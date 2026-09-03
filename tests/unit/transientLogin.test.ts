@@ -94,6 +94,7 @@ import { fetchTransientKeyring } from '@/session/keyring'
 import { initSessionFromSeed } from '@/session/initSession'
 import type { TransientKeyringFetchResult } from '@/session/keyring'
 import { transientSessionStores } from '@/session/persistence'
+import { verifiedAccountLog } from '@/session/verifiedLog'
 import {
   AlreadyRememberedError,
   routeUnlockLogin,
@@ -240,7 +241,9 @@ function primeHappyPath() {
     latestEpochId: 'did:key:z6LSepoch1'
   } as never)
   vi.mocked(initSessionFromSeed).mockResolvedValue({
-    session: { profile: {} },
+    // The persistence strategy is what the verified-log memo takes its pin
+    // store from, so the assembled profile carries one.
+    session: { profile: { persistence: { logPins: {} } } },
     userExists: true
   } as never)
 }
@@ -1252,5 +1255,103 @@ describe('transientSessionFromKeyringHit -- the shared mend ceremony', () => {
       })
     ).rejects.toMatchObject({ reason: 'unpromoted-account' })
     expect(mendCredentialAnchoredAccount).not.toHaveBeenCalled()
+  })
+})
+
+describe("transientSessionFromKeyringHit -- the caller's account-log head", () => {
+  const SEEDED_LOG = {
+    did: POINTER.did,
+    log: [{ entry: 'seeded' }],
+    doc: { id: POINTER.did },
+    updateKeys: [],
+    nextKeyHashes: []
+  } as never
+
+  it('reads the head a signup handed over instead of fetching it', async () => {
+    primeHappyPath()
+    await transientSessionFromKeyringHit({
+      found: makeFound(),
+      type: 'passphrase',
+      persistence: transientSessionStores(),
+      accountLog: SEEDED_LOG
+    })
+    // One first-contact verification, and it is the supplied head: the pin
+    // check-and-advance still runs inside it, the fetch does not.
+    expect(vi.mocked(verifyAccountLog).mock.calls).toHaveLength(1)
+    expect(vi.mocked(verifyAccountLog).mock.calls[0]![0]).toMatchObject({
+      did: POINTER.did,
+      spaceId: POINTER.spaceId,
+      published: SEEDED_LOG
+    })
+  })
+
+  it('fetches when the head names another account than the pointer', async () => {
+    primeHappyPath()
+    await transientSessionFromKeyringHit({
+      found: makeFound(),
+      type: 'passphrase',
+      persistence: transientSessionStores(),
+      accountLog: { ...(SEEDED_LOG as object), did: 'did:webvh:other' } as never
+    })
+    expect(
+      vi.mocked(verifyAccountLog).mock.calls[0]![0].published
+    ).toBeUndefined()
+  })
+
+  it('fetches when no head is handed over', async () => {
+    primeHappyPath()
+    await transientSessionFromKeyringHit({
+      found: makeFound(),
+      type: 'passphrase',
+      persistence: transientSessionStores()
+    })
+    expect(
+      vi.mocked(verifyAccountLog).mock.calls[0]![0].published
+    ).toBeUndefined()
+  })
+
+  it("primes the session's verified-log memo with the head it verified", async () => {
+    primeHappyPath()
+    const { session } = await transientSessionFromKeyringHit({
+      found: makeFound(),
+      type: 'passphrase',
+      persistence: transientSessionStores()
+    })
+    session.profile.accountPointer = POINTER as never
+    const memoized = await verifiedAccountLog({ profile: session.profile })
+    // The first surface after login reads the memo: no second verification.
+    expect(vi.mocked(verifyAccountLog).mock.calls).toHaveLength(1)
+    expect(memoized.doc).toEqual({ id: POINTER.did })
+  })
+
+  it('primes the memo with the LATEST head when the visit re-verified', async () => {
+    primeHappyPath()
+    // A readiness stage that moved the account-log pointer: the composition
+    // re-verifies, and that later head is what the memo must carry.
+    vi.mocked(ensureCredentialClientAnnexGeneration).mockResolvedValue(
+      ensureOutcome({ generationMinted: true }) as never
+    )
+    vi.mocked(verifyAccountLog)
+      .mockResolvedValueOnce({
+        doc: { id: POINTER.did, stale: true },
+        log: [{ entry: 1 }],
+        updateKeys: [],
+        nextKeyHashes: []
+      } as never)
+      .mockResolvedValueOnce({
+        doc: { id: POINTER.did, fresh: true },
+        log: [{ entry: 1 }, { entry: 2 }],
+        updateKeys: [],
+        nextKeyHashes: []
+      } as never)
+    const { session } = await transientSessionFromKeyringHit({
+      found: makeFound(),
+      type: 'passphrase',
+      persistence: transientSessionStores()
+    })
+    session.profile.accountPointer = POINTER as never
+    const memoized = await verifiedAccountLog({ profile: session.profile })
+    expect(memoized.doc).toEqual({ id: POINTER.did, fresh: true })
+    expect(vi.mocked(verifyAccountLog).mock.calls).toHaveLength(2)
   })
 })

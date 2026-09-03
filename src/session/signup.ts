@@ -17,7 +17,10 @@ import { KEYRING_KDF, type AccountPointer } from '@interop/wallet-core/keyring'
 import { mintAccountKeySet as mintSharedAccountKeySet } from '@interop/wallet-core/genesis'
 import { generateLadderSeed } from '@interop/wallet-core/clientAnnex'
 import { setClientLabel } from '@interop/wallet-core/keys'
-import { clientSigningKeyMultibase } from '@interop/wallet-core/webvh'
+import {
+  clientSigningKeyMultibase,
+  type PublishedWebvhLog
+} from '@interop/wallet-core/webvh'
 import {
   DATE_FMT,
   DEFAULT_CLIENT_LABEL,
@@ -121,8 +124,9 @@ async function mintAccountKeySet() {
  * @param options.logPins {ResourceLogPinStore}   the visit's in-memory
  *   chain-head pin store, which every log read here rides
  * @returns {Promise<object>}   `{ userExists: true }` when the probe located
- *   an account, else `{ userExists: false, credential }` with the derived
- *   credential for the entry half
+ *   an account, else `{ userExists: false, credential, accountLog }` with the
+ *   derived credential and the establishment's own verified account-log head
+ *   for the entry half
  */
 async function establishPassphraseAnchoredAccount({
   passphrase,
@@ -133,7 +137,12 @@ async function establishPassphraseAnchoredAccount({
   email?: string
   logPins: ResourceLogPinStore
 }): Promise<
-  { userExists: true } | { userExists: false; credential: UnlockCredential }
+  | { userExists: true }
+  | {
+      userExists: false
+      credential: UnlockCredential
+      accountLog: PublishedWebvhLog
+    }
 > {
   const mark = stageTimer({ log, ceremony: 'credential-anchored-signup' })
   // One 600k-iteration derivation for the whole signup.
@@ -154,7 +163,7 @@ async function establishPassphraseAnchoredAccount({
   const spaceId = mintSpaceId()
   const pointer: AccountPointer = { spaceId, host: WAS_SERVER_URL }
   const ladderSeed = generateLadderSeed()
-  await establishCredentialAnchoredAccount({
+  const establishment = await establishCredentialAnchoredAccount({
     credential,
     ladderSeed,
     pointer,
@@ -177,7 +186,7 @@ async function establishPassphraseAnchoredAccount({
     }
   })
   mark('establishment')
-  return { userExists: false, credential }
+  return { userExists: false, credential, accountLog: establishment.accountLog }
 }
 
 /**
@@ -193,16 +202,22 @@ async function establishPassphraseAnchoredAccount({
  * @param options.persistence {TransientSessionStores}
  *   the visit's in-memory store family (shared with the establishment
  *   half's pins)
+ * @param options.accountLog {PublishedWebvhLog}   the head the establishment
+ *   ends standing on, handed to the composition so its first-contact
+ *   verification reads this run's own head instead of fetching `did.jsonl`
+ *   again
  * @returns {Promise<{ session: Session, userExists: false }>}
  */
 async function enterEstablishedAccountTransiently({
   credential,
   email,
-  persistence
+  persistence,
+  accountLog
 }: {
   credential: UnlockCredential
   email?: string
   persistence: TransientSessionStores
+  accountLog: PublishedWebvhLog
 }): Promise<{ session: Session; userExists: false }> {
   const found = await fetchTransientKeyring({
     credential,
@@ -218,7 +233,8 @@ async function enterEstablishedAccountTransiently({
     type: 'passphrase',
     email,
     persistence,
-    credential
+    credential,
+    accountLog
   })
   // Kick off the welcome-content seeding without awaiting it: the signup is
   // already long, so the seed runs behind the dashboard navigation, tracked
@@ -365,7 +381,8 @@ export async function signUpWithPassphrase({
     return enterEstablishedAccountTransiently({
       credential: outcome.credential,
       email,
-      persistence
+      persistence,
+      accountLog: outcome.accountLog
     })
   }
   // The no-WAS remembered flow. Probe for an existing account first.

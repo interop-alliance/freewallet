@@ -51,6 +51,7 @@ import {
 } from '@interop/wallet-core/webvh'
 import type { UserKey } from '@interop/wallet-core/keys'
 import type { AccountPointer } from '@interop/wallet-core/keyring'
+import type { DIDLog } from '@interop/did-method-webvh'
 import type { IZcap } from '@interop/data-integrity-core'
 import type { ZcapClient } from '@interop/ezcap'
 import type { ResourceLogPinStore } from '@interop/vh-resource-log'
@@ -234,13 +235,17 @@ async function establishmentHooks({
     bindRecord,
     // The roster store the genesis (and the adopted-roster read-back) drive:
     // signed log appends under the LADDER VM's key -- the ceremony-tail
-    // license's first-entry shape -- invoked as the bootstrap did:key.
-    rosterStoreFor: ({ did }: { did: string }) =>
+    // license's first-entry shape -- invoked as the bootstrap did:key. The
+    // account log the ceremony hands over is the head it just published or
+    // adopted, so the store resolves its controller view out of this run's
+    // own head instead of fetching `did.jsonl` a second time.
+    rosterStoreFor: ({ did, log }: { did: string; log: DIDLog }) =>
       accountRosterStore({
         zcapClient: bootstrapZcap,
         keyAgent: bootstrapAgent,
         pointer: { did, spaceId, host },
-        pinStore: logPins
+        pinStore: logPins,
+        log
       }),
     // Built from the agent wallet-core hands over (it owns the bootstrap
     // identity); the app-side `bootstrapWas` above serves only the KMS thunk
@@ -294,7 +299,10 @@ async function establishmentHooks({
  *   invocation under the bootstrap did:key works (the signup's registry
  *   write). NOT swallowed: a throw fails the establishment, so a hook that
  *   must be best-effort swallows its own failures
- * @returns {Promise<CredentialAnchoredEstablishment>}
+ * @returns {Promise<CredentialAnchoredEstablishment>}   wallet-core's
+ *   establishment result, whose `accountLog` is the verified head this run
+ *   ends standing on -- what a caller entering the account straight
+ *   afterwards hands to the composition instead of re-fetching `did.jsonl`
  * @throws {Error}   when the genesis's roster or epoch stage did not land
  *   (the underlying failure as `cause`); the record stays DID-less, so the
  *   next login's heal re-runs the establishment

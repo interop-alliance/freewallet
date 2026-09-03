@@ -57,7 +57,8 @@ import {
 } from '@interop/wallet-core/keys'
 import {
   didKeyZcapClient,
-  type ICapabilityAgent
+  type ICapabilityAgent,
+  type PublishedWebvhLog
 } from '@interop/wallet-core/webvh'
 import { ladderVmAgent } from '@interop/wallet-core/clientAnnex'
 import { webvhResourceLogController } from '@interop/wallet-core/resourceLog'
@@ -85,6 +86,7 @@ import {
   type UnlockCredential
 } from '@/session/keyring'
 import { refreshTransientManageCapability } from '@/session/unlockMethods'
+import { primeVerifiedAccountLog } from '@/session/verifiedLog'
 import type { Session } from '@/types/auth'
 import type { IZcap } from '@interop/data-integrity-core'
 import type { AccountPointer } from '@interop/wallet-core/keyring'
@@ -464,6 +466,11 @@ async function ensureClientAnnexGenerationReady({
  *   re-bound record left the registry arm unfired (its root window is
  *   permanently closed), so the re-entry's mend must run the completion arms
  *   under the visit's post-promotion authority even with no tear of its own
+ * @param [options.accountLog] {PublishedWebvhLog}   an account-log head this
+ *   same visit already read or published (a signup's establishment, entering
+ *   the account it just established), reused for the first-contact
+ *   verification below in place of the fetch. Only ever a head from within
+ *   this visit: the pin check runs on it exactly as on a served one
  * @returns {Promise<{ session: Session, userExists: boolean }>}
  */
 export async function transientSessionFromKeyringHit({
@@ -474,7 +481,8 @@ export async function transientSessionFromKeyringHit({
   credential,
   popup = false,
   healAttempted = false,
-  repairShaped = false
+  repairShaped = false,
+  accountLog
 }: {
   found: TransientKeyringFetchResult
   type: 'passphrase' | 'passkey'
@@ -484,6 +492,7 @@ export async function transientSessionFromKeyringHit({
   popup?: boolean
   healAttempted?: boolean
   repairShaped?: boolean
+  accountLog?: PublishedWebvhLog
 }): Promise<{ session: Session; userExists: boolean }> {
   const standing = found.standing
   if (!standing?.ladderSeed) {
@@ -581,11 +590,23 @@ export async function transientSessionFromKeyringHit({
   // (trust-on-first-use for this visit; the pin store dies with the tab, as
   // it does on every session). The verified log is retained: the roster read
   // below resolves its controller view from it.
+  //
+  // A caller entering the account it just established hands over the head
+  // that run ended standing on, and this first contact reads it instead of
+  // fetching `did.jsonl` again. It is taken only when it names the very DID
+  // the record points at (the did:webvh embeds the Space id, so an equal DID
+  // is the same log slot); anything else falls back to the fetch. The pin
+  // check-and-advance runs on the supplied head either way.
+  const seededLog =
+    accountLog !== undefined && accountLog.did === accountDid
+      ? accountLog
+      : undefined
   let verified = await verifyAccountLog({
     did: accountDid,
     spaceId: pointer.spaceId,
     host: pointer.host,
-    pinStore: persistence.logPins
+    pinStore: persistence.logPins,
+    ...(seededLog !== undefined ? { published: seededLog } : {})
   })
 
   // The client-annex generation readiness: the ladder-signed ensure first (a
@@ -686,6 +707,10 @@ export async function transientSessionFromKeyringHit({
       firstDoc = undefined
       return doc
     }
+    // A full fetch, and not a conditional one: the server reads
+    // `If-None-Match` on `did.jsonl` as a write precondition only, so a
+    // conditional GET would buy no 304 and the re-read exists precisely to
+    // see a head this visit has not seen.
     verified = await verifyAccountLog({
       did: accountDid,
       spaceId: accountSpaceId,
@@ -974,6 +999,23 @@ export async function transientSessionFromKeyringHit({
     email: email ?? found.email,
     persistence: sessionPersistence
   })
+  // Seed the session-lifetime memo with the latest head this composition
+  // itself verified (the enrollment's re-read when one happened, the
+  // readiness stage's re-verification otherwise, else the first contact
+  // above), so the first surface the dashboard mounts reads the document
+  // this visit already holds instead of fetching and re-verifying the same
+  // log. Skipped when a mend arm ran: its arms read the log for themselves
+  // under the same pin and hand nothing back, so `verified` may then sit
+  // behind the pin the mend advanced. Every ceremony that extends the
+  // account log drops the memo, so nothing this session can run reads it
+  // stale.
+  if (mendReport === undefined) {
+    primeVerifiedAccountLog({
+      profile: session.profile,
+      pointer: { did: accountDid, spaceId: accountSpaceId, host: accountHost },
+      verified
+    })
+  }
   // Stamp what the remembered tail stamps, minus what a transient session
   // does not hold. The management zcap IS stamped: this visit minted one, and
   // the refresh below is the only thing keeping it alive on an account that

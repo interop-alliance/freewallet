@@ -279,12 +279,16 @@ describe('establishCredentialAnchoredAccount -- the orchestrator binding', () =>
     const persistence = transientSessionStores()
     const { options } = await establish({ persistence })
 
+    const accountLog = [{ entry: 1 }]
     const rosterStoreFor = options.rosterStoreFor as (context: {
       did: string
+      log: unknown
     }) => unknown
-    expect(rosterStoreFor({ did: ACCOUNT_DID })).toEqual({
+    expect(rosterStoreFor({ did: ACCOUNT_DID, log: accountLog })).toEqual({
       isRosterStore: true
     })
+    // The ceremony's own head goes in with it, so the store resolves its
+    // controller view out of this run instead of fetching `did.jsonl`.
     expect(accountRosterStore).toHaveBeenCalledWith({
       zcapClient: { isBootstrapZcapClient: true },
       keyAgent: { id: 'did:key:zLadder' },
@@ -293,7 +297,8 @@ describe('establishCredentialAnchoredAccount -- the orchestrator binding', () =>
         spaceId: POINTER.spaceId,
         host: POINTER.host
       },
-      pinStore: persistence.logPins
+      pinStore: persistence.logPins,
+      log: accountLog
     })
   })
 

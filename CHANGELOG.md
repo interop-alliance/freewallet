@@ -4,6 +4,20 @@
 
 ### Changed
 
+- A passphrase signup reads the account `did.jsonl` twice instead of six
+  times: the establishment's genesis probe and the transient enrollment's
+  post-enrollment revalidation. The establishment's final head
+  (`accountLog`) rides into the transient composition's first-contact
+  verification as an already-read head, checked and advanced under the
+  visit's pin as a served log would be; the roster store built for the
+  establishment and the mend resolves its controller view from the log the
+  run itself published (`accountRosterStore`'s `log` seed); and the
+  composition primes the session's verified-log memo from its latest
+  verified head, so the first post-login surface reads nothing. The
+  revalidation stays a full fetch: the server reads `If-None-Match` as a
+  write precondition only and never answers a GET with 304. Measured against
+  the local teaching server: 141 requests and 6 account log GETs before, 137
+  and 2 after (remembered signup: 193 and 12 to 190 and 9).
 - A transient login resolves the pointed client-annex generation log once
   instead of three times. The readiness stage's verified head is threaded
   into the generation-delegation currency check and into the enrollment's

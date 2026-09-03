@@ -38,9 +38,18 @@ vi.mock('@/session/initSession', () => ({
   loginWithPasskey: vi.fn()
 }))
 
+const ESTABLISHED_LOG = {
+  did: 'did:webvh:QmScid:was.example.test:space:space-1:id',
+  log: [{ entry: 'established' }],
+  doc: { id: 'did:webvh:QmScid:was.example.test:space:space-1:id' },
+  updateKeys: [],
+  nextKeyHashes: []
+}
+
 vi.mock('@/session/credentialAnchoredGenesis', () => ({
   establishCredentialAnchoredAccount: vi.fn(async () => ({
     did: 'did:webvh:QmScid:was.example.test:space:space-1:id',
+    accountLog: ESTABLISHED_LOG,
     unlockSpaceId: 'unlock-space-1',
     standingFields: {}
   }))
@@ -114,8 +123,14 @@ describe('signUpWithPassphrase -- login routing', () => {
     expect(establishCall.lowEntropy).toBe(true)
     expect(establishCall.pointer.host).toBe('https://was.example.test')
     expect(establishCall.ladderSeed).toHaveLength(32)
+    // The establishment's own verified head rides into the composition, so
+    // the entry half's first contact reads it instead of fetching the log
+    // this signup just published.
     expect(transientSessionFromKeyringHit).toHaveBeenCalledWith(
-      expect.objectContaining({ type: 'passphrase' })
+      expect.objectContaining({
+        type: 'passphrase',
+        accountLog: ESTABLISHED_LOG
+      })
     )
     // The tail kicks off the welcome seeding without awaiting it, stamping
     // the (never-rejecting) promise on the session for the dashboard's

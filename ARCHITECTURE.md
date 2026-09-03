@@ -1147,7 +1147,11 @@ refuses (`AlreadyRememberedError`) rather than forking the routing decision.
 
 The composition (`transientSessionFromKeyringHit`) runs the transient
 unlock-record fetch (`fetchTransientKeyring`, create-nothing), the account
-log verified under the visit's pins, the client-annex generation-readiness
+log verified under the visit's pins (a signup hands the establishment's
+final head in as an already-read log, and the verification then runs its
+DID check and pin check-and-advance on it with no fetch; the enrollment's
+post-entry revalidation stays a full fetch, since the server answers no
+GET with 304), the client-annex generation-readiness
 stage, a per-visit key minted in memory and enrolled into the generation,
 the user key unwrapped from the credential's standing roster wrap, and a
 session on the replica-less storage variant above.
@@ -1193,7 +1197,10 @@ per-reason refusal copy from one shared mapping, `transientRefusalKey`, and
 no reason opens the connect-this-browser card. Network errors rethrow
 unchanged, so a flap stays distinguishable from a lapse.
 
-The session stamps `profile.ladderSeed` and `profile.standingUnlock` from
+The session primes the verified-log memo (`profile.verifiedLog`) from the
+composition's latest verified head, so a first post-login surface reads
+nothing the visit already verified. It stamps `profile.ladderSeed` and
+`profile.standingUnlock` from
 the credential's standing members, the same fields a remembered login
 stamps, so a mid-session ceremony (the App Connect grant path's
 generation-delegation renewal below) can sign as the ladder with no
@@ -1322,7 +1329,10 @@ signed log appends, so was-client's roster machinery (`initRecipients` /
 drives the log without knowing it. `src/session/rosterStore.ts` holds two
 builders. `accountRosterStore` takes bare parts (a signing client, a key
 agent, an account pointer naming a did:webvh) for callers with no session
-profile: the login-time read and the recovery continuation.
+profile: the login-time read and the recovery continuation. The
+credential-anchored establishment and the mend seed it with the log the
+run itself minted or verified, so the roster genesis resolves its
+controller view with no fetch.
 `sessionRosterStore` serves a live session and resolves the controller view
 through the profile's verified-log memo, so a ceremony that just extended
 the account log anchors its appends at the post-edit head. Both pin on the
