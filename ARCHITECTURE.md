@@ -1176,7 +1176,11 @@ The per-visit key enrolls through whichever sibling delegation the readiness
 stage produced (wallet-core's `enrollClientAnnexTransientClient`, the loud
 entry before any authority, with the GC-race re-read built in). The
 generation delegation is the embedded one, or the one the readiness stage
-returned when it just installed or renewed one. The roster read signs as
+returned when it just installed or renewed one. The enrollment's first
+attempt builds on the verified generation head the readiness stage stood on,
+so a healthy visit resolves that log once; a lost compare-and-swap re-reads
+the head under the same pin, and a stage that published to the log hands
+nothing forward. The roster read signs as
 `<clientAnnexDid>#<vm>` under that delegation; a transient client never
 joins the roster, so nothing escrows.
 

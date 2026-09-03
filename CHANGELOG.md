@@ -4,6 +4,13 @@
 
 ### Changed
 
+- A transient login resolves the pointed client-annex generation log once
+  instead of three times. The readiness stage's verified head is threaded
+  into the generation-delegation currency check and into the enrollment's
+  first attempt; a lost compare-and-swap still re-reads the head under the
+  same pin, and a stage that minted or renewed hands nothing forward.
+  Measured against the local teaching server: 21 requests and 3 generation
+  log GETs before, 19 and 1 after.
 - Account deletion runs from a transient session. `deleteAccount` no longer
   refuses with `StepUpRequiredError`; it authenticates by deriving the
   credential, its unlock record, and its ladder seed fresh from the typed

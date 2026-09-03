@@ -834,6 +834,41 @@ describe('transientSessionFromKeyringHit -- the client-annex generation-readines
     )
   })
 
+  it("rides the readiness stage's verified generation head, once", async () => {
+    // The healthy no-op reports the head it stood on: the enrollment's first
+    // attempt builds on it instead of resolving the same log a second time.
+    primeHappyPath()
+    const generationLog = { did: CLIENT_ANNEX_DID, log: [{ entry: 1 }] }
+    vi.mocked(ensureCredentialClientAnnexGeneration).mockResolvedValue(
+      ensureOutcome({ generationLog }) as never
+    )
+    await runComposition()
+    const enrollCall = vi.mocked(enrollTransientClient).mock.calls[0]![0]
+    expect(enrollCall.published).toBe(generationLog)
+  })
+
+  it('threads no head when the readiness stage published one', async () => {
+    // A mint or a renewal leaves no compare-and-swap-capable post-publish
+    // head, so the outcome carries none and the enrollment reads for itself.
+    primeHappyPath()
+    vi.mocked(ensureCredentialClientAnnexGeneration).mockResolvedValue(
+      ensureOutcome({ generationMinted: true }) as never
+    )
+    await runComposition()
+    const enrollCall = vi.mocked(enrollTransientClient).mock.calls[0]![0]
+    expect(enrollCall.published).toBeUndefined()
+  })
+
+  it('threads no head on the record-sibling fallback arm', async () => {
+    primeHappyPath()
+    vi.mocked(ensureCredentialClientAnnexGeneration).mockRejectedValue(
+      unavailable('ladder-vm-not-anchored')
+    )
+    await runComposition()
+    const enrollCall = vi.mocked(enrollTransientClient).mock.calls[0]![0]
+    expect(enrollCall.published).toBeUndefined()
+  })
+
   it('hands the ensure the record bridge and a log-store factory', async () => {
     primeHappyPath()
     const { ensureCall, found } = await runComposition()

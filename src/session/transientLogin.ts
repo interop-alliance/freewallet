@@ -274,9 +274,15 @@ export async function routeUnlockLogin({
 }
 
 /**
- * Wraps an annex write store so a generation whose log is gone surfaces
- * as the typed refusal instead of a plain "did.jsonl is missing" error --
- * and BEFORE anything is written: the enrollment's first act is this read.
+ * Wraps an annex write store so a generation whose log is gone surfaces as
+ * the typed refusal instead of a plain "did.jsonl is missing" error.
+ *
+ * Without a threaded head the read is the enrollment's first act, so the
+ * refusal lands before anything is written. On the threaded path the first
+ * act is the compare-and-swap PUT instead: a collected generation fails it
+ * (412 to a conflict), and the retry's fresh read under the pin is what
+ * surfaces the refusal. A host serving no ETag degrades to the unconditional
+ * PUT `putLogResource` already documents, which no lost race can refuse.
  *
  * @param store {ClientAnnexWriteStore}
  * @returns {ClientAnnexWriteStore}
@@ -666,6 +672,13 @@ export async function transientSessionFromKeyringHit({
   // writes one atomic annex-log entry through the sibling delegation, and
   // hands back the generation document. A first read was just made, so the
   // closure serves it once and re-verifies thereafter.
+  //
+  // The annex log is threaded the same way: the enrollment's FIRST attempt
+  // rides the verified generation head the readiness stage stood on (present
+  // only when that stage published nothing to the log), so a healthy visit
+  // resolves the pointed generation's log once in all. A lost
+  // compare-and-swap re-reads the head fresh under the same pin, exactly as
+  // before, and a stage that minted or renewed hands nothing on.
   let firstDoc: typeof verified.doc | undefined = verified.doc
   async function readAccountDocument() {
     if (firstDoc) {
@@ -708,7 +721,10 @@ export async function transientSessionFromKeyringHit({
           : {})
       })
     },
-    pinStore: persistence.logPins
+    pinStore: persistence.logPins,
+    ...(readiness.outcome?.generationLog !== undefined
+      ? { published: readiness.outcome.generationLog }
+      : {})
   })
   const generationDelegation =
     embeddedGenerationDelegation({ doc: clientAnnexDoc }) ??
