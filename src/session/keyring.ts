@@ -1980,7 +1980,9 @@ export async function bindPassphrase({
  * The record's `controller` is the ladder VM's bare did:key -- the bootstrap
  * identity, re-derivable from the credential alone -- and the bind stamp
  * advances past the caller-supplied prior stamp (the signup's first bind), so
- * the post-genesis re-bind always supersedes it.
+ * the post-genesis re-bind always supersedes it. That same prior stamp is
+ * what tells a re-bind the Space is already provisioned, so only the first
+ * bind creates one.
  *
  * @param options {object}
  * @param options.controller {string}   the ladder VM's did:key
@@ -1999,7 +2001,8 @@ export async function bindPassphrase({
  *   the unlock Space management zcap to (widened with PUT, the standing
  *   standing configuration)
  * @param [options.priorCreatedAt] {string}   the previous bind's stamp; this
- *   bind's stamp advances past it
+ *   bind's stamp advances past it, and its presence also says the unlock
+ *   Space already exists, so the bind skips the Space ensure
  * @param [options.refuseCollidingRecord] {object}   the read-first collision
  *   refusal (see `probeUnlockSpaceCollision`): the bind GETs the served
  *   record first, refuses a colliding one, and advances its stamp past the
@@ -2093,12 +2096,22 @@ export async function bindCredentialAnchoredUnlockSecret({
     createdAt
   })
 
-  await ensureUnlockSpace({
-    storageServerUrl: WAS_SERVER_URL,
-    zcapClient: unlock.zcapClient,
-    spaceId: unlock.spaceId,
-    controller: unlock.agent.id
-  })
+  // A prior stamp is proof the Space and its keyring collection are already
+  // there: the record it stamps lives in that collection, and the stamp came
+  // from writing or reading it there. So the re-bind skips the ensure's four
+  // no-op requests (Space describe and configure, collection describe and
+  // configure) and PUTs straight away. Only the first bind, which carries no
+  // prior stamp, provisions. A Space deleted concurrently under a re-bind
+  // therefore 404s on the PUT and fails the bind, rather than being silently
+  // re-created under the bootstrap key.
+  if (priorCreatedAt === undefined) {
+    await ensureUnlockSpace({
+      storageServerUrl: WAS_SERVER_URL,
+      zcapClient: unlock.zcapClient,
+      spaceId: unlock.spaceId,
+      controller: unlock.agent.id
+    })
+  }
   await putUnlockKeyring({
     storageServerUrl: WAS_SERVER_URL,
     zcapClient: unlock.zcapClient,

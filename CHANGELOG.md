@@ -135,6 +135,11 @@
   returns) to was-client's `configure()` as `current`, so it skips its
   pre-merge re-describe. `force: true` never skipped that read; only a
   supplied `current` does.
+- The credential-anchored bind skips the unlock Space ensure when it carries
+  the previous bind's stamp: the stamp is proof the Space and its keyring
+  collection exist, so the establishment's re-bind PUTs the record without
+  the ensure's four no-op requests. A re-bind meeting a Space that is gone
+  now fails on the PUT rather than re-creating it under the bootstrap key.
 
 ### Added
 
