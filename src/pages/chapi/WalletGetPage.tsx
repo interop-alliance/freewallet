@@ -35,7 +35,7 @@ import Stack from '@mui/material/Stack'
 import Typography from '@mui/material/Typography'
 import { loadOnce } from 'credential-handler-polyfill'
 import { receiveCredentialEvent } from 'web-credential-handler'
-import { MEDIATOR_BASE } from '@/app.config'
+import { KMS_SERVER_URL, MEDIATOR_BASE } from '@/app.config'
 import {
   completePopupLogin,
   mapPopupLoginError
@@ -56,6 +56,7 @@ import {
   classifyRequest,
   composeAndDeliverResponse,
   credentialQueriesOf,
+  didAuthHolderPresentable,
   didAuthMethodSupported,
   domainMatchesOrigin,
   existingCollectionsFrom,
@@ -80,6 +81,7 @@ import {
 } from '@/lib/walletRequest'
 import {
   appKeySubjectDid,
+  DEFAULT_PRESENTABLE_DID_METHODS,
   findAppKeyCredential
 } from '@interop/wallet-core/request'
 import { fetchAppManifest, type AppManifestInfo } from '@/lib/appManifest'
@@ -98,11 +100,13 @@ type PageState =
 /**
  * Why a request cannot proceed; maps to a `chapi.get.*` message key. Set before
  * login for the statically-detectable DID-Auth cases, an unreadable request, or
- * an exchange that could not be opened; after login for a zcap request this
- * wallet cannot back, or a failed compose / delivery.
+ * an exchange that could not be opened; after login for a DID method the routed
+ * session cannot present, a zcap request this wallet cannot back, or a failed
+ * compose / delivery.
  */
 type BlockReason =
   | 'unsupported'
+  | 'unpresentableDidMethod'
   | 'domainMismatch'
   | 'zcapUnavailable'
   | 'appKeysUnreadable'
@@ -112,6 +116,7 @@ type BlockReason =
 
 const BLOCK_MESSAGE_KEY: Record<BlockReason, string> = {
   unsupported: 'chapi.get.didAuthUnsupported',
+  unpresentableDidMethod: 'chapi.get.didAuthUnpresentable',
   domainMismatch: 'chapi.get.domainMismatch',
   zcapUnavailable: 'chapi.get.zcapUnavailable',
   appKeysUnreadable: 'chapi.get.appKeysUnreadable',
@@ -119,6 +124,17 @@ const BLOCK_MESSAGE_KEY: Record<BlockReason, string> = {
   malformedRequest: 'chapi.get.malformedRequest',
   exchangeFailed: 'chapi.get.exchangeFailed'
 }
+
+/**
+ * The DID methods SOME session on this deployment could present a holder for,
+ * which is all the pre-login gate can judge. A deployment with a key server
+ * has WAS storage behind it, so its accounts publish a did:webvh document and
+ * its did:web projection; a local-only wallet has neither and presents its
+ * did:key alone.
+ */
+const DEPLOYMENT_DID_METHODS: readonly string[] = KMS_SERVER_URL
+  ? ['webvh', 'web', ...DEFAULT_PRESENTABLE_DID_METHODS]
+  : DEFAULT_PRESENTABLE_DID_METHODS
 
 const EMPTY_PROFILE: WalletRequestProfile = {
   didAuth: false,
@@ -277,12 +293,18 @@ export function WalletGetPage() {
       setRequestReason(reasonFrom(queries))
       setProfile(requestProfile)
 
-      // When DID Auth is involved the wallet must sign, so reject up front an
-      // unsupported DID method it can never satisfy. An exchange-sourced VPR
-      // names the verifier's own origin as its `domain`, never the (possibly
-      // third-party) host the exchange runs on, so this stays the same either
-      // way.
-      if (requestProfile.didAuth && !didAuthMethodSupported(queries)) {
+      // When DID Auth is involved the wallet must sign, so reject up front a
+      // DID method no session on this deployment could ever present. Nothing
+      // pre-login can know more: the routing between the transient and
+      // remembered compositions is post-KDF, so which of the account's holder
+      // forms THIS visit can present is the post-login gate's question
+      // (below). An exchange-sourced VPR names the verifier's own origin as
+      // its `domain`, never the (possibly third-party) host the exchange runs
+      // on, so this stays the same either way.
+      if (
+        requestProfile.didAuth &&
+        !didAuthMethodSupported(queries, DEPLOYMENT_DID_METHODS)
+      ) {
         setBlockReason('unsupported')
         setPageState('blocked')
         return
@@ -343,6 +365,30 @@ export function WalletGetPage() {
       return
     }
     const loggedIn = result.session
+
+    // The post-login half of the DID-method gate: the routed session answers
+    // for itself what the pre-login check could not know. A request
+    // constrained to holder forms this session cannot present is refused
+    // here, with the block screen rendered in place of the consent panel --
+    // the wallet never substitutes a form the verifier did not accept, and
+    // the refusal costs no extra step. The App Connect branch is judged
+    // against the client did:key alone, since that is what its response VP
+    // holds as whatever the account publishes -- which is why the block copy
+    // says what the WALLET can present here rather than what this login can.
+    if (
+      profile.didAuth &&
+      !didAuthHolderPresentable({
+        session: loggedIn,
+        queries: request ? queriesOf(request) : [],
+        appConnect: !!profile.appConnect
+      })
+    ) {
+      setSession(loggedIn)
+      setBlockReason('unpresentableDidMethod')
+      setPageState('blocked')
+      return
+    }
+
     try {
       // `storage.ready()` resolves when the active backend can serve reads: the
       // local collections being open (guest / no-WAS fallback -- a fast,

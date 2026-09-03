@@ -14,10 +14,7 @@ import type {
 import type { ZcapClient } from '@interop/ezcap'
 import type { IZcap } from '@interop/data-integrity-core'
 import type { KeystoreAgent } from '@interop/webkms-client'
-import type {
-  ClientWebvhUpdateKeys,
-  DidWebKeyMap
-} from '@interop/wallet-core/webvh'
+import type { ClientWebvhUpdateKeys } from '@interop/wallet-core/webvh'
 import type { UserKey } from '@interop/wallet-core/keys'
 import type { StandingUnlockClient } from '@interop/wallet-core/unlock'
 import type { AccountPointer } from '@interop/wallet-core/keyring'
@@ -80,10 +77,14 @@ export interface ControllerProfile {
   // KMS server (KMS_SERVER_URL). Absent for guests, when no KMS server is
   // configured, or when keystore provisioning failed at login.
   keystoreAgent?: KeystoreAgent
-  // The user's published did:web DID and its key-id map, present once
-  // provisioning has succeeded. Absent for guests, without a KMS/WAS server,
-  // or when provisioning failed.
-  didWeb?: { did: string; keys: DidWebKeyMap }
+  // The account's one KMS-held key binding, read from `key-map/keys.json`
+  // once the KMS-authentication stage has run: the verification-method id it
+  // was minted under (the did:web projection's) and the KMS key id its
+  // signer invokes. Absent for guests, without a KMS/WAS server, or when the
+  // stage failed. It records a binding, not a published verification method:
+  // whether the account can present it is decided against the resolved
+  // account document.
+  kmsAuthentication?: { vmId: string; kmsKeyId: string }
   // The user's published did:webvh DID, present once the log has been
   // published. The update keys behind the log are client-held
   // (`clientWebvhKeys` below), so the profile carries only the id. Absent

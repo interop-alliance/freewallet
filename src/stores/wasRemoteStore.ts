@@ -491,11 +491,17 @@ export class WASRemoteStore {
    * Returns a `Resource` handle for the single `keys.json` resource in this
    * Space's `key-map` collection, invoked with the root capability.
    *
+   * Read and written through the plaintext codec: `keys.json` is plain JSON,
+   * and without the override the client describes the collection first, so a
+   * 404 -- from a Space or collection that does not exist yet, which is what
+   * the KMS-authentication stage's probe meets on a fresh signup -- would
+   * make the client refuse to guess instead of reading as an absence.
+   *
    * @returns {Resource}
    */
   #keyMapResource(): Resource {
     return this.#space()
-      .collection(KEY_MAP_COLLECTION.id)
+      .collection(KEY_MAP_COLLECTION.id, { encryption: 'plaintext' })
       .resource(DID_KEYS_RESOURCE)
   }
 

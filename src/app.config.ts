@@ -24,7 +24,9 @@ const env = import.meta.env
 export const WAS_SERVER_URL = env.VITE_WAS_SERVER_URL
 // WebKMS server URL. Defaults to the WAS server's in-process `/kms` facet;
 // set VITE_KMS_SERVER_URL only when the KMS is hosted separately. When
-// neither is set, the session has no KMS (keys stay on this device).
+// neither is set, the session has no KMS: no server-held `authentication`
+// key is minted, the account document publishes none, and DIDAuth is
+// answered with the client did:key.
 export const KMS_SERVER_URL =
   env.VITE_KMS_SERVER_URL ||
   (WAS_SERVER_URL ? `${WAS_SERVER_URL}/kms` : undefined)
@@ -161,9 +163,12 @@ export const ENCRYPTED_STANDARD_COLLECTIONS =
 export const SYNCED_COLLECTIONS: Array<{ key: string; id: string }> =
   WALLET_STANDARD_COLLECTIONS.map(({ key, id }) => ({ key, id }))
 // The system collections and resource names that carry the account's identity,
-// key, and unlock-method state -- the world-readable `id` collection
-// (`did.json`, `did.jsonl`), the private `key-map` collection (`keys.json`,
-// plus the `user-key.jsonl` roster log addressed via
+// key, and unlock-method state -- the world-readable `id` collection (the
+// did:webvh log `did.jsonl` and `did.json`, its did:web projection; the wallet
+// assembles no did:web document of its own), the private `key-map` collection
+// (`keys.json`, recording the account DID and the one KMS `authentication`
+// binding as `{ vmId, kmsKeyId }`, plus the `user-key.jsonl` roster log
+// addressed via
 // `@interop/wallet-core/space`'s `USER_KEY_ROSTER_LOG_RESOURCE` at its
 // wallet-core call sites), the private `unlock-methods` collection
 // (`methods.json`, the registry of the account's unlock methods -- it gets no
@@ -190,12 +195,6 @@ export {
 // names itself. Stored data, not display-time i18n: a label must read the
 // same from every client that lists it.
 export const DEFAULT_CLIENT_LABEL = 'Freewallet'
-
-// Whether to provision and publish the user's did:webvh DID log alongside the
-// did:web document. An opt-out flag: default `true` (freewallet acts
-// as a did:webvh demo platform, publishing the log out of the box), disabled
-// only when `VITE_ENABLE_DID_WEBVH` is exactly the string `'false'`.
-export const ENABLE_DID_WEBVH = env.VITE_ENABLE_DID_WEBVH !== 'false'
 
 /**
  * HKDF parameters for the passkey unlock derivation

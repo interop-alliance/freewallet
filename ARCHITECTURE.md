@@ -21,7 +21,10 @@ src/hooks/          Shared React hooks (verification, credential delete,
                     PRF retry prompt, clipboard, search)
 src/context/        Theme and info-box React context
 src/lib/            Pure business logic (no React)
-  kms.ts            WebKMS keystore provisioning (ensureKeystore)
+  kms.ts            WebKMS keystore provisioning (ensureKeystore) and the
+                    one KMS-held key the account document publishes
+                    (ensureKmsAuthentication)
+  didWeb.ts         The did:web projection id of a promoted account
   resolveWalletInput.ts  The one door for free-form text (paste box, QR),
                     over the shared wallet-input classifier
   sessionKey.ts     freewallet-session IndexedDB state (keyring cache,
@@ -507,8 +510,10 @@ the controlling key stays strictly client-side: the keystore is created
 under the first client's did:key, and its controller is promoted to the
 account's did:webvh alongside the Space's (the same
 `promoteKeystoreController` sequence, non-fatal). No server-held key is ever
-an update key or an encryption-roster recipient. Provisioning failure is
-logged and non-fatal, and the settings page shows the state.
+an update key or an encryption-roster recipient. One key is minted there
+today, the `authentication` key the account document publishes (see "The KMS
+stage"). Provisioning failure is logged and non-fatal, and the settings page
+shows the state.
 
 ## The did:webvh identity (per-client keys, promoted controller)
 
@@ -524,12 +529,16 @@ client's signing multibase>`, a marker naming its client. The client
 listing, the revocation removal, and the roster's recipient resolver pair a
 client with its key-agreement key by that marker; nothing re-derives a twin.
 
-One KMS-held VM (`authentication`) is a server-side convenience. The
-KMS-held `keyAgreement` VM is NOT in the document: that relation is the
-source of record for user-key wrap recipients, and no server-held key may be
-a wrap target. No KMS assertion key is minted, since the App Connect
-Resource Log Profile authorizes log appends by `assertionMethod` membership,
-so that relation lists client signing keys only.
+One KMS-held VM (`authentication`) stands in the document. It is a DIDAuth
+signing key the wallet invokes client-side, and the server reads that
+relation nowhere. It is also the only KMS-held key the wallet mints. The
+wallet mints no KMS `keyAgreement` key, since that relation is the source of
+record for user-key wrap recipients and no server-held key may be a wrap
+target. It mints no KMS assertion key either. The App Connect Resource Log
+Profile authorizes log appends by `assertionMethod` membership, so no
+server-held key may ever stand under that relation. That relation is not
+client signing keys alone: a standing credential's ladder VM stands there
+too.
 
 **Update keys are client-held.** `updateKeys` carries one update key per
 enrolled client; apps get none. They derive from 32-byte seeds in the
@@ -555,7 +564,12 @@ re-runs on the new head (`withLogConflictRetry`). The shared
 enrolled-client ceremony; the recovery continuation's `delegatedLogStore`
 (`src/session/recovery.ts`) does the same over its public log fetch and
 delegated PUT. The `did.json` projection PUT stays unconditional: it runs
-only behind a won log CAS, and the log is the source of truth.
+only behind a won log CAS, and the log is the source of truth. That
+projection is the only producer of `id/did.json`. The wallet assembles no
+did:web document of its own, so did:web resolution and did:webvh resolution
+of one account cannot disagree, and did:web comes free with the log. The
+projection is the whole document with its ids rewritten, so a verifier handed
+either form sees every published key.
 
 **Log continuity within a session.** Resolving the world-readable log is
 one-shot verification, and a valid PREFIX of the real log passes it. The
@@ -951,8 +965,8 @@ establishment"; what follows is the account-level summary.
 `src/session/credentialAnchoredGenesis.ts` is a thin binding over that
 orchestrator, supplying only the app-specific hooks: the unlock-record codec
 (`bindRecord` over `bindCredentialAnchoredUnlockSecret`), the roster store
-builder, the KMS/did:web thunk and keystore-promotion closure, and the
-callers' registry-write `beforePromotion` hook.
+builder, the KMS-authentication thunk and keystore-promotion closure, and
+the callers' registry-write `beforePromotion` hook.
 
 Entry paths. A non-remembered browser continues into the transient
 composition below, with zero local residue. A `rememberBrowser: true` signup
@@ -1008,32 +1022,86 @@ the published log adopted by ladder attribution. `createDID` timestamps the
 genesis entry, so a naive re-create would mint a different SCID and never
 land.
 
-**The KMS stage.** With `KMS_SERVER_URL` set, the establishment also creates
-the keystore under the ladder VM's bare did:key before the genesis, mints
-the did:web keys and publishes `keys.json` / `did.json` under that identity,
-carries the KMS `authentication` VM in the genesis entry, and promotes the
-keystore controller to the did:webvh in the existing promotion stage,
-mirroring the Space's. The stage is best-effort with a timeout: a failed or
-hung KMS leaves the account keystore-less, Settings shows the state, and a
-later keystore-creation pass heals it.
+**The KMS stage** (`kms-authentication`, `ensureKmsAuthentication` in
+`src/lib/kms.ts`). With `KMS_SERVER_URL` set, the establishment also
+provisions the one KMS-held key the account document publishes. It creates
+the keystore under the ladder VM's bare did:key, mints a single Ed25519
+`authentication` key, and records the binding as
+`{ authentication: { vmId, kmsKeyId } }` in `key-map/keys.json`. The genesis
+entry then carries that key under the account's own controller, and the
+promotion stage moves the keystore controller to the did:webvh beside the
+Space's. The stage publishes no document. Nothing else is minted here, since
+no server-held key may be a wrap recipient or stand under `assertionMethod`.
+
+The stage runs alongside Space provisioning rather than between it and the
+genesis entry. wallet-core starts the thunk before awaiting the Space and
+joins on it before the genesis entry, handing it a `spaceReady` promise so
+it can order its own Space-touching half. Only the `keys.json` read and
+write touch the Space. The probe starts at once, over a plaintext codec so
+that a 404 from an absent Space reads as the same absence an unwritten
+`keys.json` does. The keystore the MINT path needs is acquired only past the
+probe's miss, so a run that short-circuits on a served map never creates a
+keystore it will not use. The write joins on `spaceReady` and carries
+`If-None-Match: *`; the
+genesis then rewrites the same resource under `If-Match` on that ETag,
+adding the `webvh: { did }` block. A lost race adopts the served map.
+
+A served map is adopted only when the multibase in its `vmId` names a key
+this session's own keystore lists. The genesis takes that `vmId` verbatim
+into the world-readable document, so a host serving a map naming an
+attacker's key would otherwise get it published under `authentication` and
+signed by the account. That check creates nothing: the adopt path performs a
+non-creating keystore lookup plus a `listKeys` round trip, and a lookup that
+finds no keystore answers the same way a listing that does not name the key
+does. Those two are the integrity verdict, and it refuses at once, since a
+retry answers the same. A lookup or listing that THROWS is transport
+instead: the served map is unverified rather than bad, so the attempt is
+retried briefly (three in all, a sub-second budget well inside the stage
+timeout) and only then refused, carrying the last error as its cause. The
+residue is the same either way, the open gap stated below.
+
+The stage is best-effort with a timeout. The budget starts once the Space is
+ready rather than covering the wait for it, so slow Space provisioning
+cannot eat it; it still covers the keystore lookup, the key mint, and the
+`keys.json` write, so a timeout can still win with that write in flight and
+leave a map the genesis entry does not publish. The next run adopts that map
+after the same listing check. A failed or hung KMS leaves the account with no `authentication`
+relation in its document, which is a complete account that presents did:key.
+Settings shows the state. Because the stage's failure is collected rather
+than thrown, the account pointer still binds, so no re-run fires the stage
+again; that residue is an open gap (see "Ceremony inventory").
+
+The mark for this stage fires at the join, in wallet-core, since a delta
+between marks measures the wrong thing once two stages overlap. The thunk
+reports its own measured span instead, through `stageSpan` in
+`src/lib/log.ts`.
 
 **The plain genesis.** `ensureAccountGenesis` is shared with the mobile
 wallet. `mintAccountKeySet` mints the whole key set locally: Space id,
 client seed, user key, did:webvh update-key seeds. The ceremony runs in
-order: Space provisioning under this client's did:key, the did:web key map,
-the did:webvh genesis, the user key roster (strictly after the DID
-publication), and key epoch[0] on every encrypted collection. Every stage
+order: Space provisioning under this client's did:key, the KMS
+authentication binding, the did:webvh genesis, the user key roster (strictly
+after the DID publication), and key epoch[0] on every encrypted collection.
+The KMS binding is the one stage that overlaps its neighbour. Every stage
 detects its own completion from durable state, so a torn run heals by
 re-running at the next login.
 
 `StorageManager.#provisionUserCollections` is the one caller. It supplies
-did:web provisioning as the ceremony's `provideDidWebKeys` closure and the
+the KMS stage as the ceremony's `provideKmsAuthentication` closure and the
 roster store builder as `rosterStoreFor`, adopts the published DID in
-`onDidPublished` (which also drops the verified-log memo), and maps
-per-stage failures onto warns. A session with no did:webvh (the flag off, no
-keystore agent, or no client update keys / user key) keeps the reduced path:
-Space provisioning, key epochs, did:web. A Space that never came up is the
-one fatal stage: `AccountGenesisSpaceError` is rethrown and login fails.
+`onDidPublished` (which also drops the verified-log memo, unless it already
+holds a settled document for that same DID), and maps
+per-stage failures onto warns. Its `spaceReady` is already resolved on this
+path, since the Space is up before the call, so the concurrency wins nothing
+here and costs nothing.
+
+There is no opt-out (`decisions/0017-did-webvh-always-provisioned.md`).
+Every WAS account provisions did:webvh, and the reduced path below is
+reached only by a session that structurally cannot produce a log. A session with no keystore agent, or no client update keys or user key,
+takes it: Space provisioning, key epochs, and the KMS binding alone. Nothing
+publishes a `did.json` there, so such a deployment presents did:key. A Space
+that never came up is the one fatal stage: `AccountGenesisSpaceError` is
+rethrown and login fails.
 
 Freewallet's own flow keeps the keyring bind before any data Space exists.
 That path is now the no-WAS deployment's plain signup plus the login-time
@@ -1808,7 +1876,7 @@ and the label store. It reads the locally verified did:webvh log (the
 `verifyAccountLog` step every ceremony runs), then runs
 `listEnrolledWebvhClients`, keyed on `capabilityInvocation`. That keying
 excludes structurally rather than by filter: a recovery code's key publishes
-under `keyAgreement` only (unmarked), the KMS-held convenience under
+under `keyAgreement` only (unmarked), the KMS-held DIDAuth signing key under
 `authentication`.
 
 Two members are not readable off the current document and come from log
@@ -1971,6 +2039,35 @@ Flow:
 
 The CHAPI pages (`src/pages/chapi/`) are not wrapped in `ProtectedRoute` and
 do not use the main app layout.
+
+**The DIDAuth holder follows the request.** A `DIDAuthentication` query may
+carry `acceptedMethods`. `presentationSignerFor`
+(`src/lib/walletRequest/composeVP.ts`) reads it and picks the holder in the
+order `webvh`, `web`, `key`
+(`decisions/0016-didauth-holder-dispatches-on-accepted-methods.md`). An
+unconstrained request takes the did:web projection id when the session can
+present it, and the client did:key otherwise. The holder is a function of
+the request rather than of what happened to be provisioned.
+
+A session can present the account's did:webvh or did:web form when its
+pointer names a did:webvh and the resolved account document lists a
+verification method it holds a signer for under `authentication`. That is
+settled against the verified-log memo, read as a cache. No fetch, no throw,
+and false when the memo is cold, so a cold or invalidated memo answers
+did:key. A stored key map is not evidence, since the map is written on paths
+that never edit the document. The did:web arm's holder is the projection id
+(`didWebFromSpace`), and one key signs under both ids, because the KMS sign
+route reads the stored KMS key id and ignores the key description's alias. A
+remembered session signs an account-form holder with the enrolled client's
+own account key; the KMS-held key signs where no client key exists.
+
+Refusing a request the session cannot answer splits by position. Pre-login,
+the widened `didAuthMethodSupported` gate judges deployment capability
+(`key` always, plus `web` and `webvh` when a KMS is configured), so a method
+no session here could ever present is refused before a password box renders.
+After login, a session that can present none of the listed methods gets the
+block screen in place of the consent panel, adding no step to the flow. The
+wallet does not answer with a form the verifier did not accept.
 
 **The popup follows the browser's routing.** The popup does not choose
 between the transient and remembered entries. It runs the same post-KDF
@@ -2226,6 +2323,13 @@ the VP `@context`), all before signing so the DIDAuth proof covers them
 `WalletGetPage` renders an app-centric consent panel ("Connect {app}?") in
 place of the three generic sections, and approval records an app-connect
 Login activity.
+
+The response VP does not take the holder dispatch above.
+`processAppConnect` passes an explicit holder override, so the holder and
+the DIDAuth proof's verification method stay the client did:key. That is the
+enrolled client's on a remembered session, and the visit key's bare did:key
+on a transient one. An app's own `acceptedMethods` does not steer it
+(`decisions/0016-didauth-holder-dispatches-on-accepted-methods.md`).
 
 **App-provisioned collection encryption (day-one policy).** A private
 (non-public) collection provisioned by an App Connect `capabilityQuery` is
@@ -2553,8 +2657,11 @@ remembered-login sweep ever runs: the transient recovery's roster-append
 repair, and one for a user-key rotation torn mid-fan-out. A third is
 KMS-specific: an establishment torn between the re-bind and the promotion
 leaves the keystore's controller on the ladder's bare did:key, outside the
-current-key-set rule. That mender is designed alongside the did:web-stage
-collapse work. The fourth is recovery-code issuance: a run torn after its
+current-key-set rule. The KMS stage's collapse does not reach it, since the
+gap sits in the promotion tail rather than in the stage, so the mender is
+its own unbuilt item (FW-420). The collapse does bring it closer. The keystore ensure
+no longer depends on the Space, so a mender could run from a transient
+visit. The fourth is recovery-code issuance: a run torn after its
 document entry leaves a saved code that locates no account, plus a document
 `keyAgreement` entry and a roster wrap nothing names. The login sweep
 rotates the orphan wrap away, but the registry-driven health check cannot
@@ -2565,7 +2672,15 @@ again has no mender at all, since the only mender is that credential's own
 next use, and an unspent recovery code is the sharp case; and on a KMS
 deployment, a keystore orphaned by a deletion that ran before the
 keystore-deletion route lands is permanent, since the server-side reaper
-that could otherwise catch it is not a wallet mender.
+that could otherwise catch it is not a wallet mender. A seventh is the KMS
+stage itself. A signup whose stage failed or timed out publishes a document
+with no `authentication` relation, and nothing adds one afterwards. The
+stage's failure is collected rather than thrown, so the account pointer
+binds and no establishment re-run fires the stage again; the only other
+trigger is a remembered login this account may never see. The cost is
+bounded. The account presents did:key, and a `web` or `webvh` request to it
+is refused. Closing it means a ladder-signed entry adding the verification
+method after the fact (FW-417).
 
 Mender unreachable was self-enrollment's cost before FW-356. The add entry
 that publishes a new client used to strike every ladder VM the document
@@ -2908,10 +3023,14 @@ Containment hierarchy (remote mode): **Space > Collection > Resource**.
   signer and adds ZCap headers to HTTP requests.
 - **WebKMS / keystore** -- the key management server (`KMS_SERVER_URL`, by
   default the WAS server's `/kms` facet). Holds a per-controller
-  **keystore** in which operational keys can live server-side; the
-  passphrase-derived `keyAgent` remains the keystore's controller,
-  client-side only. Accessed via `KmsClient`/`KeystoreAgent` from
-  `@interop/webkms-client`; provisioned at login by `src/lib/kms.ts`.
+  **keystore** in which operational keys can live server-side, while the
+  controlling key stays client-side. One key is minted there today, the
+  `authentication` key the account document publishes, recorded in
+  `key-map/keys.json` as `{ vmId, kmsKeyId }` and stamped on the session as
+  `profile.kmsAuthentication`. It signs DIDAuth under whichever
+  verification-method id the holder dispatch names. Accessed via
+  `KmsClient`/`KeystoreAgent` from `@interop/webkms-client`; provisioned at
+  login by `src/lib/kms.ts`.
 - **Vault KAK** -- the X25519 key-agreement key that encrypts and decrypts
   the EDV envelopes: the user key's key-agreement key. A remembered login
   recovers it from the local client-key record and checks it against the

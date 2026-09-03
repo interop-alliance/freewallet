@@ -43,6 +43,12 @@ export { createLogger }
  * plausible, wrong figures until FW-385. Mark every boundary, or accept
  * that a name covers everything since the previous one.
  *
+ * A delta cannot measure a stage that OVERLAPS its neighbour: two
+ * concurrent stages double-count and their figures sum past the elapsed
+ * time. A concurrent stage therefore reports a span of its own through
+ * {@link stageSpan}, and its mark here names only the join where the
+ * ceremony waited for it.
+ *
  * @param options {object}
  * @param options.log {Logger}   the calling module's namespaced logger
  * @param options.ceremony {string}   a label naming the timed sequence
@@ -66,6 +72,41 @@ export function stageTimer({
       totalMs: Math.round(now - startedAt)
     })
     previous = now
+  }
+}
+
+/**
+ * Times one stage from an explicit start rather than from the previous mark:
+ * called where the stage BEGINS, it returns the closer that logs the span it
+ * measured. What a concurrent stage needs, since a delta between marks
+ * measures the wrong thing once two stages overlap (see {@link stageTimer}).
+ *
+ * The event is `Stage span` rather than `Stage timing`, so a ceremony's
+ * profile stays the sum of its deltas and an overlapping stage's real cost
+ * is still readable beside it.
+ *
+ * @param options {object}
+ * @param options.log {Logger}   the calling module's namespaced logger
+ * @param options.ceremony {string}   a label naming the timed sequence
+ * @param options.stage {string}   the stage being measured
+ * @returns {() => void}   call at the stage's end
+ */
+export function stageSpan({
+  log,
+  ceremony,
+  stage
+}: {
+  log: Logger
+  ceremony: string
+  stage: string
+}): () => void {
+  const startedAt = performance.now()
+  return function endSpan(): void {
+    log.info('Stage span', {
+      ceremony,
+      stage,
+      ms: Math.round(performance.now() - startedAt)
+    })
   }
 }
 

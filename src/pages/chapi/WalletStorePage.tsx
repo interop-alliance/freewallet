@@ -249,12 +249,18 @@ export function WalletStorePage() {
     pending: PendingDIDAuth
   }) {
     try {
+      const queries = queriesOf(request)
       const verifiablePresentation = await composeVP({
         session: loggedIn,
+        // The exchange's own queries drive the holder dispatch here too: an
+        // issuance request that states no `acceptedMethods` takes its
+        // unconstrained arm, and the dispatch never throws, so this page's
+        // raw-message error handler cannot surface one.
+        queries,
         didAuthRequested: true,
         challenge: request.challenge,
         domain: request.domain ?? new URL(exchangeUrl).origin,
-        cryptosuite: negotiateCryptosuite(queriesOf(request))
+        cryptosuite: negotiateCryptosuite(queries)
       })
       log.debug('CHAPI store authenticating to the exchange', {
         holder: verifiablePresentation.holder

@@ -56,12 +56,15 @@ vi.mock('@interop/wallet-core/webvh', async importOriginal => ({
 }))
 
 vi.mock('@/lib/didWeb', () => ({
-  didWebFromSpace: vi.fn(() => 'did:web:was.example.test:space:space-123'),
-  ensureDidWeb: vi.fn(async () => ({ isKeyMap: true }))
+  didWebFromSpace: vi.fn(() => 'did:web:was.example.test:space:space-123')
 }))
 
 vi.mock('@/lib/kms', () => ({
   ensureKeystore: vi.fn(async () => ({ isKeystoreAgent: true })),
+  findKeystoreAgent: vi.fn(async () => ({ isKeystoreAgent: true })),
+  ensureKmsAuthentication: vi.fn(async () => ({
+    keys: { authentication: { vmId: 'vm-1', kmsKeyId: 'kms-1' } }
+  })),
   promoteKeystoreController: vi.fn(async () => undefined)
 }))
 
@@ -320,7 +323,7 @@ describe('establishCredentialAnchoredAccount -- the orchestrator binding', () =>
   it('arms no KMS thunk without a KMS, and promoteKeystore no-ops', async () => {
     const { options } = await establish()
 
-    expect(options).not.toHaveProperty('provideDidWebKeys')
+    expect(options).not.toHaveProperty('provideKmsAuthentication')
     const promoteKeystore = options.promoteKeystore as (context: {
       did: string
     }) => Promise<void>
@@ -332,16 +335,16 @@ describe('establishCredentialAnchoredAccount -- the orchestrator binding', () =>
     state.kmsUrl = 'https://was.example.test/kms'
     const { options } = await establish()
 
-    expect(typeof options.provideDidWebKeys).toBe('function')
+    expect(typeof options.provideKmsAuthentication).toBe('function')
   })
 
   it('warns the collected best-effort failures instead of throwing', async () => {
-    const didWebError = new Error('the KMS hung')
+    const kmsError = new Error('the KMS hung')
     const keystoreError = new Error('the keystore promotion was refused')
     vi.mocked(coreEstablish).mockResolvedValue(
       establishmentResult({
         failed: [
-          { stage: 'didWebKeys', error: didWebError },
+          { stage: 'kmsAuthentication', error: kmsError },
           { stage: 'keystorePromotion', error: keystoreError }
         ]
       }) as never
@@ -356,8 +359,8 @@ describe('establishCredentialAnchoredAccount -- the orchestrator binding', () =>
       expect.objectContaining({
         ns: 'fw:session:genesis',
         level: 'warn',
-        msg: expect.stringContaining('did:web provisioning failed'),
-        err: didWebError
+        msg: expect.stringContaining('KMS authentication provisioning failed'),
+        err: kmsError
       })
     )
     expect(capture.events).toContainEqual(

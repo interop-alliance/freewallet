@@ -15,9 +15,16 @@ file over scroll-scraping the console.
 Event shape (also the NDJSON line shape, which adds `page` and `seq`):
 
 ```json
-{ "ts": 0, "ns": "fw:session:sweep", "level": "warn", "msg": "...",
+{
+  "ts": 0,
+  "ns": "fw:session:sweep",
+  "level": "warn",
+  "msg": "...",
   "err": { "name": "", "message": "", "stack": "", "cause": {} },
-  "data": {}, "page": "a1b2", "seq": 42 }
+  "data": {},
+  "page": "a1b2",
+  "seq": 42
+}
 ```
 
 `msg` is static and greppable; the variables are in `data`; the error
@@ -75,13 +82,24 @@ before it is marked too. Pull one run with
 `jq -c 'select(.msg=="Stage timing")' .dev-logs/app.ndjson`, and read the
 last event's `totalMs` as the ceremony's wall clock.
 
+One stage breaks the delta contract, because it overlaps its neighbour: a
+delta would double-count it and the figures would sum past the elapsed
+time. `kms-authentication` runs alongside Space provisioning, so its
+`Stage timing` mark names only the join where the ceremony waited for it,
+and the stage reports its real cost separately as an info event `Stage
+span` carrying `{ ceremony, stage, ms }` (`stageSpan` in
+`src/lib/log.ts`). Read the profile as the sum of the deltas, and read a
+concurrent stage's own cost beside it with
+`jq -c 'select(.msg=="Stage span")' .dev-logs/app.ndjson`.
+
 Ceremony labels today: `credential-anchored-signup` (the signup's own
-outer timer), `credential-anchored-establishment`, and
-`credential-anchored-mend`. The establishment's stages come from two
-places -- wallet-core reports the ones it runs through its `onStage`
-notifier, and freewallet marks the three whose body is a closure it
-supplies (`did-web-keys`, `registry-write`, `keystore-promotion`) -- and
-both write into the one timer, so the profile reads as a single sequence.
+outer timer), `credential-anchored-establishment`,
+`credential-anchored-mend`, and `account-genesis` (the plain genesis and
+its login-time heal). The establishment's stages come from two places --
+wallet-core reports the ones it runs through its `onStage` notifier, and
+freewallet marks the two whose body is a closure it supplies
+(`registry-write`, `keystore-promotion`) -- and both write into the one
+timer, so the profile reads as a single sequence.
 
 ## In tests
 

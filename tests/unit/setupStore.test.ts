@@ -102,7 +102,9 @@ describe('setupStore stage ordering', () => {
     // No KMS configured, so the key-server stage never fires.
     markStage('webvh-genesis')
     expect(running()).toBe('roster-genesis')
-    expect(steps().find(step => step.stage === 'did-web-keys')?.done).toBe(true)
+    expect(
+      steps().find(step => step.stage === 'kms-authentication')?.done
+    ).toBe(true)
   })
 
   it('ignores a known stage that carries no line of its own', () => {

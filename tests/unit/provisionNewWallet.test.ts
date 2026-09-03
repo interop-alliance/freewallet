@@ -63,13 +63,9 @@ describe('provisionNewWallet', () => {
     expect(storage.addContact).toHaveBeenCalledWith({
       contact: interopAllianceTeamContact
     })
+    // An unpromoted profile (no account pointer) records no account DID.
     expect(storage.addContact).toHaveBeenCalledWith({
-      contact: selfContact({
-        dids: [profile.didWeb?.did, profile.didWebvh?.did].filter(
-          (did): did is string => Boolean(did)
-        ),
-        email: user.email
-      })
+      contact: selfContact({ dids: [], email: user.email })
     })
     expect(storage.addCredential).toHaveBeenCalledWith({
       credential: welcomeCredential,
@@ -89,18 +85,14 @@ describe('provisionNewWallet', () => {
     // A guest's `user.email` is the internal placeholder from
     // `initGuestSession` ('guest@example.com'), never something the user
     // typed, so it must not leak into the seeded self-contact.
-    const { session, storage, user, profile } = sessionStub()
+    const { session, storage, user } = sessionStub()
     session.isGuest = true
     user.email = 'guest@example.com'
 
     await provisionNewWallet({ session })
 
     expect(storage.addContact).toHaveBeenCalledWith({
-      contact: selfContact({
-        dids: [profile.didWeb?.did, profile.didWebvh?.did].filter(
-          (did): did is string => Boolean(did)
-        )
-      })
+      contact: selfContact({ dids: [] })
     })
   })
 
@@ -152,9 +144,13 @@ describe('seedWelcomeContent', () => {
       }
     ).accountController = 'did:key:z6MkBootstrapLadderVm'
     ;(
-      session.profile as unknown as { accountPointer?: { did?: string } }
+      session.profile as unknown as {
+        accountPointer?: { did?: string; spaceId: string; host: string }
+      }
     ).accountPointer = {
-      did: 'did:webvh:QmScid:was.example.test:space:s1:id'
+      did: 'did:webvh:QmScid:was.example.test:space:s1:id',
+      spaceId: 's1',
+      host: 'https://was.example.test'
     }
     const seedUser = {
       ...user,
@@ -174,14 +170,19 @@ describe('seedWelcomeContent', () => {
       user: seedUser
     })
     // The two default contacts mirror `provisionNewWallet`'s: the self
-    // contact carries the account pointer's did:webvh (the profile resolves
-    // no `didWebvh` on a transient tail) and the signup email.
+    // contact carries both of the account's DID forms, derived from the
+    // pointer (the profile resolves no `didWebvh` on a transient tail) --
+    // the did:web projection id first, then the did:webvh -- and the signup
+    // email.
     expect(storage.addContact).toHaveBeenCalledWith({
       contact: interopAllianceTeamContact
     })
     expect(storage.addContact).toHaveBeenCalledWith({
       contact: selfContact({
-        dids: ['did:webvh:QmScid:was.example.test:space:s1:id'],
+        dids: [
+          'did:web:was.example.test:space:s1:id',
+          'did:webvh:QmScid:was.example.test:space:s1:id'
+        ],
         email: user.email
       })
     })
@@ -199,28 +200,30 @@ describe('seedWelcomeContent', () => {
     ])
   })
 
-  it('prefers the profile-resolved didWeb and didWebvh for the self-contact', async () => {
+  it('prefers the profile-resolved didWebvh for the self-contact', async () => {
     const { session, storage } = sessionStub()
-    ;(
-      session.profile as unknown as {
-        didWeb?: { did: string }
-        didWebvh?: { did: string }
-        accountPointer?: { did?: string }
-      }
-    ).didWeb = { did: 'did:web:was.example.test:u:alice' }
     ;(session.profile as unknown as { didWebvh?: { did: string } }).didWebvh = {
       did: 'did:webvh:QmScid:was.example.test:space:s1:id'
     }
     ;(
-      session.profile as unknown as { accountPointer?: { did?: string } }
-    ).accountPointer = { did: 'did:webvh:QmScid:stale' }
+      session.profile as unknown as {
+        accountPointer?: { did?: string; spaceId: string; host: string }
+      }
+    ).accountPointer = {
+      did: 'did:webvh:QmScid:stale',
+      spaceId: 's1',
+      host: 'https://was.example.test'
+    }
 
     await seedWelcomeContent({ session })
 
+    // The projection id is derived from the pointer either way -- it is the
+    // account document under its did:web id, and the pointer is the whole
+    // evidence it exists.
     expect(storage.addContact).toHaveBeenCalledWith({
       contact: selfContact({
         dids: [
-          'did:web:was.example.test:u:alice',
+          'did:web:was.example.test:space:s1:id',
           'did:webvh:QmScid:was.example.test:space:s1:id'
         ],
         email: session.user.email

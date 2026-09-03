@@ -51,6 +51,73 @@
   of its own try/catch, so a throwing notifier is guarded once.
 - Logout, the login-path account switch, and the abandoned-run discard share
   one session teardown (`src/stores/sessionTeardown.ts`).
+- The wallet no longer mints a did:web identity of its own. The did:webvh
+  log's own did:web projection is the only writer of `id/did.json`, so
+  did:web resolution and did:webvh resolution of one account cannot
+  disagree. `assembleDidDocument` and `publishDidDocument` are gone, and
+  `src/lib/didWeb.ts` keeps only the projection-id builder.
+- The DIDAuth holder follows the request's `acceptedMethods`
+  (`presentationSignerFor({ session, queries })`): did:webvh when accepted
+  and presentable, otherwise the did:web projection id, otherwise the client
+  did:key. An unconstrained request takes the projection id when it is
+  presentable. Presentability is settled against the account document
+  resolved from the verified log, read from the memo with no fetch, so a
+  cold memo answers did:key. A remembered session signs an account-form
+  holder with the enrolled client's own account key; the KMS-held key signs
+  where no client key exists.
+- The KMS provisioning stage collapsed into one, `kms-authentication`. It
+  mints a single Ed25519 `authentication` key (no key-agreement key, no
+  assertion key) and publishes no document. It probes `key-map/keys.json`
+  first over the plaintext codec, adopts a served map only when the
+  multibase in its `vmId` names a key this session's own keystore lists, and
+  writes `{ authentication: { vmId, kmsKeyId } }` with `If-None-Match: *`;
+  the genesis rewrite adds the `webvh: { did }` block under `If-Match` on
+  that ETag. The stage runs alongside Space provisioning, started before it
+  and joined before the genesis entry, with the mint path's keystore ensure
+  reached only past the probe's miss; the adopt path's listing check runs a
+  non-creating keystore lookup and creates nothing. Its timeout budget
+  starts once the Space is ready, so slow Space provisioning cannot eat it;
+  the budget still covers the keystore lookup, the key mint, and the
+  `keys.json` write. The adopt path also tells its two refusals apart: a
+  listing that returns without naming the served key refuses at once, while
+  a lookup or listing that throws is retried briefly (three attempts, a
+  sub-second budget) before refusing with that error as its cause, so a KMS
+  flap during a re-run no longer costs the account its `authentication`
+  relation permanently.
+- `profile.didWeb` is replaced by `profile.kmsAuthentication`
+  (`{ vmId, kmsKeyId }`), the KMS binding alone. The did:web id derives from
+  the account pointer, so Settings' "Published DID" row derives it too
+  instead of reading a provisioned artifact.
+- `stageSpan` (`src/lib/log.ts`) logs a `Stage span` event measured from an
+  explicit start. A stage that overlaps its neighbour cannot be measured as
+  a delta between marks, so the concurrent KMS stage reports a span and its
+  mark names only the join.
+
+### Fixed
+
+- App Connect's response VP held as the account's did:web DID on a
+  remembered session against a KMS deployment, contradicting both this
+  repo's ARCHITECTURE.md and app-connect-spec `decisions/0004`.
+  `processAppConnect` now passes an explicit holder override, pinning the
+  holder and its DIDAuth proof to the client did:key.
+- A DIDAuth request accepting only `web` or `webvh` was refused, by a wallet
+  that would have presented did:web to a verifier that asked for nothing.
+  `didAuthMethodSupported` now takes the methods the caller can present.
+  Pre-login the CHAPI get page judges deployment capability; after login a
+  session that can present none of the listed methods gets the block screen
+  in place of the consent panel, adding no step to the flow.
+
+### Removed
+
+- The `VITE_ENABLE_DID_WEBVH` opt-out. Every WAS account provisions
+  did:webvh. The reduced provisioning path is now reached only by a session
+  that structurally cannot publish a log (a no-WAS deployment, a guest); it
+  publishes no `did.json` and presents did:key.
+- The KMS X25519 `keyAgreement` key, which is no longer minted anywhere. The
+  did:webvh document always excluded it, since no server-held key may be a
+  wrap target, but the reduced path's hand-assembled document published it.
+  That exposure is closed for accounts created after this change. An
+  existing document keeps what it has, since nothing overwrites it.
 
 ## 0.45.0 - TBD
 

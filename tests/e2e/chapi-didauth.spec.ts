@@ -179,7 +179,14 @@ test.describe('CHAPI DID Authentication', () => {
     expect(response.value).toBeNull()
   })
 
-  test('unsupported DID method is blocked before login', async ({ page }) => {
+  test('a DID method this deployment cannot present is blocked before login', async ({
+    page
+  }) => {
+    // Local mode configures no WAS (and so no key server), so no session here
+    // publishes an account document: `web` is refused on deployment
+    // capability alone, before a password box renders. The post-login half of
+    // the gate, and the methods a WAS deployment can present, live in
+    // `tests/e2e-was/did-web.spec.ts`.
     await injectGetEvent(page, {
       origin: 'https://verifier.example',
       query: [
@@ -190,7 +197,9 @@ test.describe('CHAPI DID Authentication', () => {
     })
     await openGetPopup(page)
 
-    await expect(page.getByText(/DID method this wallet/)).toBeVisible()
+    await expect(
+      page.getByText(/only accepts DID methods/, { exact: false })
+    ).toBeVisible()
     await expect(page.locator('input[type="password"]')).toHaveCount(0)
   })
 })

@@ -251,10 +251,73 @@ describe('didAuthMethodSupported', () => {
   })
 
   it('is false when acceptedMethods excludes key', () => {
+    // The default presentable set is did:key alone, which is what a session
+    // with no promoted account holds.
     expect(
       didAuthMethodSupported([
         { type: 'DIDAuthentication', acceptedMethods: [{ method: 'web' }] }
       ])
+    ).toBe(false)
+  })
+
+  it('is true for web when the caller can present web', () => {
+    expect(
+      didAuthMethodSupported(
+        [{ type: 'DIDAuthentication', acceptedMethods: [{ method: 'web' }] }],
+        ['webvh', 'web', 'key']
+      )
+    ).toBe(true)
+  })
+
+  it('is true for webvh when the caller can present webvh', () => {
+    expect(
+      didAuthMethodSupported(
+        [{ type: 'DIDAuthentication', acceptedMethods: [{ method: 'webvh' }] }],
+        ['webvh', 'web', 'key']
+      )
+    ).toBe(true)
+  })
+
+  it('is false for webvh when the caller can present only did:key', () => {
+    expect(
+      didAuthMethodSupported(
+        [{ type: 'DIDAuthentication', acceptedMethods: [{ method: 'webvh' }] }],
+        ['key']
+      )
+    ).toBe(false)
+  })
+
+  it('is false for a method no caller presents', () => {
+    expect(
+      didAuthMethodSupported(
+        [{ type: 'DIDAuthentication', acceptedMethods: [{ method: 'ion' }] }],
+        ['webvh', 'web', 'key']
+      )
+    ).toBe(false)
+  })
+
+  it('skips malformed acceptedMethods entries rather than dereferencing them', () => {
+    expect(
+      didAuthMethodSupported(
+        [
+          {
+            type: 'DIDAuthentication',
+            acceptedMethods: [null, 'web', { method: 'key' }]
+          } as unknown as IVPRQuery
+        ],
+        ['key']
+      )
+    ).toBe(true)
+    expect(
+      didAuthMethodSupported(
+        [
+          {
+            type: 'DIDAuthentication',
+            acceptedMethods: [null, 'web']
+          } as unknown as IVPRQuery
+        ],
+        ['key']
+      )
     ).toBe(false)
   })
 })

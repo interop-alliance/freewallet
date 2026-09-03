@@ -214,6 +214,16 @@ export async function processAppConnect({
 
   const verifiablePresentation = await composeVP({
     session,
+    // App Connect never dispatches on `acceptedMethods`: the response VP
+    // holds and signs as the client did:key -- the enrolled client's on a
+    // remembered session, the visit key's bare did:key on a transient one --
+    // which is the holder app-side loaders resolve (app-connect-spec
+    // `decisions/0004`). The queries are unread behind the override.
+    queries: [],
+    holderOverride: {
+      signer: session.profile.keyAgent!.getSigner(),
+      holder: session.user.id
+    },
     selectedVCs: [credential],
     challenge,
     domain,

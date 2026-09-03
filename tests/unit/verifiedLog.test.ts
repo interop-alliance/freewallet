@@ -63,6 +63,8 @@ vi.mock('@interop/wallet-core/keys', async importOriginal => ({
 import {
   createVerifiedLogCache,
   invalidateVerifiedLog,
+  invalidateVerifiedLogForPublish,
+  peekVerifiedAccountLog,
   verifiedAccountLog
 } from '@/session/verifiedLog'
 import { listAccountClients, renameAccountClient } from '@/session/clients'
@@ -157,6 +159,47 @@ describe('the verified-log memo', () => {
     expect(logState.verifications).toBe(2)
   })
 
+  it('peeks only at what this session has already verified', async () => {
+    const session = sessionWith()
+    // Cold: no memo at all, so no allocation and no verification.
+    expect(peekVerifiedAccountLog({ profile: session.profile })).toBeUndefined()
+    expect(session.profile.verifiedLog).toBeUndefined()
+    expect(logState.verifications).toBe(0)
+
+    await verifiedAccountLog({ profile: session.profile })
+    expect(peekVerifiedAccountLog({ profile: session.profile })).toBeTruthy()
+    // The peek itself never verifies.
+    expect(logState.verifications).toBe(1)
+
+    invalidateVerifiedLog({ profile: session.profile })
+    expect(peekVerifiedAccountLog({ profile: session.profile })).toBeUndefined()
+  })
+
+  it('peeks at nothing while a verification is in flight or has failed', async () => {
+    const session = sessionWith()
+    const pending = verifiedAccountLog({ profile: session.profile })
+    expect(peekVerifiedAccountLog({ profile: session.profile })).toBeUndefined()
+    await pending
+
+    logState.failWith = new Error('the host is unreachable')
+    invalidateVerifiedLog({ profile: session.profile })
+    await expect(
+      verifiedAccountLog({ profile: session.profile })
+    ).rejects.toThrow('unreachable')
+    logState.failWith = undefined
+    expect(peekVerifiedAccountLog({ profile: session.profile })).toBeUndefined()
+  })
+
+  it('peeks at nothing for a pointer the memo was not taken against', async () => {
+    const session = sessionWith()
+    await verifiedAccountLog({ profile: session.profile })
+    session.profile.accountPointer = {
+      ...POINTER,
+      did: 'did:webvh:QmOther:was.example.test'
+    }
+    expect(peekVerifiedAccountLog({ profile: session.profile })).toBeUndefined()
+  })
+
   it('refuses a session holding no promoted pointer', async () => {
     const cache = createVerifiedLogCache({
       pinStore: browserLocalSessionPersistence().logPins
@@ -165,6 +208,50 @@ describe('the verified-log memo', () => {
     await expect(
       verifiedAccountLog({ profile: { verifiedLog: cache } as never })
     ).rejects.toThrow(/account pointer/)
+  })
+})
+
+describe("the provisioning ceremony's publish invalidation", () => {
+  it('keeps a settled memo for the DID the adopt branch reported', async () => {
+    const session = sessionWith()
+    await verifiedAccountLog({ profile: session.profile })
+
+    // The adopt branch: the log already stood, so nothing was published and
+    // the memo this login paid for still describes it.
+    invalidateVerifiedLogForPublish({
+      profile: session.profile,
+      did: POINTER.did
+    })
+
+    expect(peekVerifiedAccountLog({ profile: session.profile })).toBeTruthy()
+    await verifiedAccountLog({ profile: session.profile })
+    expect(logState.verifications).toBe(1)
+  })
+
+  it('drops a memo describing another DID', async () => {
+    const session = sessionWith()
+    await verifiedAccountLog({ profile: session.profile })
+
+    invalidateVerifiedLogForPublish({
+      profile: session.profile,
+      did: 'did:webvh:QmOther:was.example.test:space:space-123:id'
+    })
+
+    expect(peekVerifiedAccountLog({ profile: session.profile })).toBeUndefined()
+    await verifiedAccountLog({ profile: session.profile })
+    expect(logState.verifications).toBe(2)
+  })
+
+  it('is safe on a session that cached nothing', async () => {
+    const session = sessionWith()
+    expect(
+      invalidateVerifiedLogForPublish({
+        profile: session.profile,
+        did: POINTER.did
+      })
+    ).toBeUndefined()
+    expect(session.profile.verifiedLog).toBeUndefined()
+    expect(logState.verifications).toBe(0)
   })
 })
 

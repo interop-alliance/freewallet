@@ -107,7 +107,7 @@ describe('negotiateCryptosuite', () => {
 describe('composeVp (unsigned)', () => {
   it('throws when neither VCs nor DID Auth are present', async () => {
     await expect(
-      composeVP({ session, didAuthRequested: false })
+      composeVP({ session, queries: [], didAuthRequested: false })
     ).rejects.toThrow(/credentials, capabilities, or a DID Auth request/)
   })
 
@@ -120,6 +120,7 @@ describe('composeVp (unsigned)', () => {
     }
     const vp = await composeVP({
       session,
+      queries: [],
       selectedVCs: [fakeVc as never],
       didAuthRequested: false
     })
@@ -131,13 +132,14 @@ describe('composeVp (unsigned)', () => {
 describe('composeVp (DID Auth)', () => {
   it('requires challenge and domain', async () => {
     await expect(
-      composeVP({ session, didAuthRequested: true })
+      composeVP({ session, queries: [], didAuthRequested: true })
     ).rejects.toThrow(/challenge.*domain/)
   })
 
   it('signs a DID-Auth-only VP verifiable with Ed25519Signature2020', async () => {
     const vp = await composeVP({
       session,
+      queries: [],
       didAuthRequested: true,
       challenge: CHALLENGE,
       domain: DOMAIN
@@ -167,6 +169,7 @@ describe('composeVp (DID Auth)', () => {
   it('signs an eddsa-rdfc-2022 VP verifiable as a DataIntegrityProof', async () => {
     const vp = await composeVP({
       session,
+      queries: [],
       didAuthRequested: true,
       challenge: CHALLENGE,
       domain: DOMAIN,

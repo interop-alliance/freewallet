@@ -5,8 +5,7 @@ import { fillSettled, forceRememberBrowser } from './helpers'
 /**
  * Hosted did:webvh DID log e2e (Track F, Phase 2). Runs against the app in
  * remote mode backed by the local was-teaching-server (whose `/kms` facet is
- * the default KMS), with `VITE_ENABLE_DID_WEBVH` at its default (enabled).
- * Covers:
+ * the default KMS). Covers:
  *
  * 1. Signing up publishes a hash-chained `did.jsonl` log as a world-readable
  *    WAS resource; a cold, unauthenticated fetch parses and

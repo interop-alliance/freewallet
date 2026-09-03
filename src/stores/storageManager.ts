@@ -49,7 +49,6 @@ import type { ControllerProfile, User } from '@/types/auth'
 import { cidFrom } from '@interop/was-client/sync'
 import { isUnknownEpochError } from '@interop/wallet-core/sync'
 import {
-  ENABLE_DID_WEBVH,
   ENCRYPTED_STANDARD_COLLECTIONS,
   RP_ZCAP_TTL_MS,
   SYSTEM_COLLECTIONS,
@@ -61,13 +60,14 @@ import {
   assertStorableAppKey
 } from '@interop/wallet-core/request'
 import { credentialTitle } from '@/lib/viewMappers/credentialTitle'
-import { didWebFromSpace, ensureDidWeb } from '@/lib/didWeb'
+import { didWebFromSpace } from '@/lib/didWeb'
+import { ensureKmsAuthentication } from '@/lib/kms'
 import {
   didKeyZcapClient,
   isWebvhDid,
   webvhCapabilityAgent,
   webvhZcapClient,
-  type DidWebKeyMapV2
+  type KmsAuthenticationBinding
 } from '@interop/wallet-core/webvh'
 import { ensureAccountGenesis } from '@interop/wallet-core/genesis'
 import { clampGrantExpires } from '@interop/wallet-core/clientAnnex'
@@ -92,7 +92,7 @@ import {
   type CollectionMetaCache,
   type SessionPersistence
 } from '@/session/persistence'
-import { invalidateVerifiedLog } from '@/session/verifiedLog'
+import { invalidateVerifiedLogForPublish } from '@/session/verifiedLog'
 import {
   createEdvDocCipher,
   isEncryptedEnvelope,
@@ -130,7 +130,7 @@ import {
   addHistoryGenerationCollected as buildHistoryGenerationCollected,
   type WalletActivity
 } from '@interop/wallet-core/space'
-import { createLogger } from '@/lib/log'
+import { createLogger, stageTimer } from '@/lib/log'
 
 const log = createLogger('fw:storage:manager')
 
@@ -566,9 +566,11 @@ export class StorageManager {
   }
 
   /**
-   * The world-readable URL the user's published did:web document resolves to,
-   * or undefined when there is no remote backend. (Whether a document has
-   * actually been published is a separate `profile.didWeb` check.)
+   * The world-readable URL the account's did:web projection resolves to, or
+   * undefined when there is no remote backend. The projection is the
+   * did:webvh document under its did:web id, written by the log's own
+   * projection rather than minted separately, so a promoted account pointer
+   * is what says a document stands there; this getter only names the URL.
    */
   get publishedDidUrl(): string | undefined {
     return this.#remoteStore?.didDocumentUrl()
@@ -2048,33 +2050,44 @@ export class StorageManager {
         }
       }
       const remoteStore = this.#remoteStore
-      // Provision and publish the user's did:web DID (only when a keystore
-      // agent is present). Runs after the Space and `id` collection exist --
-      // on the ceremony path below, wallet-core calls this closure at that
-      // exact point and threads the parsed keys.json (with any webvh block)
-      // into the did:webvh genesis, so steady state stays one keys.json read
-      // total. Non-fatal like keystore provisioning: a KMS/WAS hiccup must
-      // not fail login; the settings page surfaces the unprovisioned state,
-      // and the idempotent flow resumes on the next login.
-      const provideDidWebKeys = async (): Promise<
-        DidWebKeyMapV2 | undefined
-      > => {
+      // Provision the account's one KMS-held `authentication` key (only when
+      // a keystore agent is present) and record its binding in keys.json. On
+      // the ceremony path below wallet-core starts this closure before the
+      // Space is awaited and joins on it before the genesis entry, threading
+      // the parsed keys.json (with any webvh block) into the did:webvh
+      // genesis, so steady state stays one keys.json read total. The reduced
+      // path calls it directly, with an already-resolved `spaceReady`: its
+      // Space is up before the call. The concurrency wins nothing on either
+      // of this method's paths -- the Space exists by the time a login gets
+      // here, so the probe short-circuits -- and it costs nothing either.
+      // Non-fatal like keystore provisioning: a KMS/WAS hiccup must not fail
+      // login; the settings page surfaces the unprovisioned state, and the
+      // idempotent flow resumes on the next login.
+      const provideKmsAuthentication = async ({
+        spaceReady
+      }: {
+        spaceReady: Promise<unknown>
+      }): Promise<KmsAuthenticationBinding | undefined> => {
         // Defensive: both paths below already gate on the keystore agent.
         if (!profile?.keystoreAgent) {
           return undefined
         }
         const keystoreAgent = profile.keystoreAgent
-        const did = didWebFromSpace({
-          wasServerUrl: remoteStore.storageServerUrl,
-          spaceId: remoteStore.spaceId
-        })
-        const keys = await ensureDidWeb({
+        const binding = await ensureKmsAuthentication({
+          // This session already holds its keystore agent, so both thunks
+          // hand back the same one and neither reaches the KMS's create
+          // route: the creating ensure ran at session init.
+          lookupKeystoreAgent: async () => keystoreAgent,
           provideKeystoreAgent: async () => keystoreAgent,
           remoteStore,
-          did
+          did: didWebFromSpace({
+            wasServerUrl: remoteStore.storageServerUrl,
+            spaceId: remoteStore.spaceId
+          }),
+          spaceReady
         })
-        profile.didWeb = { did, keys }
-        return keys as DidWebKeyMapV2
+        profile.kmsAuthentication = binding.keys.authentication
+        return binding
       }
       // A fresh signup built this session's ciphers before the Space
       // existed, so every encrypted collection's descriptor was unavailable
@@ -2092,7 +2105,6 @@ export class StorageManager {
         }
       }
       if (
-        ENABLE_DID_WEBVH &&
         profile?.keystoreAgent &&
         profile.clientWebvhKeys &&
         profile.keyAgent &&
@@ -2140,7 +2152,7 @@ export class StorageManager {
             userKey,
             updateKeys: profile.clientWebvhKeys,
             idStore: remoteStore.webvhIdStore(),
-            provideDidWebKeys,
+            provideKmsAuthentication,
             ...(knownDid ? { expectedDid: knownDid } : {}),
             // The provisioning read runs under the same chain-head pin the
             // login-time account-log reads use, so a truncated or substituted
@@ -2151,9 +2163,11 @@ export class StorageManager {
             accountLogPinStore: this.#persistence.logPins,
             onDidPublished: async ({ did }) => {
               profile.didWebvh = { did }
-              // Provisioning publishes (or extends) the log, so any memo of
-              // an earlier verification is dropped.
-              invalidateVerifiedLog({ profile })
+              // Fired on both of the ceremony's branches -- the one that
+              // published the genesis, and the one that adopted a log already
+              // standing -- so the memo is kept when it already holds a
+              // settled document for this same DID and dropped otherwise.
+              invalidateVerifiedLogForPublish({ profile, did })
               // The DID is known from here on: record it against the Space so
               // a later pre-promotion heal can state an `expectedDid`.
               // Best-effort -- local continuity bookkeeping must not fail
@@ -2181,15 +2195,19 @@ export class StorageManager {
                 },
                 pinStore: this.#persistence.logPins
               }),
-            promoteController: false
+            promoteController: false,
+            // The ceremony's one stage boundary of its own: the
+            // KMS-authentication join. Timed here so the plain-genesis heal
+            // reports it like the credential-anchored establishment does.
+            onStage: stageTimer({ log, ceremony: 'account-genesis' })
           })
           remoteStore.bindCollectionMap()
           // The stages the ceremony collects rather than throwing on: each
           // keeps the warn it had when this method sequenced the stages
           // itself, and each resumes on the next login.
           for (const { stage, error } of result.failed) {
-            if (stage === 'didWebKeys') {
-              log.warn('did:web provisioning failed', { err: error })
+            if (stage === 'kmsAuthentication') {
+              log.warn('KMS authentication provisioning failed', { err: error })
             } else if (stage === 'roster') {
               log.warn('User key roster provisioning failed', { err: error })
             } else {
@@ -2258,11 +2276,12 @@ export class StorageManager {
           }
         }
       } else {
-        // No did:webvh in this session (the flag is off, or there is no
-        // keystore agent, or this client holds no update-key seeds /
-        // identity keys / user key), so the genesis and roster stages have
-        // nothing to run on: provision the Space, install the key epochs,
-        // and publish did:web on their own.
+        // No did:webvh in this session (no keystore agent, or this client
+        // holds no update-key seeds / identity keys / user key), so the
+        // genesis and roster stages have nothing to run on: provision the
+        // Space, install the key epochs, and record the KMS binding on their
+        // own. Nothing publishes a `did.json` here, so this deployment
+        // presents did:key only.
         await remoteStore.ensureUserCollections({ user })
         // The provisioning two-step's EDV-bearing second half: install key
         // epoch[0] on every encrypted roster collection, wrapped to the
@@ -2283,9 +2302,11 @@ export class StorageManager {
         }
         if (profile?.keystoreAgent) {
           try {
-            await provideDidWebKeys()
+            // The Space is already up on this path, so the stage's own
+            // `spaceReady` join is a no-op.
+            await provideKmsAuthentication({ spaceReady: Promise.resolve() })
           } catch (err) {
-            log.warn('did:web provisioning failed', { err })
+            log.warn('KMS authentication provisioning failed', { err })
           }
         }
       }

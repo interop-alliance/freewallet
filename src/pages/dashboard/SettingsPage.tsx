@@ -22,8 +22,10 @@ import { useInfoBox } from '@/hooks/useInfoBox'
 import { useCopyToClipboard } from '@/hooks/useCopyToClipboard'
 import { usePrfRetryPrompt } from '@/hooks/usePrfRetryPrompt'
 import { getFileUrl } from '@interop/did-method-webvh'
-import { isWebvhDid } from '@interop/wallet-core/webvh'
+import { isWebvhDid, relationIds } from '@interop/wallet-core/webvh'
+import { didWebFromSpace } from '@/lib/didWeb'
 import { WrongPassphraseError } from '@/session/keyring'
+import { peekVerifiedAccountLog } from '@/session/verifiedLog'
 import {
   canRevokeWithoutCeremony,
   getUnlockMethods,
@@ -79,6 +81,29 @@ function deletePhaseKey(phase: string): string {
 }
 
 const log = createLogger('fw:ui:settings')
+
+/**
+ * Whether an account document publishes a verification method under
+ * `authentication` that it does not also publish under
+ * `capabilityInvocation`. That is the KMS-held key and nothing else: every
+ * enrolled client's signing key is published under both relations, and the
+ * ladder VM under neither.
+ *
+ * @param options {object}
+ * @param options.doc {object}   the verified account document
+ * @returns {boolean}
+ */
+function publishesAuthenticationOnlyKey({
+  doc
+}: {
+  doc: {
+    authentication?: Array<string | { id?: string }>
+    capabilityInvocation?: Array<string | { id?: string }>
+  }
+}): boolean {
+  const invocation = new Set(relationIds(doc.capabilityInvocation))
+  return relationIds(doc.authentication).some(id => !invocation.has(id))
+}
 
 /**
  * A single label/value settings row: a fixed-width label column and a value
@@ -543,9 +568,35 @@ export function SettingsPage() {
   // server is configured for a non-guest session (see initSession.ts).
   const kmsConfigured = !!KMS_SERVER_URL && !session?.isGuest
   const keystoreId = session?.profile?.keystoreAgent?.keystoreId
-  // The published did:web DID (present once provisioned) and the world-readable
-  // URL its document resolves to.
-  const publishedDid = session?.profile?.didWeb?.did
+  // The account's did:web projection id and the world-readable URL its
+  // document resolves to. The projection is the did:webvh document under its
+  // did:web id, so a promoted pointer is the whole evidence it exists -- the
+  // id is derived from the pointer rather than read off a provisioned
+  // artifact. Whether the account also records a key-server signing key is a
+  // separate fact, shown beside it: it is the one surface distinguishing
+  // "keystore present, no KMS binding" from a fully provisioned account.
+  const accountPointer = session?.profile?.accountPointer
+  const publishedDid = isWebvhDid(accountPointer?.did)
+    ? didWebFromSpace({
+        wasServerUrl: accountPointer!.host,
+        spaceId: accountPointer!.spaceId
+      })
+    : undefined
+  // The evidence the DIDAuth holder dispatch reads, so the chip and the
+  // dispatch cannot disagree: a verification method the account's verified
+  // document lists under `authentication` and NOT under
+  // `capabilityInvocation`. The KMS-held key is the only authentication-only
+  // method the document carries -- every enrolled client's key is published
+  // under both. `profile.kmsAuthentication` is the fallback for a cold memo,
+  // and it is all a transient session (the default) would otherwise have:
+  // only the remembered session's own provisioning stamps that member, so
+  // reading it alone was a permanent false negative there.
+  const verifiedDoc = session?.profile
+    ? peekVerifiedAccountLog({ profile: session.profile })?.doc
+    : undefined
+  const kmsBindingRecorded = verifiedDoc
+    ? publishesAuthenticationOnlyKey({ doc: verifiedDoc })
+    : !!session?.profile?.kmsAuthentication
   const publishedDidUrl = session?.storage.publishedDidUrl
   // The published did:webvh DID (Phase 2) and the world-readable URL its log
   // resolves to, derived from the did by the library's canonical mapping
@@ -1191,6 +1242,15 @@ export function SettingsPage() {
                   publishedDid
                     ? t('settings.publishedDidProvisioned')
                     : t('settings.publishedDidNone')
+                }
+              />
+              <Chip
+                size="small"
+                color={kmsBindingRecorded ? 'success' : 'default'}
+                label={
+                  kmsBindingRecorded
+                    ? t('settings.publishedDidKeyBinding')
+                    : t('settings.publishedDidKeyBindingNone')
                 }
               />
               {publishedDid && (

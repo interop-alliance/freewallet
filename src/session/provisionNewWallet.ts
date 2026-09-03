@@ -25,15 +25,50 @@
  * and the wallet remains usable.
  */
 import { setClientLabel } from '@interop/wallet-core/keys'
-import { clientSigningKeyMultibase } from '@interop/wallet-core/webvh'
+import {
+  clientSigningKeyMultibase,
+  isWebvhDid
+} from '@interop/wallet-core/webvh'
 import { selfContact } from '@interop/social-core'
 import { DEFAULT_CLIENT_LABEL } from '@/app.config'
-import type { Session } from '@/types/auth'
+import { didWebFromSpace } from '@/lib/didWeb'
+import type { ControllerProfile, Session } from '@/types/auth'
 import { welcomeCredential } from '@/fixtures/welcomeCredential'
 import { interopAllianceTeamContact } from '@/fixtures/defaultContacts'
 import { createLogger } from '@/lib/log'
 
 const log = createLogger('fw:session:provision')
+
+/**
+ * The account DIDs the self-contact records: the account's did:web projection
+ * id and its did:webvh, in that order, for a promoted account. Both are
+ * derived rather than read off a provisioned artifact -- the projection is the
+ * did:webvh document under its did:web id, so a promoted pointer is the whole
+ * evidence either form exists, and a transient session (which provisions
+ * nothing) records them too. An unpromoted account records neither.
+ *
+ * @param options {object}
+ * @param options.profile {ControllerProfile}
+ * @returns {string[]}
+ */
+function accountSelfDids({
+  profile
+}: {
+  profile: ControllerProfile
+}): string[] {
+  const pointer = profile.accountPointer
+  const accountDid = profile.didWebvh?.did ?? pointer?.did
+  if (!pointer?.host || !pointer.spaceId || !isWebvhDid(accountDid)) {
+    return []
+  }
+  return [
+    didWebFromSpace({
+      wasServerUrl: pointer.host,
+      spaceId: pointer.spaceId
+    }),
+    accountDid
+  ]
+}
 
 /**
  * Provisions a freshly created wallet: collections, initial history, default
@@ -88,9 +123,10 @@ export async function provisionNewWallet({
   ])
 
   // Seed the default contacts: the Interop Alliance Team, and a self-contact
-  // carrying the did:web/did:webvh DIDs `ensureUserCollections` minted above
-  // (absent for guests, without a KMS/WAS server, or if provisioning failed)
-  // plus the signup email, when one was entered. `session.isGuest` gates the
+  // carrying the account's did:web and did:webvh forms, derived from the
+  // pointer `ensureUserCollections` promoted above (absent for guests, without
+  // a WAS server, or if provisioning failed) plus the signup email, when one
+  // was entered. `session.isGuest` gates the
   // email: a guest's `user.email` is an internal placeholder (see
   // `initGuestSession`), never something the user typed, so it must not leak
   // into the contact.
@@ -103,9 +139,7 @@ export async function provisionNewWallet({
       storage.addContact({ contact: interopAllianceTeamContact }),
       storage.addContact({
         contact: selfContact({
-          dids: [profile.didWeb?.did, profile.didWebvh?.did].filter(
-            (did): did is string => Boolean(did)
-          ),
+          dids: accountSelfDids({ profile }),
           ...(session.isGuest ? {} : { email: user.email })
         })
       })
@@ -172,14 +206,11 @@ export async function seedWelcomeContent({
   const seeding = (async () => {
     // The default contacts mirror `provisionNewWallet`'s: the Interop
     // Alliance Team, and a self-contact carrying the account DIDs the
-    // establishment published (the account pointer's did:webvh stands in
-    // where the profile carries no resolved `didWebvh`, as on a transient
-    // tail) plus the signup email -- gated on `isGuest` the same way,
-    // though no guest reaches this WAS-only tail.
-    const selfDids = [
-      profile.didWeb?.did,
-      profile.didWebvh?.did ?? profile.accountPointer?.did
-    ].filter((did): did is string => Boolean(did))
+    // establishment published, derived from the pointer (the profile
+    // resolves no `didWebvh` on a transient tail), plus the signup email --
+    // gated on `isGuest` the same way, though no guest reaches this WAS-only
+    // tail.
+    const selfDids = accountSelfDids({ profile })
     // The records and contacts are independent, so they are written together.
     // The contact seeds keep their own catch (`provisionNewWallet`'s rule):
     // they are decorative, so a failed contact write is logged and stepped

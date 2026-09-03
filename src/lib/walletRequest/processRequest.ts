@@ -68,11 +68,12 @@ export async function processRequest({
 
   // The shared pipeline uses `presentationSigner` only on the non-App-Connect
   // path; the App Connect branch resolves its own signer inside
-  // `processAppConnect`. Resolve the (possibly KMS-backed) did:web signer only
-  // when it will actually be used, so App Connect avoids a redundant KMS lookup.
+  // `processAppConnect` (pinned to the client did:key, whatever the request
+  // accepts). Resolve the dispatched signer only when it will actually be
+  // used, so App Connect avoids a redundant KMS lookup.
   const presentationSigner = appConnectRequested
     ? { signer: session.profile.keyAgent!.getSigner(), holder: session.user.id }
-    : await presentationSignerFor(session)
+    : await presentationSignerFor({ session, queries })
 
   return sharedProcessRequest({
     // Freewallet widens `IVPRDetails.query` with the app-side `AppConnectQuery`;

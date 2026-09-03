@@ -65,15 +65,14 @@ const HIDDEN_ESTABLISHMENT_STAGES: readonly CredentialAnchoredEstablishmentStage
 /**
  * This app's own marks inside the establishment's run, each keyed by the
  * wallet-core stage it follows. They have no name upstream because their
- * bodies are freewallet's own closures: the KMS / did:web thunk runs inside
- * the genesis, and the unlock-methods registry write is the establishment's
- * `beforePromotion` hook. Keying on the upstream stage type is what makes an
- * upstream rename a type error here rather than a silently misplaced line.
+ * bodies are freewallet's own closures: the unlock-methods registry write is
+ * the establishment's `beforePromotion` hook. Keying on the upstream stage
+ * type is what makes an upstream rename a type error here rather than a
+ * silently misplaced line.
  */
 const APP_STAGES_IN_ESTABLISHMENT: Partial<
   Record<CredentialAnchoredEstablishmentStage, readonly string[]>
 > = {
-  'space-provisioning': ['did-web-keys'],
   'record-rebind': ['registry-write']
 }
 
@@ -158,7 +157,7 @@ export const SETUP_STAGES: Record<SetupMethod, readonly string[]> =
  */
 const STAGE_ALIASES: Record<string, string> = {
   ...CREDENTIAL_ANCHORED_ESTABLISHMENT_STAGE_ALIASES,
-  'keystore-promotion': 'did-web-keys'
+  'keystore-promotion': 'kms-authentication'
 }
 
 /**

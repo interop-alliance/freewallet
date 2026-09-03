@@ -43,6 +43,9 @@ import type { ControllerProfile } from '@/types/auth'
  */
 export interface VerifiedLogCache {
   get: (options: { pointer: AccountLogPointer }) => Promise<VerifiedAccountLog>
+  peek: (options: {
+    pointer: AccountLogPointer
+  }) => VerifiedAccountLog | undefined
   prime: (options: {
     pointer: AccountLogPointer
     verified: VerifiedAccountLog
@@ -79,6 +82,11 @@ export function createVerifiedLogCache({
 }): VerifiedLogCache {
   let key: string | undefined
   let pending: Promise<VerifiedAccountLog> | undefined
+  // The settled value behind `pending`, kept so a caller that must not fetch
+  // and must not wait (the DIDAuth holder dispatch's presentability read) can
+  // ask what this session has already verified. Set only on success, cleared
+  // wherever `pending` is.
+  let settled: VerifiedAccountLog | undefined
   return {
     get({ pointer }) {
       const wanted = pointerKey({ pointer })
@@ -86,6 +94,7 @@ export function createVerifiedLogCache({
         return pending
       }
       key = wanted
+      settled = undefined
       const verification = verifyAccountLog({
         did: pointer.did,
         spaceId: pointer.spaceId,
@@ -94,26 +103,39 @@ export function createVerifiedLogCache({
         // back, or switches identity against it is refused here, before
         // anything downstream reads the memo.
         pinStore
-      }).catch(err => {
-        // A failed verification is never the cached answer: drop it so the
-        // next caller re-reads (an unreachable host is transient; a genuinely
-        // broken log fails again, loudly, at the same place).
-        if (key === wanted) {
-          key = undefined
-          pending = undefined
-        }
-        throw err
       })
+        .then(verified => {
+          if (key === wanted) {
+            settled = verified
+          }
+          return verified
+        })
+        .catch(err => {
+          // A failed verification is never the cached answer: drop it so the
+          // next caller re-reads (an unreachable host is transient; a
+          // genuinely broken log fails again, loudly, at the same place).
+          if (key === wanted) {
+            key = undefined
+            pending = undefined
+            settled = undefined
+          }
+          throw err
+        })
       pending = verification
       return verification
+    },
+    peek({ pointer }) {
+      return key === pointerKey({ pointer }) ? settled : undefined
     },
     prime({ pointer, verified }) {
       key = pointerKey({ pointer })
       pending = Promise.resolve(verified)
+      settled = verified
     },
     invalidate() {
       key = undefined
       pending = undefined
+      settled = undefined
     }
   }
 }
@@ -156,6 +178,35 @@ export async function verifiedAccountLog({
 }
 
 /**
+ * The account document this session has ALREADY verified, or `undefined`. It
+ * never fetches, never verifies, never allocates a memo, and never throws:
+ * a cold memo, a memo whose verification is still in flight or failed, and a
+ * session with no promoted pointer all answer `undefined`.
+ *
+ * For the caller that cannot afford either half of {@link verifiedAccountLog}:
+ * the DIDAuth holder dispatch runs inside the CHAPI approve handler, where a
+ * log fetch would cost a round trip on every response and a continuity refusal
+ * would surface as a raw error string.
+ *
+ * @param options {object}
+ * @param options.profile {ControllerProfile}
+ * @returns {VerifiedAccountLog | undefined}
+ */
+export function peekVerifiedAccountLog({
+  profile
+}: {
+  profile: ControllerProfile
+}): VerifiedAccountLog | undefined {
+  const pointer = profile.accountPointer
+  if (!pointer?.did) {
+    return undefined
+  }
+  return profile.verifiedLog?.peek({
+    pointer: { did: pointer.did, spaceId: pointer.spaceId, host: pointer.host }
+  })
+}
+
+/**
  * Seeds the memo with a verification a login-path check already performed,
  * so the session's first reader does not fetch and re-verify the same log.
  * Takes the same pointer key `verifiedAccountLog` reads under, and is
@@ -181,6 +232,37 @@ export function primeVerifiedAccountLog({
     pinStore: profile.persistence.logPins
   })
   profile.verifiedLog.prime({ pointer, verified })
+}
+
+/**
+ * The did:webvh provisioning ceremony's invalidation: it reports a published
+ * DID from BOTH of its branches -- the one that created the log, and the one
+ * that adopted a log already standing and published nothing.
+ *
+ * Dropping the memo on the adopt branch throws away a verification the login
+ * already paid for, and the DIDAuth holder dispatch (which peeks and never
+ * fetches) then answers a request for an account holder form with the
+ * wallet's did:key. So the memo is kept when it already holds a settled
+ * document for this same DID, and dropped otherwise. Nothing that changed is
+ * kept: the create branch published a log whose DID did not exist before it
+ * ran, so no settled memo can name it.
+ *
+ * @param options {object}
+ * @param options.profile {ControllerProfile}
+ * @param options.did {string}   the DID the ceremony reported publishing
+ * @returns {void}
+ */
+export function invalidateVerifiedLogForPublish({
+  profile,
+  did
+}: {
+  profile: ControllerProfile
+  did: string
+}): void {
+  if (peekVerifiedAccountLog({ profile })?.doc.id === did) {
+    return
+  }
+  invalidateVerifiedLog({ profile })
 }
 
 /**

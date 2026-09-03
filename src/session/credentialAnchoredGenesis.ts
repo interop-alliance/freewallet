@@ -13,17 +13,19 @@
  *   email);
  * - the storage wiring under the bootstrap identity (the `WasClient`, the
  *   account `id`-collection store, the ladder-signed roster store builder);
- * - the KMS/did:web thunk (`provideDidWebKeys`, best-effort with a local
- *   timeout) and the keystore-controller promotion closure it arms;
+ * - the KMS-authentication thunk (`provideKmsAuthentication`, best-effort
+ *   with a local timeout) and the keystore-controller promotion closure it
+ *   arms;
  * - the caller's pre-promotion tail (`beforePromotion`, the signup's
  *   registry write), wrapped only to close its own timing span;
  * - logging: the ceremony's collected best-effort failures are warned here,
  *   and its stage timings are collected on one timer. wallet-core's
- *   `onStage` notifier closes the span of every stage it runs; the three
- *   stages whose body is a closure supplied here -- the KMS/did:web thunk,
- *   the pre-promotion registry write, the keystore promotion -- close their
- *   own, so each reported figure is the stage it is named after rather than
- *   everything that happened since the last name.
+ *   `onStage` notifier closes the span of every stage it runs, the
+ *   KMS-authentication join included; the two stages whose body is a closure
+ *   supplied here and whose span the delta would misname -- the pre-promotion
+ *   registry write, the keystore promotion -- close their own, and the
+ *   concurrent KMS thunk reports a measured span of its own instead of a
+ *   delta.
  *
  * One function serves the fresh signup and the login-time re-run alike --
  * every stage is an ensure, so a signup torn at any point converges by
@@ -39,6 +41,7 @@ import {
   establishCredentialAnchoredAccount as runEstablishment,
   ladderVmAgent,
   mendCredentialAnchoredAccount as runMend,
+  KMS_AUTHENTICATION_STAGE,
   type CredentialAnchoredBindRecordHook,
   type CredentialAnchoredEstablishment,
   type CredentialAnchoredMendReport,
@@ -47,8 +50,9 @@ import {
 import {
   didKeyZcapClient,
   wasWebvhIdStore,
-  type DidWebKeyMapV2
+  type KmsAuthenticationBinding
 } from '@interop/wallet-core/webvh'
+import { plaintextCollection } from '@interop/wallet-core/space'
 import type { UserKey } from '@interop/wallet-core/keys'
 import type { AccountPointer } from '@interop/wallet-core/keyring'
 import type { DIDLog } from '@interop/did-method-webvh'
@@ -64,8 +68,13 @@ import {
   KMS_SERVER_URL,
   WAS_SERVER_URL
 } from '@/app.config'
-import { didWebFromSpace, ensureDidWeb } from '@/lib/didWeb'
-import { ensureKeystore, promoteKeystoreController } from '@/lib/kms'
+import { didWebFromSpace } from '@/lib/didWeb'
+import {
+  ensureKeystore,
+  ensureKmsAuthentication,
+  findKeystoreAgent,
+  promoteKeystoreController
+} from '@/lib/kms'
 import {
   bindCredentialAnchoredUnlockSecret,
   type UnlockCredential
@@ -77,28 +86,34 @@ import {
   upsertPassphraseUnlockMethod,
   type PassphraseUnlockMethod
 } from '@/session/unlockMethods'
-import { createLogger, stageMarker, stageTimer } from '@/lib/log'
+import { createLogger, stageMarker, stageSpan, stageTimer } from '@/lib/log'
 
 export type { CredentialAnchoredEstablishment, CredentialAnchoredMendReport }
 
 const log = createLogger('fw:session:genesis')
 
 /**
- * The bound on the whole KMS stage (keystore ensure, did:web key mint,
- * keys.json/did.json publication): a hung -- not throwing -- KMS sits between
- * Space creation and the genesis entry, so it must not wedge the signup. On
+ * The bound on the KMS half of the stage (keystore ensure, key mint,
+ * keys.json write): a hung -- not throwing -- KMS sits between Space
+ * creation and the genesis entry, so it must not wedge the signup. On
  * timeout the thunk throws and the genesis ceremony collects it as its
- * non-fatal `didWebKeys` stage.
+ * non-fatal `kmsAuthentication` stage.
+ *
+ * The budget starts when the Space is ready rather than covering the wait
+ * for it: the stage overlaps Space provisioning, and slow provisioning would
+ * otherwise eat the whole budget. It still covers the keystore lookup, the
+ * key mint, and the keys.json write, so a timeout can still win with that
+ * write in flight, leaving a map the genesis entry never publishes.
  */
-const DID_WEB_KEYS_TIMEOUT_MS = 30_000
+const KMS_AUTHENTICATION_TIMEOUT_MS = 30_000
 
 /**
  * Builds the app-specific hook set both wallet-core entry points take (the
  * establishment orchestrator and the mend entry point): the bootstrap
  * identity wiring (`WasClient`, `id`-collection store, ladder-signed roster
  * store builder), the unlock-record codec closure, and -- when a KMS is
- * configured -- the did:web thunk plus the keystore-promotion closure it
- * arms. One builder, so the two bindings can never drift.
+ * configured -- the KMS-authentication thunk plus the keystore-promotion
+ * closure it arms. One builder, so the two bindings can never drift.
  *
  * @param options {object}
  * @param options.credential {UnlockCredential}
@@ -106,10 +121,12 @@ const DID_WEB_KEYS_TIMEOUT_MS = 30_000
  * @param options.pointer {AccountPointer}
  * @param [options.email] {string}
  * @param options.logPins {ResourceLogPinStore}
- * @param options.mark {Function}   the caller's stage timer. Two of the
- *   ceremony's stages ARE hooks built here -- the KMS/did:web thunk and the
- *   keystore promotion -- so each closes its own span rather than leaving
- *   wallet-core to name work only this module knows the shape of
+ * @param options.ceremony {string}   the label the caller's own timer uses,
+ *   so the concurrent KMS stage's measured span is filed under the same
+ *   ceremony as the marks around it
+ * @param options.mark {Function}   the caller's stage timer. The keystore
+ *   promotion IS a hook built here, so it closes its own span rather than
+ *   leaving wallet-core to name work only this module knows the shape of
  * @returns {Promise<object>}   the hook members, spreadable into either
  *   wallet-core call
  */
@@ -119,6 +136,7 @@ async function establishmentHooks({
   pointer,
   email,
   logPins,
+  ceremony,
   mark
 }: {
   credential: UnlockCredential
@@ -126,6 +144,7 @@ async function establishmentHooks({
   pointer: AccountPointer
   email?: string
   logPins: ResourceLogPinStore
+  ceremony: string
   mark: (stage: string) => void
 }) {
   const host = pointer.host
@@ -139,55 +158,90 @@ async function establishmentHooks({
   })
   const idStore = wasWebvhIdStore({ was: bootstrapWas, spaceId })
 
-  // The KMS stage's thunk, when a KMS is configured: the ceremony calls it
-  // once the Space exists, before the genesis entry, so the entry can carry
-  // the KMS `authentication` VM. The keystore is created (or found,
-  // list-first) under the LADDER VM's bare did:key -- the bootstrap identity
-  // -- and the did:web keys are minted and keys.json/did.json published by
-  // that same identity; the keystore's controller is promoted to the account
-  // DID beside the Space's, through the `promoteKeystore` closure this thunk
-  // arms. The ensureDidWeb short-circuit on an existing keys.json keeps a
-  // heal re-run from generating keys twice, and its lazy keystore
-  // acquisition keeps that path off the KMS entirely. On a heal re-run of an
-  // ALREADY-PROMOTED account the bootstrap key is no longer the Space
-  // controller, so the keys.json read comes back empty (an unauthorized read
-  // looks like an absence) and the write is refused -- an expected, noisy,
-  // non-fatal `didWebKeys` failure, healed by a later keystore-creation
-  // pass. The whole thunk races a timeout: a hung KMS must not wedge the
-  // signup between Space creation and the genesis entry.
+  // The KMS stage's thunk, when a KMS is configured: the ceremony starts it
+  // BEFORE the Space is awaited and joins on it before the genesis entry, so
+  // the entry can carry the KMS `authentication` VM. The keystore is created
+  // (or found, list-first) under the LADDER VM's bare did:key -- the
+  // bootstrap identity -- and the key is minted by that same identity; the
+  // keystore's controller is promoted to the account DID beside the Space's,
+  // through the `promoteKeystore` closure both thunks below arm. The
+  // `ensureKmsAuthentication` short-circuit on an existing keys.json keeps a
+  // heal re-run from generating a key twice, and the adopt path it takes
+  // there creates no keystore: it lists under the bootstrap did:key and
+  // refuses when nothing is listed. On a heal re-run of an ALREADY-PROMOTED
+  // account the bootstrap key is no longer the Space controller, so the
+  // keys.json read comes back empty (an unauthorized read looks like an
+  // absence) and the write is refused -- an expected, noisy, non-fatal
+  // `kmsAuthentication` failure, healed by a later keystore-creation pass.
   let keystoreAgent: KeystoreAgent | undefined
   const kmsServerUrl = KMS_SERVER_URL
-  const provideDidWebKeys =
+  const provideKmsAuthentication =
     kmsServerUrl === undefined
       ? undefined
-      : async (): Promise<DidWebKeyMapV2 | undefined> => {
-          const body = (async () => {
-            const keys = await ensureDidWeb({
-              provideKeystoreAgent: async () => {
-                keystoreAgent = await ensureKeystore({
-                  kmsServerUrl,
-                  keyAgent: bootstrapAgent,
-                  zcapClient: bootstrapZcap
+      : async ({
+          spaceReady
+        }: {
+          spaceReady: Promise<unknown>
+        }): Promise<KmsAuthenticationBinding | undefined> => {
+          const endSpan = stageSpan({
+            log,
+            ceremony,
+            stage: KMS_AUTHENTICATION_STAGE
+          })
+          // The probe reads through a PLAINTEXT codec: it starts before the
+          // Space exists, and a 404 from an absent Space must read as the
+          // same absence an unwritten keys.json does rather than making the
+          // client refuse to guess the collection's encryption.
+          const body = ensureKmsAuthentication({
+            // The adopt path's lookup creates nothing: it lists keystores
+            // under the bootstrap did:key and answers `undefined` on a miss,
+            // which the stage reads as "this keystore does not list the
+            // served key" and refuses. Verifying a served map must never be
+            // what mints a keystore.
+            lookupKeystoreAgent: async () => {
+              keystoreAgent = await findKeystoreAgent({
+                kmsServerUrl,
+                keyAgent: bootstrapAgent,
+                zcapClient: bootstrapZcap
+              })
+              return keystoreAgent
+            },
+            provideKeystoreAgent: async () => {
+              keystoreAgent = await ensureKeystore({
+                kmsServerUrl,
+                keyAgent: bootstrapAgent,
+                zcapClient: bootstrapZcap
+              })
+              return keystoreAgent
+            },
+            remoteStore: {
+              getKeyMap: async () => {
+                const result = await plaintextCollection({
+                  was: bootstrapWas,
+                  spaceId,
+                  collectionId: KEY_MAP_COLLECTION.id
                 })
-                return keystoreAgent
+                  .resource(DID_KEYS_RESOURCE)
+                  .get()
+                return result === null ? undefined : result
               },
-              remoteStore: {
-                getKeyMap: async () => {
-                  const result = await bootstrapWas
-                    .space(spaceId)
-                    .collection(KEY_MAP_COLLECTION.id)
-                    .resource(DID_KEYS_RESOURCE)
-                    .get()
-                  return result === null ? undefined : result
-                },
-                webvhIdStore: () => idStore
-              },
-              did: didWebFromSpace({ wasServerUrl: host, spaceId })
-            })
-            return keys as DidWebKeyMapV2
-          })()
-          // Keep a late rejection handled once the timeout has won the race.
+              webvhIdStore: () => idStore
+            },
+            did: didWebFromSpace({ wasServerUrl: host, spaceId }),
+            spaceReady
+          })
+          // Keep a late rejection handled once the timeout has won the race,
+          // on the Space promise as well as this one: the raced body awaits
+          // `spaceReady`, so a Space that never comes up rejects here too.
           body.catch(() => undefined)
+          spaceReady.catch(() => undefined)
+          // The budget starts once the Space is ready rather than covering
+          // the wait for it, so slow Space provisioning cannot eat it. It
+          // still covers the keystore lookup, the key mint, and the
+          // keys.json write, so a timeout can still win with that write in
+          // flight, leaving a map the genesis entry does not publish; the
+          // next run adopts it after the same listing check.
+          await spaceReady.catch(() => undefined)
           let timer: ReturnType<typeof setTimeout> | undefined
           try {
             return await Promise.race([
@@ -197,21 +251,22 @@ async function establishmentHooks({
                   () =>
                     reject(
                       new Error(
-                        'The did:web key provisioning timed out ' +
-                          `(${DID_WEB_KEYS_TIMEOUT_MS}ms).`
+                        'The KMS authentication provisioning timed out ' +
+                          `(${KMS_AUTHENTICATION_TIMEOUT_MS}ms).`
                       )
                     ),
-                  DID_WEB_KEYS_TIMEOUT_MS
+                  KMS_AUTHENTICATION_TIMEOUT_MS
                 )
               })
             ])
           } finally {
             clearTimeout(timer)
-            // In the `finally`, so a thunk the timeout won still closes its
-            // own span: the stage cost is what it cost, failure included,
-            // and leaving it unmarked would fold it into the genesis stage
-            // that follows.
-            mark('did-web-keys')
+            // In the `finally`, so a thunk the timeout won still reports the
+            // span it measured: the stage cost is what it cost, failure
+            // included. The STAGE MARK is wallet-core's, fired at the join,
+            // since a thunk finishing before the Space would mark early and
+            // put the lobby feed out of order.
+            endSpan()
           }
         }
 
@@ -261,10 +316,12 @@ async function establishmentHooks({
         zcapClient: didKeyZcapClient({ keyAgent })
       }),
     idStore,
-    ...(provideDidWebKeys ? { provideDidWebKeys } : {}),
-    // The keystore half of the promotion, only when the KMS thunk bound a
-    // keystore THIS run (a heal that short-circuited off an existing
-    // keys.json never bound one).
+    ...(provideKmsAuthentication ? { provideKmsAuthentication } : {}),
+    // The keystore half of the promotion, only when the KMS stage bound a
+    // keystore THIS run: one it created, or one it found still controlled by
+    // the bootstrap did:key (the only identity either thunk lists under). A
+    // run with no KMS configured, and an adopt whose lookup found nothing,
+    // both leave it unbound and skip the promotion.
     promoteKeystore: async ({ did }: { did: string }) => {
       if (keystoreAgent) {
         await promoteKeystoreController({ keystoreAgent, controller: did })
@@ -345,9 +402,10 @@ export async function establishCredentialAnchoredAccount({
   // One `mark` for the whole establishment: it closes each stage's timing
   // span AND feeds the caller's optional progress notifier (the lobby
   // page's step feed), so the two can never report different stage sets.
+  const ceremony = 'credential-anchored-establishment'
   const mark = stageMarker({
     log,
-    ceremony: 'credential-anchored-establishment',
+    ceremony,
     ...(onStage ? { onStage } : {})
   })
   const hooks = await establishmentHooks({
@@ -356,6 +414,7 @@ export async function establishCredentialAnchoredAccount({
     pointer,
     email,
     logPins: persistence.logPins,
+    ceremony,
     mark
   })
   mark('bootstrap-wiring')
@@ -388,8 +447,10 @@ export async function establishCredentialAnchoredAccount({
   // reports them on the result), never fatal. A keystore-less account is
   // complete; Settings shows the state and a later pass heals it.
   for (const { stage, error } of establishment.failed) {
-    if (stage === 'didWebKeys') {
-      log.warn('did:web provisioning failed (continuing)', { err: error })
+    if (stage === 'kmsAuthentication') {
+      log.warn('KMS authentication provisioning failed (continuing)', {
+        err: error
+      })
     } else if (stage === 'keystorePromotion') {
       log.warn('Keystore controller promotion failed (continuing)', {
         err: error
@@ -574,16 +635,15 @@ export async function mendCredentialAnchoredAccount({
       'The credential-anchored mend requires a configured WAS server.'
     )
   }
-  const mark = stageTimer({
-    log,
-    ceremony: 'credential-anchored-mend'
-  })
+  const ceremony = 'credential-anchored-mend'
+  const mark = stageTimer({ log, ceremony })
   const hooks = await establishmentHooks({
     credential,
     ladderSeed,
     pointer,
     email,
     logPins: persistence.logPins,
+    ceremony,
     mark
   })
   mark('bootstrap-wiring')
