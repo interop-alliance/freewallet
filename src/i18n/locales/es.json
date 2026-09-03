@@ -354,6 +354,11 @@
         "record-rebind": "Vinculando tu credencial...",
         "registry-write": "Registrando tu método de inicio de sesión...",
         "controller-promotion": "Finalizando la propiedad de la cuenta...",
+        "remembered-login": "Iniciando tu sesión...",
+        "local-account-keys": "Generando las claves de tu cuenta...",
+        "keyring-bind": "Guardando tu registro de desbloqueo...",
+        "passkey-enrollment": "Registrando tu llave de acceso...",
+        "local-provisioning": "Preparando tu cartera...",
         "entering-wallet": "Entrando en tu cartera..."
       },
       "done": "ok"

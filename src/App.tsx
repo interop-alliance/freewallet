@@ -2,6 +2,7 @@ import { lazy, Suspense } from 'react'
 import type { ComponentType } from 'react'
 import { Route, Routes } from 'react-router'
 import { LandingPage } from '@/pages/LandingPage'
+import { LobbyPage } from '@/pages/auth/LobbyPage'
 import { ProtectedRoute } from '@/components/ProtectedRoute'
 import { RouteFallback } from '@/components/RouteFallback'
 
@@ -21,16 +22,18 @@ function lazyNamed<
   return lazy(async () => ({ default: (await load())[name] }))
 }
 
-// LandingPage and ProtectedRoute are eager: LandingPage is the lightweight
-// unauthenticated entry point, and ProtectedRoute is a tiny auth gate. Every
-// other route is lazily code-split so its (often heavy) dependencies -- rxdb,
+// LandingPage, LobbyPage and ProtectedRoute are eager: LandingPage is the
+// lightweight unauthenticated entry point, ProtectedRoute is a tiny auth gate,
+// and the lobby is a small page on the critical path of every signup -- a
+// chunk fetch that failed there would strand a completed setup run behind a
+// blank Suspense fallback with no error boundary to recover it. Every other
+// route is lazily code-split so its (often heavy) dependencies -- rxdb,
 // jsonld, verifier-core, qr-scanner -- stay out of the initial bundle.
 const LoginPage = lazyNamed(() => import('@/pages/auth/LoginPage'), 'LoginPage')
 const SignupPage = lazyNamed(
   () => import('@/pages/auth/SignupPage'),
   'SignupPage'
 )
-const LobbyPage = lazyNamed(() => import('@/pages/auth/LobbyPage'), 'LobbyPage')
 const RecoverPage = lazyNamed(
   () => import('@/pages/auth/RecoverPage'),
   'RecoverPage'

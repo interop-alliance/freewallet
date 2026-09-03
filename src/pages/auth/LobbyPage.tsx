@@ -9,6 +9,10 @@
  *
  * Mounting with no run in flight (a reload, a direct visit) means the store
  * is empty, and the page routes back to the wizard.
+ *
+ * This page is the run's one consumer, so it also owns the run's attendance:
+ * an unmount before the run settles marks it abandoned, and the settled run
+ * then discards its session rather than parking it in the store.
  */
 import { useEffect, useRef } from 'react'
 import { Box, Typography } from '@mui/material'
@@ -19,17 +23,21 @@ import { authStyles } from '@/styles/appStyles'
 import { usePrfRetryPrompt } from '@/hooks/usePrfRetryPrompt'
 import { useAuthStore } from '@/stores/authStore'
 import { useSetupStore, type SetupMethod } from '@/stores/setupStore'
+import { signupStepPath } from '@/lib/signupSteps'
 
 /**
- * The wizard's last step for a method, where a failed run returns the user.
+ * Where a failed run returns the user: the step they must act on. The
+ * passphrase path returns to the passphrase field, since a fresh page carries
+ * none of what the failed run was given; the passkey path has nothing to
+ * re-enter and returns to the last step.
  *
  * @param method {SetupMethod}
  * @returns {string}
  */
-function signupLastStepPath(method: SetupMethod): string {
+function signupRetryPath(method: SetupMethod): string {
   return method === 'passkey'
-    ? '/signup?method=passkey&step=storage'
-    : '/signup?step=storage'
+    ? signupStepPath({ method, step: 'storage' })
+    : signupStepPath({ method, step: 'start' })
 }
 
 export function LobbyPage() {
@@ -40,12 +48,22 @@ export function LobbyPage() {
   const steps = useSetupStore(state => state.steps)
   const result = useSetupStore(state => state.result)
   const clearSetup = useSetupStore(state => state.clearSetup)
+  const attendSetup = useSetupStore(state => state.attendSetup)
+  const abandonSetup = useSetupStore(state => state.abandonSetup)
   // The passkey ceremony may still ask for a second WebAuthn ceremony while
   // this page is the mounted one, so the consent dialog lives here too.
   const { dialog: prfRetryDialog } = usePrfRetryPrompt()
   // One navigation per visit: clearing the run empties the store, which must
   // not read as "no run in flight" and route back to the wizard.
   const navigated = useRef(false)
+
+  // While this page is mounted the run is attended; leaving before it settles
+  // abandons it, so its outcome is discarded instead of parked. Attending on
+  // mount is what makes the pairing survive React's double-invoked effects.
+  useEffect(() => {
+    attendSetup()
+    return abandonSetup
+  }, [abandonSetup, attendSetup])
 
   useEffect(() => {
     if (navigated.current) {
@@ -63,7 +81,7 @@ export function LobbyPage() {
     if (result.kind === 'failed') {
       const { errorKey } = result
       clearSetup()
-      void navigate(signupLastStepPath(method), {
+      void navigate(signupRetryPath(method), {
         replace: true,
         ...(errorKey ? { state: { setupErrorKey: errorKey } } : {})
       })

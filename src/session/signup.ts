@@ -401,7 +401,15 @@ export async function signUpWithPassphrase({
       accountLog: outcome.accountLog
     })
   }
-  // The no-WAS remembered flow. Probe for an existing account first.
+  // The no-WAS remembered flow. Its stage names are this module's own: no
+  // establishment runs here, so none of the WAS-only names is ever reported
+  // and the lobby lists a different set (`SETUP_STAGE_LISTS.local`).
+  const mark = stageMarker({
+    log,
+    ceremony: 'local-signup',
+    ...(onStage ? { onStage } : {})
+  })
+  // Probe for an existing account first.
   // loginWithPassphrase resolves the passphrase through the keyring and
   // reports whether this identity already has a wallet; probing (rather than
   // binding a raw seed straight away) is what prevents a re-signup with an
@@ -414,6 +422,7 @@ export async function signUpWithPassphrase({
     secret: passphrase,
     kdf: KEYRING_KDF
   })
+  mark('kdf')
   const probe = await loginWithPassphrase({
     passphrase,
     email,
@@ -421,6 +430,7 @@ export async function signUpWithPassphrase({
     credential,
     rememberBrowser: true
   })
+  mark('existing-account-probe')
   if (probe.userExists) {
     return { userExists: true }
   }
@@ -437,6 +447,7 @@ export async function signUpWithPassphrase({
     email,
     provisionStorage: false
   })
+  mark('local-account-keys')
   const { persistClientKeys } = await bindPassphrase({
     clientSeed: seed,
     controller: session.user.id,
@@ -450,10 +461,12 @@ export async function signUpWithPassphrase({
     credential
   })
   session.profile.persistClientKeys = persistClientKeys
+  mark('keyring-bind')
 
   // Provision collections, record the initial history, and seed the
   // welcome credential.
   await provisionNewWallet({ session })
+  mark('local-provisioning')
 
   return { session, userExists: false }
 }
@@ -656,6 +669,14 @@ export async function signUpWithPasskey({
     })
   }
 
+  // The no-WAS flow's own stage names (see the passphrase twin above): the
+  // establishment never runs here, so the lobby lists `SETUP_STAGE_LISTS`'
+  // local passkey set instead of the WAS one.
+  const mark = stageMarker({
+    log,
+    ceremony: 'local-signup',
+    ...(onStage ? { onStage } : {})
+  })
   const { seed, userKey, webvhUpdateKeys, pointer } = await mintAccountKeySet()
   const { session } = await initSessionFromSeed({
     seed,
@@ -665,6 +686,7 @@ export async function signUpWithPasskey({
     email,
     provisionStorage: false
   })
+  mark('local-account-keys')
 
   // Register the passkey and bind its PRF output to the client key set
   // BEFORE creating the local collections: an account whose keyring failed
@@ -686,10 +708,14 @@ export async function signUpWithPasskey({
     promptForPrfRetry
   })
   session.profile.persistClientKeys = persistClientKeys
+  // One boundary for the whole enrollment: the WebAuthn ceremony and the
+  // keyring bind it feeds are a single call here.
+  mark('passkey-enrollment')
 
   // Provision collections, record the initial history, and seed the
   // welcome credential.
   await provisionNewWallet({ session })
+  mark('local-provisioning')
 
   // Write the initial unlock-methods registry only now: it lives beside the
   // data collections `provisionNewWallet` just created. Non-fatal -- the
@@ -716,6 +742,7 @@ export async function signUpWithPasskey({
   } catch (err) {
     log.warn('Could not record the new passkey in the registry', { err })
   }
+  mark('registry-write')
 
   // Mark this as a passkey-only account so the dashboard can prompt the
   // user to add a second unlock method. Non-fatal.

@@ -3,9 +3,8 @@ import type { Session } from '@/types/auth'
 import { isBrowserLocalSession } from '@/session/persistence'
 import { setTransientPrefs } from '@/lib/prefsStorage'
 import { syncController } from '@/stores/syncController'
-import { createLogger } from '@/lib/log'
-
-const log = createLogger('fw:session:store')
+import { discardSession } from '@/stores/sessionTeardown'
+import { clearSetup } from '@/stores/setupStore'
 
 /**
  * E2E test seam. Space export / import (and the collection delete a round-trip
@@ -90,21 +89,18 @@ export const useAuthStore = create<AuthState>()((set, get) => ({
     // for the new session. All fire-and-forget, so login stays non-blocking.
     void (async () => {
       if (previous && previous !== session) {
-        await syncController.stop()
-        try {
-          await previous.storage.close()
-        } catch (err) {
-          log.warn('Could not close the replaced session storage', { err })
-        }
+        await discardSession(previous)
       }
       await syncController.restart({ session })
     })()
   },
   logout: async () => {
-    await syncController.stop()
-    // Release the local RxDB database owned by the session's storage (data
-    // stays in IndexedDB; only the passphrase-derived session is discarded).
-    await get().session?.storage.close()
+    // Replication stopped, then the local RxDB database released (data stays
+    // in IndexedDB; only the passphrase-derived session is discarded).
+    await discardSession(get().session)
+    // A setup run parked in the setup store outlives this session otherwise,
+    // and a later `/lobby` mount would enter the account it holds.
+    clearSetup()
     publishStorageSeam(null)
     publishLoginChainSeam(null)
     setTransientPrefs({ active: false })

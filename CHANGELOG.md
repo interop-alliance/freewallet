@@ -18,13 +18,39 @@
   `/dashboard` after `session.storageReady`, `/login` when the credential
   already had a wallet, and back to the wizard's last step with the same
   error copy on failure. Mounting with no run in flight routes back to
-  `/signup`.
+  `/signup`. The wizard replaces rather than pushes `/lobby`, the setup
+  store refuses a second run while one is in flight, and a run whose lobby
+  was left before it settled is discarded (its never-entered session's
+  storage handle closed) rather than parked for a later `/lobby` mount to
+  log in. Logout clears the store too. A failed run returns to the step the
+  user must act on (the passphrase step for a passphrase signup), and the
+  submit button is disabled whenever it cannot submit.
+- The lobby's step list derives from wallet-core's exported stage vocabulary
+  (`CREDENTIAL_ANCHORED_ESTABLISHMENT_STAGES` and its aliases) instead of
+  repeating the names, so an upstream rename is a type error rather than a
+  frozen feed; a mark for a name outside the known set logs a warn. A
+  no-WAS signup now emits its own stages (key derivation, the keyring bind,
+  local provisioning, passkey enrollment) and the store picks the list per
+  deployment, so the feed never lists stages that cannot run. A unit test
+  checks every listed stage has `en` and `es` copy.
+- `src/lib/signupSteps.ts` is the one owner of the `/signup` `step` and
+  `method` search params, used by both the wizard and the lobby.
+- `LobbyPage` is imported eagerly rather than as a lazy chunk, since it is
+  on every signup's critical path and a failed chunk fetch would strand a
+  completed ceremony.
 
 ### Changed
 
 - The WebAuthn PRF-retry consent prompt holds its pending question in a
-  module-level store rather than in component state, so a ceremony started
-  on one page can be answered on the page that follows it.
+  module-level store (`src/stores/prfRetryStore.ts`) rather than in
+  component state, so a ceremony started on one page can be answered on the
+  page that follows it. A new question settles any pending one as declined,
+  the store resets when the setup run clears or is abandoned and on logout,
+  and the signup wizard renders the dialog again beside the lobby.
+- `stageMarker` composes wallet-core's now-exported `stageNotifier` instead
+  of its own try/catch, so a throwing notifier is guarded once.
+- Logout, the login-path account switch, and the abandoned-run discard share
+  one session teardown (`src/stores/sessionTeardown.ts`).
 
 ## 0.45.0 - TBD
 

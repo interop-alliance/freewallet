@@ -354,6 +354,11 @@
         "record-rebind": "Binding your credential...",
         "registry-write": "Registering your login method...",
         "controller-promotion": "Finalizing account ownership...",
+        "remembered-login": "Signing you in...",
+        "local-account-keys": "Minting your account keys...",
+        "keyring-bind": "Saving your unlock record...",
+        "passkey-enrollment": "Registering your passkey...",
+        "local-provisioning": "Preparing your wallet...",
         "entering-wallet": "Entering your wallet..."
       },
       "done": "ok"

@@ -35,7 +35,8 @@ import {
   passkeySupported
 } from '@/lib/passkey'
 import { PassphraseStrengthField } from '@/components/PassphraseStrengthField'
-import { promptForPrfRetry } from '@/hooks/usePrfRetryPrompt'
+import { usePrfRetryPrompt } from '@/hooks/usePrfRetryPrompt'
+import { promptForPrfRetry } from '@/stores/prfRetryStore'
 import { DATE_FMT, PASSWORD_RULES } from '@/app.config'
 import { registerWallet } from '@/lib/registerWallet'
 import { forcedRememberBrowser } from '@/lib/e2eSeams'
@@ -46,8 +47,16 @@ import {
   failSetup,
   finishSetup,
   markSetupStage,
+  setupInFlight,
+  useSetupStore,
   type SetupMethod
 } from '@/stores/setupStore'
+import {
+  SIGNUP_STEPS,
+  signupMethodOf,
+  signupStepOf,
+  signupStepParams
+} from '@/lib/signupSteps'
 
 const log = createLogger('fw:ui:signup')
 
@@ -176,19 +185,24 @@ export function SignupPage() {
   const [email, setEmail] = useState('')
   const [passphrase, setPassphrase] = useState('')
   const [score, setScore] = useState(0)
-  const [isSubmitting, setIsSubmitting] = useState(false)
+  // The submit state is the store's, not this page's: the run outlives the
+  // wizard, so a page remounted behind a going run (a browser Back out of the
+  // lobby) must show itself busy rather than offer a second run.
+  const isSubmitting = useSetupStore(setupInFlight)
+  // The passkey ceremony may ask for a second WebAuthn ceremony while this
+  // page is still the mounted one, so the consent dialog lives here too.
+  const { dialog: prfRetryDialog } = usePrfRetryPrompt()
   // Seeded from the key the lobby hands back after a failed setup run; a
   // silent failure (a dismissed WebAuthn ceremony) carries none.
   const [errorKey, setErrorKey] = useState<string | null>(
     state?.setupErrorKey ?? null
   )
 
-  const stepParam = searchParams.get('step')
-  const activeStep = stepParam === 'storage' ? 2 : stepParam === 'email' ? 1 : 0
-  // The chosen login method, tracked in the URL search params so a mid-wizard
-  // reload keeps it. Passphrase is the default (an absent/other value).
-  const method: 'passphrase' | 'passkey' =
-    searchParams.get('method') === 'passkey' ? 'passkey' : 'passphrase'
+  // The step and the chosen login method both ride the URL search params, so
+  // a mid-wizard reload keeps them (`src/lib/signupSteps.ts` owns the shape).
+  const step = signupStepOf(searchParams)
+  const activeStep = SIGNUP_STEPS.indexOf(step)
+  const method: SetupMethod = signupMethodOf(searchParams)
   const stepKeys = stepI18nKeys(method)
 
   const handleSignup = (event: SubmitEvent<HTMLFormElement>) => {
@@ -196,10 +210,15 @@ export function SignupPage() {
     if (isSubmitting) {
       return
     }
-    if (activeStep !== stepKeys.length - 1 || !canSubmit) {
+    if (step !== 'storage' || !canSubmit) {
       return
     }
-    setIsSubmitting(true)
+    // The store refuses a second run while one is going, so nothing below
+    // (the ceremony, the cleared error, the navigation) happens without its
+    // go-ahead.
+    if (!beginSetup({ method })) {
+      return
+    }
     setErrorKey(null)
     // Timing mark: paired with the dashboard's mount mark to measure how
     // long a signup takes end to end.
@@ -209,7 +228,6 @@ export function SignupPage() {
     // path spends the WebAuthn user gesture; a post-navigation start would
     // have lost it. It is deliberately not awaited: the lobby page renders
     // its progress and performs the navigation its outcome calls for.
-    beginSetup({ method })
     void runSetup({
       method,
       passphrase,
@@ -219,7 +237,9 @@ export function SignupPage() {
         email ||
         `Freewallet ${new Date().toLocaleDateString(i18n.language, DATE_FMT)}`
     })
-    void navigate('/lobby')
+    // Replacing rather than pushing: the wizard's last step is mid-ceremony
+    // state, and Back into it would offer a second "Create Wallet".
+    void navigate('/lobby', { replace: true })
   }
 
   // Email is optional. An empty email is allowed; a non-empty one must be
@@ -237,24 +257,20 @@ export function SignupPage() {
     if (!passphraseStepComplete) {
       return
     }
-    // Passphrase is the default method, so omit the method param.
-    setSearchParams({ ['step']: 'email' })
+    // Passphrase is the default method, so the params omit it.
+    setSearchParams(signupStepParams({ method: 'passphrase', step: 'email' }))
   }
 
   // Advance to the email step with the passkey method recorded in the URL.
   const goPasskey = () => {
-    setSearchParams({ ['method']: 'passkey', ['step']: 'email' })
+    setSearchParams(signupStepParams({ method: 'passkey', step: 'email' }))
   }
 
   const goNextFromEmail = () => {
     if (!emailValid) {
       return
     }
-    setSearchParams(
-      method === 'passkey'
-        ? { ['method']: 'passkey', ['step']: 'storage' }
-        : { ['step']: 'storage' }
-    )
+    setSearchParams(signupStepParams({ method, step: 'storage' }))
   }
 
   // Navigate to the explicit previous step rather than popping browser
@@ -263,15 +279,11 @@ export function SignupPage() {
   // signup flow entirely). The method param is preserved back to the email
   // step; returning to step 0 (the method choice) drops it.
   const goBack = () => {
-    if (activeStep === 2) {
-      setSearchParams(
-        method === 'passkey'
-          ? { ['method']: 'passkey', ['step']: 'email' }
-          : { ['step']: 'email' }
-      )
+    if (step === 'storage') {
+      setSearchParams(signupStepParams({ method, step: 'email' }))
       return
     }
-    setSearchParams({})
+    setSearchParams(signupStepParams({ method: 'passphrase', step: 'start' }))
   }
 
   return (
@@ -532,6 +544,7 @@ export function SignupPage() {
                 variant="contained"
                 type="submit"
                 loading={isSubmitting}
+                disabled={!canSubmit || isSubmitting}
                 sx={authStyles.actionButton}
               >
                 {t('auth.signup.createWallet')}
@@ -539,6 +552,8 @@ export function SignupPage() {
             </Stack>
           </>
         )}
+
+        {prfRetryDialog}
       </Box>
     </Box>
   )

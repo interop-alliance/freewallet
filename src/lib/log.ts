@@ -24,7 +24,8 @@ import {
   setFilter
 } from '@interop/logger'
 import type { Logger } from '@interop/logger'
-import { setLogger } from '@interop/wallet-core'
+import { setLogger, stageNotifier } from '@interop/wallet-core'
+import type { StageNotifier } from '@interop/wallet-core'
 
 export { createLogger }
 
@@ -71,13 +72,17 @@ export function stageTimer({
 /**
  * Composes a stage timer with an optional observational stage notifier (the
  * lobby page's progress feed) into the single `mark` a ceremony calls at
- * every stage boundary. The notifier is observational, so a throwing one is
- * swallowed rather than allowed to tear the ceremony it watches.
+ * every stage boundary. The notifier half is wallet-core's own
+ * `stageNotifier`, the adapter its ceremonies already wrap a supplied
+ * `onStage` in: an absent notifier becomes a no-op and a throwing one is
+ * swallowed with a warn, so telemetry can never tear the ceremony it
+ * watches. Composing it rather than repeating the swallow here is what
+ * keeps one notifier from being guarded twice at two different levels.
  *
  * @param options {object}
  * @param options.log {Logger}   the calling module's namespaced logger
  * @param options.ceremony {string}   a label naming the timed sequence
- * @param [options.onStage] {(stage: string) => void}
+ * @param [options.onStage] {StageNotifier}
  * @returns {(stage: string) => void}
  */
 export function stageMarker({
@@ -87,19 +92,13 @@ export function stageMarker({
 }: {
   log: Logger
   ceremony: string
-  onStage?: (stage: string) => void
+  onStage?: StageNotifier
 }): (stage: string) => void {
   const time = stageTimer({ log, ceremony })
+  const notify = stageNotifier(onStage)
   return function mark(stage: string): void {
     time(stage)
-    if (!onStage) {
-      return
-    }
-    try {
-      onStage(stage)
-    } catch (err) {
-      log.debug('A stage notifier threw; ignored', { ceremony, stage, err })
-    }
+    notify(stage)
   }
 }
 
