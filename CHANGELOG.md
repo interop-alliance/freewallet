@@ -1,5 +1,31 @@
 # History
 
+## 0.46.0 - TBD
+
+### Added
+
+- A lobby page (`/lobby`) shown while a signup ceremony runs. Clicking
+  "Create Wallet" starts the ceremony in the click handler -- the passkey
+  path spends the WebAuthn user gesture there -- registers the run in a new
+  in-memory setup store, and navigates at once. The page renders a
+  terminal-style feed of the ceremony's stages, fed by the observational
+  `onStage` notifier `signUpWithPassphrase` and `signUpWithPasskey` now
+  accept and thread into the credential-anchored establishment; a mark fires
+  when a stage ends, so the first not-yet-marked line is the running one and
+  a stage a deployment skips (no KMS) is marked done by the next one
+  reported. The notifier is observational: a throwing one is swallowed
+  rather than tearing the run. A settled run navigates as the wizard did --
+  `/dashboard` after `session.storageReady`, `/login` when the credential
+  already had a wallet, and back to the wizard's last step with the same
+  error copy on failure. Mounting with no run in flight routes back to
+  `/signup`.
+
+### Changed
+
+- The WebAuthn PRF-retry consent prompt holds its pending question in a
+  module-level store rather than in component state, so a ceremony started
+  on one page can be answered on the page that follows it.
+
 ## 0.45.0 - TBD
 
 ### Changed

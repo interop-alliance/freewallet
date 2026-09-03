@@ -147,6 +147,46 @@ export const authStyles = {
   },
   guestIcon: {
     mr: 1.5
+  },
+  /**
+   * The lobby's terminal-style progress block: a dark, monospace log of the
+   * setup ceremony's steps.
+   */
+  lobbyTerminal: {
+    width: '100%',
+    maxWidth: 560,
+    alignSelf: 'center',
+    p: 2.5,
+    borderRadius: 2,
+    bgcolor: '#12161c',
+    color: '#d7e0ea',
+    fontFamily: 'ui-monospace, SFMono-Regular, Menlo, Consolas, monospace',
+    fontSize: '0.875rem',
+    lineHeight: 1.9,
+    overflowX: 'auto'
+  },
+  lobbyLine: {
+    display: 'flex',
+    gap: 1,
+    whiteSpace: 'nowrap'
+  },
+  lobbyLineMarker: {
+    color: '#7fd18a',
+    minWidth: '3.5ch'
+  },
+  lobbyLineMarkerRunning: {
+    color: '#e0c060',
+    minWidth: '3.5ch'
+  },
+  /**
+   * The running line's blinking block cursor.
+   */
+  lobbyCursor: {
+    '@keyframes fwLobbyBlink': {
+      '0%, 49%': { opacity: 1 },
+      '50%, 100%': { opacity: 0 }
+    },
+    animation: 'fwLobbyBlink 1s step-end infinite'
   }
 } as const
 

@@ -30,6 +30,7 @@ const SignupPage = lazyNamed(
   () => import('@/pages/auth/SignupPage'),
   'SignupPage'
 )
+const LobbyPage = lazyNamed(() => import('@/pages/auth/LobbyPage'), 'LobbyPage')
 const RecoverPage = lazyNamed(
   () => import('@/pages/auth/RecoverPage'),
   'RecoverPage'
@@ -134,6 +135,9 @@ function App() {
         <Route path="/" element={<LandingPage />} />
         <Route path="/login" element={<LoginPage />} />
         <Route path="/signup" element={<SignupPage />} />
+        {/* The setup waiting room: the signup ceremony runs behind it, so it
+            sits outside ProtectedRoute beside the wizard it hands off from. */}
+        <Route path="/lobby" element={<LobbyPage />} />
         <Route path="/recover" element={<RecoverPage />} />
         <Route path="/guest-login" element={<GuestLoginPage />} />
         <Route path="/logout" element={<LogoutPage />} />

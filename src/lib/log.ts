@@ -69,6 +69,41 @@ export function stageTimer({
 }
 
 /**
+ * Composes a stage timer with an optional observational stage notifier (the
+ * lobby page's progress feed) into the single `mark` a ceremony calls at
+ * every stage boundary. The notifier is observational, so a throwing one is
+ * swallowed rather than allowed to tear the ceremony it watches.
+ *
+ * @param options {object}
+ * @param options.log {Logger}   the calling module's namespaced logger
+ * @param options.ceremony {string}   a label naming the timed sequence
+ * @param [options.onStage] {(stage: string) => void}
+ * @returns {(stage: string) => void}
+ */
+export function stageMarker({
+  log,
+  ceremony,
+  onStage
+}: {
+  log: Logger
+  ceremony: string
+  onStage?: (stage: string) => void
+}): (stage: string) => void {
+  const time = stageTimer({ log, ceremony })
+  return function mark(stage: string): void {
+    time(stage)
+    if (!onStage) {
+      return
+    }
+    try {
+      onStage(stage)
+    } catch (err) {
+      log.debug('A stage notifier threw; ignored', { ceremony, stage, err })
+    }
+  }
+}
+
+/**
  * HMR re-evaluates this module with a fresh module scope, so the
  * wired-once guard rides globalThis: sinks must never double-install.
  */

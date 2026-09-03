@@ -202,6 +202,12 @@ export interface ControllerProfile {
 export type AuthLocationState = {
   authMessageKey?: string
   userMessage?: string
+  /**
+   * The error key a failed setup run carries back to the signup wizard from
+   * the lobby page. Rendered as the wizard's own error (the storage-server
+   * key gets its guest-mode link), not as the plain banner above.
+   */
+  setupErrorKey?: string
 }
 
 /**

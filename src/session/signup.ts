@@ -68,8 +68,9 @@ import {
 } from '@/lib/e2eSeams'
 import { registerPasskey } from '@/lib/passkey'
 import { mintSpaceId } from '@/stores/wasRemoteStore'
+import type { StageNotifier } from '@interop/wallet-core'
 import type { Session } from '@/types/auth'
-import { createLogger, stageTimer } from '@/lib/log'
+import { createLogger, stageMarker } from '@/lib/log'
 
 const log = createLogger('fw:session:signup')
 
@@ -123,6 +124,8 @@ async function mintAccountKeySet() {
  * @param [options.email] {string}
  * @param options.logPins {ResourceLogPinStore}   the visit's in-memory
  *   chain-head pin store, which every log read here rides
+ * @param [options.onStage] {StageNotifier}   observational stage-boundary
+ *   hook, fed to the lobby page's progress feed
  * @returns {Promise<object>}   `{ userExists: true }` when the probe located
  *   an account, else `{ userExists: false, credential, accountLog }` with the
  *   derived credential and the establishment's own verified account-log head
@@ -131,11 +134,13 @@ async function mintAccountKeySet() {
 async function establishPassphraseAnchoredAccount({
   passphrase,
   email,
-  logPins
+  logPins,
+  onStage
 }: {
   passphrase: string
   email?: string
   logPins: ResourceLogPinStore
+  onStage?: StageNotifier
 }): Promise<
   | { userExists: true }
   | {
@@ -144,7 +149,11 @@ async function establishPassphraseAnchoredAccount({
       accountLog: PublishedWebvhLog
     }
 > {
-  const mark = stageTimer({ log, ceremony: 'credential-anchored-signup' })
+  const mark = stageMarker({
+    log,
+    ceremony: 'credential-anchored-signup',
+    ...(onStage ? { onStage } : {})
+  })
   // One 600k-iteration derivation for the whole signup.
   const credential = await deriveUnlockCredential({
     secret: passphrase,
@@ -170,6 +179,7 @@ async function establishPassphraseAnchoredAccount({
     lowEntropy: true,
     email,
     persistence: { logPins },
+    ...(onStage ? { onStage } : {}),
     // The registry entry, in the last root-invocation window: the shared
     // read-first hook (the mend entry point's arms re-fire the same one).
     // Best-effort by the hook's own contract -- a re-fired hook upserts
@@ -318,16 +328,20 @@ async function finishRememberedSignup({
  * @param [options.rememberBrowser] {boolean}   `true` runs the remembered
  *   signup; absent or `false`, a WAS-configured signup ends in a transient
  *   session
+ * @param [options.onStage] {StageNotifier}   observational stage-boundary
+ *   hook, fed to the lobby page's progress feed
  * @returns {Promise<{ session?: Session, userExists: boolean }>}
  */
 export async function signUpWithPassphrase({
   passphrase,
   email,
-  rememberBrowser
+  rememberBrowser,
+  onStage
 }: {
   passphrase: string
   email?: string
   rememberBrowser?: boolean
+  onStage?: StageNotifier
 }): Promise<{ session?: Session; userExists: boolean }> {
   if (WAS_SERVER_URL && rememberBrowser === true) {
     // The remembered signup: the establishment half only (never the
@@ -336,7 +350,8 @@ export async function signUpWithPassphrase({
     const outcome = await establishPassphraseAnchoredAccount({
       passphrase,
       email,
-      logPins: memoryResourceLogPinStore()
+      logPins: memoryResourceLogPinStore(),
+      ...(onStage ? { onStage } : {})
     })
     if (outcome.userExists) {
       return { userExists: true }
@@ -373,7 +388,8 @@ export async function signUpWithPassphrase({
     const outcome = await establishPassphraseAnchoredAccount({
       passphrase,
       email,
-      logPins: persistence.logPins
+      logPins: persistence.logPins,
+      ...(onStage ? { onStage } : {})
     })
     if (outcome.userExists) {
       return { userExists: true }
@@ -471,6 +487,8 @@ export async function signUpWithPassphrase({
  * @param options.locale {string}
  * @param options.userName {string}
  * @param options.promptForPrfRetry {function}
+ * @param [options.onStage] {StageNotifier}   observational stage-boundary
+ *   hook, fed to the lobby page's progress feed
  * @returns {Promise<{ session: Session }>}
  */
 async function signUpCredentialAnchoredWithPasskey({
@@ -478,15 +496,21 @@ async function signUpCredentialAnchoredWithPasskey({
   email,
   locale,
   userName,
-  promptForPrfRetry
+  promptForPrfRetry,
+  onStage
 }: {
   userHandle: Uint8Array
   email?: string
   locale: string
   userName: string
   promptForPrfRetry: () => Promise<boolean>
+  onStage?: StageNotifier
 }): Promise<{ session: Session }> {
-  const mark = stageTimer({ log, ceremony: 'credential-anchored-signup' })
+  const mark = stageMarker({
+    log,
+    ceremony: 'credential-anchored-signup',
+    ...(onStage ? { onStage } : {})
+  })
   // The ONE WebAuthn ceremony of the whole signup: the remembered login below
   // takes the derived credential and skips its own PRF assertion. A
   // brand-new wallet has no authenticator credentials yet, so there is
@@ -513,6 +537,7 @@ async function signUpCredentialAnchoredWithPasskey({
     lowEntropy: false,
     email,
     persistence: { logPins: memoryResourceLogPinStore() },
+    ...(onStage ? { onStage } : {}),
     beforePromotion: async ({ zcapClient, userKey, establishment }) => {
       // The passkey registry entry, in the last root-invocation window --
       // fatal on failure (see the function doc). Read-first: a heal re-run
@@ -600,18 +625,22 @@ async function signUpCredentialAnchoredWithPasskey({
  * @param options.userName {string}   WebAuthn user name for the ceremony
  * @param options.promptForPrfRetry {function}   resolves the user's choice
  *   when the authenticator needs a second (assertion) ceremony for the PRF
+ * @param [options.onStage] {StageNotifier}   observational stage-boundary
+ *   hook, fed to the lobby page's progress feed
  * @returns {Promise<{ session: Session }>}
  */
 export async function signUpWithPasskey({
   email,
   locale,
   userName,
-  promptForPrfRetry
+  promptForPrfRetry,
+  onStage
 }: {
   email?: string
   locale: string
   userName: string
   promptForPrfRetry: () => Promise<boolean>
+  onStage?: StageNotifier
 }): Promise<{ session: Session }> {
   // The account's WebAuthn user id, minted once per account: every later
   // passkey registers under it, so authenticator pickers show one account.
@@ -622,7 +651,8 @@ export async function signUpWithPasskey({
       email,
       locale,
       userName,
-      promptForPrfRetry
+      promptForPrfRetry,
+      ...(onStage ? { onStage } : {})
     })
   }
 

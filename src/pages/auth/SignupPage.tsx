@@ -34,14 +34,20 @@ import {
   PasskeyPrfUnsupportedError,
   passkeySupported
 } from '@/lib/passkey'
-import { useAuthStore } from '@/stores/authStore'
 import { PassphraseStrengthField } from '@/components/PassphraseStrengthField'
-import { usePrfRetryPrompt } from '@/hooks/usePrfRetryPrompt'
+import { promptForPrfRetry } from '@/hooks/usePrfRetryPrompt'
 import { DATE_FMT, PASSWORD_RULES } from '@/app.config'
 import { registerWallet } from '@/lib/registerWallet'
 import { forcedRememberBrowser } from '@/lib/e2eSeams'
 import type { AuthLocationState } from '@/types/auth'
 import { createLogger } from '@/lib/log'
+import {
+  beginSetup,
+  failSetup,
+  finishSetup,
+  markSetupStage,
+  type SetupMethod
+} from '@/stores/setupStore'
 
 const log = createLogger('fw:ui:signup')
 
@@ -63,13 +69,100 @@ function stepI18nKeys(method: 'passphrase' | 'passkey') {
   ] as const
 }
 
+/**
+ * Maps a failed setup run onto the error key the wizard shows when the lobby
+ * hands the user back. `null` is the silent failure: the user dismissed the
+ * WebAuthn ceremony (or declined the PRF retry).
+ *
+ * @param err {unknown}
+ * @returns {string | null}
+ */
+function signupErrorKey(err: unknown): string | null {
+  if (err instanceof PasskeyCancelledError) {
+    return null
+  }
+  if (err instanceof PasskeyPrfUnsupportedError) {
+    return 'auth.errors.passkeyPrfUnsupported'
+  }
+  if (isStorageUnreachable(err)) {
+    // The WAS storage server is unreachable -- offer a guest-mode fallback.
+    return 'auth.errors.storageUnreachable'
+  }
+  log.error('Error completing signup', { err })
+  return 'auth.errors.setupFailed'
+}
+
+/**
+ * Runs the account-setup ceremony and records its outcome in the setup
+ * store, which the lobby page reads. Started from the wizard's click handler
+ * and deliberately not awaited there: the ceremony outlives this page, since
+ * the wizard navigates to the lobby at once.
+ *
+ * Session creation fires `ensureUserCollections` as `session.storageReady`;
+ * the collections are awaited here before the run settles, exactly as the
+ * login page does. (A transient session carries no `storageReady` and falls
+ * straight through.)
+ *
+ * @param options {object}
+ * @param options.method {SetupMethod}
+ * @param options.passphrase {string}
+ * @param options.email {string}   empty when the user skipped the step
+ * @param options.locale {string}
+ * @param options.userName {string}   the WebAuthn user name
+ * @returns {Promise<void>}
+ */
+async function runSetup({
+  method,
+  passphrase,
+  email,
+  locale,
+  userName
+}: {
+  method: SetupMethod
+  passphrase: string
+  email: string
+  locale: string
+  userName: string
+}): Promise<void> {
+  try {
+    if (method === 'passkey') {
+      const { session } = await signUpWithPasskey({
+        ...(email ? { email } : {}),
+        locale,
+        userName,
+        promptForPrfRetry,
+        onStage: markSetupStage
+      })
+      await session.storageReady
+      finishSetup({ session, userExists: false })
+      return
+    }
+    const { session, userExists } = await signUpWithPassphrase({
+      passphrase,
+      ...(email ? { email } : {}),
+      // The e2e seam forces the remembered flow; without it a WAS-configured
+      // signup on this (by definition non-remembered) browser runs
+      // credential-anchored and ends in a transient session.
+      ...(forcedRememberBrowser() ? { rememberBrowser: true } : {}),
+      onStage: markSetupStage
+    })
+    if (userExists || !session) {
+      finishSetup({ userExists })
+      return
+    }
+    await session.storageReady
+    finishSetup({ session, userExists: false })
+  } catch (err) {
+    failSetup({ errorKey: signupErrorKey(err) })
+  }
+}
+
 export function SignupPage() {
   const { t, i18n } = useTranslation()
   const theme = useTheme()
   const isCompactStepper = useMediaQuery(theme.breakpoints.down('sm'))
   const navigate = useNavigate()
   const [searchParams, setSearchParams] = useSearchParams()
-  const login = useAuthStore(state => state.login)
   const location = useLocation()
   const state = location.state as AuthLocationState | null | undefined
   const bannerText = state?.authMessageKey
@@ -84,10 +177,11 @@ export function SignupPage() {
   const [passphrase, setPassphrase] = useState('')
   const [score, setScore] = useState(0)
   const [isSubmitting, setIsSubmitting] = useState(false)
-  const [errorKey, setErrorKey] = useState<string | null>(null)
-  // PRF-retry consent dialog (passkey signup): `registerPasskey` calls
-  // `promptForPrfRetry` when a second ceremony is needed.
-  const { promptForPrfRetry, dialog: prfRetryDialog } = usePrfRetryPrompt()
+  // Seeded from the key the lobby hands back after a failed setup run; a
+  // silent failure (a dismissed WebAuthn ceremony) carries none.
+  const [errorKey, setErrorKey] = useState<string | null>(
+    state?.setupErrorKey ?? null
+  )
 
   const stepParam = searchParams.get('step')
   const activeStep = stepParam === 'storage' ? 2 : stepParam === 'email' ? 1 : 0
@@ -97,7 +191,7 @@ export function SignupPage() {
     searchParams.get('method') === 'passkey' ? 'passkey' : 'passphrase'
   const stepKeys = stepI18nKeys(method)
 
-  const handleSignup = async (event: SubmitEvent<HTMLFormElement>) => {
+  const handleSignup = (event: SubmitEvent<HTMLFormElement>) => {
     event.preventDefault()
     if (isSubmitting) {
       return
@@ -111,73 +205,21 @@ export function SignupPage() {
     // long a signup takes end to end.
     log.info('Signup submitted', { method, at: new Date().toISOString() })
 
-    if (method === 'passkey') {
-      try {
-        const userName =
-          email ||
-          `Freewallet ${new Date().toLocaleDateString(i18n.language, DATE_FMT)}`
-        const { session } = await signUpWithPasskey({
-          email: email || undefined,
-          locale: i18n.language,
-          userName,
-          promptForPrfRetry
-        })
-        // Session creation fired `ensureUserCollections` as
-        // `session.storageReady`; wait for the collections before
-        // navigating, exactly like the login page does.
-        await session.storageReady
-        login(session)
-        navigate('/dashboard')
-      } catch (err) {
-        if (err instanceof PasskeyCancelledError) {
-          // The user dismissed the ceremony (or declined the PRF retry): silent.
-        } else if (err instanceof PasskeyPrfUnsupportedError) {
-          setErrorKey('auth.errors.passkeyPrfUnsupported')
-        } else if (isStorageUnreachable(err)) {
-          // The WAS storage server is unreachable -- offer a guest-mode fallback.
-          setErrorKey('auth.errors.storageUnreachable')
-        } else {
-          log.error('Error completing signup', { err })
-          setErrorKey('auth.errors.setupFailed')
-        }
-      } finally {
-        setIsSubmitting(false)
-      }
-      return
-    }
-
-    try {
-      const { session, userExists } = await signUpWithPassphrase({
-        passphrase,
-        email: email || undefined,
-        // The e2e seam forces the remembered flow; without it a WAS-configured
-        // signup on this (by definition non-remembered) browser runs
-        // credential-anchored and ends in a transient session.
-        ...(forcedRememberBrowser() ? { rememberBrowser: true } : {})
-      })
-      if (userExists || !session) {
-        return navigate('/login', {
-          state: { authMessageKey: 'auth.errors.profileExists' }
-        })
-      }
-      // Session creation fired `ensureUserCollections` as
-      // `session.storageReady`; wait for the collections before navigating,
-      // exactly like the login page does. (A transient session carries no
-      // `storageReady` and falls straight through.)
-      await session.storageReady
-      login(session)
-      navigate('/dashboard')
-    } catch (err) {
-      // The WAS storage server is unreachable -- offer a guest-mode fallback.
-      if (isStorageUnreachable(err)) {
-        setErrorKey('auth.errors.storageUnreachable')
-      } else {
-        log.error('Error completing signup', { err })
-        setErrorKey('auth.errors.setupFailed')
-      }
-    } finally {
-      setIsSubmitting(false)
-    }
+    // The ceremony starts here, inside the click handler, because the passkey
+    // path spends the WebAuthn user gesture; a post-navigation start would
+    // have lost it. It is deliberately not awaited: the lobby page renders
+    // its progress and performs the navigation its outcome calls for.
+    beginSetup({ method })
+    void runSetup({
+      method,
+      passphrase,
+      email,
+      locale: i18n.language,
+      userName:
+        email ||
+        `Freewallet ${new Date().toLocaleDateString(i18n.language, DATE_FMT)}`
+    })
+    void navigate('/lobby')
   }
 
   // Email is optional. An empty email is allowed; a non-empty one must be
@@ -497,8 +539,6 @@ export function SignupPage() {
             </Stack>
           </>
         )}
-
-        {prfRetryDialog}
       </Box>
     </Box>
   )

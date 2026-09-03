@@ -338,6 +338,26 @@
       "lostPassphrase": "¿Perdiste tu frase de contraseña?",
       "recoverLink": "Recupera tu cartera existente en lugar de empezar de nuevo."
     },
+    "lobby": {
+      "heading": "Configurando",
+      "steps": {
+        "webauthn-create": "Creando tu llave de acceso...",
+        "kdf": "Derivando tus claves...",
+        "existing-account-probe": "Comprobando si ya existe una cuenta...",
+        "interim-bind": "Escribiendo el registro de desbloqueo...",
+        "space-provisioning": "Aprovisionando tu espacio de almacenamiento...",
+        "did-web-keys": "Aprovisionando el servidor de claves...",
+        "webvh-genesis": "Publicando la identidad de tu cuenta...",
+        "roster-genesis": "Creando tus claves de cifrado...",
+        "collection-epochs": "Cifrando tus colecciones...",
+        "annex-generation": "Preparando el acceso de inicio de sesión...",
+        "record-rebind": "Vinculando tu credencial...",
+        "registry-write": "Registrando tu método de inicio de sesión...",
+        "controller-promotion": "Finalizando la propiedad de la cuenta...",
+        "entering-wallet": "Entrando en tu cartera..."
+      },
+      "done": "ok"
+    },
     "guest": {
       "heading": "Modo invitado",
       "bulletRandom": "se creará un inicio de sesión aleatorio",

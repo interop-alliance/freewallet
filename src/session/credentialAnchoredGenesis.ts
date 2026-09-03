@@ -56,6 +56,7 @@ import type { IZcap } from '@interop/data-integrity-core'
 import type { ZcapClient } from '@interop/ezcap'
 import type { ResourceLogPinStore } from '@interop/vh-resource-log'
 import type { KeystoreAgent } from '@interop/webkms-client'
+import type { StageNotifier } from '@interop/wallet-core'
 import {
   DID_KEYS_RESOURCE,
   ENCRYPTED_STANDARD_COLLECTIONS,
@@ -76,7 +77,7 @@ import {
   upsertPassphraseUnlockMethod,
   type PassphraseUnlockMethod
 } from '@/session/unlockMethods'
-import { createLogger, stageTimer } from '@/lib/log'
+import { createLogger, stageMarker, stageTimer } from '@/lib/log'
 
 export type { CredentialAnchoredEstablishment, CredentialAnchoredMendReport }
 
@@ -299,6 +300,8 @@ async function establishmentHooks({
  *   invocation under the bootstrap did:key works (the signup's registry
  *   write). NOT swallowed: a throw fails the establishment, so a hook that
  *   must be best-effort swallows its own failures
+ * @param [options.onStage] {StageNotifier}   observational: called as each
+ *   stage ends, for a progress surface. A throwing notifier is swallowed
  * @returns {Promise<CredentialAnchoredEstablishment>}   wallet-core's
  *   establishment result, whose `accountLog` is the verified head this run
  *   ends standing on -- what a caller entering the account straight
@@ -315,7 +318,8 @@ export async function establishCredentialAnchoredAccount({
   email,
   priorCreatedAt,
   persistence,
-  beforePromotion
+  beforePromotion,
+  onStage
 }: {
   credential: UnlockCredential
   ladderSeed: Uint8Array
@@ -324,6 +328,7 @@ export async function establishCredentialAnchoredAccount({
   email?: string
   priorCreatedAt?: string
   persistence: { logPins: ResourceLogPinStore }
+  onStage?: StageNotifier
   beforePromotion?: (context: {
     was: WasClient
     zcapClient: ZcapClient
@@ -337,9 +342,13 @@ export async function establishCredentialAnchoredAccount({
       'The credential-anchored establishment requires a configured WAS server.'
     )
   }
-  const mark = stageTimer({
+  // One `mark` for the whole establishment: it closes each stage's timing
+  // span AND feeds the caller's optional progress notifier (the lobby
+  // page's step feed), so the two can never report different stage sets.
+  const mark = stageMarker({
     log,
-    ceremony: 'credential-anchored-establishment'
+    ceremony: 'credential-anchored-establishment',
+    ...(onStage ? { onStage } : {})
   })
   const hooks = await establishmentHooks({
     credential,

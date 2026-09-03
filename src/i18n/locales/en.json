@@ -338,6 +338,26 @@
       "lostPassphrase": "Lost your passphrase?",
       "recoverLink": "Recover your existing wallet instead of starting over."
     },
+    "lobby": {
+      "heading": "Setting Up",
+      "steps": {
+        "webauthn-create": "Creating your passkey...",
+        "kdf": "Deriving your keys...",
+        "existing-account-probe": "Checking for an existing account...",
+        "interim-bind": "Writing the unlock record...",
+        "space-provisioning": "Provisioning your storage space...",
+        "did-web-keys": "Provisioning the key server...",
+        "webvh-genesis": "Publishing your account identity...",
+        "roster-genesis": "Creating your encryption keys...",
+        "collection-epochs": "Encrypting your collections...",
+        "annex-generation": "Preparing login access...",
+        "record-rebind": "Binding your credential...",
+        "registry-write": "Registering your login method...",
+        "controller-promotion": "Finalizing account ownership...",
+        "entering-wallet": "Entering your wallet..."
+      },
+      "done": "ok"
+    },
     "guest": {
       "heading": "Guest Mode Login",
       "bulletRandom": "a random login will be created",

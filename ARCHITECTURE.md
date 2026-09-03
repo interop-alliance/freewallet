@@ -10,7 +10,7 @@ conventions see [CONTRIBUTING.md](CONTRIBUTING.md); for agent-facing rules
 
 ```
 src/pages/          Route-level React components (one file per page)
-  auth/             Login, Signup, Recover, GuestLogin, Logout
+  auth/             Login, Signup, Lobby, Recover, GuestLogin, Logout
   chapi/            CHAPI popup pages (WalletGetPage, WalletStorePage)
   external/         Requests arriving without CHAPI (ExternalRequestPage,
                     the interaction-URL door)
@@ -52,6 +52,8 @@ src/stores/         Global state
   remoteDirectStore.ts   The replica-less backend (transient and popup sessions)
   wasRemoteStore.ts WASRemoteStore -- the remote WAS backend
   syncController.ts Background replication lifecycle (start/stop/reSync)
+  setupStore.ts     The one in-flight signup ceremony's step feed and
+                    outcome, read by the lobby page (in-memory only)
   toastStore.ts     Transient success/info messages (`showToast`), rendered
                     by DashboardLayout as a Snackbar. Global, not
                     page-local: an action often redirects (delete returns
@@ -920,6 +922,14 @@ hash chain, prerotation, update-key signatures), and authorizes by the
 current-key-set rule (see Glossary).
 
 ## Account genesis (`@interop/wallet-core/genesis`)
+
+The signup wizard starts the ceremony in its own click handler -- the
+passkey path spends the WebAuthn user gesture there -- and navigates to the
+lobby (`/lobby`) at once, so the run outlives the page that began it. The
+ceremonies report stage boundaries through an observational `onStage`
+notifier, which the lobby renders as a step feed and the settled run's
+outcome routes from: the dashboard, `/login` when the credential already had
+a wallet, or back to the wizard's last step with the error copy.
 
 Every WAS signup runs the credential-anchored establishment below, whose
 genesis order promotes the Space controller inline. It mints no enrolled
@@ -2471,6 +2481,7 @@ Every row below `/external/request` is protected. `DocsPage` renders
 | `/`                                                        | `LandingPage`            |
 | `/login`                                                   | `LoginPage`              |
 | `/signup`                                                  | `SignupPage`             |
+| `/lobby`                                                   | `LobbyPage`              |
 | `/recover`                                                 | `RecoverPage`            |
 | `/guest-login`                                             | `GuestLoginPage`         |
 | `/logout`                                                  | `LogoutPage`             |
