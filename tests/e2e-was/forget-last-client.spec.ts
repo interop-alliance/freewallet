@@ -26,6 +26,7 @@ import { test, expect, type Browser, type Page } from '@playwright/test'
 import { readLogFromString, resolveDIDFromLog } from '@interop/did-method-webvh'
 import {
   addCredentialViaPaste,
+  expectDidWebProjectionMatches,
   fillSettled,
   forceRememberBrowser,
   signupViaWizard
@@ -170,6 +171,10 @@ test.describe('The last-enrolled-client forget transition', () => {
     const first = await coldTerminal(browser)
     let passphrase: string
     let recoveryCode: string
+    // Captured inside terminal B, read again from terminal C: Settings is
+    // gone once the browser is forgotten.
+    let projectionLogUrl: string
+    let projectionDoc: unknown
     try {
       const user = await signupViaWizard(first.page, testInfo, {
         rememberBrowser: false
@@ -304,6 +309,26 @@ test.describe('The last-enrolled-client forget transition', () => {
       // The account stays anchored by the credential's ladder VM.
       expect((document.assertionMethod ?? []).length).toBeGreaterThan(0)
       expect((document.capabilityDelegation ?? []).length).toBeGreaterThan(0)
+
+      // The did:web projection lost the forgotten client too. The removal
+      // entry is ladder-signed and publishes `did.jsonl` alone, so the
+      // transition PUTs the post-removal projection under this client's own
+      // root authority immediately before that entry; without it
+      // `id/did.json` would keep publishing the removed client's keys and a
+      // did:web verifier would keep accepting them.
+      await expectDidWebProjectionMatches({
+        page: second.page,
+        logUrl,
+        doc: resolved.doc
+      })
+      const projection = (await (
+        await second.page.request.get(
+          logUrl.replace(/\/did\.jsonl$/, '/did.json')
+        )
+      ).json()) as { capabilityInvocation?: unknown[] }
+      expect(projection.capabilityInvocation ?? []).toHaveLength(0)
+      projectionLogUrl = logUrl
+      projectionDoc = resolved.doc
     } finally {
       await second.context.close()
     }
@@ -330,6 +355,15 @@ test.describe('The last-enrolled-client forget transition', () => {
       await expect(
         third.page.getByRole('link', { name: 'E2E Test Credential' })
       ).toBeVisible({ timeout: 30_000 })
+
+      // A following transient login leaves the projection matching the
+      // log's document: its own `ensureDidWebProjection` found nothing to
+      // republish, so the mender is idempotent on a current projection.
+      await expectDidWebProjectionMatches({
+        page: third.page,
+        logUrl: projectionLogUrl,
+        doc: projectionDoc
+      })
 
       await third.page.getByRole('button', { name: 'Log out' }).click()
       await expect(third.page).toHaveURL(/\/#?\/?$/)

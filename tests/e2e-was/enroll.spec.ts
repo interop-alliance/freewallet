@@ -137,9 +137,11 @@ test.describe('Self-enrolling login', () => {
     // the add entry, so exactly two client update keys stand.
     expect(resolved.meta.updateKeys).toHaveLength(2)
     // The document roster now carries the second client's keys: two more
-    // verification methods than the four a single-client account publishes
-    // (three Multikey entries plus the passphrase's commitment).
-    expect(resolved.doc?.verificationMethod).toHaveLength(6)
+    // verification methods than the five a single-client account publishes
+    // (the KMS authentication key, the first client's signing and
+    // key-agreement pair, the passphrase's ladder VM, and the passphrase's
+    // commitment). Neither self-enrollment strikes the ladder VM.
+    expect(resolved.doc?.verificationMethod).toHaveLength(7)
     // Two client KAKs plus the passphrase's commitment entry.
     expect(resolved.doc?.keyAgreement).toHaveLength(3)
   })

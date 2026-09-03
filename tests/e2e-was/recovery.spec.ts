@@ -293,14 +293,16 @@ test.describe('Recovery codes', () => {
     expect(resolved.meta.updateKeys).toHaveLength(2)
     // The document carries: the original client's two VMs, the KMS
     // authentication VM, the recovered client's two VMs, the replacement
-    // code's keyAgreement VM (deliberately unmarked), and the two standing
-    // passphrase commitments (the original signup's and the recovered
-    // passphrase's) -- the spent code's VM is gone, so five keyAgreement
-    // entries stand (two clients, one code, two commitments) against two
+    // code's keyAgreement VM (deliberately unmarked), and the recovered
+    // passphrase's standing pair (its commitment and its ladder VM). The
+    // spent code's VM is gone, and so are the original passphrase's
+    // commitment and ladder VM: the add-and-retire entry retires every
+    // pre-recovery standing credential. So four keyAgreement entries stand
+    // (two clients, one code, one commitment) against two
     // capabilityInvocation entries (recovery and unlock keys never appear
-    // there).
+    // there), eight verification methods in all.
     const keyAgreement = (resolved.doc?.keyAgreement ?? []) as string[]
-    expect(keyAgreement).toHaveLength(5)
+    expect(keyAgreement).toHaveLength(4)
     expect(resolved.doc?.capabilityInvocation).toHaveLength(2)
     expect(resolved.doc?.verificationMethod).toHaveLength(8)
   })

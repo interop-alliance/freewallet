@@ -30,11 +30,13 @@
  * network errors rethrow unchanged so a flap stays distinguishable from a
  * generation lapse.
  */
+import type { ResourceLogPinStore } from '@interop/vh-resource-log'
 import { agentsFromSeed } from '@interop/wallet-core/identity'
 import type { UnlockKdf } from '@interop/wallet-core/keyring'
 import {
   clientSigningKeyMultibase,
   delegatedWebvhLogStore,
+  ensureDidWebProjection,
   isWebvhDid,
   verifyAccountLog,
   webvhZcapClient
@@ -62,6 +64,7 @@ import {
 } from '@interop/wallet-core/webvh'
 import { ladderVmAgent } from '@interop/wallet-core/clientAnnex'
 import { webvhResourceLogController } from '@interop/wallet-core/resourceLog'
+import { ID_COLLECTION } from '@interop/wallet-core/space'
 import { WasClient } from '@interop/was-client'
 import { WAS_SERVER_URL } from '@/app.config'
 import { hasClientKeyRecord } from '@/lib/sessionKey'
@@ -89,6 +92,7 @@ import { refreshTransientManageCapability } from '@/session/unlockMethods'
 import { primeVerifiedAccountLog } from '@/session/verifiedLog'
 import type { Session } from '@/types/auth'
 import type { IZcap } from '@interop/data-integrity-core'
+import type { ZcapClient } from '@interop/ezcap'
 import type { AccountPointer } from '@interop/wallet-core/keyring'
 import type { WebvhIdStore } from '@interop/wallet-core/webvh'
 
@@ -310,6 +314,111 @@ function refuseMissingGeneration(
 }
 
 /**
+ * The did:web projection's credential-only mender, run best-effort by every
+ * transient visit.
+ *
+ * A ladder-signed account-log entry (a transient recovery, either forget
+ * ceremony's removal entry) publishes `did.jsonl` alone, because the bridge
+ * delegation a standing credential carries is a PUT on exactly that resource.
+ * The served `id/did.json` therefore keeps publishing whatever it said before
+ * -- a forgotten client's verification method, a retired credential's
+ * `keyAgreement` entry -- and a did:web verifier reading the projection
+ * accepts a key the account has struck. WAS authorization is unaffected (the
+ * server resolves the controller out of `did.jsonl`), so this is a did:web
+ * verifier's revocation bypass rather than a storage one, and this visit is
+ * what closes it: the generation delegation targets the account Space's items
+ * subtree, which covers `id/did.json`, so the annex verification method
+ * republishes the projection with no widened bridge and no server change.
+ *
+ * On a healthy account it costs one unauthenticated GET and writes nothing.
+ * Never rejects: every failure is a warn, and the next visit retries.
+ *
+ * @param options {object}
+ * @param options.host {string}   the storage server's base URL
+ * @param options.spaceId {string}   the account Space, holding the
+ *   world-readable `id` collection
+ * @param options.did {string}   the account's did:webvh
+ * @param options.doc {object}   the resolved did:webvh document the
+ *   projection is re-derived from
+ * @param options.pinStore {ResourceLogPinStore}   the visit's chain-head
+ *   pins, carried by the re-resolution below
+ * @param options.delegation {IZcap}   the visit's generation delegation, the
+ *   authority the PUT invokes under
+ * @param options.zcapClient {ZcapClient}   the annex-signing client
+ * @returns {Promise<void>}
+ */
+async function refreshDidWebProjection({
+  host,
+  spaceId,
+  did,
+  doc,
+  pinStore,
+  delegation,
+  zcapClient
+}: {
+  host: string
+  spaceId: string
+  did: string
+  doc: Parameters<typeof ensureDidWebProjection>[0]['doc']
+  pinStore: ResourceLogPinStore
+  delegation: IZcap
+  zcapClient: ZcapClient
+}): Promise<void> {
+  try {
+    const { outcome } = await ensureDidWebProjection({
+      store: delegatedWebvhLogStore({
+        host,
+        spaceId,
+        collectionId: ID_COLLECTION.id,
+        delegation,
+        zcapClient,
+        // The `id` collection is world-readable, so the freshness read is an
+        // unauthenticated fetch; only the republish invokes the delegation.
+        publicRead: true
+      }),
+      did,
+      doc,
+      // The ordering guard. `doc` was resolved at the start of this visit, so
+      // a difference alone does not say which side is stale: another client
+      // may have published an inventory-removing entry and its projection
+      // since, and writing this snapshot over it would restore a key the
+      // account struck. One extra GET on the difference path settles it,
+      // under the visit's own pins -- a rollback or a fork served at that
+      // moment is refused, and the refusal lands in the catch below.
+      refresh: async () => {
+        const fresh = await verifyAccountLog({
+          did,
+          spaceId,
+          host,
+          pinStore
+        })
+        // The DID is the account pointer's: `verifyAccountLog` refuses a log
+        // resolving to any other, so the re-resolution cannot move it.
+        return { did, doc: fresh.doc }
+      }
+    })
+    if (outcome === 'republished') {
+      log.info('Republished the stale did:web projection of the account log', {
+        did
+      })
+    }
+    if (outcome === 'conflict') {
+      // Another writer's projection landed between the read and the PUT. It
+      // is the newer one, so it stands and the next visit is the mender.
+      log.info(
+        'Left the did:web projection to a concurrent writer of the account ' +
+          'log',
+        { did }
+      )
+    }
+  } catch (err) {
+    log.warn('Could not refresh the did:web projection of the account log', {
+      err
+    })
+  }
+}
+
+/**
  * The composition's client-annex generation-readiness stage: one converging
  * ensure over the five durable states that make the annex unreachable from
  * a credential-only visit (no `#DelegatedClients` pointer, a collected or
@@ -443,6 +552,9 @@ async function ensureClientAnnexGenerationReady({
  *    `initSessionFromSeed` everything -- annex signing, the delegation as
  *    `profile.invocationCapability`, no KMS, no second roster read, no
  *    sweeps.
+ * 6. Mend the did:web projection when the served `id/did.json` has drifted
+ *    from the log's document (`refreshDidWebProjection`): best-effort, not
+ *    awaited, and run in the CHAPI popup too.
  *
  * @param options {object}
  * @param options.found {TransientKeyringFetchResult}   the transient keyring
@@ -1014,6 +1126,31 @@ export async function transientSessionFromKeyringHit({
       profile: session.profile,
       pointer: { did: accountDid, spaceId: accountSpaceId, host: accountHost },
       verified
+    })
+    // The did:web projection mend, over that same head. It sits after the
+    // enrollment because its PUT invokes as the visit's annex verification
+    // method under the generation delegation, and that method must stand in
+    // the annex document first. Deliberately not awaited: the session is
+    // complete without it and the helper holds its own catch-and-warn, so
+    // the floating promise can never reject. Deliberately NOT skipped in the
+    // CHAPI popup either, unlike the registry refresh below -- it is a
+    // revocation-bypass repair costing one GET, and it writes nothing
+    // browser-local.
+    //
+    // It rides the memo's guard for the same reason the memo does: a mend
+    // arm that published a log entry read the log for itself and handed
+    // nothing back, so `verified` may sit behind the head it advanced the
+    // pin to, and a projection re-derived from that document would undo the
+    // mend's own republication. The next visit, which mends nothing, is that
+    // account's mender.
+    void refreshDidWebProjection({
+      host: accountHost,
+      spaceId: accountSpaceId,
+      did: accountDid,
+      doc: verified.doc,
+      pinStore: persistence.logPins,
+      delegation: generationDelegation,
+      zcapClient: transientZcapClient
     })
   }
   // Stamp what the remembered tail stamps, minus what a transient session

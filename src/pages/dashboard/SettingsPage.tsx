@@ -564,10 +564,9 @@ export function SettingsPage() {
       cancelled = true
     }
   }, [session, canAddPasskey])
-  // KMS keystore state: a keystore is provisioned at login whenever a KMS
-  // server is configured for a non-guest session (see initSession.ts).
+  // The Key Management section renders only when a KMS server is
+  // configured for a non-guest session (see initSession.ts).
   const kmsConfigured = !!KMS_SERVER_URL && !session?.isGuest
-  const keystoreId = session?.profile?.keystoreAgent?.keystoreId
   // The account's did:web projection id and the world-readable URL its
   // document resolves to. The projection is the did:webvh document under its
   // did:web id, so a promoted pointer is the whole evidence it exists -- the
@@ -1207,28 +1206,7 @@ export function SettingsPage() {
 
         <Stack sx={{ gap: 1 }}>
           <Typography variant="h6">{t('settings.kmsSection')}</Typography>
-          {kmsConfigured ? (
-            <SettingRow label={t('settings.keystore')}>
-              <Chip
-                size="small"
-                color={keystoreId ? 'success' : 'error'}
-                label={
-                  keystoreId
-                    ? t('settings.keystoreProvisioned')
-                    : t('settings.keystoreError')
-                }
-              />
-              {keystoreId && (
-                <Typography
-                  variant="body2"
-                  color="text.secondary"
-                  sx={{ wordBreak: 'break-all' }}
-                >
-                  {keystoreId}
-                </Typography>
-              )}
-            </SettingRow>
-          ) : (
+          {!kmsConfigured && (
             <Typography variant="body2" color="text.secondary">
               {t('settings.kmsNone')}
             </Typography>

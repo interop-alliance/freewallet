@@ -25,7 +25,11 @@ import {
   resolveDIDFromLog
 } from '@interop/did-method-webvh'
 import { delegatedClientsPointer } from '@interop/wallet-core/clientAnnex'
-import { fillSettled, signupViaWizard } from './helpers'
+import {
+  expectDidWebProjectionMatches,
+  fillSettled,
+  signupViaWizard
+} from './helpers'
 import {
   captureLocalStorageKeys,
   expectNoStorageResidue
@@ -247,10 +251,11 @@ test.describe.serial('transient recovery (the login-axis cell)', () => {
       )
       expect(ladderVms).toHaveLength(1)
       expect(assertion).toContain(ladderVms[0])
-      // keyAgreement: the original client's key, the original passphrase's
-      // commitment, the replacement code's key, and the recovered
-      // passphrase's commitment -- the spent code's key is gone.
-      expect(resolved.doc?.keyAgreement).toHaveLength(4)
+      // keyAgreement: the original client's key, the replacement code's
+      // key, and the recovered passphrase's commitment. The spent code's key
+      // is gone, and so is the original passphrase's commitment: the
+      // add-and-retire entry retires every pre-recovery standing credential.
+      expect(resolved.doc?.keyAgreement).toHaveLength(3)
       // The FRESH annex generation is pointed, by the add-and-retire entry
       // itself -- a pointer still naming the pre-recovery generation is the
       // stranding this ordering exists to prevent, so the value is compared,
@@ -258,6 +263,19 @@ test.describe.serial('transient recovery (the login-axis cell)', () => {
       const pointed = delegatedClientsPointerOf(resolved.doc)
       expect(pointed).toBeDefined()
       expect(pointed).not.toBe(generationBeforeRecovery)
+
+      // The did:web projection kept up. The add-and-retire entry is
+      // ladder-signed, so it publishes `did.jsonl` alone (a bridge
+      // delegation allows nothing else) and `id/did.json` was left still
+      // publishing the spent code's key -- a revocation a did:web verifier
+      // would not see. The transient login that followed republished it,
+      // invoking as its annex verification method under the generation
+      // delegation.
+      await expectDidWebProjectionMatches({
+        page,
+        logUrl,
+        doc: resolved.doc
+      })
     } finally {
       await context.close()
     }

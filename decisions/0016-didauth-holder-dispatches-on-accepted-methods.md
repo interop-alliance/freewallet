@@ -122,9 +122,18 @@ Reopen this decision when one or more of the following holds:
 1. `webvh` appears in requests the wallet actually receives, or verifier
    stacks resolve did:webvh commonly enough that the unconstrained
    default should move off the projection.
-2. The projection's staleness is closed. A stale `did.json` is a
-   revocation bypass rather than lag, and while it stands the did:web
-   arm answers with a document that may list a forgotten client.
+2. The projection's staleness widens again. `decisions/0018` closes the
+   standing case: the removal ceremonies write the projection ahead of
+   their own removal entry, and every transient visit re-derives it and
+   republishes on a difference. What remains is a window between a
+   ladder-signed entry and the next visit, so the did:web arm can still
+   answer with a document naming a credential the log has retired.
 3. app-connect-spec amends `decisions/0004` to make the App Connect
    holder negotiable, at which point rule 2 becomes a wallet policy
    rather than a contract obligation.
+
+## Changelog
+
+- 2026-09-03: Revisit criterion 2 was refined rather than reversed. The
+  projection's standing staleness is closed by `decisions/0018`; the
+  criterion now names the window that remains.

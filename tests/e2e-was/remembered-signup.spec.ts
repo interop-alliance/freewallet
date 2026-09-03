@@ -63,9 +63,10 @@ test.describe('Remembered signup', () => {
     // client's update key stands.
     expect(resolved.meta.updateKeys).toHaveLength(1)
     // The single-client document: the client's signing and key-agreement
-    // methods, the KMS authentication convenience, and the passphrase's
-    // commitment entry.
-    expect(resolved.doc?.verificationMethod).toHaveLength(4)
+    // methods, the KMS authentication convenience, the passphrase's ladder
+    // VM (left standing by the self-enrollment's add entry), and the
+    // passphrase's commitment entry.
+    expect(resolved.doc?.verificationMethod).toHaveLength(5)
     // The client's KAK plus the passphrase's commitment entry.
     expect(resolved.doc?.keyAgreement).toHaveLength(2)
     // The establishment's pointer entry survives the self-enrollment: the

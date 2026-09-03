@@ -146,17 +146,20 @@ test('signup publishes a verifying did:webvh log and a Multikey did:web projecti
   // The two ids cross-link: did.json advertises the did:webvh id it projects.
   expect(doc.alsoKnownAs).toContain(resolved.did)
   // Adopting the webvh projection flips the Phase 1 2020-suite VM types to
-  // Multikey (same key material, new type + context). Four VMs now: the
-  // KMS-held authentication convenience plus this client's Ed25519 signing
-  // key and its X25519 key-agreement twin -- the KMS keyAgreement key is
-  // deliberately absent (no server-held key may be a wrap target), and no
+  // Multikey (same key material, new type + context). Five VMs: the
+  // KMS-held authentication convenience, this client's Ed25519 signing key
+  // and its X25519 key-agreement twin, the passphrase's ladder VM (it
+  // survives the self-enrollment, under `assertionMethod` and
+  // `capabilityDelegation` only), and the passphrase's standing
+  // `keyAgreement` entry, published as a hash commitment
+  // (`MultikeyCommitment`), never the key itself. The KMS keyAgreement key
+  // is deliberately absent (no server-held key may be a wrap target), and no
   // KMS assertion key is minted (`assertionMethod` membership confers
-  // resource-log-append authority, so it lists client keys only) -- plus the
-  // passphrase's standing `keyAgreement` entry, published as a hash
-  // commitment (`MultikeyCommitment`), never the key itself.
-  expect(doc.verificationMethod).toHaveLength(4)
+  // resource-log-append authority).
+  expect(doc.verificationMethod).toHaveLength(5)
   const types = doc.verificationMethod.map(vm => vm.type).sort()
   expect(types).toEqual([
+    'Multikey',
     'Multikey',
     'Multikey',
     'Multikey',

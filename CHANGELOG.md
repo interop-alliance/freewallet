@@ -1,5 +1,47 @@
 # History
 
+## 0.47.0 - TBD
+
+### Removed
+
+- The Settings "Keystore" row under Key management. It reported whether the
+  session had bound a `KeystoreAgent`, which only a remembered login does, so
+  every transient session (the default) read "provisioning failed at login"
+  though nothing was attempted. The Published DID row's "Key server signing
+  key recorded" chip already shows what the account itself records.
+
+### Fixed
+
+- The `did:web` projection (`id/did.json`) no longer keeps publishing keys a
+  ladder-signed account-log entry removed. Such an entry writes `did.jsonl`
+  alone, so after the last-client transition the forgotten client's
+  `authentication` verification method stayed in the projection, and after a
+  transient recovery the retired credential's `keyAgreement` entry did. WAS
+  authorization was never affected: the server resolves a Space's controller
+  from `did.jsonl` and never reads `did.json`.
+- The forget ceremony and the last-client transition PUT the post-removal
+  projection through the forgetting client's own root authority immediately
+  before their removal entry, since that client's authority ends at the entry.
+- Every transient visit runs wallet-core's `ensureDidWebProjection` after its
+  per-visit key is enrolled, invoking under the generation delegation, whose
+  items-subtree target already covers `id/did.json`. It compares before
+  writing, so a healthy account costs one GET and no write. Best-effort, not
+  awaited, and it runs for the CHAPI popup too. No server change and no
+  widened bridge delegation (`decisions/0018`).
+- The visit's ensure is ordered against concurrent writers. Its document was
+  resolved at the start of the composition, so a difference alone does not say
+  which side is stale: the visit supplies a `refresh` that re-runs
+  `verifyAccountLog` under its own chain-head pins, and the write runs only
+  when the refreshed derivation still differs. The PUT is a compare-and-swap on
+  the served read's ETag, so a projection another client wrote in between
+  stands and the visit logs a `conflict` instead. Without this a login could
+  restore a key a disconnect or a retirement had just removed.
+- Six WAS e2e specs (`did-web`, `did-webvh`, `enroll`, `recovery`,
+  `recovery-transient`, `remembered-signup`) assert the account document the
+  ceremonies now publish: the ladder VM survives a self-enrollment, and a
+  recovery retires every pre-recovery standing credential's `keyAgreement`
+  entry. Each count names the entries it counts.
+
 ## 0.46.0 - TBD
 
 ### Added

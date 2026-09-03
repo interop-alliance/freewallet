@@ -630,6 +630,12 @@ describe('forgetThisBrowser (the ceremony grades)', () => {
     })
     expect(vi.mocked(assertAccountCeremonyAllowed)).toHaveBeenCalledTimes(1)
     expect(vi.mocked(invalidateVerifiedLog)).toHaveBeenCalled()
+    // The post-removal did:web projection PUT rides this still-standing
+    // client's own root authority, the store the last-client transition
+    // publishes its entries through.
+    expect(
+      vi.mocked(forgetEnrolledClient).mock.calls[0]![0].clientLogStore
+    ).toEqual({ webvhIdStore: true })
   })
 
   it('rethrows the last-client refusal without wiping anything', async () => {
@@ -695,6 +701,7 @@ describe('forgetThisBrowser (the ceremony grades)', () => {
     expect(typeof options.annex.storeFor).toBe('function')
     expect(typeof options.annex.revoke).toBe('function')
     expect(typeof options.rosterStoreFor).toBe('function')
+    expect(options.clientLogStore).toEqual({ webvhIdStore: true })
     expect(typeof options.onBeforeRemoval).toBe('function')
     expect(options.expectedDid).toBe(pointer.did)
     expect(options.knownLatentHashes).toEqual(['hash:zRung'])

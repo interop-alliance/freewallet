@@ -32,6 +32,7 @@ vi.mock('@interop/wallet-core/webvh', async importOriginal => ({
   ...(await importOriginal<typeof import('@interop/wallet-core/webvh')>()),
   verifyAccountLog: vi.fn(),
   delegatedWebvhLogStore: vi.fn(),
+  ensureDidWebProjection: vi.fn(),
   webvhZcapClient: vi.fn()
 }))
 
@@ -71,9 +72,11 @@ vi.mock('@/session/keyring', async importOriginal => ({
 
 import {
   delegatedWebvhLogStore,
+  ensureDidWebProjection,
   verifyAccountLog,
   webvhZcapClient
 } from '@interop/wallet-core/webvh'
+import { ID_COLLECTION } from '@interop/wallet-core/space'
 import {
   delegatedClientsDelegationSpaceId,
   delegatedClientsPointer,
@@ -228,6 +231,7 @@ function primeHappyPath() {
   vi.mocked(embeddedGenerationDelegation).mockReturnValue(
     GENERATION_DELEGATION as never
   )
+  vi.mocked(ensureDidWebProjection).mockResolvedValue({ outcome: 'current' })
   vi.mocked(webvhZcapClient).mockReturnValue({
     isClientAnnexZcapClient: true
   } as never)
@@ -702,6 +706,136 @@ describe('transientSessionFromKeyringHit -- the composition wiring', () => {
     expect(initSessionFromSeed).toHaveBeenCalledWith(
       expect.objectContaining({ email: 'record@example.test' })
     )
+  })
+})
+
+describe('transientSessionFromKeyringHit -- the did:web projection mend', () => {
+  it('ensures the projection after the enrollment, under the generation delegation', async () => {
+    primeHappyPath()
+    await transientSessionFromKeyringHit({
+      found: makeFound(),
+      type: 'passphrase',
+      persistence: transientSessionStores()
+    })
+
+    // The store: the account Space's world-readable `id` collection, read
+    // unauthenticated and written under the visit's generation delegation as
+    // the annex verification method.
+    expect(delegatedWebvhLogStore).toHaveBeenCalledWith({
+      host: POINTER.host,
+      spaceId: POINTER.spaceId,
+      collectionId: ID_COLLECTION.id,
+      delegation: GENERATION_DELEGATION,
+      zcapClient: expect.objectContaining({ isClientAnnexZcapClient: true }),
+      publicRead: true
+    })
+    expect(ensureDidWebProjection).toHaveBeenCalledWith({
+      store: expect.anything(),
+      did: POINTER.did,
+      doc: { id: POINTER.did },
+      refresh: expect.any(Function)
+    })
+    // Strictly after the enrollment: the PUT invokes as the visit's annex
+    // verification method, which must stand in the annex document first.
+    expect(
+      vi.mocked(ensureDidWebProjection).mock.invocationCallOrder[0]!
+    ).toBeGreaterThan(
+      vi.mocked(enrollTransientClient).mock.invocationCallOrder[0]!
+    )
+  })
+
+  it('re-verifies the log under the visit pins on the difference path', async () => {
+    // The ordering guard: the ensure calls `refresh` only when the served
+    // projection differs, and that re-resolution rides the same chain-head
+    // pins the composition read under, so a rollback or a fork served at
+    // that moment is refused rather than published over.
+    const persistence = transientSessionStores()
+    primeHappyPath()
+    await transientSessionFromKeyringHit({
+      found: makeFound(),
+      type: 'passphrase',
+      persistence
+    })
+
+    const callsBefore = vi.mocked(verifyAccountLog).mock.calls.length
+    const { refresh } = vi.mocked(ensureDidWebProjection).mock.calls[0]![0]
+    const fresh = await refresh!()
+
+    expect(vi.mocked(verifyAccountLog).mock.calls).toHaveLength(callsBefore + 1)
+    expect(vi.mocked(verifyAccountLog).mock.calls.at(-1)![0]).toEqual({
+      did: POINTER.did,
+      spaceId: POINTER.spaceId,
+      host: POINTER.host,
+      pinStore: persistence.logPins
+    })
+    expect(fresh).toEqual({ did: POINTER.did, doc: { id: POINTER.did } })
+  })
+
+  it('runs in the CHAPI popup too, unlike the registry refresh', async () => {
+    primeHappyPath()
+    await transientSessionFromKeyringHit({
+      found: makeFound(),
+      type: 'passphrase',
+      persistence: transientSessionStores(),
+      popup: true
+    })
+    expect(ensureDidWebProjection).toHaveBeenCalledTimes(1)
+  })
+
+  it('warns and completes the login when the ensure throws', async () => {
+    primeHappyPath()
+    vi.mocked(ensureDidWebProjection).mockRejectedValue(
+      new Error('the projection PUT was refused')
+    )
+    const capture = captureSink()
+    const removeSink = addSink(capture.sink)
+
+    const { session } = await transientSessionFromKeyringHit({
+      found: makeFound(),
+      type: 'passphrase',
+      persistence: transientSessionStores()
+    })
+
+    // The floating promise is not awaited by the login, so the warn lands a
+    // microtask later.
+    expect(session).toBeTruthy()
+    await vi.waitFor(() =>
+      expect(capture.events).toContainEqual(
+        expect.objectContaining({
+          ns: 'fw:session:transient',
+          level: 'warn',
+          msg: expect.stringContaining('did:web projection')
+        })
+      )
+    )
+    removeSink()
+  })
+
+  it('skips the mend when a mend arm advanced the log past this head', async () => {
+    // A mend arm reads the log for itself and hands nothing back, so the
+    // retained `verified` may sit behind the head it advanced the pin to; a
+    // projection re-derived from it would undo the mend's own republication.
+    primeHappyPath()
+    vi.mocked(readUserKeyRoster)
+      .mockResolvedValueOnce(null as never)
+      .mockResolvedValue({
+        descriptor: { epochs: [{ id: 'did:key:z6LSfresh' }] },
+        userKey: { id: 'did:key:z6LSfresh', secret: new Uint8Array(32) },
+        rotated: false,
+        latestEpochId: 'did:key:z6LSfresh'
+      } as never)
+    vi.mocked(mendCredentialAnchoredAccount).mockResolvedValue({
+      reenter: false,
+      rosterEpochs: { converged: true, outcome: 'delivered' }
+    } as never)
+
+    await transientSessionFromKeyringHit({
+      found: makeFound(),
+      type: 'passphrase',
+      persistence: transientSessionStores(),
+      credential: CREDENTIAL
+    })
+    expect(ensureDidWebProjection).not.toHaveBeenCalled()
   })
 })
 

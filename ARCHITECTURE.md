@@ -512,8 +512,12 @@ account's did:webvh alongside the Space's (the same
 `promoteKeystoreController` sequence, non-fatal). No server-held key is ever
 an update key or an encryption-roster recipient. One key is minted there
 today, the `authentication` key the account document publishes (see "The KMS
-stage"). Provisioning failure is logged and non-fatal, and the settings page
-shows the state.
+stage"). Provisioning failure is logged and non-fatal. Only a remembered
+login provisions and binds the keystore; a transient visit holds no key the
+keystore's controller document lists, so it skips the KMS whole (FW-423 is
+the ladder-signed delegation that would let it in). Settings shows whether
+the account document records the KMS-held key, not whether this session
+bound the keystore.
 
 ## The did:webvh identity (per-client keys, promoted controller)
 
@@ -570,6 +574,35 @@ did:web document of its own, so did:web resolution and did:webvh resolution
 of one account cannot disagree, and did:web comes free with the log. The
 projection is the whole document with its ids rewritten, so a verifier handed
 either form sees every published key.
+
+**The projection's freshness on a credential-anchored account.** A
+ladder-signed entry publishes through `publishEntryPinned`, which writes
+`did.jsonl` alone, since the bridge delegation is a PUT on exactly that
+resource. So the ceremonies a standing credential runs do not republish the
+projection, and a stale one keeps naming a client or a credential the log
+has struck. That is a revocation bypass for a did:web verifier rather than
+lag. WAS authorization is untouched, since the server resolves a Space's
+controller out of `did.jsonl` and reads `did.json` nowhere
+(`decisions/0018-did-web-projection-refreshed-by-the-annex-writer.md`). Two
+writers close it. The removal ceremonies PUT the post-removal projection
+under the still-standing enrolled client's own root authority immediately
+before their removal entry (see "The forget affordance"). And every
+transient visit runs wallet-core's `ensureDidWebProjection`, which re-derives
+the projection from the resolved log and republishes only on a difference,
+invoking under the generation delegation (see "The transient login"). That
+delegation targets the account Space's items subtree, which covers
+`id/did.json`, so no bridge is widened and no server change is needed. The
+ensure's own write is ordered twice over, since the document a visit holds
+was resolved before the compare and a difference alone does not say which
+side is stale: on a difference it re-resolves the log under the visit's pins
+and writes only if the refreshed derivation still differs, and the PUT is a
+compare-and-swap on the ETag of the read it was based on, so a projection
+another client wrote in between stands. The window that remains is between a
+ladder-signed entry and the next visit that runs the ensure. A self-enrollment's add entry leaves the fail-closed
+direction instead, a projection under-listing a client the log has, and is
+not corrected before the entry. The projection also carries no signature and
+no chain, so a host may freeze it or serve a different body per verifier;
+did:webvh resolution is the answer to that.
 
 **Log continuity within a session.** Resolving the world-readable log is
 one-shot verification, and a valid PREFIX of the real log passes it. The
@@ -788,15 +821,26 @@ still-standing authority: the self-forget inversion of the revocation's
 document-edit-first order, forced by the entry-proof and current-key-set
 rules (wallet-core decision 0008). Then ONE atomic ladder-signed removal
 entry through the login credential's bridge takes the client's whole
-document inventory out. Only then does the local wipe run (`clearWriter:
-true`, the wipe's one writerId consumer).
+document inventory out. Immediately before that entry publishes, the
+post-removal did:web projection is PUT through this client's own
+root-authority `id` store (`clientLogStore`, the session's
+`remoteStore.webvhIdStore()`), since the entry itself writes `did.jsonl`
+alone and this client's authority ends there. That store is required. The
+idempotent already-forgotten path writes no projection at all, since the
+removal entry landed on an earlier run and this client's authority is
+already gone; the next transient visit's ensure is that projection's mender.
+Only then does the local wipe run (`clearWriter: true`, the wipe's one writerId
+consumer).
 
 Wipe-last is the tear story. A run torn before the entry reads as "not
-forgotten", and a re-click resumes. The other direction, removal published
-but wipe torn, is caught at the next login by the **forgotten-browser
-detector** (`assertClientStillEnrolled`): an enrolled client-key record (its
-user key present) still here while the cleanly verified account document no
-longer lists this client's verification method. The detector finishes the
+forgotten", and a re-click resumes. A run torn between the projection PUT
+and the entry leaves `did.json` omitting a client the log still lists. That
+is the fail-closed direction for a did:web verifier, and the re-run re-PUTs
+it. The other direction, removal published but wipe torn, is caught at the
+next login by the **forgotten-browser detector**
+(`assertClientStillEnrolled`): an enrolled client-key record (its user key
+present) still here while the cleanly verified account document no longer
+lists this client's verification method. The detector finishes the
 wipe from what the keyring hit alone derives and surfaces "this browser's
 access was removed" in place of raw authorization errors. It persists
 nothing.
@@ -860,7 +904,9 @@ amendment). Its stages, in order:
    closure (stamped on `profile.standingUnlock` at login beside the
    credential's unlock Space id), and the registry pair refreshed in this
    client's last window of registry authority.
-7. The removal entry.
+7. The removal entry. The post-removal did:web projection is PUT through
+   this client's root-authority `id` store immediately before it publishes,
+   in the same last window of authority.
 8. The local wipe.
 
 Stages 2 through 6 precede the removal entry because the removed client's
@@ -1283,6 +1329,35 @@ the credential's standing members, the same fields a remembered login
 stamps, so a mid-session ceremony (the App Connect grant path's
 generation-delegation renewal below) can sign as the ladder with no
 enrolled-client signer in hand.
+
+**The did:web projection ensure.** The visit also keeps `id/did.json`
+current, the mender for a projection a ladder-signed entry left stale (see
+"The projection's freshness on a credential-anchored account"). It runs
+wallet-core's `ensureDidWebProjection` after the per-visit key is enrolled,
+since an invocation under the generation delegation needs that key's
+verification method in the annex document first. The store is aimed at the
+account Space's `id` collection under the generation delegation, signing as
+the annex VM. The `id` collection is world-readable, so the freshness read
+is an unauthenticated GET and only the republish invokes the delegation. The
+ensure re-derives the projection from the resolved account document, compares
+it against the served body, and writes only on a difference, so a healthy
+account costs one GET and no write.
+
+A difference is where the ordering guards run. Another client may have
+published an inventory-removing entry and its correct projection since this
+visit resolved its document, and writing the older derivation over it would
+restore a key the account struck. So the visit hands the ensure a `refresh`
+that re-runs `verifyAccountLog` under `persistence.logPins` for the same
+pointer; the write happens only when the refreshed derivation still differs.
+A continuity refusal there propagates to the helper's catch and is
+warn-logged like any other failure. The PUT itself is a compare-and-swap on
+the ETag of the served read, so a projection written between the read and
+the PUT wins and the ensure reports `conflict` rather than throwing; that
+account's next visit is the mender. The ensure is best-effort and not
+awaited. A CHAPI popup visit runs it, unlike the registry pass below. A visit whose mend
+arm published skips it, since that arm read the log for itself and the
+document this visit holds may sit behind the head it advanced to; the next
+visit is that account's mender.
 
 **The management-zcap mint and refresh.** The record fetch also mints the
 unlock Space's management zcap, a local signature by the unlock identity's
@@ -2972,8 +3047,8 @@ Containment hierarchy (remote mode): **Space > Collection > Resource**.
 - **Tear mending** -- the umbrella for how a torn ceremony (one interrupted
   mid-run) gets finished. Three menders exist: a converging re-run, a
   standing sweep (the cascade-completion sweep on the remembered-login
-  chain, or the generation-readiness stage every transient visit runs), and
-  a repair (below). A remembered-login sweep is one running on
+  chain, or the generation-readiness stage and the did:web projection
+  ensure every transient visit runs), and a repair (below). A remembered-login sweep is one running on
   `session.registryReady`. A mender counts only if a credential-only visit
   can fire it. The default session is transient, so a residue whose one
   trigger is the remembered-login chain may wait forever on an account that

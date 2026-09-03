@@ -5,6 +5,7 @@ import {
   type Page,
   type TestInfo
 } from '@playwright/test'
+import { generateParallelDidWeb } from '@interop/did-method-webvh'
 import { CapabilityAgent } from '@interop/webkms-client'
 import { didKeyZcapClient } from '@interop/wallet-core/webvh'
 
@@ -283,4 +284,55 @@ export async function appZcapClient(seedBase64url: string) {
     keyName: 'app-key'
   })
   return didKeyZcapClient({ keyAgent })
+}
+
+/**
+ * Polls the world-readable did:web projection until it IS the projection of
+ * the resolved did:webvh document: the served `did.json` body deep-equals
+ * `generateParallelDidWeb(doc.id, doc)`, the same derivation the wallet
+ * writes. Comparing the whole document rather than a summary of it is what
+ * catches a projection listing the right keys under the wrong relations, or
+ * carrying a member the log has since dropped.
+ *
+ * The projection is republished by a whole-document publish, not by the
+ * ladder-signed entries a credential-only ceremony makes, so the mender is
+ * the next transient visit's `ensureDidWebProjection` -- best-effort and not
+ * awaited by the login, hence the poll.
+ *
+ * @param options {object}
+ * @param options.page {Page}   any page, for its request context
+ * @param options.logUrl {string}   the `id/did.jsonl` URL Settings links
+ * @param options.doc {unknown}   the resolved did:webvh document to match;
+ *   its `id` is the DID the projection derives from
+ * @param [options.timeout] {number}
+ * @returns {Promise<void>}
+ */
+export async function expectDidWebProjectionMatches({
+  page,
+  logUrl,
+  doc,
+  timeout = 60_000
+}: {
+  page: Page
+  logUrl: string
+  doc: unknown
+  timeout?: number
+}): Promise<void> {
+  const didJsonUrl = logUrl.replace(/\/did\.jsonl$/, '/did.json')
+  // Round-tripped through JSON so the comparison runs in the form the server
+  // stores and serves: a member whose value is `undefined` disappears on
+  // both sides rather than reading as a difference.
+  const expected = JSON.parse(
+    JSON.stringify(
+      generateParallelDidWeb(
+        (doc as { id: string }).id,
+        doc as Parameters<typeof generateParallelDidWeb>[1]
+      )
+    )
+  ) as unknown
+  await expect(async () => {
+    const response = await page.request.get(didJsonUrl)
+    expect(response.status()).toBe(200)
+    expect((await response.json()) as unknown).toEqual(expected)
+  }).toPass({ timeout })
 }

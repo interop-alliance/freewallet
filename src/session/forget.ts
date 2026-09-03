@@ -467,6 +467,14 @@ export async function forgetThisBrowser({
       const ceremony = await forgetEnrolledClient({
         ...shared,
         logId: accountLogPinId({ spaceId: pointer.spaceId }),
+        // The post-removal did:web projection PUT, made immediately before
+        // the removal entry under this still-standing client's root
+        // authority: the removal entry itself publishes `did.jsonl` alone
+        // (all the credential's bridge in `logStore` allows), so without
+        // this the served `id/did.json` would keep publishing the forgotten
+        // client's verification methods until a later writer's
+        // `ensureDidWebProjection` caught it.
+        clientLogStore: remoteStore.webvhIdStore(),
         rosterStore: sessionRosterStore({ profile: session.profile })
       })
       outcome = { lastClient: false, ceremony }
