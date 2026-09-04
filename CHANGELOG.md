@@ -1,5 +1,17 @@
 # History
 
+## 0.48.0 - TBD
+
+### Fixed
+
+- The Settings unlock-methods list loads on a transient session (the default
+  session type), where it used to render nothing at all. The registry read
+  rides the visit's generation delegation (`profile.invocationCapability`),
+  the authority the transient recovery ceremony already reads it under. The
+  write half is unchanged: minting or rewriting the registry stays gated on
+  the browser-local strategy, so the section lists the account's passkeys
+  read-only while add, rename, and remove keep their existing gate.
+
 ## 0.47.0 - TBD
 
 ### Removed

@@ -1771,16 +1771,17 @@ function shouldAdoptFreshCapability({
  * fresh one regardless -- logging an error if it narrows -- since a dead
  * capability would lose DELETE beside PUT. But it still returns the
  * existing
- * registry when it can be read, so callers (the Settings passkeys section)
- * can use this as their load-plus-backfill entry point for any session.
+ * registry when it can be read, so a browser-local caller (the Settings
+ * passkeys section, through `loadUnlockRegistry`) can use this as its
+ * load-plus-backfill entry point.
  *
  * A transient session makes no call from HERE and returns `null` immediately,
- * before even a read: the registry is remembered-session state, a transient
- * session's annex-signed root invocation could never have authorized it
- * anyway, and threading the generation delegation into these helpers must not
- * turn this into a registry clobber from a public terminal. Its one registry
- * write is `refreshTransientManageCapability`, which creates nothing and
- * touches only the acting credential's own management zcap.
+ * before even a read: this is the registry's WRITE half, and minting or
+ * rewriting a registry stays browser-local-only. Such
+ * a session reads the registry instead, under its generation delegation
+ * (`loadUnlockRegistry`, the Settings section's entry point). Its one
+ * registry write is `refreshTransientManageCapability`, which creates nothing
+ * and touches only the acting credential's own management zcap.
  *
  * The registry is created only when `createIfMissing` is set (a fresh 16-byte
  * webAuthnUserId is minted): the lazy-creation points are first passkey

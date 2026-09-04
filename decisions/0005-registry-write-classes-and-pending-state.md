@@ -119,3 +119,40 @@ an ambiguous attribution fails closed.
 registry field ships and no consumer treats an entry as authority. The
 registry remains a pure index, and this record's write classes,
 best-effort class, and replay bound stand unchanged.
+
+## Amendment (2026-09-03)
+
+The browser wallet's design for running the account-management
+ceremonies from a credential-only transient session, approved
+2026-09-03, widens one Consequences bullet.
+
+The actor rule is unchanged. It already reads "a ceremony or repair"
+with no qualifier on the session's storage tier, and a ladder-branch
+ceremony is such a ceremony.
+
+The bullet saying that producers of the pending state may only run where
+that mender is reachable is widened rather than dropped. The
+ladder-branch passphrase change produces the pending state on a
+client-less account, which may never see a remembered login. So the
+torn-retirement repair, the bare-passkey rebuild, and the registry
+backfill now run from a transient login too. They run on the same
+ordered chain after navigation, invoking under the generation
+delegation, with the acting credential's standing key-agreement key as
+the unwrap key. The rule the bullet states holds; the set of places the
+mender is reachable grew.
+
+The tier guard that refused every registry write from a transient
+session is retired with it. The write protocol's other guards do not
+depend on the session tier. Every write is a compare-and-swap on the
+ETag of a fresh read. A refresh write carries the acting credential's
+key-agreement multibase and writes nothing on a mismatch. An identity
+write is made only by a ceremony that has settled the direction against
+the account document. `refreshTransientManageCapability`, the one
+transient registry write outside a ceremony, keeps its narrow shape.
+
+Revisit Criterion 1 was considered and is NOT met. No second
+pending-shaped state appears; the ladder branch produces the same
+inferred state the enrolled branch does, and the same repair detects it.
+
+The write classes, the best-effort class, and the replay bound stand
+unchanged.

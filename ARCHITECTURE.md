@@ -1445,10 +1445,12 @@ import.
 That is what the default session type cannot reach today. None of those
 ceremonies can be performed from a transient session at all, so performing
 one takes a remembered login on an enrolled client. On an account that
-never remembers a browser they are unreachable. The planned answer is the
-step-up ceremony (FW-208), a loudly enrolled in-memory client bracketed by
-ladder-signed enroll and retire entries. It is designed and not yet built,
-so it closes none of this today.
+never remembers a browser they are unreachable. The planned answer is a
+credential-anchored branch of each ceremony (FW-424): the ladder signs the
+log entries and the licensed roster append, and the annex VM invokes the
+rest under the generation delegation, the shape the transient recovery
+already runs. It is not yet designed or built, so it closes none of this
+today.
 
 Contacts ARE reachable in a transient session: the remote-direct backend
 serves all seven contact operations directly against the remote `contacts`
@@ -2714,7 +2716,7 @@ account that may never run one is an open gap instead, listed below.
 | Account genesis (plain)                   | a no-WAS deployment's signup only; healed at every login | `src/session/signup.ts`                                           | `/genesis`                  | re-run (every stage an ensure)                                                                                                                            |
 | Account deletion                          | Settings, any session type                               | `src/session/accountSettings.ts` + `wipe.ts`                      | app-side phase order        | re-run; an in-run retry for the acting credential's own unlock Space; otherwise the next login with that credential offering to remove it (not yet built) |
 | Shared wipe (executor, not user-facing)   | consumed by the deletion-shaped ceremonies               | `src/session/wipe.ts`                                             | app-side                    | re-probe verification; the `unverified` report                                                                                                            |
-| Step-up ceremony                          | designed, not built                                      | ---                                                               | ---                         | ---                                                                                                                                                       |
+| Credential-anchored ceremony branches     | not yet designed (FW-424)                                | ---                                                               | ---                         | ---                                                                                                                                                       |
 
 Claims the cells cannot hold. A WAS signup's remembered and passkey flavors
 continue into the self-enrollment row. The credential-anchored genesis heal

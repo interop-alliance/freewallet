@@ -290,6 +290,11 @@ export function SettingsPage() {
   // present.
   const passkeysSupported = passkeySupported()
   const canAddPasskey = !!session?.profile?.clientSeed
+  // Listing the methods needs no client seed: a remembered session invokes
+  // the root capability and a transient one reads under its generation
+  // delegation. Only adding, renaming, and removing need the seed, so a
+  // transient session gets the list read-only.
+  const canListUnlockMethods = !!session && !session.isGuest
   const [addingPasskey, setAddingPasskey] = useState(false)
   const [passkeyError, setPasskeyError] = useState<
     'duplicate' | 'unsupported' | 'notEstablished' | 'failed' | null
@@ -518,12 +523,13 @@ export function SettingsPage() {
       setAddingPassphrase(false)
     }
   }
-  // On the first render of a usable passkeys section, lazily create/repair the
-  // passphrase entry (the registry's backfill point) and hold the registry in
-  // state. A backfill failure falls back to a plain read; a read failure shows
-  // a non-blocking load error but leaves the rest of the section working.
+  // On the first render of the passkeys section, load the registry and hold it
+  // in state. A browser-local session also lazily creates/repairs the
+  // passphrase entry (the registry's backfill point), falling back to a plain
+  // read; a transient session reads only. A read failure shows a non-blocking
+  // load error but leaves the rest of the section working.
   useEffect(() => {
-    if (!session || !canAddPasskey) {
+    if (!session || !canListUnlockMethods) {
       return
     }
     let cancelled = false
@@ -563,7 +569,7 @@ export function SettingsPage() {
     return () => {
       cancelled = true
     }
-  }, [session, canAddPasskey])
+  }, [session, canListUnlockMethods])
   // The Key Management section renders only when a KMS server is
   // configured for a non-guest session (see initSession.ts).
   const kmsConfigured = !!KMS_SERVER_URL && !session?.isGuest
@@ -1021,7 +1027,7 @@ export function SettingsPage() {
                 {t('settings.passkeysSection')}
               </Typography>
 
-              {canAddPasskey ? (
+              {canListUnlockMethods ? (
                 <Stack sx={{ gap: 2, mt: 1, alignItems: 'flex-start' }}>
                   {registryLoadError && (
                     <Alert severity="warning" sx={{ alignSelf: 'stretch' }}>
@@ -1100,21 +1106,23 @@ export function SettingsPage() {
                                   <Typography variant="body1">
                                     {entry.label}
                                   </Typography>
-                                  <Tooltip title={t('common.edit')}>
-                                    <IconButton
-                                      size="small"
-                                      aria-label={t('common.edit')}
-                                      onClick={() => {
-                                        setLabelDraft(entry.label)
-                                        setEditingCredentialId(
-                                          entry.credentialId
-                                        )
-                                      }}
-                                      sx={{ p: 0.25 }}
-                                    >
-                                      <MdEdit size={15} />
-                                    </IconButton>
-                                  </Tooltip>
+                                  {canAddPasskey && (
+                                    <Tooltip title={t('common.edit')}>
+                                      <IconButton
+                                        size="small"
+                                        aria-label={t('common.edit')}
+                                        onClick={() => {
+                                          setLabelDraft(entry.label)
+                                          setEditingCredentialId(
+                                            entry.credentialId
+                                          )
+                                        }}
+                                        sx={{ p: 0.25 }}
+                                      >
+                                        <MdEdit size={15} />
+                                      </IconButton>
+                                    </Tooltip>
+                                  )}
                                   <Chip
                                     size="small"
                                     color={chipColor}
@@ -1131,29 +1139,33 @@ export function SettingsPage() {
                                 })
                               })}
                             </Typography>
-                            <Button
-                              variant="outlined"
-                              size="small"
-                              color="error"
-                              sx={{
-                                borderRadius: 2,
-                                alignSelf: 'flex-start'
-                              }}
-                              disabled={isLastUnlockMethod}
-                              onClick={() => openRemoveDialog(entry)}
-                            >
-                              {t('settings.passkeyRemove')}
-                            </Button>
+                            {canAddPasskey && (
+                              <Button
+                                variant="outlined"
+                                size="small"
+                                color="error"
+                                sx={{
+                                  borderRadius: 2,
+                                  alignSelf: 'flex-start'
+                                }}
+                                disabled={isLastUnlockMethod}
+                                onClick={() => openRemoveDialog(entry)}
+                              >
+                                {t('settings.passkeyRemove')}
+                              </Button>
+                            )}
                           </Card>
                         )
                       })}
                     </Stack>
                   )}
-                  {isLastUnlockMethod && passkeyEntries.length > 0 && (
-                    <Typography variant="body2" color="text.secondary">
-                      {t('settings.passkeyLastMethod')}
-                    </Typography>
-                  )}
+                  {canAddPasskey &&
+                    isLastUnlockMethod &&
+                    passkeyEntries.length > 0 && (
+                      <Typography variant="body2" color="text.secondary">
+                        {t('settings.passkeyLastMethod')}
+                      </Typography>
+                    )}
                   {passkeyEntries.some(
                     entry => !(entry.backupEligibility && entry.backupState)
                   ) && (
@@ -1161,23 +1173,31 @@ export function SettingsPage() {
                       {t('settings.passkeyNotSyncedHint')}
                     </Typography>
                   )}
-                  <Button
-                    variant="contained"
-                    loading={addingPasskey}
-                    onClick={handleAddPasskey}
-                  >
-                    {t('settings.addPasskey')}
-                  </Button>
-                  {passkeyError && (
-                    <Alert severity="error">
-                      {passkeyError === 'duplicate'
-                        ? t('settings.passkeyDuplicate')
-                        : passkeyError === 'unsupported'
-                          ? t('settings.passkeyPrfUnsupported')
-                          : passkeyError === 'notEstablished'
-                            ? t('settings.passkeyNotEstablished')
-                            : t('settings.passkeyAddFailed')}
-                    </Alert>
+                  {canAddPasskey ? (
+                    <>
+                      <Button
+                        variant="contained"
+                        loading={addingPasskey}
+                        onClick={handleAddPasskey}
+                      >
+                        {t('settings.addPasskey')}
+                      </Button>
+                      {passkeyError && (
+                        <Alert severity="error">
+                          {passkeyError === 'duplicate'
+                            ? t('settings.passkeyDuplicate')
+                            : passkeyError === 'unsupported'
+                              ? t('settings.passkeyPrfUnsupported')
+                              : passkeyError === 'notEstablished'
+                                ? t('settings.passkeyNotEstablished')
+                                : t('settings.passkeyAddFailed')}
+                        </Alert>
+                      )}
+                    </>
+                  ) : (
+                    <Typography variant="body2" color="text.secondary">
+                      {t('settings.passkeysRequiresFullSession')}
+                    </Typography>
                   )}
                 </Stack>
               ) : (

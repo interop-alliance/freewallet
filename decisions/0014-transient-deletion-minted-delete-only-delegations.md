@@ -149,3 +149,41 @@ Reopen this decision when one or more of the following holds:
 2. The clause predicate or the container rule's exceptions change
    upstream (app-connect-spec `decisions/0003`, the WAS authorization
    profile) in a way that removes the admission this mechanism rides.
+
+## Amendment (2026-09-03)
+
+Revisit Criterion 1 is met and answered by the browser wallet's design
+for running the account-management ceremonies from a credential-only
+transient session, approved 2026-09-03.
+
+Three ceremonies other than deletion now need the ladder VM to delete a
+Space. The passkey removal deletes the removed passkey's unlock Space.
+The recovery-code revocation deletes the revoked code's. The passphrase
+change deletes the old credential's. Each mints the same shape this
+record already states: a DELETE-only child of that credential's registry
+entry management zcap, `invocationTarget` the parent's target unchanged,
+`allowedAction` exactly `['DELETE']`, ten minutes, signed by the acting
+ladder VM. On a transient session the delegatee is the acting ladder
+VM's own bare did:key, as in the deletion walk.
+
+The criterion's own instruction is satisfied without exercising it. It
+asks for a new enumerated target-and-verb shape rather than a
+root-invoker rule. No new shape is needed. The third predicate of the
+client-annex clause admits these mints as it stands, so there is no
+clause extension, no spec change, and no root-invoker rule.
+
+The rest of the deletion walk's discipline carries over. Each mint runs
+behind the walk's five pre-mint refusals, and a refusal or a masked 404
+is reported as a named residue rather than failing the ceremony or
+passing in silence. Each also sits behind its own ceremony's strike
+entry, so the exercise stays loud (`decisions/0002`'s amendment of the
+same date).
+
+The decision is unchanged.
+
+## Changelog
+
+- 2026-09-03: Revisit Criterion 1 answered. The DELETE-only child is
+  minted by the passphrase change, the passkey removal, and the
+  recovery-code revocation as well as by the deletion ceremony, in the
+  shape recorded here and under the clause as it stands.

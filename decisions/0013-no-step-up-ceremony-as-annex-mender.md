@@ -88,3 +88,23 @@ Reopen this decision when one or more of the following holds:
    `capabilityDelegation` key stops being bounded.
 3. The annex log's record of a mend proves insufficient as an audit
    trail even with FW-358's surface built.
+
+## Amendment (2026-09-03)
+
+A clarifying amendment, from the browser wallet's design for running the
+account-management ceremonies from a credential-only transient session,
+approved 2026-09-03.
+
+The Decision's premise holds as written. A ladder VM structurally is not
+an invoking client, and nothing here changes that. What the record could
+not yet say is that the ceremonies do not need the ladder VM to invoke.
+On the ladder branch the invoker is the annex VM, acting under the
+generation delegation the ladder VM signed. So the twelve
+account-management ceremonies this record described as each needing an
+invoking client now have one, without the step-up ceremony.
+
+The Decision's closing sentence, that the step-up item is untouched in
+its main purpose, is therefore superseded. That item was retired
+2026-09-03, and its ceremony is rejected for the whole class rather than
+for this record's one mender (`decisions/0020`). The scoped rejection
+recorded here widens to that class and stands.

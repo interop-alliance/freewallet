@@ -184,10 +184,11 @@ export interface TransientSessionStores extends SessionPersistenceBase {
  */
 export interface InMemorySessionPersistence extends TransientSessionStores {
   // Session assembly only: the annex zcap spelling and the
-  // `profile.invocationCapability` stamp. Never thread the delegation into
-  // the unlock-methods registry helpers -- a delegated registry read/write
-  // from a transient session would clobber the registry from a public
-  // terminal (the registry stays remembered-session-only).
+  // `profile.invocationCapability` stamp. The delegation carries the
+  // unlock-methods registry READ (the Settings list, and the acting
+  // credential's own management-zcap refresh); it does not reach the
+  // registry's writers, which would let a transient session clobber the
+  // registry (minting and rewriting stay browser-local-only).
   clientAnnex: { clientAnnexDid: string; invocationCapability: IZcap }
 }
 

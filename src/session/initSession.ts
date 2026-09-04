@@ -1339,7 +1339,9 @@ async function sessionFromKeyringHit({
   // An existing registry not yet materialized stays that way (no
   // `createIfMissing`). The remote-direct popup is excluded, as it always
   // was; a transient session has no `registryReady` and so no backfill,
-  // which is the remembered-session-only rule the registry lives under.
+  // which is the browser-local-only rule the registry's writers live under
+  // (its read is open to a transient session under the generation
+  // delegation).
   if (session.registryReady && !popup) {
     session.registryReady = session.registryReady.then(async () => {
       try {

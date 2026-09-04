@@ -151,3 +151,38 @@ of that population loudness had no other answer for: a retired
 credential's ladder VM left standing by an unattributed strike. It does
 not reach a client-less account's other standing ladder VMs, each a
 whole-account kill switch bounded only by its own credential's entropy.
+
+## Amendment (2026-09-03)
+
+The browser wallet's design for running the account-management
+ceremonies from a credential-only transient session, approved
+2026-09-03, widens the 2026-09-01 amendment's scope. The DELETE-only
+child of `decisions/0014`'s shape is no longer minted by the account
+deletion ceremony alone.
+
+Three more ceremonies mint it, each on the ladder branch. The passphrase
+change deletes the old credential's unlock Space. The passkey removal
+deletes the removed passkey's. The recovery-code revocation deletes the
+revoked code's. The shape is unchanged, and so is the reason it needs no
+entry of its own. Each mint sits behind that ceremony's own strike
+entry, which is world-readable and inventory-changing, so the exercise
+of credential-derived authority is still preceded by a log append. Each
+also runs behind the deletion walk's five pre-mint refusals, and a
+refusal or a masked 404 is reported as a named residue rather than
+passed over.
+
+Recovery codes join the ladder holders admitted to the deletion
+exception. A code now carries a ladder of its own, so its ladder VM can
+mint the DELETE-only child of the account Space's root with no entry
+before it. The weighing that admits this found no new exposure. A stolen
+code already grants full takeover, since its holder spends it, sets a
+passphrase, logs in, and deletes the account from Settings. What the
+spend's reveal entry would have bought is a world-readable record of the
+act, and a deletion destroys the log that record would live in, which is
+why this record already carries the deletion exception. The code's other
+new reach, one ladder-signed roster append at an inventory-changing
+version, takes nothing from anyone. The rotation wraps only to
+recipients the verified account document lists, and the thief already
+holds the code's own wrap.
+
+The decision itself is unchanged.

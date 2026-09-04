@@ -138,15 +138,20 @@ export async function readLoginHandle({
 }
 
 /**
- * Loads the unlock-methods registry for the Settings passkeys section, lazily
- * creating/repairing the passphrase entry (the registry's backfill point). A
- * backfill failure falls back to a plain read; a read failure propagates, so
- * the caller can show a non-blocking load error while the rest of the section
- * keeps working.
+ * Loads the unlock-methods registry for the Settings passkeys section. Read
+ * and write split by the session's persistence strategy.
  *
- * A transient session makes no registry call at all: this surface is gated
- * on the browser-local persistence strategy, so it returns `null`
- * immediately rather than calling the backfill or the plain read.
+ * A browser-local session lazily creates/repairs the passphrase entry (the
+ * registry's backfill point). A backfill failure falls back to a plain read;
+ * a read failure propagates, so the caller can show a non-blocking load error
+ * while the rest of the section keeps working.
+ *
+ * A transient session performs the plain READ alone, riding the visit's
+ * generation delegation (`profile.invocationCapability`) since its
+ * annex-signed root invocation would be refused under the current-key-set
+ * rule. It never reaches the backfill: minting or rewriting a registry stays
+ * browser-local-only. With no WAS server there is no capability and no remote
+ * record, and the read serves the local cache.
  *
  * @param options {object}
  * @param options.session {Session}
@@ -157,8 +162,12 @@ export async function loadUnlockRegistry({
 }: {
   session: Session
 }): Promise<UnlockMethodsRecord | null> {
+  const { invocationCapability } = session.profile
   if (!isBrowserLocalSession(session.profile.persistence)) {
-    return null
+    return await getUnlockMethods({
+      session,
+      ...(invocationCapability ? { capability: invocationCapability } : {})
+    })
   }
   try {
     return await backfillPassphraseUnlockMethod({
