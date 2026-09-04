@@ -381,7 +381,7 @@
       "codeLabel": "Código de recuperación",
       "checkCode": "Comprobar código",
       "accountFound": "Se encontró una cuenta de cartera para este código.",
-      "newPassphraseExplain": "Elige una nueva frase de contraseña para este navegador. Tu frase anterior (si aún la conoces) sigue funcionando en otros dispositivos hasta que la cambies en Configuración. La recuperación también retirará el código que acabas de escribir y emitirá uno de reemplazo: un código escrito cuenta como usado.",
+      "newPassphraseExplain": "Elige una nueva frase de contraseña para este navegador. La recuperación retira todas las frases de contraseña y claves de acceso que la billetera tenía antes, en todos los navegadores; vuelve a añadir las que quieras desde Configuración una vez que hayas iniciado sesión. También retira el código que acabas de escribir y emite uno de reemplazo: un código escrito cuenta como usado.",
       "newPassphraseLabel": "Nueva frase de contraseña",
       "submit": "Recuperar cartera",
       "recovered": "Tu cartera fue recuperada. Este navegador es ahora un cliente inscrito y el código que escribiste ya no funciona.",

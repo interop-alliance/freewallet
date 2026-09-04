@@ -1851,9 +1851,13 @@ On a non-remembered browser, the default, the continuation is the
 enrolled client is minted anywhere. The add-and-retire entry publishes the
 fresh credential's ladder VM in the new client's place (`assertionMethod`
 and `capabilityDelegation` only), beside the new passphrase's `keyAgreement`
-commitment and the replacement code's inventory, and retires every standing
-ladder VM (the stale-third-party retirement no other ceremony performs). The
-account lands client-less and ladder-anchored.
+commitment and the replacement code's inventory, and retires every
+pre-recovery standing credential: its `keyAgreement` member, its ladder VM,
+and its committed rung hashes (the stale-third-party retirement no other
+ceremony performs). The remembered continuation strikes the same set. A
+recovery therefore leaves the account reachable by the new passphrase and
+the replacement code alone, and the recovery page says so. The account
+lands client-less and ladder-anchored.
 
 The continuation's persist-before-publish seam runs after the reveal entry
 validates the code and before the ladder VM publishes. It mints a fresh
@@ -1884,10 +1888,17 @@ retired, fresh credential and replacement code escrowed, fresh epoch minted,
 one write anchored at the add-and-retire entry). The pre-rotation user key
 the registry update needs is unwrapped afterwards, from the superseded
 epoch's escrow to the fresh credential. The epoch cascade and the
-unlock-methods registry update (spent entry out, replacement and
-new-passphrase entries in, re-sealed to the rotated user key) ride the
-generation delegation. The visit then enters through the ordinary transient
-composition with zero local residue.
+unlock-methods registry update (spent entry out, every retired passphrase
+and passkey entry out with it, replacement and new-passphrase entries in,
+re-sealed to the rotated user key) ride the generation delegation. Which
+entries are retired is read off the post-entry document inside the
+compare-and-swap (`findRetiredCredentialEntries`): a passphrase or passkey
+entry whose recorded key-agreement key the document publishes in neither
+form. Each retired entry's unlock Space is then deleted best-effort through
+a DELETE-only child of its own management zcap, signed by the fresh
+credential's ladder VM and sent by its bare did:key; a refusal is reported
+rather than failing the run. The visit then enters through the ordinary
+transient composition with zero local residue.
 
 Two residues remain. A tear inside the append leaves the spent code dead
 (its key left the document, so a re-run refuses it as spent) and the current
@@ -1913,10 +1924,13 @@ entry then brings in the new client, retires the spent code's inventory, and
 adds the replacement code's. The tail then makes the passphrase standing:
 roster wrap, then commitment and rung-0 entry, before the rotation. The user
 key unwraps from the code's wrap and mandatorily rotates off it. The
-registry mutation (spent entry out, successors in) runs between the re-seal
-and the cascade. The replacement code is pushed hard, its save confirm
-completing the local record and clearing the carrier. The spent code's
-unlock Space is deleted, so a spent code thereafter fails distinctly. A
+registry mutation (spent entry out, every retired passphrase and passkey
+entry out with it, successors in) runs between the re-seal and the cascade,
+and the new enrolled client then deletes each retired entry's unlock Space
+and this browser's unlock-local state for it, best-effort. The replacement
+code is pushed hard, its save confirm completing the local record and
+clearing the carrier. The spent code's unlock Space is deleted, so a spent
+code thereafter fails distinctly. A
 remembered login follows. A post-entry tab death leaves the pending record
 for the next login's spend resume: escrows re-derived from the unwrap key,
 standing and registry backfilled, the code re-displayed until confirmed

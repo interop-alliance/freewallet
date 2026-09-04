@@ -1140,10 +1140,13 @@ function sessionDelegatorIdentities({
  * capability is usable.
  *
  * The delegator check is skipped when the caller supplies its own signer: it
- * states the identity it acts as, which this module cannot second-guess.
+ * states the identity it acts as, which this module cannot second-guess. A
+ * caller with neither a session nor a signer (a recovery tail, which runs
+ * before any session exists) can act as nobody, so it is refused there.
  *
  * @param options {object}
- * @param options.session {Session}
+ * @param [options.session] {Session}   the acting session; absent, the caller
+ *   must supply its own `signer`
  * @param options.entry {UnlockMethod}
  * @param [options.signer] {object}   an explicit delegator, invoker and
  *   delegatee
@@ -1162,7 +1165,7 @@ export function unlockSpaceDeletionRefusal({
   signer,
   verb = 'DELETE'
 }: {
-  session: Session
+  session?: Session
   entry: UnlockMethod
   signer?: { zcapClient: ZcapClient; invoker?: ZcapClient; controller: string }
   verb?: 'GET' | 'PUT' | 'DELETE'
@@ -1184,7 +1187,8 @@ export function unlockSpaceDeletionRefusal({
   }
   if (
     !signer &&
-    !sessionDelegatorIdentities({ session }).has(parent.controller)
+    (!session ||
+      !sessionDelegatorIdentities({ session }).has(parent.controller))
   ) {
     return 'foreign-controller'
   }
@@ -1292,7 +1296,8 @@ export function unlockEntryReaderFor({
  * its own child, which is the remembered session's management-zcap path.
  *
  * @param options {object}
- * @param options.session {Session}
+ * @param [options.session] {Session}   the acting session, which signs the
+ *   child itself; absent, the caller must supply its own `signer`
  * @param options.entry {UnlockMethod}   the method whose Space to delete
  * @param [options.signer] {object}   an explicit delegator, invoker and
  *   delegatee, for a caller not signing as an enrolled client
@@ -1307,7 +1312,7 @@ export async function deleteUnlockSpaceForEntry({
   entry,
   signer
 }: {
-  session: Session
+  session?: Session
   entry: UnlockMethod
   signer?: { zcapClient: ZcapClient; invoker?: ZcapClient; controller: string }
 }): Promise<UnlockSpaceDeletionOutcome> {
@@ -1315,7 +1320,7 @@ export async function deleteUnlockSpaceForEntry({
     return 'no-server'
   }
   const refusal = unlockSpaceDeletionRefusal({
-    session,
+    ...(session ? { session } : {}),
     entry,
     ...(signer ? { signer } : {})
   })
@@ -1325,8 +1330,16 @@ export async function deleteUnlockSpaceForEntry({
   const parent = entry.manageCapability as IZcap
   const controller =
     signer?.controller ?? (parent as { controller?: string }).controller
-  const delegator =
-    signer?.zcapClient ?? managementZcapClient({ session, capability: parent })
+  let delegator: ZcapClient
+  if (signer) {
+    delegator = signer.zcapClient
+  } else if (session) {
+    delegator = managementZcapClient({ session, capability: parent })
+  } else {
+    // Unreachable: the refusal above already refuses a caller holding
+    // neither a session nor a signer.
+    return 'foreign-controller'
+  }
   // The child's own controller sends it; the delegator only signs it.
   const invoker = signer?.invoker ?? delegator
   let capability

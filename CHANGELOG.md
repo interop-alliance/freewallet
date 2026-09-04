@@ -4,6 +4,18 @@
 
 ### Fixed
 
+- A recovery spend now retires every pre-recovery passphrase and passkey
+  in freewallet's own tails, matching the document strike wallet-core 0.65.0
+  made. All three registry mutations (the remembered spend, its resume, and
+  the transient spend) drop the entries whose recorded key-agreement key the
+  post-entry document no longer publishes in either form
+  (`findRetiredCredentialEntries` in `src/session/credentialCoverage.ts`),
+  computed inside the compare-and-swap, and then delete each retired entry's
+  unlock Space best-effort through a DELETE-only child of its management
+  zcap; the remembered tails also clear this browser's unlock-local state for
+  it. `deleteUnlockSpaceForEntry` and `unlockSpaceDeletionRefusal` take an
+  optional session when an explicit signer is passed. The recovery page's
+  new-passphrase copy no longer claims the old passphrase keeps working.
 - Retiring a passphrase or passkey from a remembered session now re-mints the
   other standing credentials' records and bridge delegations before the strike
   entry removes the retired credential's ladder VM. The retirement binds

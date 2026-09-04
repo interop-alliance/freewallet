@@ -1,5 +1,5 @@
 /**
- * Two read-only detectors over the standing unlock credentials an account
+ * Three read-only detectors over the standing unlock credentials an account
  * document publishes, and the unlock-methods registry that is supposed to
  * name them all:
  *
@@ -8,9 +8,13 @@
  *   residue of a passphrase change torn before its retirement landed;
  * - an UNRECORDED standing credential -- a `keyAgreement` entry in the
  *   document carrying no enrolled-client controller marker that no registry
- *   entry records, in either published form.
+ *   entry records, in either published form;
+ * - a RETIRED credential's entry -- the mirror of the unrecorded case: a
+ *   registry entry whose credential the document no longer publishes, which
+ *   is what a recovery spend leaves behind for every pre-recovery passphrase
+ *   and passkey.
  *
- * Both name an unlock Space a registry-driven walk cannot reach. Two
+ * The first two name an unlock Space a registry-driven walk cannot reach. Two
  * ceremonies read them and grade them differently: the last-client transition
  * REFUSES on either (a bridge delegation its removal entry would rot with no
  * replacement), while the account-deletion walk REPORTS each as a residue and
@@ -223,4 +227,60 @@ export async function findUnrecordedCredentials({
     )
   }
   return credentialVmIds.filter(vmId => !covered.has(vmId))
+}
+
+/**
+ * The registry's passphrase and passkey entries naming a credential the
+ * account document no longer publishes -- the residue a recovery spend
+ * leaves, its add-and-retire entry having struck every pre-recovery standing
+ * credential's `keyAgreement` member, ladder VM and committed rung hashes.
+ *
+ * The comparison is {@link findUnrecordedCredentials}'s, run the other way
+ * round: an entry's recorded key-agreement multibase maps to both published
+ * forms -- the verbatim id a passkey publishes under and the commitment id a
+ * passphrase publishes under -- and the entry is retired when the document
+ * carries neither. An entry recording no multibase (a bare entry) names
+ * nothing to compare and is left alone, as are recovery codes, whose own
+ * ceremonies drop them.
+ *
+ * @param options {object}
+ * @param options.doc {object}   the verified post-entry account document
+ * @param options.did {string}   the account's did:webvh
+ * @param options.registry {{ methods?: unknown[] } | null}
+ * @returns {Promise<UnlockMethod[]>}   the retired entries
+ */
+export async function findRetiredCredentialEntries({
+  doc,
+  did,
+  registry
+}: {
+  doc: object
+  did: string
+  registry: { methods?: unknown[] } | null
+}): Promise<UnlockMethod[]> {
+  const standing = new Set(credentialKeyAgreementVmIds({ doc, did }))
+  const retired: UnlockMethod[] = []
+  for (const method of (registry?.methods ?? []) as UnlockMethod[]) {
+    if (method?.type !== 'passphrase' && method?.type !== 'passkey') {
+      continue
+    }
+    const keyAgreementKeyMultibase = method.keyAgreementKeyMultibase
+    if (typeof keyAgreementKeyMultibase !== 'string') {
+      continue
+    }
+    const verbatimVmId = unlockKeyVmId({
+      did,
+      keyAgreement: { publicKeyMultibase: keyAgreementKeyMultibase }
+    })
+    const commitmentVmId = unlockKeyVmId({
+      did,
+      keyAgreement: {
+        commitment: await keyAgreementCommitment({ keyAgreementKeyMultibase })
+      }
+    })
+    if (!standing.has(verbatimVmId) && !standing.has(commitmentVmId)) {
+      retired.push(method)
+    }
+  }
+  return retired
 }

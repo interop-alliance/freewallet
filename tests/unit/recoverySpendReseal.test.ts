@@ -17,7 +17,16 @@ import type { IKeyAgreementKey, IZcap } from '@interop/data-integrity-core'
 
 const state = vi.hoisted(() => ({
   records: new Map<string, unknown>(),
-  calls: [] as string[]
+  calls: [] as string[],
+  // The registry the mutation reads, the record it writes, and the unlock
+  // Spaces the tail asked to delete.
+  registry: null as {
+    version: 1
+    webAuthnUserId: string
+    methods: unknown[]
+  } | null,
+  written: null as { methods: Array<{ unlockSpaceId: string }> } | null,
+  deletedSpaces: [] as string[]
 }))
 
 vi.mock('@/app.config', async importOriginal => ({
@@ -75,10 +84,23 @@ vi.mock('@interop/wallet-core/recovery', async importOriginal => ({
 
 vi.mock('@/session/unlockMethods', async importOriginal => ({
   ...(await importOriginal<typeof import('@/session/unlockMethods')>()),
-  updateUnlockMethodsWithClient: vi.fn(async () => {
-    state.calls.push('registryMutation')
-    return null
-  })
+  updateUnlockMethodsWithClient: vi.fn(
+    async ({
+      mutate
+    }: {
+      mutate: (current: unknown) => unknown | Promise<unknown>
+    }) => {
+      state.calls.push('registryMutation')
+      state.written = (await mutate(state.registry)) as typeof state.written
+      return state.written
+    }
+  ),
+  deleteUnlockSpaceForEntry: vi.fn(
+    async ({ entry }: { entry: { unlockSpaceId: string } }) => {
+      state.deletedSpaces.push(entry.unlockSpaceId)
+      return 'deleted'
+    }
+  )
 }))
 
 vi.mock('@interop/wallet-core/keys', async importOriginal => ({
@@ -151,6 +173,7 @@ import {
   RECOVERY_KDF,
   wrapUnlockRecord
 } from '@interop/wallet-core/recovery'
+import { agentsFromSeed } from '@interop/wallet-core/identity'
 import { recoverAccountWithCode } from '@/session/recovery'
 import { createFakeSessionIdb } from './fakeSessionIdb'
 
@@ -166,6 +189,15 @@ const DELEGATION = {
   parentCapability: 'urn:zcap:root:test',
   proof: { verificationMethod: `${POINTER.did}#z6MkIssuingClient` }
 } as unknown as IZcap
+
+// A real X25519 key-agreement multibase, so the retired-entry detector hashes
+// decodable multikey bytes.
+const { keyAgreementKey: RETIRED_KEY_AGREEMENT_KEY } = await agentsFromSeed({
+  seed: new Uint8Array(32).fill(7)
+})
+const RETIRED_KEY_AGREEMENT_MULTIBASE = (
+  RETIRED_KEY_AGREEMENT_KEY as unknown as { publicKeyMultibase: string }
+).publicKeyMultibase
 
 /**
  * Issues a real recovery record for a fresh code into the mocked unlock
@@ -197,6 +229,9 @@ async function storeRecordForCode(): Promise<string> {
 beforeEach(() => {
   state.records.clear()
   state.calls = []
+  state.registry = null
+  state.written = null
+  state.deletedSpaces = []
   vi.clearAllMocks()
 })
 
@@ -220,5 +255,51 @@ describe('the recovery spend, torn in the collection fan-out', () => {
       'registryMutation',
       'cascadeCollections'
     ])
+  })
+
+  it("drops the retired credentials' registry entries and deletes their unlock Spaces", async () => {
+    const code = await storeRecordForCode()
+    const { idb } = createFakeSessionIdb()
+    // The mocked account document publishes no keyAgreement entry at all --
+    // the state the add-and-retire entry leaves, every pre-recovery standing
+    // credential struck -- so the passkey below names a credential nothing
+    // backs.
+    state.registry = {
+      version: 1,
+      webAuthnUserId: 'AAAAAAAAAAAAAAAAAAAAAA',
+      methods: [
+        {
+          type: 'passkey',
+          label: 'a passkey the recovery retired',
+          createdAt: '2026-09-01T00:00:00.000Z',
+          credentialId: 'retired-passkey',
+          transports: [],
+          backupEligibility: false,
+          backupState: false,
+          unlockSpaceId: 'unlock-retired-passkey',
+          keyAgreementKeyMultibase: RETIRED_KEY_AGREEMENT_MULTIBASE,
+          manageCapability: {
+            id: 'urn:zcap:delegated:manage',
+            controller: POINTER.did,
+            invocationTarget: `${POINTER.host}/space/unlock-retired-passkey`,
+            allowedAction: ['GET', 'PUT', 'DELETE']
+          }
+        }
+      ]
+    }
+
+    await expect(
+      recoverAccountWithCode({
+        code,
+        newPassphrase: 'a fresh passphrase for the recovered account',
+        rememberBrowser: true,
+        idb
+      })
+    ).rejects.toThrow('the tab closed')
+
+    expect(
+      state.written?.methods.map(method => method.unlockSpaceId)
+    ).not.toContain('unlock-retired-passkey')
+    expect(state.deletedSpaces).toEqual(['unlock-retired-passkey'])
   })
 })
