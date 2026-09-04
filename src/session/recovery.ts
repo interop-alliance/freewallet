@@ -191,6 +191,7 @@ import {
   verifiedAccountLog
 } from '@/session/verifiedLog'
 import {
+  adoptRotatedUserKey,
   adoptRotatedUserKeyInBand,
   rewrapUnlockRegistryToUserKey
 } from '@/session/userKeyAdoption'
@@ -2881,6 +2882,18 @@ export async function revokeRecoveryCode({
         rosterDescriptor: read.descriptor,
         clientKeyAgreementKey: unwrapKey,
         userKey: read.userKey
+      })
+      // The storage half of the adoption, past the fan-out that made the
+      // fresh key a recipient of every collection's current epoch: the
+      // rotated descriptors are refetched and the ciphers rebuilt on them, so
+      // the writes this session makes next seal under the fresh epoch rather
+      // than the one the rotation retired. The re-seal above already landed,
+      // so this makes no second registry PUT.
+      await adoptRotatedUserKey({
+        session,
+        spaceId: pointer.spaceId,
+        userKey: read.userKey,
+        ...rides
       })
     } else {
       await epochPins.saveFromDescriptor({

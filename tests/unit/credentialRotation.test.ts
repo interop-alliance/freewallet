@@ -313,7 +313,11 @@ function sessionWith(
   return {
     user: { id: 'did:key:z6MkRetiringClient' },
     isGuest: false,
-    storage: { remoteStore, adoptRotatedVaultKeys: vi.fn(async () => {}) },
+    storage: {
+      remoteStore,
+      holdRotatedVaultKeys: vi.fn(() => {}),
+      adoptRotatedVaultKeys: vi.fn(async () => {})
+    },
     profile: {
       accountPointer:
         'pointerDid' in overrides && overrides.pointerDid === undefined

@@ -519,13 +519,17 @@ export async function initSessionFromSeed({
             clientKeyAgreementKey: keyAgreementKey,
             userKey: sweepUserKey
           })
-          // The session's ciphers were built before the sweep ran: when the
-          // sweep moved any collection's current epoch (`rotated`; the
-          // rotation-only cascade never installs epochs -- provisioning does
-          // -- and an escrow leaves the current epoch in place), refresh the
-          // descriptors and ciphers so the rest of the session seals writes
-          // under the fresh epoch instead of the retired one.
+          // The session's ciphers were built before the sweep ran, and the
+          // sweep's own adoption deliberately leaves them alone (the
+          // collections still carried the pre-rotation epochs then). Refresh
+          // the descriptors and ciphers when the sweep adopted a rotated key,
+          // or when the fan-out moved any collection's current epoch
+          // (`rotated`; the rotation-only cascade never installs epochs --
+          // provisioning does -- and an escrow leaves the current epoch in
+          // place), so the rest of the session seals writes under the fresh
+          // epoch instead of the retired one.
           if (
+            sweepUserKey.id !== loginUserKey.id ||
             Object.values(result.outcomes).some(
               outcome => outcome === 'rotated'
             )

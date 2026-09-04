@@ -1,5 +1,23 @@
 # History
 
+## 0.49.1 - TBD
+
+### Fixed
+
+- The rotated user key now reaches a live session's storage ciphers. The
+  in-band adoption fires before the collection fan-out, while every collection
+  still carries the epoch the rotation retires, so rebuilding the ciphers
+  there asked the fresh key to open an epoch it was not yet a recipient of and
+  failed with a `KeyUnwrapError`. It now takes the key material alone
+  (`StorageManager.holdRotatedVaultKeys`), and the post-ceremony
+  `adoptRotatedUserKey` rebuilds the ciphers past the fan-out: its id guard
+  covers the registry re-seal alone rather than skipping the swap. Without
+  this a write made after a recovery-code revocation or a passphrase change,
+  in the same session, could seal under the epoch the rotation had just
+  retired. Recovery-code revocation gained the post-ceremony adoption it never
+  made, and the login-time sweep refreshes its descriptors whenever it adopted
+  a rotated key.
+
 ## 0.49.0 - TBD
 
 Every account-management ceremony now runs from a transient session, on a

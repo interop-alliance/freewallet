@@ -144,10 +144,12 @@ function makeFakeStorage({ withRemote = true } = {}) {
   const remoteStore = { isFakeRemoteStore: true } as unknown as WASRemoteStore
   const refreshEncryptedDescriptors = vi.fn(async () => undefined)
   const adoptRotatedVaultKeys = vi.fn(async () => undefined)
+  const holdRotatedVaultKeys = vi.fn(() => undefined)
   const storage = {
     ensureUserCollections: vi.fn(() => provisioning),
     refreshEncryptedDescriptors,
     adoptRotatedVaultKeys,
+    holdRotatedVaultKeys,
     get remoteStore() {
       return withRemote ? remoteStore : undefined
     }
@@ -157,6 +159,7 @@ function makeFakeStorage({ withRemote = true } = {}) {
     remoteStore,
     refreshEncryptedDescriptors,
     adoptRotatedVaultKeys,
+    holdRotatedVaultKeys,
     resolveProvisioning,
     rejectProvisioning
   }
@@ -524,6 +527,12 @@ describe('the roster stage of the sweep', () => {
     vi.mocked(checkUserKeyRosterAtLogin).mockResolvedValue(
       rosterRead() as never
     )
+    // A clean fan-out, restated because `clearAllMocks` leaves an earlier
+    // test's rejection implementation in place.
+    vi.mocked(cascadeCollectionsToUserKey).mockResolvedValue({
+      outcomes: {},
+      failed: []
+    })
     // The convergence found the roster still wrapping the current key to a
     // recipient the document no longer keys, rotated it, and handed back the
     // fresh key through the adoption callback.
@@ -574,11 +583,14 @@ describe('the roster stage of the sweep', () => {
     expect(epochPins.load).toHaveBeenCalledWith(
       expect.objectContaining({ accountDid: POINTER.did })
     )
-    // The fresh key is adopted -- persisted for the next login, swapped into
-    // the live session -- and the fan-out runs against it.
+    // The fresh key is adopted -- persisted for the next login, held by the
+    // live session -- and the fan-out runs against it. The ciphers move only
+    // once the fan-out has, on the refresh below.
     expect(persistClientKeys).toHaveBeenCalledWith({ userKey: FRESH_USER_KEY })
     expect(session.profile.userKey).toEqual(FRESH_USER_KEY)
-    expect(fake.adoptRotatedVaultKeys).toHaveBeenCalledOnce()
+    expect(fake.holdRotatedVaultKeys).toHaveBeenCalledOnce()
+    expect(fake.adoptRotatedVaultKeys).not.toHaveBeenCalled()
+    expect(fake.refreshEncryptedDescriptors).toHaveBeenCalledOnce()
     expect(
       vi.mocked(cascadeCollectionsToUserKey)
     ).toHaveBeenCalledExactlyOnceWith(
@@ -609,7 +621,7 @@ describe('the roster stage of the sweep', () => {
     await session.userKeySweep
 
     expect(vi.mocked(convergeUserKeyRosterToAccount)).toHaveBeenCalledOnce()
-    expect(fake.adoptRotatedVaultKeys).not.toHaveBeenCalled()
+    expect(fake.holdRotatedVaultKeys).not.toHaveBeenCalled()
     expect(
       vi.mocked(cascadeCollectionsToUserKey)
     ).toHaveBeenCalledExactlyOnceWith(
@@ -642,7 +654,7 @@ describe('the roster stage of the sweep', () => {
     fake.resolveProvisioning()
     await session.userKeySweep
 
-    expect(fake.adoptRotatedVaultKeys).not.toHaveBeenCalled()
+    expect(fake.holdRotatedVaultKeys).not.toHaveBeenCalled()
     expect(
       vi.mocked(cascadeCollectionsToUserKey)
     ).toHaveBeenCalledExactlyOnceWith(

@@ -791,6 +791,30 @@ export class StorageManager {
   }
 
   /**
+   * Takes a rotated user key's vault key material without touching the
+   * ciphers -- the in-band half of a rotation, which runs while every
+   * collection still carries the epoch the rotation is about to retire.
+   * Rebuilding there would ask the fresh key to open an epoch it is not yet a
+   * recipient of, so the ciphers keep the material they were built from until
+   * {@link adoptRotatedVaultKeys} (or
+   * {@link refreshEncryptedDescriptors}) runs past the collection fan-out.
+   *
+   * @param options {object}
+   * @param options.keyAgreementKey {IKeyAgreementKey}   the fresh user key's KAK
+   * @param options.keyResolver {IKeyResolver}
+   * @returns {void}
+   */
+  holdRotatedVaultKeys({
+    keyAgreementKey,
+    keyResolver
+  }: {
+    keyAgreementKey: IKeyAgreementKey
+    keyResolver: IKeyResolver
+  }): void {
+    this.#vaultKeys = { keyAgreementKey, keyResolver }
+  }
+
+  /**
    * Adopts a rotated user key's vault keys into the live session's storage -- the
    * tail of the revocation cascade: once the roster and the collections have
    * moved to a fresh user key, the session that drove the rotation (it minted the
@@ -798,6 +822,11 @@ export class StorageManager {
    * descriptors, and rebuilds the ciphers, so it keeps reading and writing
    * without a re-login. The app-collection cipher caches are dropped too (they
    * were built from the old vault KAK) and rebuild lazily on next decrypt.
+   *
+   * Its one ordering rule: the collection fan-out must already have run, or
+   * the refetched descriptors still name epochs the fresh key cannot open.
+   * The in-band step that precedes the fan-out takes
+   * {@link holdRotatedVaultKeys} instead.
    *
    * @param options {object}
    * @param options.keyAgreementKey {IKeyAgreementKey}   the fresh user key's KAK
@@ -811,7 +840,7 @@ export class StorageManager {
     keyAgreementKey: IKeyAgreementKey
     keyResolver: IKeyResolver
   }): Promise<void> {
-    this.#vaultKeys = { keyAgreementKey, keyResolver }
+    this.holdRotatedVaultKeys({ keyAgreementKey, keyResolver })
     await this.refreshEncryptedDescriptors()
   }
 

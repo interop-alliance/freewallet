@@ -12,6 +12,10 @@
  *   remote-direct backend, starts no replication (no local end exists), and
  *   keeps the descriptor/meta caches on the persistence strategy's in-memory
  *   pair -- localStorage gains no key.
+ * - A rotated user key reaches the remote-direct backend's ciphers: the
+ *   in-band step holds the key material while the collections still carry the
+ *   retiring epoch, and the post-fan-out adoption rebuilds the ciphers, so
+ *   the next write seals under the fresh epoch.
  *
  * The WAS layer is faked at two seams matching the two subjects: a recording
  * fake `WasClient` under a real `WASRemoteStore` (so the store's own
@@ -34,7 +38,11 @@ import type {
   IZcap,
   WasClient
 } from '@interop/was-client'
-import { ensureFirstEpoch, ownerRecipient } from '@interop/was-client/edv'
+import {
+  ensureFirstEpoch,
+  ownerRecipient,
+  replaceRecipient
+} from '@interop/was-client/edv'
 import { cidFrom } from '@interop/was-client/sync'
 import type { Json } from '@/lib/sync'
 import {
@@ -225,17 +233,35 @@ describe('WASRemoteStore invocation capability', () => {
 })
 
 /**
+ * The encrypted standard collections this fake provisions and rotates.
+ */
+const ENCRYPTED_COLLECTION_IDS = [
+  'private-credentials',
+  'wallet-activity',
+  'contacts',
+  'contacts-history'
+]
+
+/**
  * A structural fake of `WASRemoteStore` for the replica-less StorageManager:
  * per-collection descriptors served from `collectionEncryption`, and an
  * in-memory synced-resource map behind the remote-direct read/write surface.
+ * `rotate` stands in for the cascade's collection fan-out, and `epochStamps`
+ * records the key epoch each write was sealed under.
  */
 function makeFakeRemote(): {
   remoteStore: WASRemoteStore
   descriptors: Record<string, CollectionEncryption>
   provision(owner: { keyAgreementKey: IKeyAgreementKey }): Promise<void>
+  rotate(options: {
+    from: { keyAgreementKey: IKeyAgreementKey }
+    to: { keyAgreementKey: IKeyAgreementKey }
+  }): Promise<void>
+  epochStamps: Map<string, string[]>
 } {
   const spaceId = 's-space'
   const descriptors: Record<string, CollectionEncryption> = {}
+  const epochStamps = new Map<string, string[]>()
   const logicalToId: Record<string, string> = {
     privateCredentials: 'private-credentials',
     walletActivity: 'wallet-activity',
@@ -310,13 +336,22 @@ function makeFakeRemote(): {
       logicalKey,
       resourceId,
       body,
-      ifMatch
+      ifMatch,
+      epoch
     }: {
       logicalKey: string
       resourceId: string
       body: Json
       ifMatch?: string
+      epoch?: string
     }) {
+      const collectionId = logicalToId[logicalKey] ?? logicalKey
+      if (epoch) {
+        epochStamps.set(collectionId, [
+          ...(epochStamps.get(collectionId) ?? []),
+          epoch
+        ])
+      }
       const map = resourcesFor(logicalKey)
       const resourceVersions = versionsFor(logicalKey)
       if (ifMatch !== undefined) {
@@ -348,45 +383,61 @@ function makeFakeRemote(): {
       versionsFor(logicalKey).delete(resourceId)
     }
   } as unknown as WASRemoteStore
-  // A CAS-backed minimal Collection so the real `ensureFirstEpoch` installs
-  // real epoch descriptors (what provisioning would have written).
-  const provision = async (owner: { keyAgreementKey: IKeyAgreementKey }) => {
-    for (const id of [
-      'private-credentials',
-      'wallet-activity',
-      'contacts',
-      'contacts-history'
-    ]) {
-      let version = 0
-      const fakeCollection = {
-        async describeWithEtag() {
-          return {
-            description: {
-              name: id,
-              encryption: descriptors[id] ?? { scheme: 'edv' }
-            },
-            etag: `v${version}`
-          }
+  // A CAS-backed minimal Collection per encrypted collection, so the real
+  // `ensureFirstEpoch` and `replaceRecipient` write real epoch descriptors
+  // (what provisioning and the cascade's fan-out would have written).
+  const collectionVersions = new Map<string, number>()
+  const collectionHandle = (collectionId: string) => ({
+    async describeWithEtag() {
+      return {
+        description: {
+          name: collectionId,
+          encryption: descriptors[collectionId] ?? { scheme: 'edv' }
         },
-        async replaceDescription(
-          fields: { encryption: CollectionEncryption },
-          { ifMatch }: { ifMatch?: string }
-        ) {
-          if (ifMatch !== `v${version}`) {
-            throw new Error('stale etag')
-          }
-          descriptors[id] = fields.encryption
-          version++
-        }
+        etag: `v${collectionVersions.get(collectionId) ?? 0}`
       }
+    },
+    async replaceDescription(
+      fields: { encryption: CollectionEncryption },
+      { ifMatch }: { ifMatch?: string }
+    ) {
+      const version = collectionVersions.get(collectionId) ?? 0
+      if (ifMatch !== `v${version}`) {
+        throw new Error('stale etag')
+      }
+      descriptors[collectionId] = fields.encryption
+      collectionVersions.set(collectionId, version + 1)
+    }
+  })
+  const provision = async (owner: { keyAgreementKey: IKeyAgreementKey }) => {
+    for (const id of ENCRYPTED_COLLECTION_IDS) {
       const { descriptor } = await ensureFirstEpoch({
-        collection: fakeCollection as never,
+        collection: collectionHandle(id) as never,
         recipients: [ownerRecipient({ keyAgreementKey: owner.keyAgreementKey })]
       })
       descriptors[id] = descriptor
     }
   }
-  return { remoteStore, descriptors, provision }
+  const rotate = async ({
+    from,
+    to
+  }: {
+    from: { keyAgreementKey: IKeyAgreementKey }
+    to: { keyAgreementKey: IKeyAgreementKey }
+  }) => {
+    for (const id of ENCRYPTED_COLLECTION_IDS) {
+      descriptors[id] = await replaceRecipient({
+        collection: collectionHandle(id) as never,
+        retire: from.keyAgreementKey.id!,
+        recipient: ownerRecipient({ keyAgreementKey: to.keyAgreementKey }),
+        owner: { keyAgreementKey: from.keyAgreementKey },
+        // The pull axis ran elsewhere: the roster rotation is what retired
+        // the key, and this fake has no zcaps to revoke.
+        pull: async () => {}
+      })
+    }
+  }
+  return { remoteStore, descriptors, provision, rotate, epochStamps }
 }
 
 describe('replica-less remote-direct StorageManager', () => {
@@ -534,6 +585,118 @@ describe('replica-less remote-direct StorageManager', () => {
         'update',
         'create'
       ])
+    } finally {
+      initClientSpy.mockRestore()
+    }
+  })
+
+  it('adopts a rotated user key past the fan-out, sealing later writes under the fresh epoch', async () => {
+    const owner = await generateKey()
+    const { remoteStore, descriptors, provision, rotate, epochStamps } =
+      makeFakeRemote()
+    await provision(owner)
+
+    const persistence = inMemorySessionPersistence({
+      stores: transientSessionStores(),
+      clientAnnex: {
+        clientAnnexDid: 'did:webvh:example:annex',
+        invocationCapability: {} as IZcap
+      }
+    })
+    const user: User = { id: 'did:key:z6MkTestClient' }
+    const profile = {
+      zcapClient: {} as ZcapClient,
+      keyAgreementKey: owner.keyAgreementKey,
+      keyResolver: owner.keyResolver,
+      persistence
+    } as ControllerProfile
+
+    const initClientSpy = vi
+      .spyOn(WASRemoteStore, 'initClient')
+      .mockResolvedValue({ remoteStore })
+    try {
+      const { storage } = await StorageManager.initStorageClients({
+        user,
+        profile
+      })
+      await storage.ready()
+
+      const before = makeCredential('Before')
+      await storage.addCredential({ credential: before, user })
+      const firstEpoch = descriptors['private-credentials'].currentEpoch
+
+      // The ceremony's in-band half, which fires BEFORE the collection
+      // fan-out: the manager takes the rotated key material, and the ciphers
+      // stay on the epoch the collections still carry.
+      const rotated = await generateKey()
+      storage.holdRotatedVaultKeys(rotated)
+
+      // The fan-out: every encrypted collection re-epoch'd onto the rotated
+      // key, which is what makes it a recipient of the current epoch.
+      await rotate({ from: owner, to: rotated })
+      const freshEpoch = descriptors['private-credentials'].currentEpoch
+      expect(freshEpoch).not.toBe(firstEpoch)
+
+      // The post-ceremony half: the rotated descriptors are refetched and the
+      // ciphers rebuilt on them, with no unwrap failure.
+      await storage.adoptRotatedVaultKeys(rotated)
+
+      // A credential written next seals under the fresh epoch...
+      const after = makeCredential('After')
+      await storage.addCredential({ credential: after, user })
+      expect(epochStamps.get('private-credentials')).toEqual([
+        firstEpoch,
+        freshEpoch
+      ])
+      // ...and the pre-rotation row still reads, the rotated key having been
+      // escrowed into the epoch it was sealed under.
+      const listed = await storage.listCredentials()
+      expect(listed.map(({ vc }) => vc)).toEqual(
+        expect.arrayContaining([before, after])
+      )
+    } finally {
+      initClientSpy.mockRestore()
+    }
+  })
+
+  it('refuses to rebuild the ciphers before the fan-out has run', async () => {
+    const owner = await generateKey()
+    const { remoteStore, provision } = makeFakeRemote()
+    await provision(owner)
+
+    const persistence = inMemorySessionPersistence({
+      stores: transientSessionStores(),
+      clientAnnex: {
+        clientAnnexDid: 'did:webvh:example:annex',
+        invocationCapability: {} as IZcap
+      }
+    })
+    const user: User = { id: 'did:key:z6MkTestClient' }
+    const profile = {
+      zcapClient: {} as ZcapClient,
+      keyAgreementKey: owner.keyAgreementKey,
+      keyResolver: owner.keyResolver,
+      persistence
+    } as ControllerProfile
+
+    const initClientSpy = vi
+      .spyOn(WASRemoteStore, 'initClient')
+      .mockResolvedValue({ remoteStore })
+    try {
+      const { storage } = await StorageManager.initStorageClients({
+        user,
+        profile
+      })
+      await storage.ready()
+
+      // Why the in-band step holds the keys rather than adopting them: the
+      // collections still carry the epoch the rotation is about to retire, so
+      // a full adoption there asks the rotated key to open an epoch it is not
+      // yet a recipient of.
+      const rotated = await generateKey()
+      await expect(storage.adoptRotatedVaultKeys(rotated)).rejects.toThrow(
+        expect.objectContaining({ name: 'KeyUnwrapError' })
+      )
     } finally {
       initClientSpy.mockRestore()
     }

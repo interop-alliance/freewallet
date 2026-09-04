@@ -13,6 +13,12 @@
  * on a single-client account. A ceremony that re-sealed only afterwards
  * stranded the registry whenever the collection fan-out in between was torn.
  *
+ * The two halves split at the fan-out. The in-band form takes the key
+ * material alone, because every collection still carries the epoch the
+ * rotation is about to retire. The post-ceremony form
+ * (`adoptRotatedUserKey`) is what rebuilds the storage ciphers, on the
+ * descriptors the fan-out has moved onto the fresh key.
+ *
  * Neutral by design: both the revocation cascade and the recovery ceremonies
  * call in here, and the recovery module is itself imported by the revocation
  * one (the delegation re-mint), so a helper living in either would close a
@@ -152,10 +158,10 @@ export async function resealUnlockRegistryForRotation({
  * 2. The client-key record persists the adopted key, and the visit's epoch
  *    pin advances with it -- the pin must never advance without the key that
  *    authenticated the roster it advanced to.
- * 3. The live session swaps onto the adopted key -- but ONLY if step 1
- *    reported success. The ceremony's own later registry reads and writes (an
- *    entry drop, the deferred entry write, a re-mint's field refresh) must go
- *    out under the key the record is actually sealed to; a session moved onto
+ * 3. The live session takes the adopted key -- but ONLY if step 1 reported
+ *    success. The ceremony's own later registry reads and writes (an entry
+ *    drop, the deferred entry write, a re-mint's field refresh) must go out
+ *    under the key the record is actually sealed to; a session moved onto
  *    the rotated key over a record still sealed to the old one would meet
  *    `UnlockRegistryStaleSealError` on every one of them, mid-ceremony. When
  *    the re-seal failed the session stays on the pre-rotation keys, which
@@ -163,6 +169,12 @@ export async function resealUnlockRegistryForRotation({
  *    The caller's post-ceremony `adoptRotatedUserKey` then retries the
  *    re-seal from those still-held keys, and the next login's re-seal repair
  *    is the backstop after that.
+ *
+ * The storage ciphers are deliberately NOT rebuilt here. This callback fires
+ * before the collection fan-out, so every collection still carries the epoch
+ * the rotation is about to retire, and a rebuild would ask the fresh key to
+ * open an epoch it is not yet a recipient of. The ciphers move at the
+ * caller's post-ceremony `adoptRotatedUserKey`, past the fan-out.
  *
  * @param options {object}
  * @param options.session {Session}
@@ -213,21 +225,42 @@ export async function adoptRotatedUserKeyInBand({
     )
     return
   }
-  try {
-    await swapSessionVaultKeys({ session, userKey })
-  } catch (err) {
-    log.warn(
-      'Could not rebuild the storage ciphers on the rotated user key; the next login adopts it instead',
-      { err }
-    )
-  }
+  holdSessionVaultKeys({ session, userKey })
+}
+
+/**
+ * Moves a live session's key material onto a user key without rebuilding the
+ * storage ciphers: the profile's vault keys are derived from it and the
+ * storage manager holds them for its next rebuild. The pre-fan-out form, so
+ * a ceremony's later registry reads and writes go out under the rotated key
+ * while the ciphers keep opening the epochs the collections still carry.
+ *
+ * @param options {object}
+ * @param options.session {Session}
+ * @param options.userKey {UserKey}   the user key to operate under
+ * @returns {void}
+ */
+export function holdSessionVaultKeys({
+  session,
+  userKey
+}: {
+  session: Session
+  userKey: UserKey
+}): void {
+  const vaultKeys = userKeyVaultKeys({ userKey })
+  session.profile.userKey = userKey
+  session.profile.keyAgreementKey = vaultKeys.keyAgreementKey
+  session.profile.keyResolver = vaultKeys.keyResolver
+  session.storage.holdRotatedVaultKeys(vaultKeys)
 }
 
 /**
  * Swaps a user key into a live session: the profile's vault keys are derived
- * from it and the storage ciphers rebuilt on them. The one place the swap is
- * spelled out -- both the rotation tail below and the login-time roster
- * convergence go through it.
+ * from it, the rotated descriptors are refetched, and the storage ciphers are
+ * rebuilt on them. The one place the full swap is spelled out. It belongs
+ * past the collection fan-out, which is what puts the fresh key in every
+ * collection's current epoch; before it, {@link holdSessionVaultKeys} is the
+ * step that runs.
  *
  * @param options {object}
  * @param options.session {Session}
@@ -253,14 +286,19 @@ export async function swapSessionVaultKeys({
  * re-sealed to it, then the profile vault keys and the storage ciphers are
  * swapped, so this session keeps operating without a re-login.
  *
- * The post-ceremony form, and the retry the in-band adoption's re-seal
- * failure needs. Its id guard makes it exactly that: a session already
- * running on the given key adopted it in band (`adoptRotatedUserKeyInBand`,
- * inside the ceremony's roster tail) with its re-seal landed, so there is
- * nothing left to do and no second PUT is made. A session still on the
+ * The post-ceremony form, and the one place the storage ciphers move onto the
+ * rotated key: it runs past the collection fan-out, which is what makes the
+ * fresh key a recipient of every collection's current epoch. The in-band step
+ * before the fan-out takes the key material alone.
+ *
+ * Its id guard is over the re-seal, not over the swap. A session already
+ * running on the given key adopted it in band
+ * (`adoptRotatedUserKeyInBand`, inside the ceremony's roster tail) with its
+ * re-seal landed, so no second PUT is made. A session still on the
  * PRE-rotation key is the failed-re-seal case -- the in-band step left it
  * there deliberately -- so this call retries the re-seal from the keys it is
- * still holding and swaps on success.
+ * still holding. Either way the swap that follows is what rebuilds the
+ * ciphers on the rotated epochs.
  *
  * The registry re-seal is guarded on a configured storage server (and on the
  * session actually holding pre-rotation vault keys) because the registry has
@@ -289,15 +327,14 @@ export async function adoptRotatedUserKey({
   userKey: UserKey
   capability?: IZcap
 }): Promise<void> {
-  if (session.profile.userKey?.id === userKey.id) {
-    return
+  if (session.profile.userKey?.id !== userKey.id) {
+    await resealUnlockRegistryForRotation({
+      session,
+      spaceId,
+      userKey,
+      ...(capability ? { capability } : {})
+    })
   }
-  await resealUnlockRegistryForRotation({
-    session,
-    spaceId,
-    userKey,
-    ...(capability ? { capability } : {})
-  })
   try {
     await swapSessionVaultKeys({ session, userKey })
   } catch (err) {

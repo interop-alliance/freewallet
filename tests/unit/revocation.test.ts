@@ -261,6 +261,9 @@ function sessionWith(
     isGuest: false,
     storage: {
       remoteStore,
+      holdRotatedVaultKeys: vi.fn(() => {
+        state.calls.push('holdRotatedVaultKeys')
+      }),
       adoptRotatedVaultKeys: vi.fn(async () => {
         state.calls.push('adoptRotatedVaultKeys')
       }),
@@ -395,7 +398,7 @@ describe('the cascade, torn in the collection fan-out', () => {
       'rewrapUnlockMethodsRecord',
       'savePinFromDescriptor',
       'persistClientKeys',
-      'adoptRotatedVaultKeys'
+      'holdRotatedVaultKeys'
     ])
     expect(state.calls.indexOf('rewrapUnlockMethodsRecord')).toBeLessThan(
       state.calls.indexOf('persistClientKeys')
@@ -422,9 +425,12 @@ describe('the cascade, rotated path', () => {
       'rewrapUnlockMethodsRecord',
       'savePinFromDescriptor',
       'persistClientKeys',
-      'adoptRotatedVaultKeys',
+      // The in-band step takes the key material alone; the ciphers move
+      // after the fan-out, on the post-ceremony adoption below.
+      'holdRotatedVaultKeys',
       'cascadeCollections',
       'remintRecoveryDelegations',
+      'adoptRotatedVaultKeys',
       'addHistoryClientRevoked'
     ])
     expect(outcome).toEqual({
@@ -593,6 +599,7 @@ describe('re-run convergence and best-effort stages', () => {
     // Nothing re-persists or re-adopts: the session already holds this user key.
     expect(session.profile.persistClientKeys).not.toHaveBeenCalled()
     expect(vi.mocked(rewrapUnlockMethodsRecord)).not.toHaveBeenCalled()
+    expect(session.storage.holdRotatedVaultKeys).not.toHaveBeenCalled()
     expect(session.storage.adoptRotatedVaultKeys).not.toHaveBeenCalled()
     expect(session.profile.userKey).toBe(OLD_USER_KEY)
   })

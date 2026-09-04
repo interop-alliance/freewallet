@@ -375,13 +375,19 @@ needs this browser's stored copy of the OLD key, destroyed on a
 single-client account by persisting the rotated one, so a run torn after
 this step still leaves a registry the surviving keys open.
 
+The in-band step takes the key material alone. It fires before the
+collection fan-out, while every collection still carries the epoch the
+rotation retires, so a cipher rebuilt there would ask the fresh key to open
+an epoch it is not yet a recipient of.
+
 The callers then tear down the registry entry and the old unlock Space under
 the ROTATED vault keys, and adopt the rotated key into the live session's
 storage ciphers (`adoptRotatedUserKey`, the `revokeRecoveryCode` ordering).
-That call returns on its id guard once the tail has re-sealed and swapped,
-and retries the re-seal in the one case the tail leaves open: a failed
-re-seal, where the session stays on the pre-rotation keys rather than
-meeting a stale seal on its own teardown writes.
+That call runs past the fan-out, so it is the one that rebuilds the ciphers,
+on descriptors the fan-out has moved onto the fresh key. Its id guard covers
+the registry re-seal alone: the re-seal is retried in the one case the tail
+leaves open, a failed re-seal where the session stays on the pre-rotation
+keys rather than meeting a stale seal on its own teardown writes.
 
 Document-removal-first is load-bearing: a run torn after it leaves the
 roster keying a recipient the document no longer backs, exactly what the
@@ -2041,8 +2047,10 @@ branch" after them states what differs when a standing credential signs:
    ordinary disconnect. The closure runs in the no-roster early return too.
 
 The revoking session then adopts the fresh user key in place: vault keys
-swapped, storage ciphers rebuilt via `adoptRotatedVaultKeys`, the
-unlock-methods registry re-wrapped. It keeps operating without a re-login,
+swapped, storage ciphers rebuilt on the re-epoch'd descriptors via
+`adoptRotatedVaultKeys`, the unlock-methods registry re-wrapped. The rebuild
+is what the post-fan-out placement buys, and the in-band step before the
+fan-out holds the key material without it. It keeps operating without a re-login,
 and a wallet-activity record is written under the fresh epoch.
 Self-revocation is refused up front (use another enrolled client, or a
 recovery code). The cascade converges under a naive full re-run: the log
