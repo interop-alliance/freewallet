@@ -26,7 +26,20 @@ const state = vi.hoisted(() => ({
   publishedLog: {
     updateKeys: [] as string[],
     nextKeyHashes: [] as string[]
-  }
+  },
+  /** the arguments the did:web projection store was built with */
+  projectionStoreArgs: null as unknown,
+  /** every projection body PUT through that store, in order */
+  projectionPuts: [] as unknown[]
+}))
+
+/**
+ * The post-strike did:web projection wallet-core derives from the entry it is
+ * about to publish: the retired credential's members already gone.
+ */
+const POST_STRIKE_WEB_DOC = vi.hoisted(() => ({
+  id: 'did:web:test',
+  verificationMethod: []
 }))
 
 vi.mock('@/app.config', async importOriginal => ({
@@ -64,8 +77,23 @@ vi.mock('@interop/wallet-core/clientAnnex', async importOriginal => ({
 
 vi.mock('@interop/was-client', async importOriginal => ({
   ...(await importOriginal<typeof import('@interop/was-client')>()),
+  // The signing authority is restated on the instance, so an annex reach's
+  // client can be told apart from this session's own by the store it is
+  // handed to.
   WasClient: class {
     isWasClient = true
+    serverUrl: string
+    zcapClient: unknown
+    constructor({
+      serverUrl,
+      zcapClient
+    }: {
+      serverUrl: string
+      zcapClient: unknown
+    }) {
+      this.serverUrl = serverUrl
+      this.zcapClient = zcapClient
+    }
   }
 }))
 
@@ -79,6 +107,20 @@ vi.mock('@/session/userKeyCascade', () => ({
     storeFor: () => ({ isDescriptorStore: true }),
     isEncrypted: async () => true
   }))
+}))
+
+vi.mock('@/session/annexReach', async importOriginal => ({
+  ...(await importOriginal<typeof import('@/session/annexReach')>()),
+  didWebProjectionStore: vi.fn((args: unknown) => {
+    state.projectionStoreArgs = args
+    return {
+      getIdResourceRaw: vi.fn(async () => undefined),
+      putIdResource: vi.fn(async ({ content }: { content: string }) => {
+        state.calls.push('putDidWebProjection')
+        state.projectionPuts.push(JSON.parse(content))
+      })
+    }
+  })
 }))
 
 vi.mock('@/session/verifiedLog', () => ({
@@ -107,6 +149,7 @@ import {
   retireClientAnnexRung,
   swapClientAnnexGeneration
 } from '@interop/wallet-core/clientAnnex'
+import { didWebProjectionStore } from '@/session/annexReach'
 import { browserLocalSessionPersistence } from '@/session/persistence'
 import { sessionRosterStore } from '@/session/rosterStore'
 import { cascadeCollections } from '@/session/userKeyCascade'
@@ -119,6 +162,7 @@ import {
   preflightCredentialRetirement,
   rotateOffUnlockCredential
 } from '@/session/credentialRotation'
+import type { AccountCeremonyContext } from '@/session/accountCeremonyContext'
 import type { Session } from '@/types/auth'
 
 const POINTER = {
@@ -194,6 +238,14 @@ function ceremonyDriving({
   document
 }: { rotated?: boolean; document?: object } = {}) {
   return async (options: Parameters<typeof retireUnlockCredential>[0]) => {
+    // wallet-core PUTs the post-strike projection through the supplied store
+    // immediately BEFORE the strike entry publishes; the stand-in reproduces
+    // that placement.
+    await options.projectionStore?.putIdResource({
+      resourceId: 'did.json',
+      content: JSON.stringify(POST_STRIKE_WEB_DOC),
+      contentType: 'application/json'
+    })
     state.calls.push('retireUnlockCredential')
     const userKey = rotated ? FRESH_USER_KEY : OLD_USER_KEY
     if (rotated) {
@@ -251,6 +303,7 @@ function sessionWith(
     clientWebvhKeys: unknown
     clientKeyAgreementKey: unknown
     ladderSeed: Uint8Array | undefined
+    standingUnlock: unknown
   }> = {}
 ): Session {
   const remoteStore =
@@ -280,6 +333,9 @@ function sessionWith(
       ...('ladderSeed' in overrides
         ? { ladderSeed: overrides.ladderSeed }
         : {}),
+      ...('standingUnlock' in overrides
+        ? { standingUnlock: overrides.standingUnlock }
+        : {}),
       persistence: {
         ...browserLocalSessionPersistence(),
         epochPins: { load: epochPinLoad, saveFromDescriptor: epochPinSave }
@@ -294,6 +350,8 @@ function sessionWith(
 beforeEach(() => {
   state.wasUrl = 'https://was.example.test'
   state.calls = []
+  state.projectionStoreArgs = null
+  state.projectionPuts = []
   state.struck = true
   state.strikeError = null
   state.swapError = null
@@ -361,7 +419,9 @@ describe('the ceremony hand-off', () => {
       expect.objectContaining({
         idStore: { isWebvhIdStore: true },
         rosterStore: { rosterStore: true },
-        updateKeys: session.profile.clientWebvhKeys,
+        // An enrolled client's context signs the retirement entry with its
+        // own did:webvh update keys.
+        signer: { kind: 'client', updateKeys: session.profile.clientWebvhKeys },
         expectedDid: POINTER.did,
         verb: 'changing the passphrase',
         userKey: OLD_USER_KEY,
@@ -757,6 +817,186 @@ describe('the annex strike-or-swap stage', () => {
     })
     expect(outcome?.rotated).toBe(true)
     warn.mockRestore()
+  })
+
+  describe('on the ladder kind', () => {
+    const ACTING_ZCAP_CLIENT = { isActingStandingClient: true }
+    const SURVIVING_ZCAP_CLIENT = { isSurvivingStandingClient: true }
+    const ACTING_SIBLING = { id: 'urn:zcap:acting-delegated-clients' }
+    const SURVIVING_SIBLING = { id: 'urn:zcap:surviving-delegated-clients' }
+
+    /**
+     * A transient visit's ceremony context on a standing unlock credential,
+     * carrying the acting record's own sibling delegation into the annex
+     * Space. It names no generation delegation, so the projection refresh
+     * past the strike entry stays out of this stage's assertions.
+     *
+     * @param [options] {object}
+     * @param [options.sibling] {object}   the record's `delegatedClients`
+     * @returns {AccountCeremonyContext}
+     */
+    function ladderContext({ sibling }: { sibling?: object } = {}) {
+      return {
+        kind: 'ladder',
+        remoteStore: { webvhIdStore: vi.fn(() => ({ isWebvhIdStore: true })) },
+        pointer: POINTER,
+        controller: POINTER.did,
+        signer: { kind: 'ladder', ladderSeed: SURVIVING_SEED },
+        ladderSeed: SURVIVING_SEED,
+        idStore: { isWebvhIdStore: true },
+        rosterStore: { rosterStore: true },
+        invoker: { zcapClient: { isPerVisitAnnexClient: true } },
+        standingKeyAgreementKey: { id: 'did:key:z6LSStandingKak' },
+        ...(sibling ? { sibling } : {})
+      } as unknown as AccountCeremonyContext
+    }
+
+    /**
+     * Runs the retirement from a ladder-kind context with the annex stage
+     * driven, over both seeds so the strike arm is the one reached.
+     *
+     * @param options {object}
+     * @param options.context {AccountCeremonyContext}
+     * @param [options.survivingStanding] {object}   the SURVIVING
+     *   credential's client identity and sibling delegation
+     * @param [options.standingUnlock] {object}   the session's own standing
+     *   members, which the fallback reads the acting client off
+     * @returns {Promise<object | null>}
+     */
+    async function retireOnLadder({
+      context,
+      survivingStanding,
+      standingUnlock
+    }: {
+      context: AccountCeremonyContext
+      survivingStanding?: object
+      standingUnlock?: object
+    }) {
+      vi.mocked(retireUnlockCredential).mockImplementation(
+        ceremonyDriving({ document: accountDocument() })
+      )
+      return await rotateOffUnlockCredential({
+        session: sessionWith({
+          ...(standingUnlock ? { standingUnlock } : {})
+        }),
+        context,
+        method: { ...PASSPHRASE_METHOD, ladderSeed: RETIRED_SEED },
+        survivingLadderSeed: SURVIVING_SEED,
+        ...(survivingStanding
+          ? { survivingStanding: survivingStanding as never }
+          : {}),
+        verb: 'changing the passphrase'
+      })
+    }
+
+    it("reaches the annex log through the caller's surviving sibling", async () => {
+      const outcome = await retireOnLadder({
+        context: ladderContext({ sibling: ACTING_SIBLING }),
+        survivingStanding: {
+          standingClient: { agents: { zcapClient: SURVIVING_ZCAP_CLIENT } },
+          delegatedClients: SURVIVING_SIBLING
+        },
+        standingUnlock: {
+          standingClient: { agents: { zcapClient: ACTING_ZCAP_CLIENT } }
+        }
+      })
+
+      expect(outcome?.clientAnnex).toEqual({ action: 'struck' })
+      // The strike invokes the sibling delegation under the surviving
+      // credential's own client, never this visit's per-visit annex key,
+      // which the annex Space's controller does not list.
+      expect(vi.mocked(clientAnnexLogStore)).toHaveBeenCalledWith(
+        expect.objectContaining({
+          spaceId: CLIENT_ANNEX_SPACE_ID,
+          generationId: GENERATION_ID,
+          capability: SURVIVING_SIBLING,
+          was: expect.objectContaining({
+            serverUrl: POINTER.host,
+            zcapClient: SURVIVING_ZCAP_CLIENT
+          })
+        })
+      )
+    })
+
+    it('publishes the did:web projection before the strike entry', async () => {
+      const capability = { id: 'urn:zcap:generation' }
+      const context = ladderContext({ sibling: ACTING_SIBLING })
+      ;(
+        context as unknown as { invoker: { capability?: unknown } }
+      ).invoker.capability = capability
+      await retireOnLadder({
+        context,
+        standingUnlock: {
+          standingClient: { agents: { zcapClient: ACTING_ZCAP_CLIENT } }
+        }
+      })
+
+      // The store: the account Space's `id` collection, reached under
+      // whatever capability the visit holds at the moment of the PUT. The
+      // branch replaces its generation delegation before the strike, so a
+      // store built on a snapshot would invoke a struck signer's delegation.
+      expect(vi.mocked(didWebProjectionStore)).toHaveBeenCalledWith(
+        expect.objectContaining({
+          host: POINTER.host,
+          spaceId: POINTER.spaceId,
+          invoker: expect.any(Function)
+        })
+      )
+      const { invoker } = state.projectionStoreArgs as {
+        invoker: () => { capability?: unknown }
+      }
+      expect(invoker().capability).toBe(capability)
+      // The body reaches the store before the entry, and no longer names the
+      // retired credential's members.
+      expect(state.projectionPuts).toEqual([POST_STRIKE_WEB_DOC])
+      expect(state.calls.indexOf('putDidWebProjection')).toBeLessThan(
+        state.calls.indexOf('retireUnlockCredential')
+      )
+    })
+
+    it('hands the enrolled kind no projection store of its own', async () => {
+      // An enrolled client's entry publishes `did.jsonl` beside its own
+      // projection, so wallet-core's client arm needs no store from here.
+      await rotateOffUnlockCredential({
+        session: sessionWith(),
+        method: PASSPHRASE_METHOD,
+        verb: 'changing the passphrase'
+      })
+      expect(vi.mocked(didWebProjectionStore)).not.toHaveBeenCalled()
+      expect(state.projectionPuts).toEqual([])
+    })
+
+    it("falls back to the acting credential's own sibling", async () => {
+      const outcome = await retireOnLadder({
+        context: ladderContext({ sibling: ACTING_SIBLING }),
+        standingUnlock: {
+          standingClient: { agents: { zcapClient: ACTING_ZCAP_CLIENT } }
+        }
+      })
+
+      expect(outcome?.clientAnnex).toEqual({ action: 'struck' })
+      expect(vi.mocked(clientAnnexLogStore)).toHaveBeenCalledWith(
+        expect.objectContaining({
+          capability: ACTING_SIBLING,
+          was: expect.objectContaining({ zcapClient: ACTING_ZCAP_CLIENT })
+        })
+      )
+    })
+
+    it('skips rather than root-invoking with no sibling to reach through', async () => {
+      const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
+      const outcome = await retireOnLadder({ context: ladderContext() })
+
+      expect(outcome?.clientAnnex).toEqual({
+        action: 'skipped',
+        reason: 'no-ladder-seed'
+      })
+      expect(vi.mocked(clientAnnexLogStore)).not.toHaveBeenCalled()
+      expect(vi.mocked(retireClientAnnexRung)).not.toHaveBeenCalled()
+      // The rotation -- the retirement's essential remedy -- still ran.
+      expect(outcome?.rotated).toBe(true)
+      warn.mockRestore()
+    })
   })
 })
 

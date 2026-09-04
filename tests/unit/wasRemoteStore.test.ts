@@ -1,7 +1,15 @@
 // @vitest-environment node
 import { describe, it, expect, vi } from 'vitest'
 import type { ZcapClient } from '@interop/ezcap'
+import type { IZcap } from '@interop/data-integrity-core'
 import type { SpaceDescription, WasClient } from '@interop/was-client'
+
+vi.mock('@interop/wallet-core/keys', async importOriginal => ({
+  ...(await importOriginal<typeof import('@interop/wallet-core/keys')>()),
+  wasClientLabelsStore: vi.fn(() => ({ isLabelsStore: true }))
+}))
+
+import { wasClientLabelsStore } from '@interop/wallet-core/keys'
 import { mintSpaceId, WASRemoteStore } from '../../src/stores/wasRemoteStore'
 import { deriveSpaceId } from '@interop/was-client/sync'
 import type { ControllerProfile, User } from '../../src/types/auth'
@@ -778,5 +786,54 @@ describe('WASRemoteStore.ensureUserCollections', () => {
     expect(setPublics).not.toContain('key-map')
     // The synced standard collections are provisioned alongside them.
     expect(configures.map(({ id }) => id)).toContain('private-credentials')
+  })
+})
+
+describe('WASRemoteStore.clientLabelsStore', () => {
+  /**
+   * Builds a store with the bound invocation capability a transient session
+   * hands over: the generation delegation its every request rides.
+   *
+   * @param [capability] {IZcap}
+   * @returns {WASRemoteStore}
+   */
+  function storeWithCapability(capability?: IZcap): WASRemoteStore {
+    return new WASRemoteStore({
+      storageServerUrl: 'https://example.test',
+      zcapClient: { request: vi.fn() } as unknown as ZcapClient,
+      spaceId: 'space-id',
+      controller: 'did:webvh:zQmScid:example.test:space:space-id:id',
+      ...(capability ? { capability } : {})
+    })
+  }
+
+  it('rides the bound capability on the ladder kind', () => {
+    // A transient session's only authority over the Space is the generation
+    // delegation, so the labels read and write must invoke under it or the
+    // listing shows no labels and a rename is refused.
+    const capability = { id: 'urn:zcap:generation' } as unknown as IZcap
+    storeWithCapability(capability).clientLabelsStore()
+    expect(vi.mocked(wasClientLabelsStore)).toHaveBeenCalledWith(
+      expect.objectContaining({ spaceId: 'space-id', capability })
+    )
+  })
+
+  it('root-invokes on the enrolled kind', () => {
+    storeWithCapability().clientLabelsStore()
+    const options = vi.mocked(wasClientLabelsStore).mock.calls.at(-1)![0]
+    expect(options).not.toHaveProperty('capability')
+    expect(options.spaceId).toBe('space-id')
+  })
+
+  it('reads the capability at each build, so a renewal reaches the next one', () => {
+    const store = storeWithCapability({
+      id: 'urn:zcap:generation'
+    } as unknown as IZcap)
+    const renewed = { id: 'urn:zcap:generation-fresh' } as unknown as IZcap
+    store.adoptInvocationCapability({ capability: renewed })
+    store.clientLabelsStore()
+    expect(vi.mocked(wasClientLabelsStore)).toHaveBeenLastCalledWith(
+      expect.objectContaining({ capability: renewed })
+    )
   })
 })

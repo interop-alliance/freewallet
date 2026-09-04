@@ -315,11 +315,16 @@ beforeEach(() => {
 })
 
 describe('the preconditions gate', () => {
+  // The gate resolves neither ceremony kind, so all four states refuse with
+  // the one message naming both ways in: a connected browser's key material,
+  // or a standing passphrase or passkey's ladder.
+  const NEITHER_KIND = 'reached either from a connected browser'
+
   it('refuses without a configured storage server or remote store', async () => {
     state.wasUrl = undefined
     await expect(
       revokeEnrolledClient({ session: sessionWith(), client: REVOKED })
-    ).rejects.toThrow('configured storage server')
+    ).rejects.toThrow(NEITHER_KIND)
 
     state.wasUrl = 'https://was.example.test'
     await expect(
@@ -327,7 +332,7 @@ describe('the preconditions gate', () => {
         session: sessionWith({ remoteStore: undefined }),
         client: REVOKED
       })
-    ).rejects.toThrow('configured storage server')
+    ).rejects.toThrow(NEITHER_KIND)
     expect(vi.mocked(revokeAccountClient)).not.toHaveBeenCalled()
   })
 
@@ -337,19 +342,19 @@ describe('the preconditions gate', () => {
         session: sessionWith({ pointerDid: 'did:key:z6MkNotPromoted' }),
         client: REVOKED
       })
-    ).rejects.toThrow('promoted did:webvh')
+    ).rejects.toThrow(NEITHER_KIND)
     await expect(
       revokeEnrolledClient({
         session: sessionWith({ clientWebvhKeys: undefined }),
         client: REVOKED
       })
-    ).rejects.toThrow('update keys')
+    ).rejects.toThrow(NEITHER_KIND)
     await expect(
       revokeEnrolledClient({
         session: sessionWith({ clientKeyAgreementKey: undefined }),
         client: REVOKED
       })
-    ).rejects.toThrow('key-agreement key')
+    ).rejects.toThrow(NEITHER_KIND)
     expect(vi.mocked(revokeAccountClient)).not.toHaveBeenCalled()
   })
 
@@ -444,7 +449,9 @@ describe('the cascade, rotated path', () => {
       expect.objectContaining({
         idStore: { isWebvhIdStore: true },
         rosterStore: { rosterStore: true },
-        updateKeys: session.profile.clientWebvhKeys,
+        // An enrolled client's context signs the document edit with its own
+        // did:webvh update keys.
+        signer: { kind: 'client', updateKeys: session.profile.clientWebvhKeys },
         revokedClient: REVOKED,
         knownLatentHashes: [],
         userKey: OLD_USER_KEY,

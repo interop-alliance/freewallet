@@ -30,13 +30,11 @@
  * network errors rethrow unchanged so a flap stays distinguishable from a
  * generation lapse.
  */
-import type { ResourceLogPinStore } from '@interop/vh-resource-log'
 import { agentsFromSeed } from '@interop/wallet-core/identity'
 import type { UnlockKdf } from '@interop/wallet-core/keyring'
 import {
   clientSigningKeyMultibase,
   delegatedWebvhLogStore,
-  ensureDidWebProjection,
   isWebvhDid,
   verifyAccountLog,
   webvhZcapClient
@@ -64,7 +62,6 @@ import {
 } from '@interop/wallet-core/webvh'
 import { ladderVmAgent } from '@interop/wallet-core/clientAnnex'
 import { webvhResourceLogController } from '@interop/wallet-core/resourceLog'
-import { ID_COLLECTION } from '@interop/wallet-core/space'
 import { WasClient } from '@interop/was-client'
 import { WAS_SERVER_URL } from '@/app.config'
 import { hasClientKeyRecord } from '@/lib/sessionKey'
@@ -88,11 +85,20 @@ import {
   type TransientKeyringFetchResult,
   type UnlockCredential
 } from '@/session/keyring'
-import { refreshTransientManageCapability } from '@/session/unlockMethods'
+import {
+  backfillPassphraseUnlockMethod,
+  refreshTransientManageCapability
+} from '@/session/unlockMethods'
+import { accountCeremonyContext } from '@/session/accountCeremonyContext'
+import { repairStaleUnlockRegistrySeal } from '@/session/registryReseal'
+import {
+  rebuildBarePasskeyEntry,
+  repairTornPassphraseRetirement
+} from '@/session/pendingRetirement'
 import { primeVerifiedAccountLog } from '@/session/verifiedLog'
+import { refreshDidWebProjection } from '@/session/annexReach'
 import type { Session } from '@/types/auth'
 import type { IZcap } from '@interop/data-integrity-core'
-import type { ZcapClient } from '@interop/ezcap'
 import type { AccountPointer } from '@interop/wallet-core/keyring'
 import type { WebvhIdStore } from '@interop/wallet-core/webvh'
 
@@ -310,111 +316,6 @@ function refuseMissingGeneration(
       return result
     },
     putIdResource: store.putIdResource.bind(store)
-  }
-}
-
-/**
- * The did:web projection's credential-only mender, run best-effort by every
- * transient visit.
- *
- * A ladder-signed account-log entry (a transient recovery, either forget
- * ceremony's removal entry) publishes `did.jsonl` alone, because the bridge
- * delegation a standing credential carries is a PUT on exactly that resource.
- * The served `id/did.json` therefore keeps publishing whatever it said before
- * -- a forgotten client's verification method, a retired credential's
- * `keyAgreement` entry -- and a did:web verifier reading the projection
- * accepts a key the account has struck. WAS authorization is unaffected (the
- * server resolves the controller out of `did.jsonl`), so this is a did:web
- * verifier's revocation bypass rather than a storage one, and this visit is
- * what closes it: the generation delegation targets the account Space's items
- * subtree, which covers `id/did.json`, so the annex verification method
- * republishes the projection with no widened bridge and no server change.
- *
- * On a healthy account it costs one unauthenticated GET and writes nothing.
- * Never rejects: every failure is a warn, and the next visit retries.
- *
- * @param options {object}
- * @param options.host {string}   the storage server's base URL
- * @param options.spaceId {string}   the account Space, holding the
- *   world-readable `id` collection
- * @param options.did {string}   the account's did:webvh
- * @param options.doc {object}   the resolved did:webvh document the
- *   projection is re-derived from
- * @param options.pinStore {ResourceLogPinStore}   the visit's chain-head
- *   pins, carried by the re-resolution below
- * @param options.delegation {IZcap}   the visit's generation delegation, the
- *   authority the PUT invokes under
- * @param options.zcapClient {ZcapClient}   the annex-signing client
- * @returns {Promise<void>}
- */
-async function refreshDidWebProjection({
-  host,
-  spaceId,
-  did,
-  doc,
-  pinStore,
-  delegation,
-  zcapClient
-}: {
-  host: string
-  spaceId: string
-  did: string
-  doc: Parameters<typeof ensureDidWebProjection>[0]['doc']
-  pinStore: ResourceLogPinStore
-  delegation: IZcap
-  zcapClient: ZcapClient
-}): Promise<void> {
-  try {
-    const { outcome } = await ensureDidWebProjection({
-      store: delegatedWebvhLogStore({
-        host,
-        spaceId,
-        collectionId: ID_COLLECTION.id,
-        delegation,
-        zcapClient,
-        // The `id` collection is world-readable, so the freshness read is an
-        // unauthenticated fetch; only the republish invokes the delegation.
-        publicRead: true
-      }),
-      did,
-      doc,
-      // The ordering guard. `doc` was resolved at the start of this visit, so
-      // a difference alone does not say which side is stale: another client
-      // may have published an inventory-removing entry and its projection
-      // since, and writing this snapshot over it would restore a key the
-      // account struck. One extra GET on the difference path settles it,
-      // under the visit's own pins -- a rollback or a fork served at that
-      // moment is refused, and the refusal lands in the catch below.
-      refresh: async () => {
-        const fresh = await verifyAccountLog({
-          did,
-          spaceId,
-          host,
-          pinStore
-        })
-        // The DID is the account pointer's: `verifyAccountLog` refuses a log
-        // resolving to any other, so the re-resolution cannot move it.
-        return { did, doc: fresh.doc }
-      }
-    })
-    if (outcome === 'republished') {
-      log.info('Republished the stale did:web projection of the account log', {
-        did
-      })
-    }
-    if (outcome === 'conflict') {
-      // Another writer's projection landed between the read and the PUT. It
-      // is the newer one, so it stands and the next visit is the mender.
-      log.info(
-        'Left the did:web projection to a concurrent writer of the account ' +
-          'log',
-        { did }
-      )
-    }
-  } catch (err) {
-    log.warn('Could not refresh the did:web projection of the account log', {
-      err
-    })
   }
 }
 
@@ -1179,32 +1080,91 @@ export async function transientSessionFromKeyringHit({
       ? { rebindRecord: found.rebindStandingRecord }
       : {})
   }
-  // The one registry write an ordinary transient login makes: the acting
-  // credential's own management zcap, refreshed when the stored copy is
-  // absent, expiring, retargeted, or narrower than the fresh mint. Nothing
-  // else on the registry is touched, nothing is created, and a failed read
-  // warns and skips rather than failing the login.
+  // The login-time registry chain, on a transient session too: one ordered
+  // promise that never rejects, run after the login page has navigated. Five
+  // passes ride it -- the stale-seal repair first (every writer below reads
+  // the record, and a stale seal would make each warn and skip on a registry
+  // this same visit can mend), then the torn-retirement repair, the bare
+  // passkey rebuild, the registry backfill, and last the acting credential's
+  // management-zcap refresh. Each rides the visit's generation delegation and
+  // unwraps with the credential's standing key. A CHAPI popup skips them, the
+  // guard the remembered chain's passes carry.
   //
-  // Deliberately not awaited: it is a once-a-year write behind a registry
-  // GET, and the session is complete without it, so no login (and no CHAPI
-  // popup visit) waits on that round trip. The helper holds its own
-  // catch-and-warn, so the floating promise can never reject. A popup skips
-  // it outright, the guard the other registry passes carry.
-  if (found.manageCapability && !popup) {
-    void refreshTransientManageCapability({
-      zcapClient: transientZcapClient,
-      spaceId: accountSpaceId,
-      userKey: rosterRead.userKey,
-      capability: generationDelegation,
-      unlockSpaceId: found.unlockSpaceId,
-      manageCapability: found.manageCapability,
-      ...(found.standingClient?.keyAgreementKeyMultibase
-        ? {
-            keyAgreementKeyMultibase:
-              found.standingClient.keyAgreementKeyMultibase
-          }
-        : {})
-    })
+  // The refresh is last rather than parallel: it compare-and-swaps the same
+  // registry entry the passes above rewrite, and two writers racing one entry
+  // would spend the CAS retry budget undoing each other. The chain itself is
+  // still not awaited by the login -- the session is complete without any of
+  // it -- so the once-a-year write behind a registry GET costs no login time.
+  // It touches only the acting credential's entry, creates nothing, and warns
+  // and skips on a read that throws.
+  //
+  // The user key sweep and the annex GC stay remembered-only: neither has a
+  // ladder-anchored branch yet.
+  if (!popup) {
+    session.registryReady = (async () => {
+      const context = await accountCeremonyContext({ session })
+      try {
+        await repairStaleUnlockRegistrySeal({
+          session,
+          rosterRead,
+          context
+        })
+      } catch (err) {
+        log.warn(
+          'Could not repair the unlock-methods registry seal; the next login retries',
+          { err }
+        )
+      }
+      try {
+        await repairTornPassphraseRetirement({
+          session,
+          found,
+          ...(credential ? { credential: { derived: credential } } : {})
+        })
+      } catch (err) {
+        log.warn(
+          'Could not finish the pending passphrase retirement; the next login retries',
+          { err }
+        )
+      }
+      try {
+        await rebuildBarePasskeyEntry({ session, found })
+      } catch (err) {
+        log.warn(
+          'Could not rebuild the bare passkey unlock-method entry; the next login retries',
+          { err }
+        )
+      }
+      try {
+        await backfillPassphraseUnlockMethod({
+          session,
+          ...(context?.invoker.capability
+            ? { capability: context.invoker.capability }
+            : {})
+        })
+      } catch (err) {
+        log.warn('Could not backfill the unlock-methods registry', { err })
+      }
+      if (found.manageCapability) {
+        await refreshTransientManageCapability({
+          zcapClient: transientZcapClient,
+          spaceId: accountSpaceId,
+          userKey: rosterRead.userKey,
+          // The capability the visit rides now, not the one it started on:
+          // a stage above may have renewed the generation delegation.
+          capability:
+            session.profile.invocationCapability ?? generationDelegation,
+          unlockSpaceId: found.unlockSpaceId,
+          manageCapability: found.manageCapability,
+          ...(found.standingClient?.keyAgreementKeyMultibase
+            ? {
+                keyAgreementKeyMultibase:
+                  found.standingClient.keyAgreementKeyMultibase
+              }
+            : {})
+        })
+      }
+    })().catch(() => {})
   }
   return { session, userExists }
 }

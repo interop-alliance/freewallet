@@ -6,12 +6,10 @@
 import { describe, expect, it } from 'vitest'
 import type { IZcap } from '@interop/data-integrity-core'
 import {
-  assertAccountCeremonyAllowed,
   assertBrowserLocalSession,
   BrowserLocalSessionRequiredError,
   browserLocalSessionPersistence,
   isBrowserLocalSession,
-  StepUpRequiredError,
   inMemorySessionPersistence,
   transientSessionStores,
   type InMemorySessionPersistence
@@ -193,22 +191,6 @@ describe('the tier refusals', () => {
       assertBrowserLocalSession({
         persistence: browserLocalSessionPersistence(),
         ceremony: 'Update-key rotation'
-      })
-    ).not.toThrow()
-  })
-
-  it('refuses an account ceremony outside a step-up', () => {
-    const transient = transientHandle()
-    expect(() =>
-      assertAccountCeremonyAllowed({
-        persistence: transient,
-        ceremony: 'Deleting the account'
-      })
-    ).toThrow(StepUpRequiredError)
-    expect(() =>
-      assertAccountCeremonyAllowed({
-        persistence: browserLocalSessionPersistence(),
-        ceremony: 'Deleting the account'
       })
     ).not.toThrow()
   })

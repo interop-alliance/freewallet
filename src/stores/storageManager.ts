@@ -86,7 +86,6 @@ import {
   saveAccountDidForSpace
 } from '@/lib/sessionKey'
 import {
-  assertAccountCeremonyAllowed,
   assertBrowserLocalSession,
   isBrowserLocalSession,
   type CollectionMetaCache,
@@ -1481,13 +1480,6 @@ export class StorageManager {
 
   async exportSpace(): Promise<ReadableStream<Uint8Array>> {
     // Export needs no authority a transient session lacks; the gate is
-    // loudness and deliberateness -- a bulk read of the whole account is
-    // exactly what a session-stealer wants on untrusted hardware, so from a
-    // transient session it runs only inside a step-up.
-    assertAccountCeremonyAllowed({
-      persistence: this.#persistence,
-      ceremony: 'Exporting the Space'
-    })
     return await this.#requireRemote('Exporting a Space').exportSpace()
   }
 
@@ -1496,11 +1488,6 @@ export class StorageManager {
   }: {
     tarFile: File
   }): Promise<ImportSpaceSummary> {
-    // The write-side twin of the export gate above.
-    assertAccountCeremonyAllowed({
-      persistence: this.#persistence,
-      ceremony: 'Importing a Space'
-    })
     return await this.#requireRemote('Importing a Space').importSpace({
       tarFile
     })

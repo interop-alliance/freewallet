@@ -12,10 +12,14 @@
  *
  * This module is Freewallet's glue over `@interop/wallet-core/recovery`:
  *
- * - `issueRecoveryCode` -- the Settings flow, in the recovery-anchor order
- *   (decryption material before authorization): roster wrap first, then the
- *   document entry, then the delegation + unlock record, then the registry
- *   entry. Idempotent stage by stage.
+ * - `issueRecoveryCode` -- the Settings flow, on either kind of
+ *   account-ceremony session. The record and its self-signed bridge come
+ *   first on both kinds; the document half then splits by signer kind. An
+ *   enrolled client escrows the code's wrap and writes one merged entry; the
+ *   ladder branch publishes the code's `keyAgreement` (the pivot), escrows
+ *   anchored at that entry, then publishes the code's authority -- its
+ *   ladder VM and its rung-0 commitment. Either way the code's decryption
+ *   material precedes its authority. Idempotent stage by stage.
  * - `recoverAccountWithCode` -- the `/recover` flow end to end on a fresh
  *   browser: unlock record decrypted, log verified, the delegation invoked
  *   to write the self-enrolling continuation, the user key unwrapped from
@@ -27,18 +31,22 @@
  *   with `rememberBrowser`, and otherwise (the default) the fresh
  *   credential's LADDER VM -- the transient variant, which lands the account
  *   client-less and ladder-anchored with zero local residue.
- * - `revokeRecoveryCode` -- the Settings removal: document entry out, user key
- *   rotated off the code's wrap, the same collection cascade, unlock Space
- *   deleted, registry entry dropped, and the live session adopting the
- *   rotated key in place.
+ * - `revokeRecoveryCode` -- the Settings removal, on either kind: the
+ *   retirement gate read-only, the document entry out (the code's whole
+ *   inventory, its ladder VM claimed seedlessly from the registry-recorded
+ *   rung-0 multibase), the post-removal did:web projection on the ladder
+ *   kind, the user key rotated off the code's wrap, the same collection
+ *   cascade, unlock Space deleted, registry entry dropped, and the live
+ *   session adopting the rotated key in place.
  * - `checkRecoveryHealth` -- the login-time delegation staleness check: a
  *   stored delegation chains only while its signing client's verification
  *   method is in the current document (rot), lapses at its one-year expiry,
  *   and either way bricks recovery exactly when it is needed. Client
- *   revocation re-mints stale delegations automatically
- *   (`remintRecoveryDelegations`); the check remains the backstop for
- *   entries that predate the re-mint fields and for expiry between
- *   revocations.
+ *   revocation re-mints the standing credentials' stale delegations
+ *   (`remintRecoveryDelegations`); a code's bridge is signed by the code's
+ *   own ladder VM and is never re-minted, so for a code issued before that
+ *   rule this check is the whole remedy -- its nudge to re-issue the code is
+ *   what brings it onto the rule.
  */
 import { deriveNextKeyHash } from '@interop/did-method-webvh'
 import type { IKeyAgreementKey, IZcap } from '@interop/data-integrity-core'
@@ -73,7 +81,7 @@ import {
   rotateUserKeyRoster,
   type UserKey
 } from '@interop/wallet-core/keys'
-import { accountRosterStore, sessionRosterStore } from '@/session/rosterStore'
+import { accountRosterStore } from '@/session/rosterStore'
 import { cascadeCollectionsToUserKey } from '@/session/userKeyCascade'
 import {
   accountLogPinId,
@@ -133,6 +141,7 @@ import {
 } from '@interop/wallet-core/recovery'
 import { base58 } from '@scure/base'
 import {
+  preflightUnlockCredentialRetirement,
   publishUnlockKey,
   unlockClientIdentityFromSeed,
   unlockKeyVmId
@@ -153,8 +162,10 @@ import {
   type PersistableClientKeys
 } from '@/session/keyring'
 import { KEYRING_KDF } from '@interop/wallet-core/keyring'
+import { didWebProjectionStore } from '@/session/annexReach'
 import { transientSessionStores } from '@/session/persistence'
 import {
+  deleteUnlockSpaceForEntry,
   emptyUnlockMethodsRegistry,
   getUnlockMethods,
   getUnlockMethodsWithClient,
@@ -162,7 +173,6 @@ import {
   refreshStandingDelegationFields,
   updateUnlockMethods,
   updateUnlockMethodsWithClient,
-  revokeUnlockMethod,
   upsertPassphraseUnlockMethod,
   type PassphraseUnlockMethod,
   type PasskeyUnlockMethod,
@@ -171,9 +181,11 @@ import {
   type UnlockMethodsRecord
 } from '@/session/unlockMethods'
 import {
-  enrolledClientContext,
-  requireEnrolledClientContext
-} from '@/session/enrolledContext'
+  accountCeremonyContext,
+  canRunAccountCeremonies,
+  requireEnrolledCeremonyContext,
+  type AccountCeremonyContext
+} from '@/session/accountCeremonyContext'
 import {
   invalidateVerifiedLog,
   verifiedAccountLog
@@ -183,7 +195,6 @@ import {
   rewrapUnlockRegistryToUserKey
 } from '@/session/userKeyAdoption'
 import { deleteUnlockLocalState } from '@/lib/sessionKey'
-import { assertAccountCeremonyAllowed } from '@/session/persistence'
 import { isStorageUnreachable } from '@/lib/storageErrors'
 import { mintSpaceId, WASRemoteStore } from '@/stores/wasRemoteStore'
 import { createLogger } from '@/lib/log'
@@ -314,6 +325,37 @@ async function bindRecoveryRecord({
 }
 
 /**
+ * Mints the replacement code's bridge delegation, signed by the replacement
+ * code's OWN ladder VM. Both spends publish that VM in the add-and-retire
+ * entry, so a bridge signed by it keeps verifying past any later strike of
+ * another credential's inventory.
+ *
+ * @param options {object}
+ * @param options.replacement {RecoveryClient}   the replacement code's client
+ * @param options.accountDid {string}   the account did:webvh the VM stands in
+ * @param options.pointer {object}   the account pointer the bridge targets
+ * @returns {Promise<IZcap>}
+ */
+async function delegateReplacementBridge({
+  replacement,
+  accountDid,
+  pointer
+}: {
+  replacement: RecoveryClient
+  accountDid: string
+  pointer: Parameters<typeof delegateLogWrite>[0]['pointer']
+}): Promise<IZcap> {
+  return delegateLogWrite({
+    zcapClient: await ladderVmZcapClient({
+      accountDid,
+      ladderSeed: replacement.ladderSeed
+    }),
+    pointer,
+    recoveryClientDid: replacement.clientDid
+  })
+}
+
+/**
  * Assembles the registry entry for an issued code -- public halves only. The
  * unlock-KAK members (when the bind step surfaced them) are what let the
  * revocation cascade re-mint the code's delegation and re-wrap its record
@@ -412,6 +454,9 @@ export async function recordRecoveryMethod({
   const dropped = new Set([entry.recoveryKid, ...dropKids])
   await updateUnlockMethods({
     session,
+    // A transient session's writes ride the visit's generation delegation,
+    // inside the registry's own compare-and-swap.
+    ...registryRides({ session }),
     mutate: existing => {
       const record = existing ?? emptyUnlockMethodsRegistry()
       const methods = [
@@ -427,12 +472,11 @@ export async function recordRecoveryMethod({
 }
 
 /**
- * Whether this session can issue (and revoke) recovery codes: an enrolled
- * wallet client on a promoted account with a remote store, holding the
- * account's current per-user key -- the issuance gate, "an enrolled wallet
- * client holding its key material" (the roster model's restatement of the
- * retired you-must-hold-the-seed gate). Derived from the shared
- * enrolled-client context, so the gate and the ceremony cannot disagree.
+ * Whether this session can issue (and revoke) recovery codes: either kind of
+ * account-ceremony session -- an enrolled client, or a transient session on a
+ * standing unlock credential -- on a promoted account with a remote store,
+ * holding the account's current user key. Derived from the shared ceremony
+ * context's own predicate, so the gate and the ceremony cannot disagree.
  *
  * @param options {object}
  * @param options.session {Session}
@@ -443,17 +487,93 @@ export function canIssueRecoveryCode({
 }: {
   session: Session
 }): boolean {
-  return !!enrolledClientContext({ session }) && !!session.profile.userKey
+  return canRunAccountCeremonies({ session }) && !!session.profile.userKey
 }
 
 /**
- * Issues a recovery code from a live enrolled session, in the
- * recovery-anchor order (decryption material before authorization): the user key
- * wrap lands in the roster FIRST (escrow: every epoch, so recovery decrypts
- * pre-issuance history), then the document entry (the recovery-marked
- * `keyAgreement` VM and the update-key hash commitment), then the delegation
- * and the unlock record, then the registry entry. Nothing is durable until
- * this is called -- the Settings dialog binds only on confirm.
+ * The invocation capability every registry read and write of this session
+ * rides: a transient session's generation delegation, the only authority it
+ * holds over the account Space. An enrolled session root-invokes and rides
+ * nothing.
+ *
+ * @param options {object}
+ * @param options.session {Session}
+ * @returns {{ capability?: IZcap }}
+ */
+function registryRides({ session }: { session: Session }): {
+  capability?: IZcap
+} {
+  const capability = session.profile.invocationCapability
+  return capability ? { capability } : {}
+}
+
+/**
+ * The account-ceremony context both recovery-code ceremonies act through, or
+ * a throw naming the precondition this session misses.
+ *
+ * @param options {object}
+ * @param options.session {Session}
+ * @param options.action {string}   the ceremony's name, as the error opens
+ * @returns {Promise<AccountCeremonyContext>}
+ */
+async function requireRecoveryContext({
+  session,
+  action
+}: {
+  session: Session
+  action: string
+}): Promise<AccountCeremonyContext> {
+  return (
+    (await accountCeremonyContext({ session })) ??
+    requireEnrolledCeremonyContext({ session, action })
+  )
+}
+
+/**
+ * The key-agreement key a ceremony's roster append unwraps the current epoch
+ * with: this client's own on the enrolled kind, the acting credential's
+ * standing key on the ladder kind.
+ *
+ * @param options {object}
+ * @param options.context {AccountCeremonyContext}
+ * @returns {IKeyAgreementKey}
+ */
+function rosterUnwrapKey({
+  context
+}: {
+  context: AccountCeremonyContext
+}): IKeyAgreementKey {
+  return context.kind === 'enrolled'
+    ? context.clientKeyAgreementKey
+    : context.standingKeyAgreementKey
+}
+
+/**
+ * Issues a recovery code from either kind of account-ceremony session. The
+ * code is a standing unlock credential that retires on spend: its key set,
+ * ladder seed included, derives from the code bytes alone, so it exists
+ * nowhere until the code is typed.
+ *
+ * The record and its bridge are written FIRST on both kinds. The bridge is
+ * signed by the CODE's own ladder VM, so a strike of any other credential's
+ * inventory can never rot it, and it is inert twice over until the authority
+ * entry lands: the VM stands in no document, and rung 0 is uncommitted.
+ *
+ * The document half then splits by signer kind. An enrolled client's roster
+ * append needs no license, so the escrow can precede the entry and one merged
+ * entry carries the code's whole inventory. A ladder-signed append is
+ * licensed only at the inventory-changing version its own entry mints, so the
+ * ladder branch publishes the code's `keyAgreement` alone (the pivot), then
+ * escrows anchored at that entry, then publishes the code's authority -- its
+ * ladder VM and its rung-0 commitment. That order keeps the code's decryption
+ * material ahead of its authority: a code that could spend before it could
+ * decrypt would strike every standing credential and then fail.
+ *
+ * Every stage detects its own completion from durable state, so a torn run
+ * converges on a re-run with the same code.
+ *
+ * Nothing is durable until this is called -- the Settings dialog binds only
+ * on confirm.
  *
  * @param options {object}
  * @param options.session {Session}
@@ -472,51 +592,31 @@ export async function issueRecoveryCode({
   code: string
   label: string
 }): Promise<{ entry: RecoveryCodeUnlockMethod }> {
-  assertAccountCeremonyAllowed({
-    persistence: session.profile.persistence,
-    ceremony: 'Issuing a recovery code'
-  })
   // Wait out the login-time registry passes rather than racing their
   // read-modify-writes; on a settled session the chain resolved long ago.
   await session.registryReady
-  const {
-    remoteStore,
-    pointer,
-    clientWebvhKeys,
-    clientKeyAgreementKey,
-    controller
-  } = requireEnrolledClientContext({
+  const context = await requireRecoveryContext({
     session,
     action: 'Recovery-code issuance'
   })
+  const { pointer, controller, idStore, rosterStore, signer } = context
+  const logPins = session.profile.persistence.logPins
+  const logId = accountLogPinId({ spaceId: pointer.spaceId })
 
   const client = await recoveryClientFromCode({ code })
+  const recovery = {
+    keyAgreementKeyMultibase: client.keyAgreementKeyMultibase,
+    updateKeyMultibase: client.updateKeyMultibase
+  }
 
-  // 1. Decryption material first: the code's wrap into every roster epoch.
-  await addUserKeyRosterRecipient({
-    store: sessionRosterStore({ profile: session.profile }),
-    recipient: {
-      id: client.recipientKid,
-      publicKeyMultibase: client.keyAgreementKeyMultibase
-    },
-    ownerKeyAgreementKey: clientKeyAgreementKey
-  })
-
-  // 2. The document entry: the recovery VM and the update-key commitment.
-  await publishRecoveryKey({
-    idStore: remoteStore.webvhIdStore(),
-    updateKeys: clientWebvhKeys,
-    recovery: {
-      keyAgreementKeyMultibase: client.keyAgreementKeyMultibase,
-      updateKeyMultibase: client.updateKeyMultibase
-    },
-    expectedDid: pointer.did
-  })
-  invalidateVerifiedLog({ profile: session.profile })
-
-  // 3. The authorization bridge and the record that carries it.
+  // 1. The record and its bridge, before any entry. The bridge's delegatee is
+  // the code's own signing did:key (what the spend invokes it as); its signer
+  // is the code's own ladder VM, which the authority entry below publishes.
   const delegation = await delegateLogWrite({
-    zcapClient: session.profile.zcapClient,
+    zcapClient: await ladderVmZcapClient({
+      accountDid: pointer.did,
+      ladderSeed: client.ladderSeed
+    }),
     pointer,
     recoveryClientDid: client.clientDid
   })
@@ -527,7 +627,57 @@ export async function issueRecoveryCode({
     delegation
   })
 
-  // 4. The registry entry (public halves only).
+  /**
+   * The code's wrap into every roster epoch, so recovery decrypts
+   * pre-issuance history. Idempotent: a wrap already standing is returned
+   * as-is.
+   */
+  const escrow = async (): Promise<void> => {
+    await addUserKeyRosterRecipient({
+      store: rosterStore,
+      recipient: {
+        id: client.recipientKid,
+        publicKeyMultibase: client.keyAgreementKeyMultibase
+      },
+      ownerKeyAgreementKey: rosterUnwrapKey({ context })
+    })
+  }
+
+  /**
+   * One part of the code's document inventory, published and memo-dropped.
+   *
+   * @param part {'all' | 'key' | 'authority'}
+   * @returns {Promise<void>}
+   */
+  const publishPart = async (
+    part: 'all' | 'key' | 'authority'
+  ): Promise<void> => {
+    await publishRecoveryKey({
+      idStore,
+      signer,
+      recovery,
+      // The code's own ladder seed: its update key is rung 0 of that ladder,
+      // and the authority half publishes the ladder's VM.
+      ladderSeed: client.ladderSeed,
+      part,
+      expectedDid: pointer.did,
+      pinStore: logPins,
+      logId
+    })
+    invalidateVerifiedLog({ profile: session.profile })
+  }
+
+  if (context.kind === 'ladder') {
+    await publishPart('key')
+    await escrow()
+    await publishPart('authority')
+  } else {
+    await escrow()
+    await publishPart('all')
+  }
+
+  // The registry entry (public halves only), recording rung 0's multibase as
+  // the anchor a later revocation attributes the code's ladder VM from.
   const entry = recoveryRegistryEntry({
     client,
     label,
@@ -1000,7 +1150,8 @@ export async function recoverAccountWithCode({
     newClientUpdateSeeds,
     replacement: {
       keyAgreementKeyMultibase: replacement.keyAgreementKeyMultibase,
-      updateKeyMultibase: replacement.updateKeyMultibase
+      updateKeyMultibase: replacement.updateKeyMultibase,
+      ladderVmKeyMultibase: replacement.ladderVmKeyMultibase
     },
     // The persist-before-publish seam: fires after the reveal entry stands
     // (a revoked or spent code has been refused) and before the
@@ -1085,13 +1236,13 @@ export async function recoverAccountWithCode({
         idb
       })
       // The replacement code's record and bridge delegation (the delegation
-      // signed by the new client's pre-entry key, verifying once the entry
-      // publishes the signer), and the registry entry built from them for
-      // the tail's registry mutation.
-      const replacementDelegation = await delegateLogWrite({
-        zcapClient: newZcapClient,
-        pointer,
-        recoveryClientDid: replacement.clientDid
+      // signed by the replacement code's own ladder VM, which the
+      // add-and-retire entry publishes), and the registry entry built from
+      // them for the tail's registry mutation.
+      const replacementDelegation = await delegateReplacementBridge({
+        replacement,
+        accountDid,
+        pointer
       })
       const replacementBind = await bindRecoveryRecord({
         client: replacement,
@@ -1239,7 +1390,7 @@ export async function recoverAccountWithCode({
     })
     await publishUnlockKey({
       idStore: remoteStore.webvhIdStore(),
-      updateKeys: newClientUpdateSeeds,
+      signer: { kind: 'client', updateKeys: newClientUpdateSeeds },
       unlockKeys: {
         keyAgreement: {
           commitment: await keyAgreementCommitment({
@@ -1806,7 +1957,7 @@ export async function resumeRecoverySpend({
         })
         await publishUnlockKey({
           idStore: remoteStore.webvhIdStore(),
-          updateKeys: clientKeys.webvhUpdateKeys,
+          signer: { kind: 'client', updateKeys: clientKeys.webvhUpdateKeys },
           unlockKeys: {
             keyAgreement: { commitment },
             updateKeyMultibase: rung0.keyMultibase
@@ -1856,10 +2007,10 @@ export async function resumeRecoverySpend({
           hasReplacement,
           hasPassphrase
         })
-        const replacementDelegation = await delegateLogWrite({
-          zcapClient: newZcapClient,
-          pointer,
-          recoveryClientDid: replacement.clientDid
+        const replacementDelegation = await delegateReplacementBridge({
+          replacement,
+          accountDid: did,
+          pointer
         })
         const replacementBind = await bindRecoveryRecord({
           client: replacement,
@@ -2190,7 +2341,8 @@ async function recoverAccountTransient({
     },
     replacement: {
       keyAgreementKeyMultibase: replacement.keyAgreementKeyMultibase,
-      updateKeyMultibase: replacement.updateKeyMultibase
+      updateKeyMultibase: replacement.updateKeyMultibase,
+      ladderVmKeyMultibase: replacement.ladderVmKeyMultibase
     },
     // The persist-before-publish seam: runs after the reveal entry stands
     // (a revoked code has been refused) and before the add entry publishes
@@ -2298,12 +2450,13 @@ async function recoverAccountTransient({
         refuseCollidingRecord: { accountDoc: verifiedLog.doc },
         credential
       })
-      // The replacement code's record (no sibling -- a code needs no
-      // annex authority; its delegation is ladder-VM-signed).
-      const replacementDelegation = await delegateLogWrite({
-        zcapClient: ladderZcap,
-        pointer,
-        recoveryClientDid: replacement.clientDid
+      // The replacement code's record (no sibling -- a code needs no annex
+      // authority; its bridge is signed by the code's OWN ladder VM, which
+      // the add-and-retire entry publishes).
+      const replacementDelegation = await delegateReplacementBridge({
+        replacement,
+        accountDid: did,
+        pointer
       })
       const replacementBind = await bindRecoveryRecord({
         client: replacement,
@@ -2542,7 +2695,9 @@ export async function listRecoveryCodeEntries({
   session: Session
 }): Promise<RecoveryCodeUnlockMethod[]> {
   try {
-    return recoveryEntriesOf({ record: await getUnlockMethods({ session }) })
+    return recoveryEntriesOf({
+      record: await getUnlockMethods({ session, ...registryRides({ session }) })
+    })
   } catch (err) {
     log.warn('Could not load the recovery-code entries', { err })
     return []
@@ -2587,15 +2742,23 @@ export async function updateRegistryAfterRecovery({
 }
 
 /**
- * Revokes a recovery code from a live enrolled session -- the issuance
- * reversal, in the cascade order: the document entry out first (the pull
- * axis: the code's VM and commitment leave, so the doc-backed resolver drops
- * its roster entry), then the mandatory user key rotation off the code's wrap,
- * then the epoch cascade re-keying every encrypted collection, then the
- * unlock Space (whose deletion is what makes the code resolve to nothing
- * afterwards) and the registry entry. The revocation is REAL -- the secret
- * was only ever a pointer to the record -- which is stronger than what the
- * sharing layer can promise.
+ * Revokes a recovery code from either kind of account-ceremony session -- the
+ * issuance reversal, in the cascade order: the document entry out first (the
+ * pull axis: the code's whole inventory leaves, its ladder VM included, so
+ * the doc-backed resolver drops its roster entry), then the mandatory user
+ * key rotation off the code's wrap, then the epoch cascade re-keying every
+ * encrypted collection, then the unlock Space (whose deletion is what makes
+ * the code resolve to nothing afterwards) and the registry entry. The
+ * revocation is REAL -- the secret was only ever a pointer to the record --
+ * which is stronger than what the sharing layer can promise.
+ *
+ * The revoker holds neither the code bytes nor its ladder seed, so the ladder
+ * VM claim is seedless, anchored on the rung-0 update-key multibase the
+ * registry recorded at issuance. A VM no attribution arm claims refuses the
+ * whole revocation before anything is written: a standing ladder VM whose
+ * credential is otherwise retired keeps its delegation authority. The gate
+ * runs read-only up front too, so the refusal lands before any write rather
+ * than between two of them.
  *
  * The rotated user key is persisted into this client's client-key record and
  * epoch pin, and the live session ADOPTS it in place (it drove the rotation,
@@ -2608,6 +2771,9 @@ export async function updateRegistryAfterRecovery({
  * @param options.entry {RecoveryCodeUnlockMethod}
  * @param [options.idb] {IDBFactory}
  * @returns {Promise<void>}
+ * @throws {UnclaimedLadderVmRetirementError}   the code's ladder VM could not
+ *   be attributed, so the revocation refused before publishing anything.
+ *   Matched by NAME everywhere in this repo
  */
 export async function revokeRecoveryCode({
   session,
@@ -2618,41 +2784,67 @@ export async function revokeRecoveryCode({
   entry: RecoveryCodeUnlockMethod
   idb?: IDBFactory
 }): Promise<void> {
-  assertAccountCeremonyAllowed({
-    persistence: session.profile.persistence,
-    ceremony: 'Revoking a recovery code'
-  })
   // Wait out the login-time registry passes rather than racing their
   // read-modify-writes; on a settled session the chain resolved long ago.
   await session.registryReady
-  const { epochPins } = session.profile.persistence
-  const { remoteStore, pointer, clientWebvhKeys, clientKeyAgreementKey } =
-    requireEnrolledClientContext({
-      session,
-      action: 'Recovery-code revocation'
-    })
+  const { epochPins, logPins } = session.profile.persistence
+  const context = await requireRecoveryContext({
+    session,
+    action: 'Recovery-code revocation'
+  })
+  const { remoteStore, pointer, idStore, rosterStore, signer } = context
+  const logId = accountLogPinId({ spaceId: pointer.spaceId })
+  const recovery = {
+    keyAgreementKeyMultibase: entry.keyAgreementKeyMultibase,
+    updateKeyMultibase: entry.updateKeyMultibase
+  }
+  const unwrapKey = rosterUnwrapKey({ context })
 
-  // 1. The document entry out (idempotent).
-  await removeRecoveryKey({
-    idStore: remoteStore.webvhIdStore(),
-    updateKeys: clientWebvhKeys,
-    recovery: {
-      keyAgreementKeyMultibase: entry.keyAgreementKeyMultibase,
+  // 1. The retirement gate, read-only: a code whose ladder VM this account's
+  // log does not attribute refuses here, before anything is written.
+  await preflightUnlockCredentialRetirement({
+    idStore,
+    unlockKeys: {
+      keyAgreement: { publicKeyMultibase: entry.keyAgreementKeyMultibase },
       updateKeyMultibase: entry.updateKeyMultibase
     },
-    expectedDid: pointer.did
+    expectedDid: pointer.did,
+    pinStore: logPins,
+    logId
   })
 
-  // 2. The user key rotation off the code's wrap, recipients resolved from the
-  // just-updated document (the pull axis already ran there) -- so the memo
-  // from before the edit is dropped first, and the re-read refills it with
-  // the document every later surface should see.
+  // 2. The document entry out (idempotent), striking the code's
+  // `keyAgreement`, its committed rung-0 hash, and its ladder VM.
+  await removeRecoveryKey({
+    idStore,
+    signer,
+    recovery,
+    // The post-removal did:web projection, PUT immediately BEFORE the strike
+    // entry. A ladder-signed entry writes `did.jsonl` alone (all the bridge
+    // delegation allows), so without this the served `id/did.json` would keep
+    // publishing the revoked code's key until a later visit's ensure caught
+    // it.
+    ...(context.kind === 'ladder'
+      ? {
+          projectionStore: didWebProjectionStore({
+            host: pointer.host,
+            spaceId: pointer.spaceId,
+            invoker: () => context.invoker
+          })
+        }
+      : {}),
+    expectedDid: pointer.did,
+    pinStore: logPins,
+    logId
+  })
   invalidateVerifiedLog({ profile: session.profile })
+
+  // 3. The user key rotation off the code's wrap, recipients resolved from
+  // the just-updated document (the pull axis already ran there).
   const { doc } = await verifiedAccountLog({
     profile: session.profile,
     pointer
   })
-  const rosterStore = sessionRosterStore({ profile: session.profile })
   await rotateUserKeyRoster({
     store: rosterStore,
     document: doc,
@@ -2661,9 +2853,10 @@ export async function revokeRecoveryCode({
   const read = await readUserKeyRoster({
     store: rosterStore,
     userKey: session.profile.userKey,
-    clientKeyAgreementKey,
+    clientKeyAgreementKey: unwrapKey,
     pinnedEpochId: await epochPins.load({ accountDid: pointer.did })
   })
+  const rides = registryRides({ session })
   if (read) {
     if (read.rotated) {
       // The in-band adoption: the registry is re-sealed to the rotated key
@@ -2680,12 +2873,13 @@ export async function revokeRecoveryCode({
         accountDid: pointer.did,
         userKey: read.userKey,
         latestEpochId: read.latestEpochId,
-        descriptor: read.descriptor
+        descriptor: read.descriptor,
+        ...rides
       })
       await cascadeCollectionsToUserKey({
         remoteStore,
         rosterDescriptor: read.descriptor,
-        clientKeyAgreementKey,
+        clientKeyAgreementKey: unwrapKey,
         userKey: read.userKey
       })
     } else {
@@ -2697,12 +2891,72 @@ export async function revokeRecoveryCode({
     }
   }
 
-  // 3. The unlock Space and the registry entry -- the shared tap-free
-  // revocation path (the entry's management zcap, invoked with this
-  // client's did:key). Under the ROTATED vault keys: the adoption above
-  // re-sealed the stored record to them and swapped the live session onto
-  // them, so these reads and writes decrypt and re-seal under one key.
-  await revokeUnlockMethod({ session, entry, idb })
+  // 4. The unlock Space and the registry entry, under the ROTATED vault keys:
+  // the adoption above re-sealed the stored record to them and swapped the
+  // live session onto them, so these reads and writes decrypt and re-seal
+  // under one key. The Space goes through a DELETE-only child of the entry's
+  // management zcap -- signed and sent by the acting ladder VM on the ladder
+  // kind, whose bare did:key is the only identity that can both delegate from
+  // a parent the account DID controls and invoke the child.
+  await deleteRevokedCodeSpace({ session, context, entry })
+  await deleteUnlockLocalState({ spaceId: entry.unlockSpaceId, idb })
+  await updateUnlockMethods({
+    session,
+    ...rides,
+    mutate: current => {
+      if (!current) {
+        return null
+      }
+      const methods = current.methods.filter(
+        method =>
+          method.type !== 'recovery-code' ||
+          method.recoveryKid !== entry.recoveryKid
+      )
+      return methods.length === current.methods.length
+        ? null
+        : { ...current, methods }
+    }
+  })
+}
+
+/**
+ * Deletes a revoked code's unlock Space, reporting the deletion walk's five
+ * pre-mint refusals rather than failing the revocation: the account behind
+ * the record has already dropped the code's inventory, so the code is dead
+ * whether or not its Space goes with it, and a refusal is a named residue the
+ * next run can retry.
+ *
+ * @param options {object}
+ * @param options.session {Session}
+ * @param options.context {AccountCeremonyContext}
+ * @param options.entry {RecoveryCodeUnlockMethod}
+ * @returns {Promise<void>}
+ */
+async function deleteRevokedCodeSpace({
+  session,
+  context,
+  entry
+}: {
+  session: Session
+  context: AccountCeremonyContext
+  entry: RecoveryCodeUnlockMethod
+}): Promise<void> {
+  if (!WAS_SERVER_URL) {
+    return
+  }
+  const outcome = await deleteUnlockSpaceForEntry({
+    session,
+    entry,
+    ...(context.kind === 'ladder' ? { signer: context.ladderDeleter } : {})
+  })
+  if (outcome !== 'deleted') {
+    // `not-found` is the server's masked 404, absent OR unauthorized; the
+    // rest are the local pre-mint refusals.
+    log.info("The revoked code's unlock Space was not deleted", {
+      unlockSpaceId: entry.unlockSpaceId,
+      outcome
+    })
+  }
 }
 
 /**
@@ -2713,13 +2967,18 @@ export async function revokeRecoveryCode({
 export type RemintEntry = RecoveryDelegationEntry & { source: UnlockMethod }
 
 /**
- * The unlock-methods registry entries a re-mint pass walks, in the shape the
- * shared pass takes: the recovery codes AND the standing passphrase/passkey
- * credentials alike (one bridge machinery, per FW-154's one-codepath
- * model), with `unlockClientDid` filling the delegation-grantee slot the
- * recovery entries call `recoveryClientDid`. The sibling pair is absent on
- * recovery codes by construction; stating it keeps the entry union uniform
- * for the record-back seam.
+ * The unlock-methods registry entries a re-mint pass walks: the standing
+ * passphrase and passkey credentials whose records predate the self-signed
+ * bridge, whose `unlockClientDid` fills the delegation-grantee slot the
+ * shared pass calls `recoveryClientDid`.
+ *
+ * Recovery codes are deliberately absent. A code's bridge is signed by the
+ * code's OWN ladder VM, so no other credential's strike can rot it and no
+ * ceremony owes it a re-seal; re-signing it with the acting client's key
+ * would move it back onto a foreign signer. A code issued before that rule
+ * keeps whatever key signed it, and the login-time health check's
+ * delegation-rot half is what nudges re-issuing it -- the one remedy that
+ * brings such a code onto the rule.
  *
  * @param options {object}
  * @param options.record {UnlockMethodsRecord | null}   the registry
@@ -2735,19 +2994,12 @@ export function remintEntriesOf({
   record: UnlockMethodsRecord | null
   excludeUnlockSpaceIds?: string[]
 }): RemintEntry[] {
-  const entries = recoveryEntriesOf({ record })
   const standingSources = (record?.methods ?? []).filter(
     (method): method is PassphraseUnlockMethod | PasskeyUnlockMethod =>
       (method.type === 'passphrase' || method.type === 'passkey') &&
       !!method.unlockClientDid
   )
   const mapped: RemintEntry[] = [
-    ...entries.map(entry => ({
-      ...entry,
-      delegatedClientsKeyId: undefined,
-      delegatedClientsExpires: undefined,
-      source: entry as UnlockMethod
-    })),
     ...standingSources.map(method => ({
       label: method.type,
       unlockSpaceId: method.unlockSpaceId,
@@ -2783,21 +3035,6 @@ export async function recordRemintedEntry({
   session: Session
   entry: RemintEntry
 }): Promise<void> {
-  if (entry.source.type === 'recovery-code') {
-    await recordRecoveryMethod({
-      session,
-      entry: {
-        ...(entry.source as RecoveryCodeUnlockMethod),
-        ...(entry.delegationKeyId
-          ? { delegationKeyId: entry.delegationKeyId }
-          : {}),
-        ...(entry.delegationExpires
-          ? { delegationExpires: entry.delegationExpires }
-          : {})
-      }
-    })
-    return
-  }
   await refreshStandingDelegationFields({
     session,
     unlockSpaceId: entry.unlockSpaceId,
@@ -2810,8 +3047,9 @@ export async function recordRemintedEntry({
 
 /**
  * Re-mints the unlock-record bridge delegations the current document no
- * longer backs -- the delta riding the revocation cascade, for the recovery
- * codes AND the standing passphrase/passkey credentials alike. The
+ * longer backs -- the delta riding the revocation cascade, for the standing
+ * passphrase and passkey credentials whose records predate the self-signed
+ * bridge ({@link remintEntriesOf} states why recovery codes are absent). The
  * mechanism, the skip policy, and the binding-carried-forward re-wrap all
  * live in `@interop/wallet-core/recovery`; this binding supplies the app
  * seams: the storage server URL, the session's delegating signer and account
@@ -2926,7 +3164,9 @@ export async function checkRecoveryHealth({
   }
   const entries =
     prefetched ??
-    recoveryEntriesOf({ record: await getUnlockMethods({ session }) })
+    recoveryEntriesOf({
+      record: await getUnlockMethods({ session, ...registryRides({ session }) })
+    })
   if (entries.length === 0) {
     return []
   }

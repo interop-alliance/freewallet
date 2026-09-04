@@ -36,9 +36,11 @@ import {
 import type { AccountClientView } from '@interop/wallet-core/clients'
 import type { Session } from '@/types/auth'
 import {
-  enrolledClientContext,
-  requireEnrolledClientContext
-} from '@/session/enrolledContext'
+  accountCeremonyContext,
+  canRunAccountCeremonies,
+  enrolledCeremonyContext,
+  type AccountCeremonyContext
+} from '@/session/accountCeremonyContext'
 import {
   revokeEnrolledClient,
   type RevocationOutcome
@@ -57,11 +59,12 @@ export {
 
 /**
  * Whether this session can list and manage the account's enrolled clients:
- * the shared enrolled-client context -- a configured remote store, a promoted
- * did:webvh account pointer, AND this client's own key material, since
- * Disconnect drives the revocation cascade with exactly that material.
- * Deriving the gate from the same resolution the cascade requires is what
- * stops the panel from enabling a Disconnect that then throws.
+ * the shared account-ceremony context -- a configured remote store, a
+ * promoted did:webvh account pointer, and either this client's own key
+ * material or a standing unlock credential's ladder, since Disconnect drives
+ * the revocation cascade with exactly one of those two. Deriving the gate
+ * from the same resolution the cascade requires is what stops the panel from
+ * enabling a Disconnect that then throws.
  *
  * @param options {object}
  * @param options.session {Session}
@@ -72,7 +75,27 @@ export function canManageAccountClients({
 }: {
   session: Session
 }): boolean {
-  return !!enrolledClientContext({ session })
+  return canRunAccountCeremonies({ session })
+}
+
+/**
+ * Which signer would put this session's removal entry on the account log:
+ * `client` when an enrolled client's own update keys sign it, `ladder` when a
+ * standing credential's rung does. The shared disconnect-eligibility policy
+ * takes it, and the two refusals it lifts on the ladder branch (a client
+ * disconnecting itself, and the account's last enrolled client) are
+ * properties of that signer rather than of the account.
+ *
+ * @param options {object}
+ * @param options.session {Session}
+ * @returns {'client' | 'ladder'}
+ */
+export function accountSignerKind({
+  session
+}: {
+  session: Session
+}): 'client' | 'ladder' {
+  return enrolledCeremonyContext({ session }) ? 'client' : 'ladder'
 }
 
 /**
@@ -80,13 +103,20 @@ export function canManageAccountClients({
  * `canManageAccountClients` first, so a throw here is a programming error).
  *
  * @param session {Session}
- * @returns {object}   the enrolled-client context
+ * @returns {Promise<AccountCeremonyContext>}
  */
-function requireClientListing(session: Session) {
-  return requireEnrolledClientContext({
-    session,
-    action: 'Listing enrolled clients'
-  })
+async function requireClientListing(
+  session: Session
+): Promise<AccountCeremonyContext> {
+  const context = await accountCeremonyContext({ session })
+  if (!context) {
+    throw new Error(
+      'Listing enrolled clients requires an account on a storage server, ' +
+        'reached either from a connected browser or with a standing ' +
+        'passphrase or passkey.'
+    )
+  }
+  return context
 }
 
 /**
@@ -104,8 +134,8 @@ export async function listAccountClients({
 }: {
   session: Session
 }): Promise<AccountClientView[]> {
-  const { remoteStore, pointer } = requireClientListing(session)
-  const { keyAgent } = session.profile
+  const context = await requireClientListing(session)
+  const { remoteStore, pointer } = context
   return await sharedListAccountClients({
     pointer: {
       did: pointer.did,
@@ -117,8 +147,15 @@ export async function listAccountClients({
       pointer
     }),
     labelsStore: remoteStore.clientLabelsStore(),
-    ...(keyAgent
-      ? { ownSigningKeyMultibase: clientSigningKeyMultibase({ keyAgent }) }
+    // "This browser" marks the row this session runs AS. A transient session
+    // runs as no enrolled client at all, so no row is marked and the chip
+    // does not render.
+    ...(context.kind === 'enrolled'
+      ? {
+          ownSigningKeyMultibase: clientSigningKeyMultibase({
+            keyAgent: context.keyAgent
+          })
+        }
       : {})
   })
 }
@@ -142,7 +179,7 @@ export async function currentAccountSigningKeys({
   if (!canManageAccountClients({ session })) {
     return undefined
   }
-  const { pointer } = requireClientListing(session)
+  const { pointer } = await requireClientListing(session)
   return await sharedCurrentAccountSigningKeys({
     pointer: {
       did: pointer.did,
@@ -174,7 +211,7 @@ export async function renameAccountClient({
   signingKeyMultibase: string
   label: string
 }): Promise<void> {
-  const { remoteStore } = requireClientListing(session)
+  const { remoteStore } = await requireClientListing(session)
   await setClientLabel({
     store: remoteStore.clientLabelsStore(),
     signingKeyMultibase,
@@ -202,13 +239,15 @@ export async function disconnectAccountClient({
   session: Session
   client: AccountClientView
 }): Promise<RevocationOutcome> {
-  const { remoteStore } = requireClientListing(session)
+  const context = await requireClientListing(session)
+  const { remoteStore } = context
   // Wait out the login-time registry passes rather than racing their
   // read-modify-writes (the cascade re-wraps the registry); on a settled
   // session the chain resolved long ago.
   await session.registryReady
   const outcome = await revokeEnrolledClient({
     session,
+    context,
     client: revokedClientKeysFor({ client }),
     ...(client.label !== undefined ? { label: client.label } : {})
   })

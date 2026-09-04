@@ -1,11 +1,13 @@
 // @vitest-environment node
 /**
- * Unit tests for the shared enrolled-client context
- * (`src/session/enrolledContext.ts`): the one resolution behind every ceremony
- * that acts AS the account, the per-miss error messages the ceremonies throw,
- * and -- the point of sharing it -- the boolean gates being DERIVED from it,
- * so the Settings panels cannot enable an action whose ceremony then throws
- * (Disconnect used to be enabled on a session holding no client key material).
+ * Unit tests for the ENROLLED kind of the account-ceremony context
+ * (`src/session/accountCeremonyContext.ts`): the one resolution behind every
+ * ceremony that acts AS the account, the per-miss error messages the
+ * ceremonies throw, and -- the point of sharing it -- the boolean gates being
+ * DERIVED from it, so the Settings panels cannot enable an action whose
+ * ceremony then throws (Disconnect used to be enabled on a session holding no
+ * client key material). The ladder kind has its own suite in
+ * `ladderCeremonyContext.test.ts`.
  */
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
@@ -21,9 +23,9 @@ vi.mock('@/app.config', async importOriginal => ({
 }))
 
 import {
-  enrolledClientContext,
-  requireEnrolledClientContext
-} from '@/session/enrolledContext'
+  enrolledCeremonyContext,
+  requireEnrolledCeremonyContext
+} from '@/session/accountCeremonyContext'
 import { canManageAccountClients } from '@/session/clients'
 import { canIssueRecoveryCode } from '@/session/recovery'
 import type { Session } from '@/types/auth'
@@ -89,7 +91,7 @@ beforeEach(() => {
 describe('the enrolled-client context', () => {
   it('resolves the stores, pointer, key material, and controller', () => {
     const session = sessionWith()
-    const context = requireEnrolledClientContext({
+    const context = requireEnrolledCeremonyContext({
       session,
       action: 'Client revocation'
     })
@@ -105,7 +107,7 @@ describe('the enrolled-client context', () => {
   it('names the missing precondition, opening with the action', () => {
     state.wasUrl = undefined
     expect(() =>
-      requireEnrolledClientContext({
+      requireEnrolledCeremonyContext({
         session: sessionWith(),
         action: 'Client revocation'
       })
@@ -113,19 +115,19 @@ describe('the enrolled-client context', () => {
 
     state.wasUrl = 'https://was.example.test'
     expect(() =>
-      requireEnrolledClientContext({
+      requireEnrolledCeremonyContext({
         session: sessionWith({ pointerDid: 'did:key:z6MkNotPromoted' }),
         action: 'Recovery-code issuance'
       })
     ).toThrow('promoted did:webvh')
     expect(() =>
-      requireEnrolledClientContext({
+      requireEnrolledCeremonyContext({
         session: sessionWith({ clientWebvhKeys: undefined }),
         action: 'Client revocation'
       })
     ).toThrow('update keys')
     expect(() =>
-      requireEnrolledClientContext({
+      requireEnrolledCeremonyContext({
         session: sessionWith({ clientKeyAgreementKey: undefined }),
         action: 'Client revocation'
       })
@@ -133,12 +135,12 @@ describe('the enrolled-client context', () => {
   })
 
   it('reports a guest and a store-less session as no context', () => {
-    expect(enrolledClientContext({ session: sessionWith() })).not.toBeNull()
+    expect(enrolledCeremonyContext({ session: sessionWith() })).not.toBeNull()
     expect(
-      enrolledClientContext({ session: sessionWith({ isGuest: true }) })
+      enrolledCeremonyContext({ session: sessionWith({ isGuest: true }) })
     ).toBeNull()
     expect(
-      enrolledClientContext({
+      enrolledCeremonyContext({
         session: sessionWith({ remoteStore: undefined })
       })
     ).toBeNull()

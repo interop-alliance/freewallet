@@ -29,13 +29,16 @@ import {
 import { isWebvhDid } from '@interop/wallet-core/webvh'
 import { WAS_SERVER_URL } from '@/app.config'
 import type { Session } from '@/types/auth'
-import { isBrowserLocalSession } from '@/session/persistence'
 import { RecordEnvelopeDecryptError } from '@/session/recordEnvelope'
 import {
   getUnlockMethods,
   rewrapUnlockMethodsRecord,
   UnlockRegistryStaleSealError
 } from '@/session/unlockMethods'
+import {
+  ceremonyRides,
+  type AccountCeremonyContext
+} from '@/session/accountCeremonyContext'
 import { createLogger } from '@/lib/log'
 
 const log = createLogger('fw:session:reseal')
@@ -67,6 +70,10 @@ const log = createLogger('fw:session:reseal')
  * @param options.session {Session}
  * @param options.rosterRead {UserKeyRosterReadResult}   this login's verified
  *   roster read
+ * @param options.context {AccountCeremonyContext | null}   this session's
+ *   ceremony context: its invoker (the generation delegation on the ladder
+ *   branch) and, there, the standing key the escrows unwrap with. `null`
+ *   resolves `ok` with nothing read
  * @returns {Promise<'ok' | 'repaired' | 'unrepaired' | 'reseal-failed'>}
  *   `ok` when the registry opened (or none exists), `repaired` when a
  *   superseded generation opened it and it was re-sealed, `unrepaired` when
@@ -75,27 +82,37 @@ const log = createLogger('fw:session:reseal')
  */
 export async function repairStaleUnlockRegistrySeal({
   session,
-  rosterRead
+  rosterRead,
+  context
 }: {
   session: Session
   rosterRead: UserKeyRosterReadResult
+  context: AccountCeremonyContext | null
 }): Promise<'ok' | 'repaired' | 'unrepaired' | 'reseal-failed'> {
   const pointer = session.profile.accountPointer
   const spaceId = session.storage.spaceId
-  const { clientKeyAgreementKey, userKey } = session.profile
+  const { userKey } = session.profile
+  // The key the escrowed generations are wrapped to: an enrolled client's own
+  // identity key-agreement key, or the credential's standing key on the
+  // ladder branch (escrowed into every epoch, so it opens every generation).
+  const unwrapKey =
+    context?.kind === 'ladder'
+      ? context.standingKeyAgreementKey
+      : session.profile.clientKeyAgreementKey
+  const rides = ceremonyRides({ context })
   if (
     !WAS_SERVER_URL ||
-    !isBrowserLocalSession(session.profile.persistence) ||
+    !context ||
     !pointer ||
     !isWebvhDid(pointer.did) ||
     !spaceId ||
-    !clientKeyAgreementKey ||
+    !unwrapKey ||
     !userKey
   ) {
     return 'ok'
   }
   try {
-    await getUnlockMethods({ session })
+    await getUnlockMethods({ session, ...rides() })
     return 'ok'
   } catch (err) {
     if (!(err instanceof UnlockRegistryStaleSealError)) {
@@ -108,12 +125,13 @@ export async function repairStaleUnlockRegistrySeal({
     spaceId,
     userKey,
     descriptor: rosterRead.descriptor,
-    unwrapKey: clientKeyAgreementKey
+    unwrapKey,
+    ...rides()
   })
   if (repaired === 'repaired') {
     // Refresh the local cache from the record as served, the way an ordinary
     // read does.
-    await getUnlockMethods({ session })
+    await getUnlockMethods({ session, ...rides() })
   }
   return repaired
 }

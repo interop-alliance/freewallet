@@ -452,6 +452,28 @@ describe('the remembered spend reorder -- the persist hook', () => {
     expect(outcome.replacementEntry.recoveryKid).toBe(replayed.recipientKid)
   })
 
+  it("signs the replacement code's bridge with that code's OWN ladder VM", async () => {
+    // Both spends publish the replacement code's ladder VM in the
+    // add-and-retire entry, so its bridge is signed by that VM rather than by
+    // the new client's key: no other credential's later strike can rot it.
+    const { code } = await storeRecordForCode()
+    const { idb } = createFakeSessionIdb()
+
+    const outcome = await recoverAccountWithCode({
+      code,
+      newPassphrase: NEW_PASSPHRASE,
+      rememberBrowser: true,
+      idb
+    })
+
+    const replacement = await recoveryClientFromCode({
+      code: outcome.replacementCode
+    })
+    expect(outcome.replacementEntry.delegationKeyId).toBe(
+      `${POINTER.did}#${replacement.ladderVmKeyMultibase}`
+    )
+  })
+
   it('refuses a hook-less continuation (the build-skew guard), the pending record already persisted', async () => {
     const { code } = await storeRecordForCode()
     const { idb } = createFakeSessionIdb()

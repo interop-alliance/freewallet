@@ -17,17 +17,36 @@ import { KEYRING_KDF } from '@interop/wallet-core/keyring'
 import { ladderRung } from '@interop/wallet-core/clientAnnex'
 import { transientSessionStores } from '@/session/persistence'
 
-vi.mock('@/session/enrolledContext', () => ({
-  enrolledClientContext: vi.fn(() => ({ pointer: POINTER })),
-  requireEnrolledClientContext: vi.fn(() => ({
+vi.mock('@/session/accountCeremonyContext', () => ({
+  enrolledCeremonyContext: vi.fn(() => ({ pointer: POINTER })),
+  requireEnrolledCeremonyContext: vi.fn(() => enrolledContextStub()),
+  // The establishment resolves the ceremony context when the caller supplies
+  // none. A remembered session's is the enrolled kind, which root-invokes.
+  accountCeremonyContext: vi.fn(async () => enrolledContextStub())
+}))
+
+/**
+ * The enrolled-kind ceremony context the establishment's enrolled branch
+ * reads: this client's own update keys sign the document entry, its
+ * key-agreement key opens the roster, and every request root-invokes.
+ *
+ * @returns {object}
+ */
+function enrolledContextStub() {
+  return {
+    kind: 'enrolled',
     remoteStore: { webvhIdStore: vi.fn(() => ({ isWebvhIdStore: true })) },
     pointer: POINTER,
+    signer: { kind: 'client', updateKeys: { updateSeed: new Uint8Array(32) } },
+    idStore: { isWebvhIdStore: true },
+    rosterStore: { rosterStore: true },
+    invoker: { zcapClient: { isZcapClient: true } },
     clientWebvhKeys: { updateSeed: new Uint8Array(32) },
     clientKeyAgreementKey: { id: 'did:key:zClient#zKak' },
     keyAgent: { id: 'did:key:zClient' },
     controller: 'did:key:zAccount'
-  }))
-}))
+  }
+}
 
 vi.mock('@interop/wallet-core/unlock', () => ({
   publishUnlockKey: vi.fn(async () => ({}))

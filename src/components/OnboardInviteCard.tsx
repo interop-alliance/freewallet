@@ -37,7 +37,7 @@ import {
   type EnrollmentRequest
 } from '@interop/wallet-core/enrollment'
 import type { Session } from '@/types/auth'
-import { enrolledClientContext } from '@/session/enrolledContext'
+import { accountCeremonyContext } from '@/session/accountCeremonyContext'
 import { useCopyToClipboard } from '@/hooks/useCopyToClipboard'
 import { OnboardConsentPanel } from '@/components/OnboardConsentPanel'
 import { createLogger } from '@/lib/log'
@@ -110,11 +110,12 @@ export function OnboardInviteCard({
       setRemainingMs(ONBOARDING_INVITE_TTL_MS)
       let exchangeUrl: string
       try {
-        const context = enrolledClientContext({ session })
+        const context = await accountCeremonyContext({ session })
         if (!context) {
           throw new Error(
-            'Onboarding another wallet requires an enrolled client on a ' +
-              'configured storage server.'
+            'Onboarding another wallet requires an account on a configured ' +
+              'storage server, reached either from a connected browser or ' +
+              'with a standing passphrase or passkey.'
           )
         }
         const created = await createEphemeralExchange({

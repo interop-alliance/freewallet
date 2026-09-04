@@ -161,7 +161,7 @@ export function RecoveryCodesSection({ session }: { session: Session }) {
 
       {!canManage && (
         <Typography variant="body2" color="text.secondary">
-          {t('settings.recovery.requiresEnrolledClient')}
+          {t('settings.recovery.requiresProvisionedAccount')}
         </Typography>
       )}
 

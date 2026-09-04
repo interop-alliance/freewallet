@@ -94,6 +94,7 @@ import {
   type UnlockMethodsRecord
 } from '@/session/unlockMethods'
 import { repairStaleUnlockRegistrySeal } from '@/session/registryReseal'
+import type { AccountCeremonyContext } from '@/session/accountCeremonyContext'
 import { adoptRotatedUserKeyInBand } from '@/session/userKeyAdoption'
 import { createFakeSessionIdb } from './fakeSessionIdb'
 
@@ -192,6 +193,20 @@ function rosterReadFor({ userKey }: { userKey: UserKey }) {
   >[0]['rosterRead']
 }
 
+/**
+ * The ceremony context a remembered login hands the repair: the enrolled
+ * kind, whose invoker root-invokes (no delegated capability) and whose
+ * escrow unwrap key is read off the session profile rather than the context.
+ *
+ * @returns {AccountCeremonyContext}
+ */
+function enrolledContext(): AccountCeremonyContext {
+  return {
+    kind: 'enrolled',
+    invoker: {}
+  } as unknown as AccountCeremonyContext
+}
+
 beforeEach(() => {
   wasState.url = 'https://was.example.test'
   wasState.records.clear()
@@ -271,7 +286,8 @@ describe('the login-time re-seal repair', () => {
 
     const outcome = await repairStaleUnlockRegistrySeal({
       session,
-      rosterRead: rosterReadFor({ userKey: currentKey })
+      rosterRead: rosterReadFor({ userKey: currentKey }),
+      context: enrolledContext()
     })
 
     expect(outcome).toBe('repaired')
@@ -287,7 +303,8 @@ describe('the login-time re-seal repair', () => {
 
     const outcome = await repairStaleUnlockRegistrySeal({
       session,
-      rosterRead: rosterReadFor({ userKey })
+      rosterRead: rosterReadFor({ userKey }),
+      context: enrolledContext()
     })
 
     expect(outcome).toBe('ok')
@@ -304,7 +321,8 @@ describe('the login-time re-seal repair', () => {
 
     const outcome = await repairStaleUnlockRegistrySeal({
       session,
-      rosterRead: rosterReadFor({ userKey: currentKey })
+      rosterRead: rosterReadFor({ userKey: currentKey }),
+      context: enrolledContext()
     })
 
     expect(outcome).toBe('unrepaired')

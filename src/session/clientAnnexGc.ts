@@ -18,7 +18,7 @@ import { isWebvhDid } from '@interop/wallet-core/webvh'
 import { runClientAnnexGc } from '@interop/wallet-core/clientAnnex'
 import type { ClientAnnexGcReport } from '@interop/wallet-core/clientAnnex'
 import { pointedClientAnnexReach } from '@/session/annexReach'
-import { enrolledClientContext } from '@/session/enrolledContext'
+import { enrolledCeremonyContext } from '@/session/accountCeremonyContext'
 import { isBrowserLocalSession } from '@/session/persistence'
 import { invalidateVerifiedLog } from '@/session/verifiedLog'
 import type { Session } from '@/types/auth'
@@ -49,7 +49,7 @@ export async function sweepClientAnnexGenerations({
   if (!persistence || !isBrowserLocalSession(persistence)) {
     return null
   }
-  const context = enrolledClientContext({ session })
+  const context = enrolledCeremonyContext({ session })
   if (!context) {
     return null
   }

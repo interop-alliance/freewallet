@@ -142,17 +142,24 @@ export function accountRosterStore({
  * @param [options.capability] {IZcap}   an invocation capability every request
  *   rides (a transient session's generation delegation, the only authority
  *   that session holds); the root capability is invoked otherwise
+ * @param [options.keyAgent] {ICapabilityAgent}   the agent whose key signs the
+ *   log appends, overriding the profile's own. A ladder-anchored ceremony
+ *   passes the credential's ladder VM agent: that key is what the
+ *   post-ceremony document lists, so the roster head stays signed by a key
+ *   every later reader resolves
  * @returns {SealableEncryptionDescriptorStore}
  */
 export function sessionRosterStore({
   profile,
-  capability
+  capability,
+  keyAgent: signingKeyAgent
 }: {
   profile: ControllerProfile
   capability?: IZcap
+  keyAgent?: ICapabilityAgent
 }): SealableEncryptionDescriptorStore {
   const pointer = profile.accountPointer
-  const { keyAgent } = profile
+  const keyAgent = signingKeyAgent ?? profile.keyAgent
   if (!pointer?.did || !keyAgent) {
     throw new Error(
       'The user key roster store needs an account pointer naming a DID and ' +

@@ -249,8 +249,15 @@ test.describe.serial('transient recovery (the login-axis cell)', () => {
       const ladderVms = delegationRelation.filter(
         id => !authentication.includes(id)
       )
-      expect(ladderVms).toHaveLength(1)
-      expect(assertion).toContain(ladderVms[0])
+      // TWO ladder VMs stand: the recovered passphrase's, and the
+      // REPLACEMENT code's -- a recovery code is a standing credential with a
+      // ladder of its own, and the add-and-retire entry publishes the
+      // replacement's VM beside its verbatim key, since that VM is what signs
+      // the replacement's own bridge delegation.
+      expect(ladderVms).toHaveLength(2)
+      for (const ladderVm of ladderVms) {
+        expect(assertion).toContain(ladderVm)
+      }
       // keyAgreement: the original client's key, the replacement code's
       // key, and the recovered passphrase's commitment. The spent code's key
       // is gone, and so is the original passphrase's commitment: the

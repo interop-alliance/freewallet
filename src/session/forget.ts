@@ -118,11 +118,14 @@ import { SESSION_DB_NAME } from '@/lib/sessionKey'
 import { clearWriterId } from '@/lib/writerId'
 import { BrowserStore, migrationMarkerKeys } from '@/stores/browserStore'
 import {
-  assertAccountCeremonyAllowed,
+  assertBrowserLocalSession,
   deleteAllLocalCacheFamilies,
   LOCAL_CACHE_FAMILY_PREFIXES
 } from '@/session/persistence'
-import { requireEnrolledClientContext } from '@/session/enrolledContext'
+import {
+  requireEnrolledCeremonyContext,
+  type LadderDeleter
+} from '@/session/accountCeremonyContext'
 import type { KeyringFetchResult } from '@/session/keyring'
 import {
   recordRemintedEntry,
@@ -138,7 +141,8 @@ import { unlockLogStore } from '@/session/standingUnlock'
 import {
   getUnlockMethods,
   managementZcapClient,
-  refreshStandingDelegationFields
+  refreshStandingDelegationFields,
+  unlockEntryReaderFor
 } from '@/session/unlockMethods'
 import { adoptRotatedUserKeyInBand } from '@/session/userKeyAdoption'
 import { cascadeCollections } from '@/session/userKeyCascade'
@@ -270,9 +274,9 @@ export type ForgetOutcome = ForgetCeremonyOutcome & {
  * Refusals before anything runs: a pending-shaped passphrase registry entry
  * on the transition (`PendingRetirementForgetError`), a registry on the
  * transition that does not name every standing credential the account
- * document publishes (`UnrecordedCredentialForgetError`), a transient session
- * (`StepUpRequiredError`
- * via the shared ceremony gate) and a session whose login did not carry the
+ * document publishes (`UnrecordedCredentialForgetError`), a session that is
+ * not browser-local (`BrowserLocalSessionRequiredError`: this ceremony's
+ * subject is this browser) and a session whose login did not carry the
  * credential's standing members (the bridge delegation and ladder seed; the
  * transition additionally needs the hit's record re-bind closure, since a
  * removal entry leaving the login credential's bridge rotted would strand
@@ -294,7 +298,7 @@ export async function forgetThisBrowser({
   lastClient?: boolean
   idb?: IDBFactory
 }): Promise<ForgetOutcome> {
-  assertAccountCeremonyAllowed({
+  assertBrowserLocalSession({
     persistence: session.profile.persistence,
     ceremony: 'Forgetting this browser'
   })
@@ -304,7 +308,10 @@ export async function forgetThisBrowser({
   // the chain resolved long ago.
   await session.registryReady
   const { remoteStore, pointer, clientWebvhKeys, keyAgent } =
-    requireEnrolledClientContext({ session, action: 'Forgetting this browser' })
+    requireEnrolledCeremonyContext({
+      session,
+      action: 'Forgetting this browser'
+    })
   const standing = session.profile.standingUnlock
   const ladderSeed = session.profile.ladderSeed
   if (!standing || !ladderSeed) {
@@ -1212,24 +1219,23 @@ function derivableReplicaPrefixes(): Set<string> {
  * @param options.registry {UnlockMethodsRecord | null}
  * @returns {Promise<void>}
  */
-async function assertNoPendingPassphraseEntry({
+export async function assertNoPendingPassphraseEntry({
   session,
   pointer,
-  registry
+  registry,
+  signer
 }: {
   session: Session
   pointer: Parameters<typeof delegateLogWrite>[0]['pointer']
   registry: { methods?: unknown[] } | null
+  signer?: LadderDeleter
 }): Promise<void> {
   const pending = await findPendingPassphraseEntries({
     registry,
     host: pointer.host,
-    readerFor: async entry => ({
-      zcapClient: managementZcapClient({
-        session,
-        capability: entry.manageCapability!
-      }),
-      capability: entry.manageCapability!
+    readerFor: unlockEntryReaderFor({
+      session,
+      ...(signer ? { signer } : {})
     })
   })
   if (pending.length > 0) {
@@ -1270,7 +1276,7 @@ async function assertNoPendingPassphraseEntry({
  * @param options.registry {UnlockMethodsRecord | null}
  * @returns {Promise<void>}
  */
-async function assertRegistryCoversStandingCredentials({
+export async function assertRegistryCoversStandingCredentials({
   session,
   pointer,
   registry

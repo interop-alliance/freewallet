@@ -510,10 +510,21 @@ export class WASRemoteStore {
    * (`key-map/client-labels.json`) for the wallet-core label helpers, bound to
    * this store's current signing client.
    *
+   * The labels read and write ride this store's bound invocation capability
+   * when one is held, so a session whose only authority over the Space is a
+   * delegated subtree zcap (the generation delegation a transient session
+   * invokes under) can list, set, and drop labels. An enrolled client holds
+   * none and root-invokes, as before. The capability is read here rather than
+   * captured, so a mid-session renewal reaches the next store built.
+   *
    * @returns {ClientLabelsStore}
    */
   clientLabelsStore(): ClientLabelsStore {
-    return wasClientLabelsStore({ was: this.was, spaceId: this.spaceId })
+    return wasClientLabelsStore({
+      was: this.was,
+      spaceId: this.spaceId,
+      ...(this.#capability ? { capability: this.#capability } : {})
+    })
   }
 
   /**

@@ -50,15 +50,17 @@
  * A passkey login mends the same bare shape through
  * {@link rebuildBarePasskeyEntry}, which rebuilds its own entry alone.
  */
+import type { IZcap } from '@interop/data-integrity-core'
 import { keyAgreementCommitment } from '@interop/wallet-core/webvh'
 import { unlockKeyVmId } from '@interop/wallet-core/unlock'
 import { KEYRING_KDF } from '@interop/wallet-core/keyring'
 import type { Session } from '@/types/auth'
 import type { KeyringFetchResult, UnlockCredential } from '@/session/keyring'
 import {
-  enrolledClientContext,
-  type EnrolledClientContext
-} from '@/session/enrolledContext'
+  accountCeremonyContext,
+  ceremonyRides,
+  type AccountCeremonyContext
+} from '@/session/accountCeremonyContext'
 import {
   isUnclaimedLadderVmRefusal,
   rotateOffUnlockCredential
@@ -106,17 +108,18 @@ export async function repairTornPassphraseRetirement({
 }: {
   session: Session
   found: KeyringFetchResult
-  credential?: { secret: string | Uint8Array; derived?: UnlockCredential }
+  credential?: { secret?: string | Uint8Array; derived?: UnlockCredential }
 }): Promise<void> {
   if (session.profile.unlockMethod?.type !== 'passphrase') {
     return
   }
-  const context = enrolledClientContext({ session })
+  const context = await accountCeremonyContext({ session })
   const standingClient = found.standingClient
   if (!context || !standingClient) {
     return
   }
-  const registry = await getUnlockMethods({ session })
+  const rides = ceremonyRides({ context })
+  const registry = await getUnlockMethods({ session, ...rides() })
   if (!registry) {
     // No registry at all is the backfill's business, not a repair's: it
     // creates the record, and the login after that finds an entry here.
@@ -136,7 +139,15 @@ export async function repairTornPassphraseRetirement({
     // is the same damage in a narrower form, and is rebuilt here too.
     // Nothing names another credential in either case, so nothing is
     // retired.
-    await rebuildBareEntry({ session, found, context, registry, entry, mine })
+    await rebuildBareEntry({
+      session,
+      found,
+      context,
+      registry,
+      entry,
+      mine,
+      ...rides()
+    })
     return
   }
   if (entry.keyAgreementKeyMultibase === mine) {
@@ -193,7 +204,8 @@ export async function repairTornPassphraseRetirement({
       // standing passphrase.
       established = await establishStandingUnlock({
         session,
-        secret: credential.secret,
+        context,
+        secret: credential.secret ?? '',
         kdf: KEYRING_KDF,
         lowEntropy: true,
         email: session.user.email,
@@ -209,7 +221,9 @@ export async function repairTornPassphraseRetirement({
     // The standing re-bind superseded this login's record: swap the live
     // profile's persist closure, unlock method, and annex-writing seed onto
     // it, as the change ceremony does on its own establishment.
-    session.profile.persistClientKeys = established.persistClientKeys
+    if (established.persistClientKeys) {
+      session.profile.persistClientKeys = established.persistClientKeys
+    }
     session.profile.unlockMethod = {
       type: 'passphrase',
       unlockSpaceId: established.unlockSpaceId,
@@ -245,6 +259,7 @@ export async function repairTornPassphraseRetirement({
     try {
       outcome = await rotateOffUnlockCredential({
         session,
+        context,
         method: entry,
         verb: 'finishing a passphrase change'
       })
@@ -280,7 +295,8 @@ export async function repairTornPassphraseRetirement({
         session,
         spaceId:
           session.profile.accountPointer?.spaceId ?? session.storage.spaceId!,
-        userKey: outcome.userKey
+        userKey: outcome.userKey,
+        ...rides()
       })
     }
   }
@@ -294,6 +310,7 @@ export async function repairTornPassphraseRetirement({
     : await standingFieldsOfKeyringHit({ found })
   await updateUnlockMethods({
     session,
+    ...rides(),
     mutate: current => {
       if (!current) {
         return null
@@ -326,11 +343,13 @@ export async function repairTornPassphraseRetirement({
  * @param options {object}
  * @param options.session {Session}
  * @param options.found {KeyringFetchResult}   the login credential's hit
- * @param options.context {EnrolledClientContext}
+ * @param options.context {AccountCeremonyContext}
  * @param options.registry {UnlockMethodsRecord}   the registry as read
  * @param [options.entry] {PassphraseUnlockMethod}   the bare entry, if any
  * @param options.mine {string}   the login credential's key-agreement
  *   multibase
+ * @param [options.capability] {IZcap}   the invocation capability the write
+ *   rides (the ladder branch's generation delegation)
  * @returns {Promise<void>}
  */
 async function rebuildBareEntry({
@@ -339,14 +358,16 @@ async function rebuildBareEntry({
   context,
   registry,
   entry,
-  mine
+  mine,
+  capability
 }: {
   session: Session
   found: KeyringFetchResult
-  context: EnrolledClientContext
+  context: AccountCeremonyContext
   registry: UnlockMethodsRecord
   entry?: PassphraseUnlockMethod
   mine: string
+  capability?: IZcap
 }): Promise<void> {
   const { doc } = await verifiedAccountLog({
     profile: session.profile,
@@ -367,6 +388,7 @@ async function rebuildBareEntry({
   const standing = await standingFieldsOfKeyringHit({ found })
   await updateUnlockMethods({
     session,
+    ...(capability ? { capability } : {}),
     mutate: current =>
       upsertPassphraseUnlockMethod({
         record: current ?? registry,
@@ -410,12 +432,13 @@ export async function rebuildBarePasskeyEntry({
   if (session.profile.unlockMethod?.type !== 'passkey') {
     return
   }
-  const context = enrolledClientContext({ session })
+  const context = await accountCeremonyContext({ session })
   const standingClient = found.standingClient
   if (!context || !standingClient) {
     return
   }
-  const registry = await getUnlockMethods({ session })
+  const rides = ceremonyRides({ context })
+  const registry = await getUnlockMethods({ session, ...rides() })
   if (!registry) {
     return
   }

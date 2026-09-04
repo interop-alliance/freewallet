@@ -40,6 +40,14 @@ const state = vi.hoisted(() => ({
   // Whether the session resolves an enrolled-client context at all: a session
   // that cannot run a retirement never reads the registry.
   enrolled: true,
+  // Which kind the account-ceremony context resolves to. A remembered
+  // session is the enrolled kind (the default here); a transient session on
+  // a standing credential is the ladder kind, whose passphrase change defers
+  // the old unlock Space's delete to its own stage after the retirement.
+  contextKind: 'enrolled' as 'enrolled' | 'ladder',
+  // What `deleteUnlockSpaceForEntry` reports back for that stage.
+  unlockSpaceDeleteOutcome: 'deleted' as string,
+  unlockSpaceDeleteThrows: false,
   // The key-agreement multibases the typed passphrases derive. The old one
   // matches `registryWithPassphraseStanding`'s entry unless a test says
   // otherwise (a mismatch is a pending retirement).
@@ -420,7 +428,12 @@ vi.mock('@/session/keyring', () => ({
           standing: {
             keyAgreementKeyMultibase: 'z6LSPasskeyKak',
             recipientKid: 'did:key:zPasskeyClient#z6LSPasskeyKak',
-            clientDid: 'did:key:zPasskeyClient'
+            clientDid: 'did:key:zPasskeyClient',
+            // The derived standing client: a retirement takes the surviving
+            // credential's key-agreement key off it.
+            agents: {
+              keyAgreementKey: { id: 'did:key:zPasskeyClient#z6LSPasskeyKak' }
+            }
           }
         }
       }
@@ -442,7 +455,15 @@ vi.mock('@/session/keyring', () => ({
           clientDid:
             secret === 'old'
               ? 'did:key:zOldPassphraseClient'
-              : 'did:key:zNewPassphraseClient'
+              : 'did:key:zNewPassphraseClient',
+          agents: {
+            keyAgreementKey: {
+              id:
+                secret === 'old'
+                  ? 'did:key:zOldPassphraseClient#z6LSOldPassphraseKak'
+                  : 'did:key:zNewPassphraseClient#z6LSNewPassphraseKak'
+            }
+          }
         }
       }
     }
@@ -489,6 +510,15 @@ vi.mock('@/session/unlockMethods', async importOriginal => {
           unlockSpaceId: entry.unlockSpaceId,
           space: state.artifactOutcome[entry.type] ?? 'deleted'
         }
+      }
+    ),
+    deleteUnlockSpaceForEntry: vi.fn(
+      async ({ entry }: { entry: { unlockSpaceId: string } }) => {
+        state.calls.push(`deleteUnlockSpaceForEntry:${entry.unlockSpaceId}`)
+        if (state.unlockSpaceDeleteThrows) {
+          throw new Error('the DELETE-only child was refused')
+        }
+        return state.unlockSpaceDeleteOutcome
       }
     ),
     unlockSpaceDeletionRefusal: vi.fn(
@@ -774,8 +804,16 @@ vi.mock('@/session/pendingRetirement', () => ({
   )
 }))
 
-vi.mock('@/session/enrolledContext', () => ({
-  enrolledClientContext: vi.fn(() =>
+vi.mock('@/session/accountCeremonyContext', () => ({
+  // The live-rides thunk: the ceremonies read the invocation capability off
+  // the context each time they spread it, so the mock must expose it too.
+  ceremonyRides:
+    ({ context }: { context: { invoker?: { capability?: unknown } } | null }) =>
+    () =>
+      context?.invoker?.capability
+        ? { capability: context.invoker.capability }
+        : {},
+  enrolledCeremonyContext: vi.fn(() =>
     state.enrolled
       ? {
           controller: 'did:key:zAccount',
@@ -787,9 +825,78 @@ vi.mock('@/session/enrolledContext', () => ({
         }
       : null
   ),
-  requireEnrolledClientContext: vi.fn(() => ({
+  requireEnrolledCeremonyContext: vi.fn(() => ({
     controller: 'did:key:zAccount'
-  }))
+  })),
+  // The ceremonies resolve the account-ceremony context. A remembered
+  // session's is the enrolled kind: it root-invokes, so its invoker carries
+  // no delegated capability and nothing rides one.
+  accountCeremonyContext: vi.fn(async () =>
+    state.enrolled && state.contextKind === 'ladder'
+      ? {
+          // The ladder kind: a transient session on a standing credential.
+          // Its account-log entries are signed by a rung of that
+          // credential's ladder, and every request is invoked by the annex
+          // VM under the generation delegation.
+          kind: 'ladder',
+          controller: 'did:key:zAccount',
+          pointer: {
+            did: 'did:webvh:account',
+            spaceId: 'space-123',
+            host: 'https://was.example.test'
+          },
+          remoteStore: {
+            webvhIdStore: vi.fn(() => ({ isWebvhIdStore: true }))
+          },
+          signer: { kind: 'ladder', ladderSeed: LADDER_SEED },
+          ladderSeed: LADDER_SEED,
+          idStore: { isUnlockLogStore: true },
+          rosterStore: { read: vi.fn(async () => state.rosterRead) },
+          invoker: {
+            zcapClient: { isAnnexVmZcapClient: true },
+            capability: GENERATION_DELEGATION
+          },
+          delegationSigner: { isLadderVmZcapClient: true },
+          ladderDeleter: {
+            zcapClient: { isLadderVmZcapClient: true },
+            invoker: { isDidKeyZcapClient: true },
+            controller: LADDER_DID_KEY
+          },
+          bindRecord: async () => ({}),
+          sibling: { id: 'urn:zcap:delegated-clients' },
+          unlockSpaceId: ACTING_SPACE,
+          standingKeyAgreementKey: {
+            id: 'did:key:zStanding#z6LSStanding'
+          },
+          renew: async () => GENERATION_DELEGATION
+        }
+      : state.enrolled
+        ? {
+            kind: 'enrolled',
+            controller: 'did:key:zAccount',
+            pointer: {
+              did: 'did:webvh:account',
+              spaceId: 'space-123',
+              host: 'https://was.example.test'
+            },
+            remoteStore: {
+              webvhIdStore: vi.fn(() => ({ isWebvhIdStore: true }))
+            },
+            signer: {
+              kind: 'client',
+              updateKeys: { updateSeed: new Uint8Array(32) }
+            },
+            idStore: { isWebvhIdStore: true },
+            // The same roster read `sessionRosterStore` is mocked to serve:
+            // the real context builds its store with it.
+            rosterStore: { read: vi.fn(async () => state.rosterRead) },
+            invoker: { zcapClient: { isZcapClient: true } },
+            clientWebvhKeys: { updateSeed: new Uint8Array(32) },
+            clientKeyAgreementKey: { id: 'did:key:zClient#zKak' },
+            keyAgent: { id: 'did:key:zClient' }
+          }
+        : null
+  )
 }))
 
 vi.mock('@/session/wipe', () => ({
@@ -848,12 +955,15 @@ const {
 } = await import('@/session/unlockMethods')
 const {
   deleteUnlockMethodSpace,
+  deleteUnlockSpaceForEntry,
   emptyUnlockMethodsRegistry,
   getUnlockMethods,
   updateUnlockMethods,
   upsertPassphraseUnlockMethod
 } = await import('@/session/unlockMethods')
-const { deleteUnlockMethod } = await import('@/session/keyring')
+const { deleteKeyring, deleteUnlockMethod } = await import('@/session/keyring')
+const { ladderVmAgent, ladderVmZcapClient } =
+  await import('@interop/wallet-core/clientAnnex')
 const { establishStandingUnlock } = await import('@/session/standingUnlock')
 const { registerPasskey } = await import('@/lib/passkey')
 const { executeLocalWipe, snapshotWipeTargets } = await import('@/session/wipe')
@@ -1022,6 +1132,9 @@ beforeEach(() => {
   state.localWipeFailed = []
   state.localWipeUnverified = []
   state.enrolled = true
+  state.contextKind = 'enrolled'
+  state.unlockSpaceDeleteOutcome = 'deleted'
+  state.unlockSpaceDeleteThrows = false
   state.newKeyAgreementKeyMultibase = 'z6LSNewPassphraseKak'
   state.oldKeyAgreementKeyMultibase = 'z6LSOldPassphraseKak'
   state.oldCredentialInDocument = false
@@ -2783,6 +2896,132 @@ describe('changeAccountPassphrase', () => {
       'rotateOffUnlockCredential'
     ])
     warn.mockRestore()
+  })
+})
+
+describe("changeAccountPassphrase (the ladder branch's unlock-Space stage)", () => {
+  beforeEach(() => {
+    state.contextKind = 'ladder'
+    state.registry = registryWithPassphraseStanding({
+      keyAgreementKeyMultibase: 'z6LSOldPassphraseKak'
+    })
+    // The old record's ladder seed, as the read-only verification hands it
+    // back: what makes the pre-strike delegation replacement reachable.
+    state.oldLadderSeed = OLD_LADDER_SEED
+  })
+
+  it('deletes the old unlock Space after the retirement and before the registry write', async () => {
+    const { oldPassphraseRetired } = await changeAccountPassphrase({
+      session: makeSession({ transient: true }),
+      oldPassphrase: 'old',
+      newPassphrase: 'new'
+    })
+
+    // Stage 11: the delete runs after the retirement (whose annex strike is
+    // its last internal stage) and before the registry write, so a tear here
+    // leaves an entry still naming the Space rather than a Space nothing
+    // names. The enrolled branch's `deleteKeyring` never fires: a transient
+    // session wrote no browser-local state to clear.
+    expect(state.calls).toEqual([
+      'verifyPassphrase',
+      'establishStandingUnlock',
+      'adoptPassphraseRebind',
+      'renewTransientGenerationDelegation',
+      'rotateOffUnlockCredential',
+      'deleteUnlockSpaceForEntry:unlock-space-passphrase',
+      'putUnlockMethods'
+    ])
+    expect(state.calls).not.toContain('deleteKeyring')
+    expect(vi.mocked(deleteKeyring)).not.toHaveBeenCalled()
+    expect(oldPassphraseRetired).toBe(true)
+  })
+
+  it('signs the delete with the NEW ladder VM, which the bind entry published', async () => {
+    await changeAccountPassphrase({
+      session: makeSession({ transient: true }),
+      oldPassphrase: 'old',
+      newPassphrase: 'new'
+    })
+    expect(vi.mocked(ladderVmAgent)).toHaveBeenCalledWith({
+      ladderSeed: NEW_LADDER_SEED
+    })
+    expect(vi.mocked(ladderVmZcapClient)).toHaveBeenCalledWith({
+      accountDid: 'did:webvh:account',
+      ladderSeed: NEW_LADDER_SEED
+    })
+    expect(vi.mocked(deleteUnlockSpaceForEntry)).toHaveBeenCalledWith(
+      expect.objectContaining({
+        entry: expect.objectContaining({
+          unlockSpaceId: 'unlock-space-passphrase'
+        }),
+        signer: expect.objectContaining({ controller: LADDER_DID_KEY })
+      })
+    )
+  })
+
+  it('reports a refused delete as a residue rather than failing the change', async () => {
+    // The passphrase has already changed and cannot roll back, so a Space
+    // this session could not delete is a residue the copy states.
+    state.unlockSpaceDeleteOutcome = 'refused'
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
+    const { oldPassphraseRetired, rotation } = await changeAccountPassphrase({
+      session: makeSession({ transient: true }),
+      oldPassphrase: 'old',
+      newPassphrase: 'new'
+    })
+    expect(oldPassphraseRetired).toBe(false)
+    expect(rotation).toBe('skipped')
+    expect(state.calls).toContain('putUnlockMethods')
+    warn.mockRestore()
+  })
+
+  it('writes the registry entry even when the delete throws', async () => {
+    state.unlockSpaceDeleteThrows = true
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
+    const { oldPassphraseRetired } = await changeAccountPassphrase({
+      session: makeSession({ transient: true }),
+      oldPassphrase: 'old',
+      newPassphrase: 'new'
+    })
+    expect(oldPassphraseRetired).toBe(false)
+    expect(state.calls).toContain('putUnlockMethods')
+    warn.mockRestore()
+  })
+
+  it('counts a 404 as deleted, the Space having gone already', async () => {
+    state.unlockSpaceDeleteOutcome = 'not-found'
+    const { oldPassphraseRetired } = await changeAccountPassphrase({
+      session: makeSession({ transient: true }),
+      oldPassphrase: 'old',
+      newPassphrase: 'new'
+    })
+    expect(oldPassphraseRetired).toBe(true)
+  })
+})
+
+describe('changeAccountPassphrase (the enrolled branch keeps deleteKeyring)', () => {
+  it('deletes the old keyring before the retirement and mints no DELETE child', async () => {
+    state.registry = registryWithPassphraseStanding({
+      keyAgreementKeyMultibase: 'z6LSOldPassphraseKak'
+    })
+    state.oldLadderSeed = OLD_LADDER_SEED
+    await changeAccountPassphrase({
+      session: makeSession(),
+      oldPassphrase: 'old',
+      newPassphrase: 'new'
+    })
+
+    expect(state.calls).toEqual([
+      'verifyPassphrase',
+      'establishStandingUnlock',
+      'adoptPassphraseRebind',
+      'deleteKeyring',
+      'rotateOffUnlockCredential',
+      'putUnlockMethods'
+    ])
+    expect(vi.mocked(deleteUnlockSpaceForEntry)).not.toHaveBeenCalled()
+    // An enrolled client root-invokes and mints no ladder-signed child.
+    expect(vi.mocked(ladderVmAgent)).not.toHaveBeenCalled()
   })
 })
 

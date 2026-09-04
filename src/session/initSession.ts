@@ -104,6 +104,7 @@ import {
   backfillPassphraseUnlockMethod,
   refreshStandingDelegationFields
 } from '@/session/unlockMethods'
+import { accountCeremonyContext } from '@/session/accountCeremonyContext'
 import { repairStaleUnlockRegistrySeal } from '@/session/registryReseal'
 import {
   rebuildBarePasskeyEntry,
@@ -1277,7 +1278,8 @@ async function sessionFromKeyringHit({
       try {
         await repairStaleUnlockRegistrySeal({
           session,
-          rosterRead: loginRosterRead
+          rosterRead: loginRosterRead,
+          context: await accountCeremonyContext({ session })
         })
       } catch (err) {
         log.warn(

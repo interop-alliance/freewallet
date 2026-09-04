@@ -7,9 +7,15 @@
  * `key-map/client-labels.json`; the document carries key material only),
  * starts the connect-another-wallet ceremony (one card offering both the QR
  * invite and the pasted connect code), and disconnects a client by
- * driving the full revocation cascade -- with honest copy about the last
- * enrolled client (disconnecting it would abandon update authority; a
- * recovery code is the answer to "my only browser is gone").
+ * driving the full revocation cascade.
+ *
+ * What the section offers follows the signer that would sign the removal
+ * entry. From an enrolled client the last enrolled client cannot be
+ * disconnected (that would abandon the account's update authority) and this
+ * browser's own row offers the forget ceremony instead. From a transient
+ * session on a standing unlock credential the ladder signs, so every row
+ * offers Disconnect and the last row states the transition it makes: the
+ * account lands ladder-anchored, reached by the sign-in credentials alone.
  */
 import Alert from '@mui/material/Alert'
 import Button from '@mui/material/Button'
@@ -37,6 +43,7 @@ import {
 } from '@interop/wallet-core/enrollment'
 import type { Session } from '@/types/auth'
 import {
+  accountSignerKind,
   canManageAccountClients,
   cascadeCompletion,
   disconnectAccountClient,
@@ -71,6 +78,12 @@ function isCanonicalKeyRefusal({ err }: { err: unknown }): boolean {
 export function EnrolledClientsSection({ session }: { session: Session }) {
   const { t, i18n } = useTranslation()
   const canManage = canManageAccountClients({ session })
+  // Which signer would put this session's removal entry on the log. On the
+  // ladder branch the shared policy drops the self and last-client refusals,
+  // so every listed row offers Disconnect and the last one carries the
+  // transition copy: the account lands ladder-anchored rather than stranded.
+  const signerKind = accountSignerKind({ session })
+  const ladderBranch = signerKind === 'ladder'
   // `null` = not loaded yet (or the listing failed; `loadError` tells apart).
   const [clients, setClients] = useState<AccountClientView[] | null>(null)
   const [loadError, setLoadError] = useState(false)
@@ -420,9 +433,16 @@ export function EnrolledClientsSection({ session }: { session: Session }) {
           {clients.map(client => {
             const editing = editingKey === client.signingKeyMultibase
             const displayName = client.label ?? t('settings.clients.unlabeled')
-            // The shared policy, not UI state: self and last-wallet hide the
-            // button entirely, an unattributed update key disables it.
-            const eligibility = disconnectEligibility({ client, clients })
+            // The shared policy, not UI state: on the client branch self and
+            // last-wallet hide the button entirely, an unattributed update
+            // key disables it. The ladder branch keeps only the last of the
+            // three.
+            const eligibility = disconnectEligibility({
+              client,
+              clients,
+              signerKind
+            })
+            const lastRow = ladderBranch && clients.length <= 1
             return (
               <Card
                 key={client.signingKeyMultibase}
@@ -526,6 +546,11 @@ export function EnrolledClientsSection({ session }: { session: Session }) {
                       {t('settings.clients.disconnect')}
                     </Button>
                   )}
+                {lastRow && (
+                  <Typography variant="body2" color="text.secondary">
+                    {t('settings.clients.lastClientTransitionHint')}
+                  </Typography>
+                )}
                 {eligibility.refusal === 'self' &&
                   session.profile.standingUnlock !== undefined &&
                   session.profile.ladderSeed !== undefined && (
@@ -557,7 +582,7 @@ export function EnrolledClientsSection({ session }: { session: Session }) {
         </Stack>
       )}
 
-      {clients !== null && lastClient && (
+      {clients !== null && lastClient && !ladderBranch && (
         <Typography variant="body2" color="text.secondary">
           {t('settings.clients.lastClientHint')}
         </Typography>
@@ -565,7 +590,11 @@ export function EnrolledClientsSection({ session }: { session: Session }) {
 
       {cascadeWarning && (
         <Alert severity="warning">
-          {t('settings.clients.cascadeIncomplete')}
+          {t(
+            ladderBranch
+              ? 'settings.clients.cascadeIncompleteTransient'
+              : 'settings.clients.cascadeIncomplete'
+          )}
         </Alert>
       )}
 
@@ -707,6 +736,14 @@ export function EnrolledClientsSection({ session }: { session: Session }) {
           <DialogContentText>
             {t('settings.clients.disconnectConfirmMessage')}
           </DialogContentText>
+          {ladderBranch && (clients?.length ?? 0) <= 1 && (
+            <DialogContentText
+              sx={{ mt: 1 }}
+              data-testid="disconnect-last-client-copy"
+            >
+              {t('settings.clients.lastClientTransitionHint')}
+            </DialogContentText>
+          )}
           {disconnecting && (
             <Alert severity="info" sx={{ mt: 2 }}>
               {t('settings.clients.disconnectProgress')}
@@ -714,7 +751,11 @@ export function EnrolledClientsSection({ session }: { session: Session }) {
           )}
           {disconnectError && (
             <Alert severity="error" sx={{ mt: 2 }}>
-              {t('settings.clients.disconnectError')}
+              {t(
+                ladderBranch
+                  ? 'settings.clients.disconnectErrorTransient'
+                  : 'settings.clients.disconnectError'
+              )}
             </Alert>
           )}
         </DialogContent>

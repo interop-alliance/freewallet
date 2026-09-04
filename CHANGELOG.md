@@ -1,5 +1,214 @@
 # History
 
+## 0.49.0 - TBD
+
+Every account-management ceremony now runs from a transient session, on a
+standing unlock credential's ladder in place of an enrolled client's key.
+
+### Added
+
+- One account-ceremony context (`accountCeremonyContext` in
+  `src/session/accountCeremonyContext.ts`), replacing `enrolledContext.ts`. It
+  resolves the enrolled kind from a remembered session (this client's
+  did:webvh update keys sign the account-log entry, its key agent signs the
+  roster append, every request root-invokes) or the ladder kind from a
+  transient session holding a standing unlock credential (a rung of the
+  credential's update-key ladder signs the entry through the record's bridge
+  delegation, the credential's ladder VM signs the licensed roster append, and
+  the per-visit annex VM invokes every request under the generation
+  delegation). A guest, a no-WAS session, and a transient session whose record
+  carries no standing members resolve to neither. The ladder kind carries what
+  only it needs: the ladder VM's own delegation signer (the annex VM stands in
+  no account document), the DELETE-only child mint the account-deletion walk
+  already used, a remote-only unlock-record binder, the credential's
+  `delegatedClients` sibling delegation, the acting credential's management
+  zcap and unlock Space id, the standing key-agreement key every roster and
+  registry unwrap needs, and a `renew()` that replaces the generation
+  delegation in place. Account deletion's ladder-signer construction is now
+  that kind's builder, so the deletion walk and the ceremonies share one
+  source.
+- Every unlock record's bridge and sibling delegation is now signed by its own
+  credential's ladder VM, in place of the acting session's signer, so a strike
+  of one credential's inventory can rot only the record the same ceremony
+  deletes.
+- The passphrase change, passphrase add, passkey add, and passkey remove run
+  from a transient session. `establishStandingUnlock` gained a ladder branch:
+  the new credential's unlock record is written remotely first (inert, its
+  ladder VM standing in no document yet), its annex rung-0 hash is committed
+  under the acting credential's rung as a blocking stage, the bind entry
+  publishes, and only then does the roster escrow append, a ladder-signed
+  append being licensed at the inventory-changing version its own entry mints.
+  `rotateOffUnlockCredential` and the retirement pre-flight run on the ladder
+  kind too: the strike entry is signed by a rung of the surviving credential's
+  ladder, the convergence append by that credential's ladder VM, and the
+  roster unwrap uses its standing key. A credential retirement on the ladder
+  branch strikes the retired credential's annex rung through the SURVIVING
+  credential's sibling delegation, since the annex Space answers to the
+  account did:webvh and a transient session's per-visit key is not it (a
+  passphrase change reaches it through the new credential's sibling, since its
+  own strike entry has already removed the old credential's ladder VM from the
+  document). A passphrase change and a passkey removal also replace the
+  generation delegation before their strike entry lands and adopt the
+  replacement into the live session (profile stamp, persistence strategy,
+  remote store), since the retired credential's ladder VM may be what signed
+  the delegation the visit's requests ride; App Connect grants the visit
+  chained under the old delegation end with it, the same mid-generation death
+  an ordinary disconnect causes.
+- `ActingCredentialRemovalError`, refusing removal of the passkey a transient
+  session entered on, since that credential's ladder VM is what all three
+  stages of the removal act through. A remembered session may still remove its
+  own login passkey.
+- The passphrase change deletes the old unlock Space in the ceremony's own
+  place on the ladder branch: after the annex strike and before the registry
+  write, through a DELETE-only child of the old entry's management zcap signed
+  by the new ladder VM. A tear there leaves an entry still naming the Space
+  rather than a Space nothing names, and each of the mint's five refusals is
+  reported rather than failing a change that has already landed. The tap-free
+  passkey removal deletes the passkey's unlock Space the same way; a delete
+  that does not succeed is reported as a residue rather than as a deletion.
+  The enrolled branch is unchanged: it still re-derives the old unlock
+  identity and clears its browser-local state in the old place.
+- Every ladder-branch strike publishes the post-strike `did:web` projection
+  immediately BEFORE its entry, through the account Space's `id` collection
+  under the visit's generation delegation: the client disconnect, the
+  passphrase change and passkey removal, and the recovery-code revocation. A
+  ladder-signed entry writes `did.jsonl` alone, so `id/did.json` would
+  otherwise keep naming the struck client or credential -- a revocation
+  bypass for a `did:web` verifier, though WAS authorization reads the log and
+  never the projection. The store resolves its capability at each use, so a
+  ceremony that replaced its generation delegation before the strike writes
+  under the replacement. A failed PUT is warned and the entry still
+  publishes, the next visit's projection ensure being the mender.
+- Space export and import from a transient session: one POST and a batch of
+  writes the bound generation delegation already admits.
+- Recovery-code issuance and revocation run from a transient session. A code
+  is now a standing credential with a ladder of its own, derived from the code
+  bytes: its ladder VM publishes under `assertionMethod` and
+  `capabilityDelegation` beside its verbatim `keyAgreement`, and rung 0 of
+  that ladder is the update key whose hash the document commits. The code's
+  unlock record and its bridge are written before any entry on both kinds, and
+  the bridge is signed by the code's OWN ladder VM, so no other credential's
+  strike can rot it. The ladder branch's issuance splits its document entry so
+  the code's decryption material precedes its authority: the code's
+  `keyAgreement` alone (the pivot), the roster escrow anchored at that entry,
+  then the code's ladder VM and rung-0 commitment. The enrolled branch keeps
+  escrow-first and one merged entry, an enrolled client's roster append
+  needing no license. Either way the code can decrypt before it can spend, and
+  a run torn between the stages leaves an inert code a re-run converges.
+- Recovery-code revocation strikes the code's ladder VM beside its
+  `keyAgreement` and its committed rung hash, claiming the VM seedlessly from
+  the rung-0 update-key multibase the registry recorded at issuance. A VM no
+  attribution arm claims refuses the whole revocation before anything is
+  written (`UnclaimedLadderVmRetirementError`): a standing ladder VM whose
+  credential is otherwise retired keeps its delegation authority. The gate
+  also runs read-only up front. On the ladder kind the revocation deletes the
+  code's unlock Space through a DELETE-only child of its management zcap
+  signed by the acting ladder VM. The replacement code issued by a recovery
+  spend gets its bridge delegation signed by that replacement code's OWN
+  ladder VM on both spends (in place of the new client's key, or the new
+  passphrase's ladder VM), published in the same add-and-retire entry, so it
+  keeps verifying past any later strike of another credential's inventory; it
+  is still written in the persist-before-publish seam, before the entry. The
+  re-mint pass no longer walks recovery-code registry entries, since a code's
+  own ladder VM signs its bridge and no ceremony owes it a re-seal.
+- Every recovery code issued before this release must be re-issued. Its
+  committed update key came from a standalone derivation the ladder's rung 0
+  replaces, so such a code no longer spends, and its registry entry still
+  looks healthy. Its bridge also keeps whatever key signed it; the login-time
+  health check's delegation-rot flag is what nudges the re-issue.
+- A login-time registry chain on a transient login, on its own
+  `session.registryReady`: the stale-seal repair, the torn-retirement repair,
+  the bare-passkey rebuild, the registry backfill, and last the acting
+  credential's management-zcap refresh, each riding the visit's generation
+  delegation and unwrapping with the credential's standing key. The refresh
+  runs inside the chain rather than beside it, so one writer at a time
+  compare-and-swaps the credential's registry entry. The CHAPI popup keeps
+  skipping them. The user key sweep and the annex generation GC stay
+  remembered-only.
+- Enrollment approval runs from a transient session. The approving half takes
+  the ceremony context instead of an enrolled client's key material, so a
+  standing credential's ladder signs the commit and add entries through the
+  record's bridge and the escrow append follows them, licensed at the version
+  the add entry mints. The connect-another-wallet card and the QR onboarding
+  invite render and run there. The one-request window between the add entry
+  and the escrow is the branch's stated cost: the new client stands in the
+  document holding no wrap, mended by a re-run with the same connect code, by
+  the escrow-direction convergence of any later ladder-branch ceremony, and by
+  a disconnect from the listing the row now appears in.
+- Client disconnect runs from a transient session, the account's last enrolled
+  client included: the account lands ladder-anchored. Three refusals run
+  before anything is written -- a registry this session cannot read, a
+  pending-shaped passphrase entry, and a standing credential the registry does
+  not name -- and the generation delegation is replaced and adopted before the
+  removal entry when the removed client's own key signed it. The listing drops
+  the self and last-client refusals on that branch, marks no row as this
+  browser, and the last row carries the transition copy. No record re-mint
+  stage follows: every unlock record's bridge and sibling delegation is signed
+  by its own credential's ladder VM, which the removal entry does not strike.
+- `unlockEntryReaderFor` (`src/session/unlockMethods.ts`), the one reader both
+  sibling-record walks take: an enrolled client invokes the stored management
+  zcap, a ladder mints a GET-only child of it and sends it as its own bare
+  did:key.
+
+### Changed
+
+- The registry helpers (`updateUnlockMethods`, `backfillPassphraseUnlockMethod`,
+  `revokeUnlockMethod`, `revokeUnlockMethodByCeremony`,
+  `resealUnlockRegistryForRotation`, `adoptRotatedUserKeyInBand`,
+  `repairStaleUnlockRegistrySeal`, `adoptRotatedUserKey`) take an invocation
+  capability and, where they unwrap, the standing key-agreement key, so a
+  ladder-branch rotation's registry writes and re-seal retries reach the
+  remote store. `sessionRosterStore` takes an optional signing key agent, so a
+  ladder-anchored ceremony's appends are signed by a key the post-ceremony
+  document lists. The client-labels store (`key-map/client-labels.json`)
+  rides the remote store's bound invocation capability the same way, so a
+  transient session reads and writes labels under its generation delegation;
+  the Connected wallets listing shows labels, an enrollment approval's label
+  write lands, and rename works there. An enrolled client holds no capability
+  and root-invokes as before.
+- Consumes `@interop/wallet-core` 0.65.0: every ceremony body publishing an
+  account-log entry takes `signer: AccountLogSigner`
+  (`{ kind: 'client', updateKeys }` or `{ kind: 'ladder', ladderSeed }`) in
+  place of `updateKeys`. A recovery code's document entry carries the code's
+  own ladder seed.
+- Settings gates the passphrase and passkey controls on the account-ceremony
+  context rather than on this client's seed, so a transient session sees the
+  change form, the add forms, the passkeys list and Connected wallets. The
+  passkey a transient session entered on has its remove button disabled with
+  copy pointing at another credential's login, the add button says the passkey
+  lands in this machine's authenticator, and the passphrase-change and
+  passkey-remove surfaces state that connected apps will need to reconnect
+  when the change re-mints the generation delegation.
+
+### Fixed
+
+- The Settings registry refresh after an unlock-method mutation now rides the
+  same authority the mount load does (the visit's generation delegation on a
+  transient session). It root-invoked, the server masks that refusal as a 404,
+  and the absent-looking read emptied the list the mutation had just written
+  to -- a passkey added from a transient session appeared to vanish.
+- The enrollment approval drops this session's verified-log memo BEFORE the
+  ceremony as well as after it. On the ladder branch the escrow append is
+  licensed only at the version the add entry mints, and the roster store
+  resolves its controller view through that memo, so a view primed before the
+  entries (the Connected wallets listing that opens the dialog primes one)
+  anchored the append at the pre-add head and the approval failed with
+  `ResourceLogLicenseError`.
+
+### Removed
+
+- The session-kind gate: `assertAccountCeremonyAllowed` and
+  `StepUpRequiredError`, with every call site (passphrase change, passphrase
+  add, passkey add, passkey remove, recovery-code issuance and revocation,
+  client disconnect, enrollment approval, Space export and import).
+  `BrowserLocalSessionRequiredError` stays for the two ceremonies whose
+  subject is this browser: update-key rotation, and forgetting this browser.
+- The registry write guard that refused every write from a transient session.
+  The write protocol's own guards do not depend on the session tier: the
+  compare-and-swap on a fresh read's ETag, the acting credential's
+  key-agreement multibase on a refresh write, and the direction settled
+  against the account document on an identity write.
+
 ## 0.48.0 - TBD
 
 ### Fixed

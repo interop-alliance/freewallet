@@ -3,9 +3,10 @@
  * (`@interop/wallet-core/enrollment`): the two halves that need this app's own
  * session shape and its `freewallet-session` IndexedDB unlock layer.
  *
- * - `approveEnrollment` -- the enrolling client's half, guarding on the live
- *   session's profile and storage before handing the ceremony the stores and
- *   keys it needs.
+ * - `approveEnrollment` -- the approving half, resolving this session's
+ *   account-ceremony context (an enrolled client's own keys, or a standing
+ *   credential's ladder on a transient session) and handing the ceremony the
+ *   signer, the stores and the keys that kind acts with.
  * - `completeEnrollment` -- the enrollee's half: the account pointer comes out
  *   of the keyring (the enrollee holds the passphrase), the portable core
  *   verifies and reads the roster, the key set is persisted under the
@@ -29,8 +30,6 @@ import {
 import { setClientLabel } from '@interop/wallet-core/keys'
 import { memoryResourceLogPinStore } from '@interop/vh-resource-log'
 import { WAS_SERVER_URL } from '@/app.config'
-import { sessionRosterStore } from '@/session/rosterStore'
-import { assertAccountCeremonyAllowed } from '@/session/persistence'
 import { KEYRING_KDF } from '@interop/wallet-core/keyring'
 import {
   bindPassphrase,
@@ -38,20 +37,36 @@ import {
   fetchKeyring
 } from '@/session/keyring'
 import { loginWithPassphrase } from '@/session/initSession'
-import { invalidateVerifiedLog } from '@/session/verifiedLog'
-import { requireEnrolledClientContext } from '@/session/enrolledContext'
+import {
+  invalidateVerifiedLog,
+  reprimeVerifiedAccountLog
+} from '@/session/verifiedLog'
+import { accountCeremonyContext } from '@/session/accountCeremonyContext'
 import type { Session } from '@/types/auth'
 import { createLogger } from '@/lib/log'
 
 const log = createLogger('fw:enrollment')
 
 /**
- * ENROLLING CLIENT: approves a connect code the person has compared against
- * the enrollee's screen. Guards that this session can actually run the
- * ceremony (a configured WAS server, and this client's own did:webvh update
- * keys and key-agreement key in memory), then runs the shared push-order
- * ceremony: the user key wrap lands in the `key-map/user-key.jsonl` roster log
- * first, and only then the two did:webvh log entries publish.
+ * THE APPROVING SIDE: approves a connect code the person has compared against
+ * the enrollee's screen. It resolves the account-ceremony context and runs the
+ * shared ceremony on whichever kind this session is.
+ *
+ * On the ENROLLED kind the order is the push order it has always been: the
+ * user key wrap lands in the `key-map/user-key.jsonl` roster log first, and
+ * only then the two did:webvh log entries publish. An enrolled client's
+ * roster append needs no license, so nothing forces the flip.
+ *
+ * On the LADDER kind (a transient session on a standing unlock credential)
+ * the order is commit entry, add entry, then the escrow append. A
+ * ladder-signed append is licensed only at an inventory-changing version its
+ * own ladder signed, and the add entry is what mints that version. wallet-core
+ * places the escrow by signer kind, so both orders come out of one body. The
+ * one-request window between the add entry and the append is the ladder
+ * branch's stated cost: the new client stands in the document holding no
+ * wrap. It is mended by a re-run with the same connect code, by the
+ * escrow-direction convergence of any later ladder-branch ceremony, and by a
+ * disconnect from the Connected wallets listing the row now appears in.
  *
  * @param options {object}
  * @param options.request {EnrollmentRequest}   the parsed connect code
@@ -73,25 +88,47 @@ export async function approveEnrollment({
   session: Session
   label?: string
 }): Promise<{ did: string; clientDid: string; signingKeyMultibase: string }> {
-  assertAccountCeremonyAllowed({
-    persistence: session.profile.persistence,
-    ceremony: 'Approving a wallet enrollment'
-  })
-  const { remoteStore, clientWebvhKeys, clientKeyAgreementKey } =
-    requireEnrolledClientContext({ session, action: 'Enrollment' })
+  const context = await accountCeremonyContext({ session })
+  if (!context) {
+    throw new Error(
+      'Connecting another wallet needs an account on a storage server, ' +
+        'reached either from a connected browser or with a standing ' +
+        'passphrase or passkey; this session holds neither.'
+    )
+  }
+  const { remoteStore, pointer } = context
   const { profile } = session
+  // The party that unwraps each epoch to re-wrap it for the enrollee: this
+  // client's own key-agreement key when one is enrolled here, the acting
+  // credential's standing key on the ladder kind.
+  const clientKeyAgreementKey =
+    context.kind === 'enrolled'
+      ? context.clientKeyAgreementKey
+      : context.standingKeyAgreementKey
 
+  // The memo is dropped BEFORE the ceremony as well as after it. On the
+  // ladder kind the escrow append is licensed only at the version the add
+  // entry mints, and the roster store resolves its controller view through
+  // this memo -- a view primed before the entries (the Connected wallets
+  // listing that opened this dialog primes one) would anchor the append at
+  // the pre-add head, which licenses nothing (`ResourceLogLicenseError`).
+  // Dropped here, the append's own resolution fetches the post-add log.
+  invalidateVerifiedLog({ profile })
   // The approval publishes the new client's log entries (and a torn approval
   // may have published the commit entry before failing), so this session's
-  // verified-log memo is dropped either way -- the listing that renders right
-  // afterwards must show the newly enrolled client.
+  // verified-log memo is dropped afterwards too -- the listing that renders
+  // right afterwards must show the newly enrolled client.
   const approved = await approveEnrollmentCore({
     request,
-    clientWebvhKeys,
+    signer: context.signer,
     clientKeyAgreementKey,
-    userKeyRosterStore: sessionRosterStore({ profile }),
-    idStore: remoteStore.webvhIdStore()
+    userKeyRosterStore: context.rosterStore,
+    idStore: context.idStore
   }).finally(() => invalidateVerifiedLog({ profile }))
+  // Nothing else on a transient session re-settles the memo, and the surfaces
+  // that peek it (the Key Management chip, the DIDAuth holder dispatch) would
+  // read cold until some other section fetched. Best-effort.
+  await reprimeVerifiedAccountLog({ profile, pointer })
   if (label?.trim()) {
     try {
       await setClientLabel({

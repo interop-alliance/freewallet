@@ -280,3 +280,38 @@ export function invalidateVerifiedLog({
 }): void {
   profile.verifiedLog?.invalidate()
 }
+
+/**
+ * Re-settles the memo after a ceremony extended the log: drops the stale
+ * verification and immediately verifies the published head again, so the
+ * surfaces that only PEEK the memo (the Key Management chip, the DIDAuth
+ * holder dispatch) do not read cold until some other section fetches.
+ *
+ * A remembered session gets that re-settling for free from the login-time
+ * chain and the surfaces that verify for themselves; a transient session has
+ * neither, so every ladder-branch ceremony ends here.
+ *
+ * Best-effort by contract: the ceremony has already landed, so a failed
+ * re-verification is logged by the caller's own reader on its next read
+ * rather than surfaced here.
+ *
+ * @param options {object}
+ * @param options.profile {ControllerProfile}
+ * @param options.pointer {AccountLogPointer}   the pointer the ceremony
+ *   published under
+ * @returns {Promise<void>}
+ */
+export async function reprimeVerifiedAccountLog({
+  profile,
+  pointer
+}: {
+  profile: ControllerProfile
+  pointer: AccountLogPointer
+}): Promise<void> {
+  invalidateVerifiedLog({ profile })
+  try {
+    await verifiedAccountLog({ profile, pointer })
+  } catch {
+    // The memo simply stays cold; the next reader fetches and reports.
+  }
+}

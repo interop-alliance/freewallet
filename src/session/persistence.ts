@@ -611,25 +611,6 @@ export class BrowserLocalSessionRequiredError extends Error {
 }
 
 /**
- * Thrown when an account-management ceremony was invoked from a transient
- * session outside a step-up: the ceremony is reachable from a public
- * terminal, but only bracketed by the step-up ceremony's loud enroll and
- * retire entries (the in-memory FW-154 self-enrollment), never bare.
- */
-export class StepUpRequiredError extends Error {
-  ceremony: string
-
-  constructor({ ceremony }: { ceremony: string }) {
-    super(
-      `${ceremony} requires a step-up from a transient session: ` +
-        'the ceremony runs as a loudly enrolled in-memory client, never bare.'
-    )
-    this.name = 'StepUpRequiredError'
-    this.ceremony = ceremony
-  }
-}
-
-/**
  * Whether this session's persistence reaches browser-local storage -- the
  * one predicate gating sites use in place of comparing the discriminant.
  *
@@ -687,28 +668,4 @@ export function isRememberedSession({
   isGuest: boolean
 }): boolean {
   return !isGuest && isBrowserLocalSession(persistence)
-}
-
-/**
- * Refuses an account-management ceremony invoked from a transient session
- * outside a step-up. The step-up ceremony itself (an in-memory enrolled
- * client bracketed by ladder-signed enroll and retire entries) supplies the
- * context that satisfies this gate when it lands; until then every transient
- * invocation refuses.
- *
- * @param options {object}
- * @param options.persistence {SessionPersistence}
- * @param options.ceremony {string}   names the ceremony in the refusal
- * @returns {void}
- */
-export function assertAccountCeremonyAllowed({
-  persistence,
-  ceremony
-}: {
-  persistence: SessionPersistence
-  ceremony: string
-}): void {
-  if (!isBrowserLocalSession(persistence)) {
-    throw new StepUpRequiredError({ ceremony })
-  }
 }

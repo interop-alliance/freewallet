@@ -45,9 +45,23 @@ const state = vi.hoisted(() => ({
   establishThrows: false
 }))
 
-vi.mock('@/session/enrolledContext', () => ({
-  enrolledClientContext: vi.fn(() =>
+vi.mock('@/session/accountCeremonyContext', () => ({
+  // The live-rides thunk: the ceremonies read the invocation capability off
+  // the context each time they spread it, so the mock must expose it too.
+  ceremonyRides:
+    ({ context }: { context: { invoker?: { capability?: unknown } } | null }) =>
+    () =>
+      context?.invoker?.capability
+        ? { capability: context.invoker.capability }
+        : {},
+  enrolledCeremonyContext: vi.fn(() =>
     state.enrolled ? { pointer: POINTER } : null
+  ),
+  // The repairs resolve the ceremony context rather than the enrolled one:
+  // a remembered session's context root-invokes, so its invoker carries no
+  // delegated capability.
+  accountCeremonyContext: vi.fn(async () =>
+    state.enrolled ? { kind: 'enrolled', pointer: POINTER, invoker: {} } : null
   )
 }))
 

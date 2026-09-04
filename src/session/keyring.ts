@@ -1661,6 +1661,131 @@ export async function probeUnlockSpaceCollision({
 }
 
 /**
+ * The remote-only unlock-record binder: everything {@link bindUnlockSecret}
+ * writes to the storage host, and nothing it writes to this browser. A
+ * ladder-anchored ceremony binds a NEW credential's record through this --
+ * the visit holds no client seed and no user key to cache, and a transient
+ * session must leave no local residue.
+ *
+ * The record it writes is the standing layout: the account pointer, the
+ * credential's own ladder seed, and the bridge and sibling delegations the
+ * caller minted under that credential's OWN ladder VM. It is inert until the
+ * ceremony's bind entry publishes that VM.
+ *
+ * @param options {object}
+ * @param options.credential {UnlockCredential}   the derived credential the
+ *   record is sealed to
+ * @param options.controller {string}   the account controller the record
+ *   restates
+ * @param options.pointer {AccountPointer}   the account pointer the record
+ *   carries
+ * @param options.delegation {IZcap}   the bridge delegation
+ * @param [options.delegatedClients] {IZcap}   the annex-Space sibling
+ * @param options.ladderSeed {Uint8Array}   the credential's update-key ladder
+ *   seed
+ * @param [options.email] {string}   the account email
+ * @param [options.delegateManagementTo] {string}   an account DID to delegate
+ *   the unlock Space management zcap to
+ * @param [options.refuseCollidingRecord] {boolean | object}   the read-first
+ *   collision refusal and served-stamp advance
+ * @returns {Promise<{ unlockSpaceId: string, manageCapability?: IZcap,
+ *   unlockKeyAgreementKeyId?: string, unlockKeyAgreementKeyMultibase?: string }>}
+ */
+export async function bindRemoteUnlockRecord({
+  credential,
+  controller,
+  pointer,
+  delegation,
+  delegatedClients,
+  ladderSeed,
+  email,
+  delegateManagementTo,
+  refuseCollidingRecord = false
+}: {
+  credential: UnlockCredential
+  controller: string
+  pointer: AccountPointer
+  delegation: IZcap
+  delegatedClients?: IZcap
+  ladderSeed: Uint8Array
+  email?: string
+  delegateManagementTo?: string
+  refuseCollidingRecord?: boolean | { accountDoc?: unknown }
+}): Promise<{
+  unlockSpaceId: string
+  manageCapability?: IZcap
+  unlockKeyAgreementKeyId?: string
+  unlockKeyAgreementKeyMultibase?: string
+}> {
+  if (!WAS_SERVER_URL) {
+    throw new TypeError(
+      'The remote unlock-record bind requires a configured WAS server.'
+    )
+  }
+  const { unlock, standing } = credential
+  let servedCreatedAt: string | undefined
+  if (refuseCollidingRecord) {
+    const guard =
+      typeof refuseCollidingRecord === 'object' ? refuseCollidingRecord : {}
+    // No local record is read: this visit holds none, and a probe that read
+    // one would consult another credential's browser-local state.
+    const probed = await probeUnlockSpaceCollision({
+      credential,
+      controller,
+      pointer,
+      ...(guard.accountDoc !== undefined
+        ? { accountDoc: guard.accountDoc }
+        : {}),
+      readLocalRecord: false
+    })
+    servedCreatedAt = probed.servedCreatedAt
+  }
+  const record = await wrapUnlockRecord({
+    controller,
+    email,
+    pointer,
+    delegation,
+    ...(delegatedClients ? { delegatedClients } : {}),
+    ladderSeed,
+    keyAgreementKey: unlock.keyAgreementKey as IKeyAgreementKey,
+    signer: unlock.recordSigner,
+    bindingMacKey: standing.bindingMacKey,
+    createdAt: nextRecordCreatedAt({ advancePast: [servedCreatedAt] })
+  })
+  await ensureUnlockSpace({
+    storageServerUrl: WAS_SERVER_URL,
+    zcapClient: unlock.zcapClient,
+    spaceId: unlock.spaceId,
+    controller: unlock.agent.id
+  })
+  await putUnlockKeyring({
+    storageServerUrl: WAS_SERVER_URL,
+    zcapClient: unlock.zcapClient,
+    spaceId: unlock.spaceId,
+    record
+  })
+  let manageCapability: IZcap | undefined
+  if (delegateManagementTo) {
+    manageCapability = await delegateUnlockManagement({
+      zcapClient: unlock.zcapClient,
+      spaceId: unlock.spaceId,
+      controller: delegateManagementTo,
+      allowedActions: ['GET', 'PUT', 'DELETE']
+    })
+  }
+  return {
+    unlockSpaceId: unlock.spaceId,
+    ...(manageCapability ? { manageCapability } : {}),
+    ...unlockKeyAgreementMembers({ unlock })
+  }
+}
+
+/**
+ * The remote-only binder's type, as the ceremony context carries it.
+ */
+export type RemoteUnlockRecordBind = typeof bindRemoteUnlockRecord
+
+/**
  * Binds an unlock secret to this client's key set and the account it belongs
  * to: derives the unlock identity for the method's KDF, ensures the unlock
  * Space (when WAS is configured), wraps, signs, and PUTs the account-pointer

@@ -45,12 +45,23 @@ import {
 import {
   attributeLadderRung,
   ladderRung,
+  ladderVmAgent,
   retireClientAnnexRung,
   swapClientAnnexGeneration
 } from '@interop/wallet-core/clientAnnex'
+import type { IKeyAgreementKey, IZcap } from '@interop/data-integrity-core'
+import type { ZcapClient } from '@interop/ezcap'
 import type { Session } from '@/types/auth'
-import { clientAnnexReachFor } from '@/session/annexReach'
-import { enrolledClientContext } from '@/session/enrolledContext'
+import {
+  clientAnnexReachFor,
+  didWebProjectionStore,
+  standingClientAnnexReachFor
+} from '@/session/annexReach'
+import {
+  accountCeremonyContext,
+  ceremonyRides,
+  type AccountCeremonyContext
+} from '@/session/accountCeremonyContext'
 import { sessionRosterStore } from '@/session/rosterStore'
 import { adoptRotatedUserKeyInBand } from '@/session/userKeyAdoption'
 import {
@@ -108,6 +119,13 @@ export interface CredentialRotationOutcome {
  *   credential's), preferred over the session's login seed for the annex
  *   strike-or-swap stage below. The login seed stands in only when it is
  *   provably not the retired ladder
+ * @param [options.survivingStanding] {object}   the SURVIVING credential's
+ *   client identity and its annex-Space sibling delegation, used by the annex
+ *   strike below on the ladder branch. A passphrase change passes the new
+ *   credential's, since the strike entry has already taken the old
+ *   credential's ladder VM out of the document and its sibling delegation no
+ *   longer verifies. Absent, the acting credential's own members stand in,
+ *   which is the passkey removal's case
  * @param [options.onInventoryRemoved] {Function}   invoked once, after the
  *   document edit has landed and before the roster tail runs. "Landed" is
  *   proven by the callback having run: it fires from inside the annex stage,
@@ -130,12 +148,16 @@ export interface CredentialRotationOutcome {
  */
 export async function rotateOffUnlockCredential({
   session,
+  context: supplied,
   method,
   survivingLadderSeed,
+  survivingKeyAgreementKey,
+  survivingStanding,
   onInventoryRemoved,
   verb
 }: {
   session: Session
+  context?: AccountCeremonyContext | null
   method: {
     type: 'passphrase' | 'passkey'
     keyAgreementKeyMultibase?: string
@@ -143,6 +165,11 @@ export async function rotateOffUnlockCredential({
     ladderSeed?: Uint8Array
   }
   survivingLadderSeed?: Uint8Array
+  survivingKeyAgreementKey?: IKeyAgreementKey
+  survivingStanding?: {
+    standingClient: { agents: { zcapClient: ZcapClient } }
+    delegatedClients: IZcap
+  }
   onInventoryRemoved?: () => void
   verb: string
 }): Promise<CredentialRotationOutcome | null> {
@@ -150,12 +177,14 @@ export async function rotateOffUnlockCredential({
   if (!keyAgreementKeyMultibase || !updateKeyMultibase) {
     return null
   }
-  const context = enrolledClientContext({ session })
+  const context =
+    supplied !== undefined
+      ? supplied
+      : await accountCeremonyContext({ session })
   if (!context) {
     return null
   }
-  const { remoteStore, pointer, clientWebvhKeys, clientKeyAgreementKey } =
-    context
+  const { remoteStore, pointer } = context
 
   const keyAgreement = await standingKeyAgreementOf({
     type: method.type,
@@ -183,18 +212,86 @@ export async function rotateOffUnlockCredential({
     method: { ...method, updateKeyMultibase },
     survivingLadderSeed
   })
+  // The signing authorities, by branch. On the ladder branch the entry is
+  // signed by a rung of the SURVIVING credential's ladder -- an entry cannot
+  // strike the rung that signs it -- and the licensed roster append by that
+  // same credential's ladder VM, the key the post-edit document still lists.
+  // Its unwrap key is the surviving credential's standing key, which the
+  // ceremony escrowed into every epoch before reaching here.
+  // The SETTLED survivor, never the caller's raw seed: `settleLadderSeeds`
+  // withholds a seed that is the retired ladder's, so a strike entry can
+  // never be signed by the rung it retires.
+  const signingLadderSeed = ladders.survivingLadderSeed
+  if (context.kind === 'ladder' && !signingLadderSeed) {
+    throw new Error(
+      'Retiring a standing unlock credential from a transient session needs ' +
+        "a surviving credential's ladder seed to sign the strike entry."
+    )
+  }
+  const signer =
+    context.kind === 'enrolled'
+      ? context.signer
+      : ({ kind: 'ladder', ladderSeed: signingLadderSeed! } as const)
+  const unwrapKey =
+    context.kind === 'enrolled'
+      ? context.clientKeyAgreementKey
+      : (survivingKeyAgreementKey ?? context.standingKeyAgreementKey)
+  const rosterStore =
+    context.kind === 'enrolled'
+      ? context.rosterStore
+      : sessionRosterStore({
+          profile: session.profile,
+          keyAgent: await ladderVmAgent({ ladderSeed: signingLadderSeed! }),
+          ...(context.invoker.capability
+            ? { capability: context.invoker.capability }
+            : {})
+        })
+  const rides = ceremonyRides({ context })
+  // Which client identity and sibling delegation the annex strike reaches the
+  // generation's log through, on the ladder branch: the surviving
+  // credential's when the caller named one (a passphrase change, whose strike
+  // entry rots the acting credential's own sibling), otherwise the acting
+  // credential's own members.
+  const actingStanding = session.profile.standingUnlock
+  const standingReach =
+    context.kind !== 'ladder'
+      ? undefined
+      : (survivingStanding ??
+        (actingStanding && context.sibling
+          ? {
+              standingClient: actingStanding.standingClient,
+              delegatedClients: context.sibling
+            }
+          : undefined))
   const result = await retireUnlockCredential({
-    idStore: remoteStore.webvhIdStore(),
-    updateKeys: clientWebvhKeys,
+    idStore: context.idStore,
+    signer,
     unlockKeys: { keyAgreement, updateKeyMultibase },
+    // The post-strike did:web projection, PUT immediately BEFORE the strike
+    // entry. That entry publishes `did.jsonl` alone -- the bridge delegation
+    // a standing credential carries is a PUT on exactly that resource -- so
+    // without this the served `id/did.json` keeps naming the retired
+    // credential's `keyAgreement` entry and ladder VM, which a did:web
+    // verifier would accept. The store is aimed at the capability held at
+    // call time: the branch replaces its generation delegation before the
+    // strike lands.
+    ...(context.kind === 'ladder'
+      ? {
+          projectionStore: didWebProjectionStore({
+            host: pointer.host,
+            spaceId: pointer.spaceId,
+            invoker: () => context.invoker
+          })
+        }
+      : {}),
     ...(ladders.retiredLadderSeed
       ? { ladderSeed: ladders.retiredLadderSeed }
       : {}),
     expectedDid: pointer.did,
     verb,
-    rosterStore: sessionRosterStore({ profile: session.profile }),
+    rosterStore,
     ...(session.profile.userKey ? { userKey: session.profile.userKey } : {}),
-    clientKeyAgreementKey,
+    clientKeyAgreementKey: unwrapKey,
     pinnedEpochId,
     onUserKeyAdopted: async ({ userKey, latestEpochId, descriptor }) =>
       // The in-band adoption: the registry is re-sealed to the rotated key
@@ -208,7 +305,8 @@ export async function rotateOffUnlockCredential({
         accountDid: pointer.did,
         userKey,
         latestEpochId,
-        descriptor
+        descriptor,
+        ...rides()
       }),
     collections: cascadeCollections({ remoteStore }),
     retireClientAnnexInventory: async ({ document }) => {
@@ -217,11 +315,12 @@ export async function rotateOffUnlockCredential({
       onInventoryRemoved?.()
       return retireClientAnnexInventoryStage({
         session,
+        context,
         document,
         ...ladders,
         pointer,
-        clientWebvhKeys,
-        remoteStore
+        remoteStore,
+        ...(standingReach ? { standingReach } : {})
       })
     }
   }).finally(() => invalidateVerifiedLog({ profile: session.profile }))
@@ -288,9 +387,11 @@ export function isUnclaimedLadderVmRefusal(err: unknown): boolean {
  */
 export async function preflightCredentialRetirement({
   session,
+  context: supplied,
   method
 }: {
   session: Session
+  context?: AccountCeremonyContext | null
   method: {
     type: 'passphrase' | 'passkey'
     keyAgreementKeyMultibase?: string
@@ -302,17 +403,20 @@ export async function preflightCredentialRetirement({
   if (!keyAgreementKeyMultibase || !updateKeyMultibase) {
     return
   }
-  const context = enrolledClientContext({ session })
+  const context =
+    supplied !== undefined
+      ? supplied
+      : await accountCeremonyContext({ session })
   if (!context) {
     return
   }
-  const { remoteStore, pointer } = context
+  const { pointer } = context
   const keyAgreement = await standingKeyAgreementOf({
     type: method.type,
     keyAgreementKeyMultibase
   })
   await preflightUnlockCredentialRetirement({
-    idStore: remoteStore.webvhIdStore(),
+    idStore: context.idStore,
     unlockKeys: { keyAgreement, updateKeyMultibase },
     ...(method.ladderSeed ? { ladderSeed: method.ladderSeed } : {}),
     expectedDid: pointer.did,
@@ -381,36 +485,56 @@ async function standingKeyAgreementOf({
  * @param [options.survivingLadderSeed] {Uint8Array}   a seed distinct from
  *   the retired ladder's
  * @param options.pointer {object}   the account pointer
- * @param options.clientWebvhKeys {object}   this client's update-key seeds
+ * @param options.context {AccountCeremonyContext}   this session's ceremony
+ *   context; its kind decides whether the swap arm is reachable
  * @param options.remoteStore {object}   the session's remote store
+ * @param [options.standingReach] {object}   the client identity and sibling
+ *   delegation the ladder branch reaches the annex log through
  * @returns {Promise<ClientAnnexInventoryRetirement>}
  */
 async function retireClientAnnexInventoryStage({
   session,
+  context,
   document,
   retiredLadderSeed,
   survivingLadderSeed,
   pointer,
-  clientWebvhKeys,
-  remoteStore
+  remoteStore,
+  standingReach
 }: {
   session: Session
+  context: AccountCeremonyContext
   document: object
   retiredLadderSeed?: Uint8Array
   survivingLadderSeed?: Uint8Array
-  pointer: NonNullable<ReturnType<typeof enrolledClientContext>>['pointer']
-  clientWebvhKeys: NonNullable<
-    ReturnType<typeof enrolledClientContext>
-  >['clientWebvhKeys']
-  remoteStore: NonNullable<
-    ReturnType<typeof enrolledClientContext>
-  >['remoteStore']
+  pointer: AccountCeremonyContext['pointer']
+  remoteStore: AccountCeremonyContext['remoteStore']
+  standingReach?: {
+    standingClient: { agents: { zcapClient: ZcapClient } }
+    delegatedClients: IZcap
+  }
 }): Promise<ClientAnnexInventoryRetirement> {
   try {
     const doc = document as Parameters<typeof clientAnnexReachFor>[0]['doc']
-    const reach = clientAnnexReachFor({ session, pointer, doc })
+    // The annex Space answers to the account did:webvh, which a transient
+    // session's per-visit annex VM is not, so the ladder branch reaches the
+    // generation's log through the surviving credential's sibling delegation
+    // rather than by root-invoking as this session's own key.
+    const reach =
+      context.kind === 'ladder' && standingReach
+        ? standingClientAnnexReachFor({ pointer, doc, standing: standingReach })
+        : clientAnnexReachFor({ session, pointer, doc })
     if (reach === null) {
       return { action: 'skipped', reason: 'no-pointer' }
+    }
+    if (context.kind === 'ladder' && !standingReach) {
+      // No sibling delegation to reach the annex log with: a root-invoked
+      // strike would be refused as a masked 404 and read as a clean run.
+      log.warn(
+        'The annex strike has no sibling delegation to reach the generation ' +
+          'log through; the retired rung stands until the next generation swap'
+      )
+      return { action: 'skipped', reason: 'no-ladder-seed' }
     }
     const { generationId, was } = reach
     const logPins = session.profile.persistence.logPins
@@ -440,6 +564,19 @@ async function retireClientAnnexInventoryStage({
     if (survivingLadderSeed === undefined) {
       return { action: 'skipped', reason: 'no-ladder-seed' }
     }
+    if (context.kind === 'ladder') {
+      // The swap arm is unreachable on this branch by construction: the
+      // ceremony's own blocking annex commit put the surviving credential's
+      // rung in the generation before the strike entry, so the strike arm
+      // above always applies. Reaching here means the commit was undone
+      // between the two, and a swap would need the account-log update keys
+      // this branch does not hold.
+      log.warn(
+        'The annex strike found no committed surviving rung on the ladder ' +
+          'branch; the retired rung stands until the next generation swap'
+      )
+      return { action: 'skipped', reason: 'no-ladder-seed' }
+    }
     await swapClientAnnexGeneration({
       was,
       wasServerUrl: pointer.host,
@@ -449,7 +586,7 @@ async function retireClientAnnexInventoryStage({
         doc
       },
       idStore: remoteStore.webvhIdStore(),
-      updateKeys: clientWebvhKeys,
+      signer: context.signer,
       zcapClient: session.profile.zcapClient,
       ladderSeed: survivingLadderSeed,
       pinStore: logPins
@@ -497,7 +634,7 @@ async function settleLadderSeeds({
   survivingLadderSeed
 }: {
   session: Session
-  pointer: NonNullable<ReturnType<typeof enrolledClientContext>>['pointer']
+  pointer: AccountCeremonyContext['pointer']
   method: { updateKeyMultibase: string; ladderSeed?: Uint8Array }
   survivingLadderSeed?: Uint8Array
 }): Promise<{
@@ -561,7 +698,7 @@ async function loginLadderStanding({
   updateKeyMultibase
 }: {
   session: Session
-  pointer: NonNullable<ReturnType<typeof enrolledClientContext>>['pointer']
+  pointer: AccountCeremonyContext['pointer']
   ladderSeed: Uint8Array
   updateKeyMultibase: string
 }): Promise<'retired' | 'survives' | 'unsettled'> {

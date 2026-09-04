@@ -24,6 +24,10 @@ import { usePrfRetryPrompt } from '@/hooks/usePrfRetryPrompt'
 import { getFileUrl } from '@interop/did-method-webvh'
 import { isWebvhDid, relationIds } from '@interop/wallet-core/webvh'
 import { didWebFromSpace } from '@/lib/didWeb'
+import {
+  canRunAccountCeremonies,
+  enrolledCeremonyContext
+} from '@/session/accountCeremonyContext'
 import { WrongPassphraseError } from '@/session/keyring'
 import { peekVerifiedAccountLog } from '@/session/verifiedLog'
 import {
@@ -212,10 +216,25 @@ export function SettingsPage() {
     }
   }
   // Passphrase keyring (keyring v2) state. The whole section is shown for
-  // non-guest sessions; changing the passphrase re-binds this client's key
-  // set under a new unlock identity, so it needs the client seed in memory.
+  // non-guest sessions.
   const keyringSectionVisible = !session?.isGuest
-  const canChangePassphrase = !!session?.profile?.clientSeed
+  // Both branches of the ceremony: the account-ceremony context (a remembered
+  // client, or a transient session on a standing credential), and the plain
+  // path a no-WAS or unpromoted account still takes with this client's seed.
+  const canRunUnlockCeremonies =
+    !!session &&
+    (canRunAccountCeremonies({ session }) || !!session.profile.clientSeed)
+  // The ladder branch: a transient session acting through a standing unlock
+  // credential. The credential it entered on cannot remove itself -- every
+  // stage of the removal is signed by that credential's ladder.
+  const ladderBranch =
+    !!session &&
+    !enrolledCeremonyContext({ session }) &&
+    canRunAccountCeremonies({ session })
+  // The unlock Space of the credential this session logged in with: what a
+  // passkey row matches itself against on that branch.
+  const actingUnlockSpaceId = session?.profile?.unlockMethod?.unlockSpaceId
+  const canChangePassphrase = canRunUnlockCeremonies
   const [oldPassphrase, setOldPassphrase] = useState('')
   const [newPassphrase, setNewPassphrase] = useState('')
   const [newPassphraseScore, setNewPassphraseScore] = useState(0)
@@ -244,9 +263,7 @@ export function SettingsPage() {
     newPassphraseLengthPassed && newPassphraseScore >= PASSWORD_RULES.minscore
 
   const handleChangePassphrase = async () => {
-    const profile = session?.profile
-    const seed = profile?.clientSeed
-    if (!session || !profile || !seed) {
+    if (!session) {
       return
     }
     setChangingPassphrase(true)
@@ -285,15 +302,13 @@ export function SettingsPage() {
   }
 
   // Passkeys (keyring v2 unlock methods). The section is shown only where
-  // WebAuthn exists; adding a passkey binds this client's in-memory key set
-  // under the passkey's PRF-derived unlock identity, so it needs the seed
-  // present.
+  // WebAuthn exists; adding, renaming, and removing run the same unlock
+  // ceremonies the passphrase controls run.
   const passkeysSupported = passkeySupported()
-  const canAddPasskey = !!session?.profile?.clientSeed
-  // Listing the methods needs no client seed: a remembered session invokes
-  // the root capability and a transient one reads under its generation
-  // delegation. Only adding, renaming, and removing need the seed, so a
-  // transient session gets the list read-only.
+  const canAddPasskey = canRunUnlockCeremonies
+  // Listing the methods needs no ceremony authority: a remembered session
+  // invokes the root capability and a transient one reads under its
+  // generation delegation. A guest has neither, so it gets no list.
   const canListUnlockMethods = !!session && !session.isGuest
   const [addingPasskey, setAddingPasskey] = useState(false)
   const [passkeyError, setPasskeyError] = useState<
@@ -301,7 +316,7 @@ export function SettingsPage() {
   >(null)
   // The unlock-methods registry: how this account can be unlocked (the
   // passphrase entry plus one entry per passkey). Loaded once the passkeys
-  // section is usable (full tier + data seed), refreshed after every mutation.
+  // section is usable, and refreshed after every mutation.
   // `null` = no registry yet (or a load failure); `registryLoaded` records that
   // a load attempt has finished so the UI can distinguish "unknown" from
   // "known empty".
@@ -327,7 +342,12 @@ export function SettingsPage() {
   )
   const [removeDialogOpen, setRemoveDialogOpen] = useState(false)
   const [removing, setRemoving] = useState(false)
-  const [removeError, setRemoveError] = useState(false)
+  // How the last removal ended: `failed` is the generic refusal, `acting` the
+  // ladder branch's refusal to remove the credential this session acts
+  // through.
+  const [removeError, setRemoveError] = useState<false | 'failed' | 'acting'>(
+    false
+  )
   const passkeyEntries = (unlockRegistry?.methods ?? []).filter(
     (method): method is PasskeyUnlockMethod => method.type === 'passkey'
   )
@@ -350,16 +370,24 @@ export function SettingsPage() {
     !!unlockRegistry &&
     !hasPassphraseEntry &&
     session?.profile?.unlockMethod?.type !== 'passphrase'
-  const canAddPassphrase = knownNoPassphrase && !!session?.profile?.clientSeed
+  const canAddPassphrase = knownNoPassphrase && canRunUnlockCeremonies
 
   // Refreshes the registry from the source of truth after a mutation (not the
-  // cancellable mount load below).
+  // cancellable mount load below). It rides the same authority the mount load
+  // does: a transient session's requests go under the visit's generation
+  // delegation, since its annex-signed root invocation would be refused --
+  // and the server masks that refusal as a 404, which reads as "no registry"
+  // and would empty the list the mutation just wrote to.
   const reloadRegistry = async () => {
     if (!session) {
       return
     }
+    const { invocationCapability } = session.profile
     try {
-      const record = await getUnlockMethods({ session })
+      const record = await getUnlockMethods({
+        session,
+        ...(invocationCapability ? { capability: invocationCapability } : {})
+      })
       setUnlockRegistry(record)
       setRegistryLoaded(true)
       setRegistryLoadError(false)
@@ -373,9 +401,7 @@ export function SettingsPage() {
   const { promptForPrfRetry, dialog: prfRetryDialog } = usePrfRetryPrompt()
 
   const handleAddPasskey = async () => {
-    const profile = session?.profile
-    const seed = profile?.clientSeed
-    if (!session || !profile || !seed) {
+    if (!session) {
       return
     }
     setAddingPasskey(true)
@@ -477,9 +503,15 @@ export function SettingsPage() {
         // The user dismissed the confirming ceremony: silent close.
         setRemoveDialogOpen(false)
         setRemoveTarget(null)
+      } else if (
+        (err as { name?: string }).name === 'ActingCredentialRemovalError'
+      ) {
+        // The ladder branch refuses to strike the credential this session
+        // acts through; another credential's login removes it instead.
+        setRemoveError('acting')
       } else {
         log.error('Could not remove the passkey', { err })
-        setRemoveError(true)
+        setRemoveError('failed')
       }
     } finally {
       setRemoving(false)
@@ -499,8 +531,7 @@ export function SettingsPage() {
     addPassphraseLengthPassed && addPassphraseScore >= PASSWORD_RULES.minscore
 
   const handleAddPassphrase = async () => {
-    const seed = session?.profile?.clientSeed
-    if (!session || !seed) {
+    if (!session) {
       return
     }
     setAddingPassphrase(true)
@@ -888,7 +919,7 @@ export function SettingsPage() {
                   <Typography variant="body2" color="text.secondary">
                     {t('settings.addPassphraseHint')}
                   </Typography>
-                  {canAddPassphrase ? (
+                  {canAddPassphrase && (
                     <Stack sx={{ gap: 1.5, mt: 1, maxWidth: 360 }}>
                       <TextField
                         size="small"
@@ -926,10 +957,6 @@ export function SettingsPage() {
                         </Alert>
                       )}
                     </Stack>
-                  ) : (
-                    <Typography variant="body2" color="text.secondary">
-                      {t('settings.passphraseRequiresFullSession')}
-                    </Typography>
                   )}
                 </>
               ) : canChangePassphrase ? (
@@ -976,6 +1003,11 @@ export function SettingsPage() {
                       ? t('settings.changingPassphrase')
                       : t('settings.changePassphrase')}
                   </Button>
+                  {ladderBranch && (
+                    <Typography variant="body2" color="text.secondary">
+                      {t('settings.passphraseChangeReconnectApps')}
+                    </Typography>
+                  )}
                   {passphraseChangeSuccess !== null &&
                     (passphraseRotation === 'failed' ? (
                       <Alert severity="warning">
@@ -1009,11 +1041,7 @@ export function SettingsPage() {
                     {t('settings.passphraseLeakHint')}
                   </Typography>
                 </Stack>
-              ) : (
-                <Typography variant="body2" color="text.secondary">
-                  {t('settings.passphraseRequiresFullSession')}
-                </Typography>
-              )}
+              ) : null}
             </Stack>
           </>
         )}
@@ -1027,13 +1055,15 @@ export function SettingsPage() {
                 {t('settings.passkeysSection')}
               </Typography>
 
-              {canListUnlockMethods ? (
+              {canListUnlockMethods && (
                 <Stack sx={{ gap: 2, mt: 1, alignItems: 'flex-start' }}>
                   {registryLoadError && (
                     <Alert severity="warning" sx={{ alignSelf: 'stretch' }}>
-                      {registryStaleSeal
-                        ? t('settings.passkeyRegistryStaleSeal')
-                        : t('settings.passkeyLoadError')}
+                      {!registryStaleSeal
+                        ? t('settings.passkeyLoadError')
+                        : ladderBranch
+                          ? t('settings.passkeyRegistryStaleSealTransient')
+                          : t('settings.passkeyRegistryStaleSeal')}
                     </Alert>
                   )}
                   {passkeyEntries.length > 0 && (
@@ -1054,6 +1084,12 @@ export function SettingsPage() {
                           : entry.backupEligibility
                             ? t('settings.passkeySyncAvailable')
                             : t('settings.passkeySyncNone')
+                        // On the ladder branch the credential this session
+                        // logged in with cannot remove itself: the strike
+                        // would take the visit's own verification method.
+                        const actingCredential =
+                          ladderBranch &&
+                          entry.unlockSpaceId === actingUnlockSpaceId
                         return (
                           <Card
                             key={entry.credentialId}
@@ -1140,19 +1176,31 @@ export function SettingsPage() {
                               })}
                             </Typography>
                             {canAddPasskey && (
-                              <Button
-                                variant="outlined"
-                                size="small"
-                                color="error"
-                                sx={{
-                                  borderRadius: 2,
-                                  alignSelf: 'flex-start'
-                                }}
-                                disabled={isLastUnlockMethod}
-                                onClick={() => openRemoveDialog(entry)}
-                              >
-                                {t('settings.passkeyRemove')}
-                              </Button>
+                              <>
+                                <Button
+                                  variant="outlined"
+                                  size="small"
+                                  color="error"
+                                  sx={{
+                                    borderRadius: 2,
+                                    alignSelf: 'flex-start'
+                                  }}
+                                  disabled={
+                                    isLastUnlockMethod || actingCredential
+                                  }
+                                  onClick={() => openRemoveDialog(entry)}
+                                >
+                                  {t('settings.passkeyRemove')}
+                                </Button>
+                                {actingCredential && (
+                                  <Typography
+                                    variant="body2"
+                                    color="text.secondary"
+                                  >
+                                    {t('settings.passkeyActingCredential')}
+                                  </Typography>
+                                )}
+                              </>
                             )}
                           </Card>
                         )
@@ -1173,7 +1221,7 @@ export function SettingsPage() {
                       {t('settings.passkeyNotSyncedHint')}
                     </Typography>
                   )}
-                  {canAddPasskey ? (
+                  {canAddPasskey && (
                     <>
                       <Button
                         variant="contained"
@@ -1182,6 +1230,11 @@ export function SettingsPage() {
                       >
                         {t('settings.addPasskey')}
                       </Button>
+                      {ladderBranch && (
+                        <Typography variant="body2" color="text.secondary">
+                          {t('settings.passkeyAddTransientHint')}
+                        </Typography>
+                      )}
                       {passkeyError && (
                         <Alert severity="error">
                           {passkeyError === 'duplicate'
@@ -1194,16 +1247,8 @@ export function SettingsPage() {
                         </Alert>
                       )}
                     </>
-                  ) : (
-                    <Typography variant="body2" color="text.secondary">
-                      {t('settings.passkeysRequiresFullSession')}
-                    </Typography>
                   )}
                 </Stack>
-              ) : (
-                <Typography variant="body2" color="text.secondary">
-                  {t('settings.passkeysRequiresFullSession')}
-                </Typography>
               )}
             </Stack>
           </>
@@ -1530,9 +1575,16 @@ export function SettingsPage() {
             <DialogContentText sx={{ mt: 2 }}>
               {t('settings.passkeyRemoveRotationNote')}
             </DialogContentText>
+            {ladderBranch && (
+              <DialogContentText sx={{ mt: 2 }}>
+                {t('settings.passkeyRemoveReconnectApps')}
+              </DialogContentText>
+            )}
             {removeError && (
               <Alert severity="error" sx={{ mt: 2 }}>
-                {t('settings.passkeyRemoveFailed')}
+                {removeError === 'acting'
+                  ? t('settings.passkeyActingCredential')
+                  : t('settings.passkeyRemoveFailed')}
               </Alert>
             )}
           </DialogContent>

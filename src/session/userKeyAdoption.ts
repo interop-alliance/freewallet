@@ -20,7 +20,8 @@
  */
 import type {
   IKeyAgreementKey,
-  IKeyResolver
+  IKeyResolver,
+  IZcap
 } from '@interop/data-integrity-core'
 import type { ZcapClient } from '@interop/ezcap'
 import { userKeyVaultKeys, type UserKey } from '@interop/wallet-core/keys'
@@ -49,6 +50,9 @@ const log = createLogger('fw:session:userkey')
  * @param options.to {object}   the post-rotation vault keys
  * @param options.to.keyAgreementKey {IKeyAgreementKey}
  * @param options.to.keyResolver {IKeyResolver}
+ * @param [options.capability] {IZcap}   an invocation capability every request
+ *   rides (a transient session's generation delegation); the root capability
+ *   is invoked otherwise
  * @returns {Promise<boolean>}   whether the registry is now sealed to `to`
  */
 export async function rewrapUnlockRegistryToUserKey({
@@ -56,13 +60,15 @@ export async function rewrapUnlockRegistryToUserKey({
   zcapClient,
   spaceId,
   from,
-  to
+  to,
+  capability
 }: {
   storageServerUrl: string
   zcapClient: ZcapClient
   spaceId: string
   from: { keyAgreementKey: IKeyAgreementKey; keyResolver: IKeyResolver }
   to: { keyAgreementKey: IKeyAgreementKey; keyResolver: IKeyResolver }
+  capability?: IZcap
 }): Promise<boolean> {
   try {
     await rewrapUnlockMethodsRecord({
@@ -70,7 +76,8 @@ export async function rewrapUnlockRegistryToUserKey({
       zcapClient,
       spaceId,
       from,
-      to
+      to,
+      ...(capability ? { capability } : {})
     })
     return true
   } catch (err) {
@@ -103,17 +110,22 @@ export async function rewrapUnlockRegistryToUserKey({
  * @param options.session {Session}
  * @param options.spaceId {string}   the data Space id
  * @param options.userKey {UserKey}   the freshly rotated per-user key
+ * @param [options.capability] {IZcap}   an invocation capability every request
+ *   rides (a transient session's generation delegation); the root capability
+ *   is invoked otherwise
  * @returns {Promise<boolean>}   whether the registry is now sealed to the
  *   rotated key
  */
 export async function resealUnlockRegistryForRotation({
   session,
   spaceId,
-  userKey
+  userKey,
+  capability
 }: {
   session: Session
   spaceId: string
   userKey: UserKey
+  capability?: IZcap
 }): Promise<boolean> {
   const { keyAgreementKey, keyResolver } = session.profile
   if (!keyAgreementKey || !keyResolver || !WAS_SERVER_URL) {
@@ -124,7 +136,8 @@ export async function resealUnlockRegistryForRotation({
     zcapClient: session.profile.zcapClient,
     spaceId,
     from: { keyAgreementKey, keyResolver },
-    to: userKeyVaultKeys({ userKey })
+    to: userKeyVaultKeys({ userKey }),
+    ...(capability ? { capability } : {})
   })
 }
 
@@ -160,6 +173,9 @@ export async function resealUnlockRegistryForRotation({
  * @param options.latestEpochId {string}   the roster epoch the key came from
  * @param options.descriptor {object}   the roster descriptor that epoch was
  *   read from
+ * @param [options.capability] {IZcap}   an invocation capability the re-seal's
+ *   requests ride (a transient session's generation delegation); the root
+ *   capability is invoked otherwise
  * @returns {Promise<void>}
  */
 export async function adoptRotatedUserKeyInBand({
@@ -168,7 +184,8 @@ export async function adoptRotatedUserKeyInBand({
   accountDid,
   userKey,
   latestEpochId,
-  descriptor
+  descriptor,
+  capability
 }: {
   session: Session
   spaceId: string
@@ -176,11 +193,13 @@ export async function adoptRotatedUserKeyInBand({
   userKey: UserKey
   latestEpochId: string
   descriptor: { epochs?: Array<{ id: string }> }
+  capability?: IZcap
 }): Promise<void> {
   const resealed = await resealUnlockRegistryForRotation({
     session,
     spaceId,
-    userKey
+    userKey,
+    ...(capability ? { capability } : {})
   })
   await session.profile.persistence.epochPins.saveFromDescriptor({
     accountDid,
@@ -254,21 +273,31 @@ export async function swapSessionVaultKeys({
  * @param options.session {Session}
  * @param options.spaceId {string}
  * @param options.userKey {UserKey}   the freshly rotated per-user key
+ * @param [options.capability] {IZcap}   an invocation capability the re-seal's
+ *   requests ride (a transient session's generation delegation); the root
+ *   capability is invoked otherwise
  * @returns {Promise<void>}
  */
 export async function adoptRotatedUserKey({
   session,
   spaceId,
-  userKey
+  userKey,
+  capability
 }: {
   session: Session
   spaceId: string
   userKey: UserKey
+  capability?: IZcap
 }): Promise<void> {
   if (session.profile.userKey?.id === userKey.id) {
     return
   }
-  await resealUnlockRegistryForRotation({ session, spaceId, userKey })
+  await resealUnlockRegistryForRotation({
+    session,
+    spaceId,
+    userKey,
+    ...(capability ? { capability } : {})
+  })
   try {
     await swapSessionVaultKeys({ session, userKey })
   } catch (err) {

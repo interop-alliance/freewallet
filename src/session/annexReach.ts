@@ -34,8 +34,17 @@ import {
 import type { IZcap } from '@interop/data-integrity-core'
 import type { ZcapClient } from '@interop/ezcap'
 import type { ResourceLogPinStore } from '@interop/vh-resource-log'
-import { ladderVmIds, verifyAccountLog } from '@interop/wallet-core/webvh'
-import type { PublishedKeyDocument } from '@interop/wallet-core/webvh'
+import {
+  delegatedWebvhLogStore,
+  ensureDidWebProjection,
+  ladderVmIds,
+  verifyAccountLog
+} from '@interop/wallet-core/webvh'
+import type {
+  DelegatedWebvhLogStore,
+  PublishedKeyDocument
+} from '@interop/wallet-core/webvh'
+import { ID_COLLECTION } from '@interop/wallet-core/space'
 import { createLogger } from '@/lib/log'
 import { verifiedAccountLog } from '@/session/verifiedLog'
 import type { Session } from '@/types/auth'
@@ -154,6 +163,48 @@ export function standingClientAnnexReachOf({
         capability: standing.delegatedClients
       }))
   }
+}
+
+/**
+ * The same reach a CREDENTIAL-ONLY session takes, for the generation an
+ * account document points at: `null` when the document points at none.
+ *
+ * The pair of {@link clientAnnexReachFor} for the ladder branch. That one
+ * builds its client on `session.profile.zcapClient`, which on a transient
+ * session is the per-visit annex VM -- an identity the auxiliary Space's
+ * controller does not list, so its root invocation is refused as a masked
+ * 404. A ladder-branch write reaches the annex log through the acting
+ * record's sibling delegation instead.
+ *
+ * @param options {object}
+ * @param options.pointer {ReachPointer}   the account pointer
+ * @param options.doc {object}   the account document to read the pointer out
+ *   of (a ceremony's post-edit document, or a verified one)
+ * @param options.standing {object}   the credential's client identity and its
+ *   annex-Space sibling delegation
+ * @returns {ClientAnnexReach | null}
+ */
+export function standingClientAnnexReachFor({
+  pointer,
+  doc,
+  standing
+}: {
+  pointer: ReachPointer
+  doc: AccountDoc
+  standing: {
+    standingClient: { agents: { zcapClient: ZcapClient } }
+    delegatedClients: IZcap
+  }
+}): ClientAnnexReach | null {
+  const pointedDid = delegatedClientsPointer({ doc })
+  if (pointedDid === undefined) {
+    return null
+  }
+  return standingClientAnnexReachOf({
+    pointer,
+    clientAnnexDid: pointedDid,
+    standing
+  })
 }
 
 /**
@@ -298,7 +349,8 @@ export async function ensureLadderSignedGenerationDelegation({
   reach,
   ladderSeed,
   accountDoc,
-  pin
+  pin,
+  retiringKeyMultibases
 }: {
   accountDid: string
   pointer: ReachPointer
@@ -306,6 +358,7 @@ export async function ensureLadderSignedGenerationDelegation({
   ladderSeed: Uint8Array
   accountDoc?: PublishedKeyDocument
   pin?: { pinStore: ResourceLogPinStore; logId: string }
+  retiringKeyMultibases?: string[]
 }): Promise<{ renewed: boolean; delegation: IZcap }> {
   return await runEnsureGenerationDelegation({
     reach,
@@ -317,7 +370,8 @@ export async function ensureLadderSignedGenerationDelegation({
       spaceId: pointer.spaceId
     }),
     ...(accountDoc !== undefined ? { accountDoc } : {}),
-    ...(pin !== undefined ? { pin } : {})
+    ...(pin !== undefined ? { pin } : {}),
+    ...(retiringKeyMultibases !== undefined ? { retiringKeyMultibases } : {})
   })
 }
 
@@ -339,13 +393,15 @@ async function runEnsureGenerationDelegation({
   ladderSeed,
   mint,
   accountDoc,
-  pin
+  pin,
+  retiringKeyMultibases
 }: {
   reach: ClientAnnexReach
   ladderSeed: Uint8Array
   mint: (options: { clientAnnexDid: string }) => Promise<IZcap>
   accountDoc?: PublishedKeyDocument
   pin?: { pinStore: ResourceLogPinStore; logId: string }
+  retiringKeyMultibases?: string[]
 }): Promise<{ renewed: boolean; delegation: IZcap }> {
   return await ensureGenerationDelegationCurrent({
     store: reach.logStore(),
@@ -354,7 +410,8 @@ async function runEnsureGenerationDelegation({
     mintGenerationDelegation: mint,
     expectedDid: reach.clientAnnexDid,
     ...(accountDoc !== undefined ? { accountDoc } : {}),
-    ...(pin !== undefined ? { pinStore: pin.pinStore, logId: pin.logId } : {})
+    ...(pin !== undefined ? { pinStore: pin.pinStore, logId: pin.logId } : {}),
+    ...(retiringKeyMultibases !== undefined ? { retiringKeyMultibases } : {})
   })
 }
 
@@ -382,13 +439,20 @@ async function runEnsureGenerationDelegation({
  *
  * @param options {object}
  * @param options.session {Session}
+ * @param [options.retiringKeyMultibases] {string[]}   key multibases a
+ *   ceremony is about to strike from the account document. A delegation any
+ *   of them signed counts as rotted, so the replacement is minted and
+ *   adopted BEFORE the strike lands rather than after it rots the visit's
+ *   only HTTP authority
  * @returns {Promise<IZcap | null>}   the fresh delegation, or `null` when
  *   none was installed
  */
 export async function renewTransientGenerationDelegation({
-  session
+  session,
+  retiringKeyMultibases
 }: {
   session: Session
+  retiringKeyMultibases?: string[]
 }): Promise<IZcap | null> {
   const { profile } = session
   const { ladderSeed, standingUnlock, accountPointer, persistence } = profile
@@ -436,7 +500,8 @@ export async function renewTransientGenerationDelegation({
       reach,
       ladderSeed,
       accountDoc: doc,
-      pin: { pinStore: persistence.logPins, logId: reach.logId }
+      pin: { pinStore: persistence.logPins, logId: reach.logId },
+      ...(retiringKeyMultibases !== undefined ? { retiringKeyMultibases } : {})
     })
     // The live session adopts it. The profile stamp is what the grant path
     // reads its parent from, and the remote store swaps the capability its
@@ -453,5 +518,156 @@ export async function renewTransientGenerationDelegation({
   } catch (err) {
     log.warn('Generation-delegation renewal failed', { err })
     return null
+  }
+}
+
+/**
+ * The account Space's `id` collection as a did:web projection store, aimed at
+ * the capability this session holds AT CALL TIME rather than at a snapshot.
+ * A ceremony that replaces its generation delegation mid-run (the rule for a
+ * struck signer) swaps the authority every later request rides, and a store
+ * built once would invoke the delegation the pivot is about to strike.
+ *
+ * The `id` collection is world-readable, so the freshness read is an
+ * unauthenticated fetch and only the republish invokes the delegation.
+ *
+ * @param options {object}
+ * @param options.host {string}   the storage server's base URL
+ * @param options.spaceId {string}   the account Space
+ * @param options.invoker {Function}   `() => { zcapClient, capability? }`,
+ *   read afresh on every call
+ * @returns {DelegatedWebvhLogStore}
+ */
+export function didWebProjectionStore({
+  host,
+  spaceId,
+  invoker
+}: {
+  host: string
+  spaceId: string
+  invoker: () => { zcapClient: ZcapClient; capability?: IZcap }
+}): DelegatedWebvhLogStore {
+  const storeNow = (): DelegatedWebvhLogStore => {
+    const { zcapClient, capability } = invoker()
+    if (!capability) {
+      throw new Error(
+        'The did:web projection store needs the generation delegation this ' +
+          'session invokes under.'
+      )
+    }
+    return delegatedWebvhLogStore({
+      host,
+      spaceId,
+      collectionId: ID_COLLECTION.id,
+      delegation: capability,
+      zcapClient,
+      publicRead: true
+    })
+  }
+  return {
+    getIdResourceRaw: async options => storeNow().getIdResourceRaw(options),
+    putIdResource: async options => storeNow().putIdResource(options)
+  }
+}
+
+/**
+ * The did:web projection's credential-only mender, run best-effort by every
+ * transient visit. A ladder-branch ceremony that strikes an inventory does not
+ * come through here: it hands wallet-core a {@link didWebProjectionStore} and
+ * the post-strike projection is PUT immediately before its entry.
+ *
+ * A ladder-signed account-log entry (a transient recovery, either forget
+ * ceremony's removal entry) publishes `did.jsonl` alone, because the bridge
+ * delegation a standing credential carries is a PUT on exactly that resource.
+ * The served `id/did.json` therefore keeps publishing whatever it said before
+ * -- a forgotten client's verification method, a retired credential's
+ * `keyAgreement` entry -- and a did:web verifier reading the projection
+ * accepts a key the account has struck. WAS authorization is unaffected (the
+ * server resolves the controller out of `did.jsonl`), so this is a did:web
+ * verifier's revocation bypass rather than a storage one, and this visit is
+ * what closes it: the generation delegation targets the account Space's items
+ * subtree, which covers `id/did.json`, so the annex verification method
+ * republishes the projection with no widened bridge and no server change.
+ *
+ * On a healthy account it costs one unauthenticated GET and writes nothing.
+ * Never rejects: every failure is a warn, and the next visit retries.
+ *
+ * @param options {object}
+ * @param options.host {string}   the storage server's base URL
+ * @param options.spaceId {string}   the account Space, holding the
+ *   world-readable `id` collection
+ * @param options.did {string}   the account's did:webvh
+ * @param options.doc {object}   the resolved did:webvh document the
+ *   projection is re-derived from
+ * @param options.pinStore {ResourceLogPinStore}   the visit's chain-head
+ *   pins, carried by the re-resolution below
+ * @param options.delegation {IZcap}   the visit's generation delegation, the
+ *   authority the PUT invokes under
+ * @param options.zcapClient {ZcapClient}   the annex-signing client
+ * @returns {Promise<void>}
+ */
+export async function refreshDidWebProjection({
+  host,
+  spaceId,
+  did,
+  doc,
+  pinStore,
+  delegation,
+  zcapClient
+}: {
+  host: string
+  spaceId: string
+  did: string
+  doc: Parameters<typeof ensureDidWebProjection>[0]['doc']
+  pinStore: ResourceLogPinStore
+  delegation: IZcap
+  zcapClient: ZcapClient
+}): Promise<void> {
+  try {
+    const { outcome } = await ensureDidWebProjection({
+      store: didWebProjectionStore({
+        host,
+        spaceId,
+        invoker: () => ({ zcapClient, capability: delegation })
+      }),
+      did,
+      doc,
+      // The ordering guard. `doc` was resolved at the start of this visit, so
+      // a difference alone does not say which side is stale: another client
+      // may have published an inventory-removing entry and its projection
+      // since, and writing this snapshot over it would restore a key the
+      // account struck. One extra GET on the difference path settles it,
+      // under the visit's own pins -- a rollback or a fork served at that
+      // moment is refused, and the refusal lands in the catch below.
+      refresh: async () => {
+        const fresh = await verifyAccountLog({
+          did,
+          spaceId,
+          host,
+          pinStore
+        })
+        // The DID is the account pointer's: `verifyAccountLog` refuses a log
+        // resolving to any other, so the re-resolution cannot move it.
+        return { did, doc: fresh.doc }
+      }
+    })
+    if (outcome === 'republished') {
+      log.info('Republished the stale did:web projection of the account log', {
+        did
+      })
+    }
+    if (outcome === 'conflict') {
+      // Another writer's projection landed between the read and the PUT. It
+      // is the newer one, so it stands and the next visit is the mender.
+      log.info(
+        'Left the did:web projection to a concurrent writer of the account ' +
+          'log',
+        { did }
+      )
+    }
+  } catch (err) {
+    log.warn('Could not refresh the did:web projection of the account log', {
+      err
+    })
   }
 }

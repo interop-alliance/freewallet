@@ -1,9 +1,11 @@
 // @vitest-environment node
 /**
- * FW-396: `loadUnlockRegistry` splits the registry read from the registry
- * write by persistence strategy. A transient session reads under the visit's
- * generation delegation; only a browser-local session reaches the backfill,
- * the writer FW-295 kept off a transient session.
+ * `loadUnlockRegistry` takes one path on both storage tiers: the backfill,
+ * which lazily creates or repairs the passphrase entry. What varies is the
+ * authority its requests ride -- a transient session's ride the visit's
+ * generation delegation (`profile.invocationCapability`), since an
+ * annex-signed root invocation would be refused under the current-key-set
+ * rule, while a browser-local session root-invokes and rides none.
  */
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import type { Session } from '@/types/auth'
@@ -47,14 +49,38 @@ function fakeSession({
   } as unknown as Session
 }
 
-describe('loadUnlockRegistry (FW-396 read/write split)', () => {
-  it('reads under the generation delegation on a transient session', async () => {
+describe('loadUnlockRegistry (the authority the registry read rides)', () => {
+  it('rides the generation delegation on a transient session', async () => {
     const invocationCapability = { id: 'urn:zcap:delegated:generation' }
     const session = fakeSession({
       storage: STORAGE_IN_MEMORY,
       invocationCapability
     })
     const record = { methods: [] }
+    vi.mocked(backfillPassphraseUnlockMethod).mockResolvedValue(record as never)
+
+    const result = await loadUnlockRegistry({ session })
+
+    expect(result).toBe(record)
+    expect(vi.mocked(backfillPassphraseUnlockMethod)).toHaveBeenCalledWith({
+      session,
+      createIfMissing: true,
+      capability: invocationCapability
+    })
+    expect(vi.mocked(getUnlockMethods)).not.toHaveBeenCalled()
+  })
+
+  it('falls back to a plain read under the same authority', async () => {
+    const invocationCapability = { id: 'urn:zcap:delegated:generation' }
+    const session = fakeSession({
+      storage: STORAGE_IN_MEMORY,
+      invocationCapability
+    })
+    const record = { methods: [] }
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
+    vi.mocked(backfillPassphraseUnlockMethod).mockRejectedValue(
+      new Error('the backfill write was refused')
+    )
     vi.mocked(getUnlockMethods).mockResolvedValue(record as never)
 
     const result = await loadUnlockRegistry({ session })
@@ -64,12 +90,10 @@ describe('loadUnlockRegistry (FW-396 read/write split)', () => {
       session,
       capability: invocationCapability
     })
-    // The writer stays browser-local-only: no transient session mints or
-    // rewrites a registry.
-    expect(vi.mocked(backfillPassphraseUnlockMethod)).not.toHaveBeenCalled()
+    warn.mockRestore()
   })
 
-  it('backfills with createIfMissing on a browser-local session', async () => {
+  it('backfills with createIfMissing and no capability on a browser-local session', async () => {
     const session = fakeSession({ storage: STORAGE_INDEXEDDB })
     const record = { methods: [] }
     vi.mocked(backfillPassphraseUnlockMethod).mockResolvedValue(record as never)

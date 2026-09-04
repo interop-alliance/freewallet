@@ -27,7 +27,9 @@ import type {
   IKeyResolver,
   IZcap
 } from '@interop/data-integrity-core'
+import type { ZcapClient } from '@interop/ezcap'
 import type { Session } from '@/types/auth'
+import type { AccountCeremonyContext } from '@/session/accountCeremonyContext'
 import {
   loadKeyringCache,
   loadUnlockMethodsCache,
@@ -356,6 +358,31 @@ let FAKE_CAP: IZcap
 let SESSION_CLIENT_DID: string
 
 /**
+ * The ladder VM's bare did:key: the delegatee and sender of every single-verb
+ * child a ladder-anchored ceremony mints, and an identity this suite's
+ * session is not, so a capability delegated to it is `foreign-controller` to
+ * a root-signed delete.
+ */
+let LADDER_DID: string
+
+/**
+ * The ladder branch's deleter: the ladder VM signs the child, its own bare
+ * did:key sends it.
+ */
+let LADDER_DELETER: {
+  zcapClient: ZcapClient
+  invoker: ZcapClient
+  controller: string
+}
+
+/**
+ * A REAL management zcap on the unlock Space delegated to the LADDER VM
+ * rather than to this session's client -- the shape a transient session
+ * meets, and the one a root-signed delete cannot use.
+ */
+let LADDER_CAP: IZcap
+
+/**
  * A stand-in management zcap expiring the given interval from now, for the
  * backfill's expiry-refresh cases. The action set is optional: only the
  * action-coverage cases care about it.
@@ -460,6 +487,26 @@ beforeAll(async () => {
     capability: rootCapabilityId(UNLOCK_SPACE_URL),
     invocationTarget: UNLOCK_SPACE_URL,
     controller: SESSION_CLIENT_DID,
+    allowedActions: ['GET', 'PUT', 'DELETE'],
+    expires: new Date(Date.now() + 365 * 24 * 3600 * 1000)
+  })) as IZcap
+  const ladderSeed = new Uint8Array(32)
+  ladderSeed.fill(11)
+  const ladderAgent = await CapabilityAgent.fromSeed({
+    seed: ladderSeed,
+    handle: 'ladder-vm-context',
+    keyName: 'ladder-vm-context-key'
+  })
+  LADDER_DID = ladderAgent.id
+  LADDER_DELETER = {
+    zcapClient: zcapClientForSigner({ signer: ladderAgent.getSigner() }),
+    invoker: zcapClientForSigner({ signer: ladderAgent.getSigner() }),
+    controller: LADDER_DID
+  }
+  LADDER_CAP = (await profile.zcapClient.delegate({
+    capability: rootCapabilityId(UNLOCK_SPACE_URL),
+    invocationTarget: UNLOCK_SPACE_URL,
+    controller: LADDER_DID,
     allowedActions: ['GET', 'PUT', 'DELETE'],
     expires: new Date(Date.now() + 365 * 24 * 3600 * 1000)
   })) as IZcap
@@ -691,6 +738,148 @@ describe('revokeUnlockMethod', () => {
     ).resolves.toBeNull()
     const after = await getUnlockMethods({ session })
     expect(after!.methods).toHaveLength(0)
+  })
+})
+
+describe('revokeUnlockMethod on a ladder-anchored session', () => {
+  /**
+   * The ceremony context a transient session on a standing credential
+   * resolves, carrying only the members `revokeUnlockMethod` reads.
+   *
+   * @param options {object}
+   * @param options.session {Session}
+   * @returns {AccountCeremonyContext}
+   */
+  function ladderContext({
+    session
+  }: {
+    session: Session
+  }): AccountCeremonyContext {
+    return {
+      kind: 'ladder',
+      unlockSpaceId: 'unlock-space-acting',
+      ladderDeleter: LADDER_DELETER,
+      invoker: { zcapClient: session.profile.zcapClient }
+    } as unknown as AccountCeremonyContext
+  }
+
+  it('mints and sends the DELETE-only child as the ladder deleter', async () => {
+    const idb = createFakeIdb()
+    const session = await makeSession(idb)
+    // The management zcap of a credential-anchored account is delegated to
+    // the ladder VM, not to this session's per-visit annex key.
+    const entry = passkeyEntry({ manageCapability: LADDER_CAP })
+    await seedRegistry({
+      session,
+      record: {
+        version: 1,
+        webAuthnUserId: 'AAAAAAAAAAAAAAAAAAAAAA',
+        methods: [entry]
+      }
+    })
+    vi.clearAllMocks()
+
+    await revokeUnlockMethod({
+      session,
+      context: ladderContext({ session }),
+      entry,
+      idb
+    })
+
+    expect(deleteUnlockSpaceWithCapability).toHaveBeenCalledOnce()
+    const args = vi.mocked(deleteUnlockSpaceWithCapability).mock.calls[0][0]
+    // Sent by the ladder VM's own bare did:key -- a root-signed DELETE would
+    // come back as the server's masked 404 and orphan the Space.
+    expect(args.zcapClient).toBe(LADDER_DELETER.invoker)
+    const child = args.capability as IDelegatedZcap
+    expect(child.controller).toBe(LADDER_DID)
+    expect(child.allowedAction).toEqual(['DELETE'])
+    expect(child.parentCapability).toBe((LADDER_CAP as IDelegatedZcap).id)
+
+    const after = await getUnlockMethods({ session })
+    expect(after!.methods).toHaveLength(0)
+  })
+
+  it('refuses the same entry with no ladder deleter in hand', async () => {
+    const idb = createFakeIdb()
+    const session = await makeSession(idb)
+    const entry = passkeyEntry({ manageCapability: LADDER_CAP })
+
+    // The pre-flight reads the deleter too: without it the capability's
+    // delegatee is a controller this session cannot act as.
+    await expect(revokeUnlockMethod({ session, entry, idb })).rejects.toThrow(
+      /foreign-controller/
+    )
+    expect(deleteUnlockSpaceWithCapability).not.toHaveBeenCalled()
+    expect(vi.mocked(rotateOffUnlockCredential)).not.toHaveBeenCalled()
+  })
+
+  it("reports the server's masked 404 as a residue, not as a deletion", async () => {
+    wasState.deleteOutcome = 'not-found'
+    const idb = createFakeIdb()
+    const session = await makeSession(idb)
+    const entry = passkeyEntry({ manageCapability: LADDER_CAP })
+    await seedRegistry({
+      session,
+      record: {
+        version: 1,
+        webAuthnUserId: 'AAAAAAAAAAAAAAAAAAAAAA',
+        methods: [entry]
+      }
+    })
+    const capture = captureSink()
+    addSink(capture.sink)
+
+    await revokeUnlockMethod({
+      session,
+      context: ladderContext({ session }),
+      entry,
+      idb
+    })
+
+    // Nothing here probes the Space first, so a 404 (absent OR unauthorized)
+    // is no evidence of absence.
+    expect(capture.events).toContainEqual(
+      expect.objectContaining({
+        ns: 'fw:session:methods',
+        level: 'warn',
+        msg: expect.stringContaining('The unlock Space was not deleted')
+      })
+    )
+    // The registry entry still goes: the retirement is idempotent and the
+    // caller is really after the entry.
+    const after = await getUnlockMethods({ session })
+    expect(after!.methods).toHaveLength(0)
+  })
+
+  it('keeps the root signer on the enrolled kind', async () => {
+    const idb = createFakeIdb()
+    const session = await makeSession(idb)
+    const entry = passkeyEntry({ manageCapability: FAKE_CAP })
+    await seedRegistry({
+      session,
+      record: {
+        version: 1,
+        webAuthnUserId: 'AAAAAAAAAAAAAAAAAAAAAA',
+        methods: [entry]
+      }
+    })
+    vi.clearAllMocks()
+
+    await revokeUnlockMethod({
+      session,
+      context: {
+        kind: 'enrolled',
+        invoker: { zcapClient: session.profile.zcapClient }
+      } as unknown as AccountCeremonyContext,
+      entry,
+      idb
+    })
+
+    const args = vi.mocked(deleteUnlockSpaceWithCapability).mock.calls[0][0]
+    expect(args.zcapClient).not.toBe(LADDER_DELETER.invoker)
+    const child = args.capability as IDelegatedZcap
+    expect(child.controller).toBe(SESSION_CLIENT_DID)
   })
 })
 

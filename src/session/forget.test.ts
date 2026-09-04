@@ -107,21 +107,29 @@ vi.mock('@/session/persistence', async importOriginal => {
   const actual = await importOriginal<object>()
   return {
     ...actual,
-    assertAccountCeremonyAllowed: vi.fn()
+    assertBrowserLocalSession: vi.fn()
   }
 })
-const { assertAccountCeremonyAllowed } = await import('@/session/persistence')
+const { assertBrowserLocalSession } = await import('@/session/persistence')
 
-vi.mock('@/session/enrolledContext', () => ({
-  requireEnrolledClientContext: vi.fn()
+vi.mock('@/session/accountCeremonyContext', () => ({
+  requireEnrolledCeremonyContext: vi.fn()
 }))
-const { requireEnrolledClientContext } =
-  await import('@/session/enrolledContext')
+const { requireEnrolledCeremonyContext } =
+  await import('@/session/accountCeremonyContext')
 
 vi.mock('@/session/unlockMethods', () => ({
   getUnlockMethods: vi.fn(),
   managementZcapClient: vi.fn(() => ({ managementZcapClient: true })),
   refreshStandingDelegationFields: vi.fn(),
+  // The shared sibling-record reader, in its enrolled-client shape: the
+  // stored management zcap, invoked by the session's own signer.
+  unlockEntryReaderFor: vi.fn(
+    () => async (entry: { manageCapability?: unknown }) => ({
+      zcapClient: { managementZcapClient: true },
+      capability: entry.manageCapability
+    })
+  ),
   updateUnlockMethods: vi.fn()
 }))
 const {
@@ -561,7 +569,7 @@ describe('forgetThisBrowser (the ceremony grades)', () => {
 
   beforeEach(() => {
     vi.clearAllMocks()
-    vi.mocked(requireEnrolledClientContext).mockReturnValue({
+    vi.mocked(requireEnrolledCeremonyContext).mockReturnValue({
       remoteStore: {
         remoteStore: true,
         // The last-client transition publishes the ladder VM's strike and
@@ -628,7 +636,7 @@ describe('forgetThisBrowser (the ceremony grades)', () => {
       targets: WIPE_TARGETS,
       clearWriter: true
     })
-    expect(vi.mocked(assertAccountCeremonyAllowed)).toHaveBeenCalledTimes(1)
+    expect(vi.mocked(assertBrowserLocalSession)).toHaveBeenCalledTimes(1)
     expect(vi.mocked(invalidateVerifiedLog)).toHaveBeenCalled()
     // The post-removal did:web projection PUT rides this still-standing
     // client's own root authority, the store the last-client transition

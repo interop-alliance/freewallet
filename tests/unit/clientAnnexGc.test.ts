@@ -25,8 +25,8 @@ vi.mock('@interop/was-client', async importOriginal => ({
   })
 }))
 
-vi.mock('@/session/enrolledContext', () => ({
-  enrolledClientContext: vi.fn()
+vi.mock('@/session/accountCeremonyContext', () => ({
+  enrolledCeremonyContext: vi.fn()
 }))
 
 vi.mock('@/session/verifiedLog', () => ({
@@ -36,7 +36,7 @@ vi.mock('@/session/verifiedLog', () => ({
 
 import { runClientAnnexGc } from '@interop/wallet-core/clientAnnex'
 import { sweepClientAnnexGenerations } from '@/session/clientAnnexGc'
-import { enrolledClientContext } from '@/session/enrolledContext'
+import { enrolledCeremonyContext } from '@/session/accountCeremonyContext'
 import {
   browserLocalSessionPersistence,
   inMemorySessionPersistence,
@@ -112,7 +112,7 @@ function makeSession({
  * document points at an annex generation, and a canned GC report.
  */
 function primeHappyPath() {
-  vi.mocked(enrolledClientContext).mockReturnValue({
+  vi.mocked(enrolledCeremonyContext).mockReturnValue({
     remoteStore: { webvhIdStore: vi.fn(() => ID_STORE) },
     pointer: POINTER,
     clientWebvhKeys: CLIENT_WEBVH_KEYS
@@ -154,11 +154,11 @@ describe('sweepClientAnnexGenerations -- the preconditions', () => {
     })
     await expect(sweepClientAnnexGenerations({ session })).resolves.toBeNull()
     expect(runClientAnnexGc).not.toHaveBeenCalled()
-    expect(enrolledClientContext).not.toHaveBeenCalled()
+    expect(enrolledCeremonyContext).not.toHaveBeenCalled()
   })
 
   it('skips a session that cannot act as the account', async () => {
-    vi.mocked(enrolledClientContext).mockReturnValue(null)
+    vi.mocked(enrolledCeremonyContext).mockReturnValue(null)
     const session = makeSession()
     await expect(sweepClientAnnexGenerations({ session })).resolves.toBeNull()
     expect(runClientAnnexGc).not.toHaveBeenCalled()
@@ -166,7 +166,7 @@ describe('sweepClientAnnexGenerations -- the preconditions', () => {
   })
 
   it('skips an unpromoted (did:key) account pointer', async () => {
-    vi.mocked(enrolledClientContext).mockReturnValue({
+    vi.mocked(enrolledCeremonyContext).mockReturnValue({
       remoteStore: { webvhIdStore: vi.fn(() => ID_STORE) },
       pointer: { ...POINTER, did: 'did:key:z6MkNotWebvh' },
       clientWebvhKeys: CLIENT_WEBVH_KEYS

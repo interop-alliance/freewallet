@@ -2,9 +2,10 @@
  * The standing-configuration establishment ceremony: what turns a passphrase or
  * passkey bind into a STANDING unlock credential -- one a fresh browser can
  * later self-enroll with, holding nothing but the credential (FW-154's
- * one-codepath model, the recovery-code configuration minus spend-on-use). Run from
- * a live enrolled session, in the recovery-anchor order (decryption material
- * before authorization):
+ * one-codepath model, the recovery-code configuration minus spend-on-use).
+ * Run from a live session of either ceremony kind. On a remembered session
+ * the stages run in the recovery-anchor order (decryption material before
+ * authorization):
  *
  * 1. The credential's user-key wrap lands in the `key-map/user-key.jsonl`
  *    roster first (escrow: every epoch, so a later self-enrollment decrypts
@@ -26,6 +27,19 @@
  *    (`wrapUnlockRecord` -- shell, bridge, sibling, ladder, binding MAC),
  *    superseding the credential's previous record (the plain layout
  *    survives only on no-WAS deployments, where this ceremony never runs).
+ *
+ * On a transient session the acting authority is the login credential's
+ * ladder, and the order changes for one reason: a ladder-signed roster
+ * append is licensed only at the inventory-changing version its own entry
+ * mints. So the record is written remotely first and stays inert (its ladder
+ * VM is in no document yet), the bound credential's annex rung-0 hash is
+ * committed under the acting credential's rung as a blocking stage, the bind
+ * entry publishes, and only then does the escrow append. Nothing lands on
+ * this browser.
+ *
+ * On both kinds the new record's bridge and sibling are signed by that
+ * credential's OWN ladder VM, so a later strike of any other credential's
+ * inventory can rot only the record the same ceremony deletes.
  *
  * The caller records the returned standing fields in the unlock-methods
  * registry entry, which is what lets the revocation cascade re-mint the
@@ -56,6 +70,7 @@ import {
   ensurePointedClientAnnexGeneration,
   generateLadderSeed,
   ladderRung,
+  ladderVmZcapClient,
   mintDelegatedClientsDelegation,
   mintGenerationDelegation,
   selfEnrollClientCore
@@ -81,12 +96,16 @@ import {
   type UnlockCredential
 } from '@/session/keyring'
 import { WAS_SERVER_URL } from '@/app.config'
-import { requireEnrolledClientContext } from '@/session/enrolledContext'
+import {
+  accountCeremonyContext,
+  requireEnrolledCeremonyContext,
+  type AccountCeremonyContext
+} from '@/session/accountCeremonyContext'
 import {
   clientAnnexReachOf,
-  ensureGenerationDelegation
+  ensureGenerationDelegation,
+  standingClientAnnexReachOf
 } from '@/session/annexReach'
-import { sessionRosterStore } from '@/session/rosterStore'
 import {
   invalidateVerifiedLog,
   verifiedAccountLog
@@ -149,7 +168,11 @@ export function unlockLogStore({
  * failure fails the surrounding ceremony rather than being swallowed.
  *
  * @param options {object}
- * @param options.session {Session}   a live enrolled session
+ * @param options.session {Session}   the live session running the ceremony
+ * @param [options.context] {AccountCeremonyContext | null}   this session's
+ *   ceremony context, resolved by the caller; the enrolled kind keeps the
+ *   roster-first order and binds a local client-key record, the ladder kind
+ *   binds the record remotely first and escrows after its bind entry
  * @param options.secret {string | Uint8Array}   the unlock secret being made
  *   standing
  * @param options.kdf {UnlockKdf}   the unlock method's KDF parameters
@@ -169,11 +192,12 @@ export function unlockLogStore({
  *   absent
  * @param [options.idb] {IDBFactory}
  * @returns {Promise<object>}   the new record's unlock Space id, management
- *   zcap, persist closure, and the standing fields the registry entry
- *   records
+ *   zcap, persist closure (absent on the ladder kind, which writes nothing
+ *   local), and the standing fields the registry entry records
  */
 export async function establishStandingUnlock({
   session,
+  context,
   secret,
   kdf,
   lowEntropy,
@@ -183,6 +207,7 @@ export async function establishStandingUnlock({
   idb
 }: {
   session: Session
+  context?: AccountCeremonyContext | null
   secret: string | Uint8Array
   kdf: UnlockKdf
   lowEntropy: boolean
@@ -193,149 +218,272 @@ export async function establishStandingUnlock({
 }): Promise<{
   unlockSpaceId: string
   manageCapability?: IZcap
-  persistClientKeys: (changes: PersistableClientKeys) => Promise<void>
+  persistClientKeys?: (changes: PersistableClientKeys) => Promise<void>
   standingFields: StandingUnlockFields
   ladderSeed: Uint8Array
+  delegatedClients?: IZcap
 }> {
-  const { remoteStore, pointer, clientWebvhKeys, clientKeyAgreementKey } =
-    requireEnrolledClientContext({
+  const ctx =
+    context ??
+    (await accountCeremonyContext({ session })) ??
+    requireEnrolledCeremonyContext({
       session,
       action: 'Establishing a standing unlock credential'
     })
-  const { clientSeed, userKey, zcapClient } = session.profile
-  if (!clientSeed) {
-    throw new Error(
-      "Establishing a standing unlock credential requires this client's " +
-        'seed in the session.'
-    )
-  }
-  const controller = session.profile.accountController ?? session.user.id
+  const { pointer, controller: accountController } = ctx
+  const { userKey } = session.profile
+  const controller = session.profile.accountController ?? accountController
   const credential = derived ?? (await deriveUnlockCredential({ secret, kdf }))
   const { standing } = credential
-
-  // 1. Decryption material first: the credential's wrap into every roster
-  // epoch. Idempotent -- a wrap already standing is returned as-is.
-  await addUserKeyRosterRecipient({
-    store: sessionRosterStore({ profile: session.profile }),
-    recipient: {
-      id: standing.recipientKid,
-      publicKeyMultibase: standing.keyAgreementKeyMultibase
-    },
-    ownerKeyAgreementKey: clientKeyAgreementKey
-  })
-
-  // 2. The document entry: the keyAgreement publication (commitment for a
-  // low-entropy credential, verbatim for a high-entropy one) and the hash of
-  // ladder rung 0 in `nextKeyHashes`.
   const ladderSeed = mintedLadderSeed ?? generateLadderSeed()
   const rung0 = await ladderRung({ ladderSeed, index: 0 })
-  await publishUnlockKey({
-    idStore: remoteStore.webvhIdStore(),
-    updateKeys: clientWebvhKeys,
-    unlockKeys: {
-      keyAgreement: lowEntropy
-        ? {
-            commitment: await keyAgreementCommitment({
-              keyAgreementKeyMultibase: standing.keyAgreementKeyMultibase
-            })
-          }
-        : { publicKeyMultibase: standing.keyAgreementKeyMultibase },
-      updateKeyMultibase: rung0.keyMultibase
-    },
-    ladderSeed,
-    expectedDid: pointer.did,
-    pinStore: session.profile.persistence.logPins,
-    logId: accountLogPinId({ spaceId: pointer.spaceId })
+  // Invariant 17: every record's bridge and sibling are signed by that
+  // record's OWN credential's ladder VM, so a strike of any other
+  // credential's inventory can never rot this record. The signer is inert
+  // until the bind entry below publishes that VM.
+  const boundZcapClient = await ladderVmZcapClient({
+    accountDid: pointer.did,
+    ladderSeed
   })
-  invalidateVerifiedLog({ profile: session.profile })
 
-  // 3. The authorization bridge to the credential-derived signing DID --
-  // and, when the account document points at an annex generation, the
-  // annex-Space sibling delegation to the same DID. The auxiliary Space
-  // id is read off the document's delegated-clients service entry (the
-  // sibling delegation's target is the id's one carrier, so an account with
-  // no pointed generation binds without a sibling; a later re-mint adds one
-  // once the pointer exists). Best-effort: a sibling-less standing record
-  // still self-enrolls, it just cannot reach the annex log.
-  const delegation = await delegateLogWrite({
-    zcapClient,
-    pointer,
-    recoveryClientDid: standing.clientDid
-  })
-  let delegatedClients: IZcap | undefined
-  let clientAnnexDid: string | undefined
-  try {
-    const { doc } = await verifiedAccountLog({
-      profile: session.profile,
-      pointer
+  /**
+   * The bridge delegation and, where the account points at an annex
+   * generation, the annex-Space sibling delegation -- both to the
+   * credential's own derived signing DID and both signed by its own ladder
+   * VM. Best-effort on the sibling: a sibling-less standing record still
+   * self-enrolls, it just cannot reach the annex log.
+   */
+  const mintDelegations = async (): Promise<{
+    delegation: IZcap
+    delegatedClients?: IZcap
+    clientAnnexDid?: string
+  }> => {
+    const delegation = await delegateLogWrite({
+      zcapClient: boundZcapClient,
+      pointer,
+      recoveryClientDid: standing.clientDid
     })
-    clientAnnexDid = delegatedClientsPointer({ doc })
-    if (clientAnnexDid) {
-      delegatedClients = await mintDelegatedClientsDelegation({
-        zcapClient,
-        wasServerUrl: pointer.host,
-        clientAnnexSpaceId: clientAnnexDidParts({ did: clientAnnexDid })
-          .spaceId,
-        controller: standing.clientDid
-      })
-    }
-  } catch (err) {
-    log.warn(
-      'Could not mint the annex-Space sibling delegation; the record binds without one',
-      { err }
-    )
-  }
-
-  // 3b. The annex rung commit -- the bind ceremony's half of the
-  // mid-generation lockout hybrid: the bound credential's rung-0 hash joins
-  // the pointed generation's `nextKeyHashes` in one atomic hash-restating
-  // entry signed by the LOGIN credential's committed rung 0
-  // (`profile.ladderSeed`; on a passphrase change still the OLD credential's
-  // seed here, by the caller's reassignment ordering). Without it a freshly
-  // bound credential is locked out of transient login until the next
-  // generation swap. Best-effort: an acting rung the generation does not
-  // commit is the honest skip (nothing licenses a bind to mint a
-  // generation), and the lockout consequence stands as documented.
-  const actingLadderSeed = session.profile.ladderSeed
-  if (clientAnnexDid && actingLadderSeed) {
+    let delegatedClients: IZcap | undefined
+    let clientAnnexDid: string | undefined
     try {
-      const reach = clientAnnexReachOf({ session, pointer, clientAnnexDid })
-      await commitClientAnnexRung({
-        store: reach.logStore(),
-        boundLadderSeed: ladderSeed,
-        actingLadderSeed,
-        generationId: reach.generationId,
-        expectedDid: clientAnnexDid,
-        pinStore: session.profile.persistence.logPins,
-        logId: reach.logId
+      const { doc } = await verifiedAccountLog({
+        profile: session.profile,
+        pointer
       })
+      clientAnnexDid = delegatedClientsPointer({ doc })
+      if (clientAnnexDid) {
+        delegatedClients = await mintDelegatedClientsDelegation({
+          zcapClient: boundZcapClient,
+          wasServerUrl: pointer.host,
+          clientAnnexSpaceId: clientAnnexDidParts({ did: clientAnnexDid })
+            .spaceId,
+          controller: standing.clientDid
+        })
+      }
     } catch (err) {
       log.warn(
-        (err as { name?: string }).name === 'ClientAnnexRungUncommittedError'
-          ? "The login credential's rung is not committed in the pointed generation; the bound credential waits for the next generation swap"
-          : "Could not commit the bound credential's annex rung",
+        'Could not mint the annex-Space sibling delegation; the record binds without one',
         { err }
       )
     }
+    return {
+      delegation,
+      ...(delegatedClients ? { delegatedClients } : {}),
+      ...(clientAnnexDid ? { clientAnnexDid } : {})
+    }
   }
 
-  // 4. The re-bind: the unlock record in the standing layout.
-  const bound = await bindUnlockSecret({
-    clientSeed,
-    controller,
-    secret,
-    kdf,
-    email,
-    userKey,
-    webvhUpdateKeys: clientWebvhKeys,
-    pointer,
-    delegateManagementTo: unlockManagementGrantee({ pointer, controller }),
-    delegation,
-    ...(delegatedClients ? { delegatedClients } : {}),
-    ladderSeed,
-    credential,
-    idb
-  })
+  /**
+   * The bound credential's rung-0 hash into the pointed generation's
+   * `nextKeyHashes`, in one atomic hash-restating entry signed by the ACTING
+   * credential's committed rung. Without it a freshly bound credential is
+   * locked out of transient login until the next generation swap.
+   *
+   * Best-effort on the enrolled branch (an acting rung the generation does
+   * not commit is the honest skip). Blocking on the ladder branch, where the
+   * ceremony's own later strike is signed by this rung.
+   */
+  const commitAnnexRung = async ({
+    clientAnnexDid
+  }: {
+    clientAnnexDid: string
+  }): Promise<void> => {
+    const actingLadderSeed = session.profile.ladderSeed
+    if (!actingLadderSeed) {
+      throw new ClientAnnexRungCommitSkipped()
+    }
+    const reach =
+      ctx.kind === 'ladder' && ctx.sibling
+        ? standingClientAnnexReachOf({
+            pointer,
+            clientAnnexDid,
+            standing: {
+              standingClient: session.profile.standingUnlock!.standingClient,
+              delegatedClients: ctx.sibling
+            }
+          })
+        : clientAnnexReachOf({ session, pointer, clientAnnexDid })
+    await commitClientAnnexRung({
+      store: reach.logStore(),
+      boundLadderSeed: ladderSeed,
+      actingLadderSeed,
+      generationId: reach.generationId,
+      expectedDid: clientAnnexDid,
+      pinStore: session.profile.persistence.logPins,
+      logId: reach.logId
+    })
+  }
+
+  let bound: {
+    unlockSpaceId: string
+    manageCapability?: IZcap
+    persistClientKeys?: (changes: PersistableClientKeys) => Promise<void>
+    unlockKeyAgreementKeyId?: string
+    unlockKeyAgreementKeyMultibase?: string
+  }
+  let delegation: IZcap
+  let delegatedClients: IZcap | undefined
+
+  if (ctx.kind === 'ladder') {
+    // The ladder branch's order (the transient recovery's shape). The record
+    // is written FIRST and is inert -- its ladder VM stands in no document
+    // yet -- so a tear before the bind entry leaves an orphan a retry with
+    // the same secret overwrites. The escrow follows the entry rather than
+    // preceding it: a ladder-signed roster append is licensed only at the
+    // inventory-changing version its own entry mints.
+    const minted = await mintDelegations()
+    delegation = minted.delegation
+    delegatedClients = minted.delegatedClients
+    bound = await ctx.bindRecord({
+      credential,
+      controller,
+      pointer,
+      delegation,
+      ...(delegatedClients ? { delegatedClients } : {}),
+      ladderSeed,
+      ...(email ? { email } : {}),
+      delegateManagementTo: unlockManagementGrantee({ pointer, controller })
+    })
+    if (minted.clientAnnexDid) {
+      // Blocking here: the strike entry a later retirement publishes is
+      // signed by this rung, so a bind that skipped the commit would leave
+      // the ceremony with no rung to sign with.
+      await commitAnnexRung({ clientAnnexDid: minted.clientAnnexDid })
+    }
+    await publishUnlockKey({
+      idStore: ctx.idStore,
+      signer: ctx.signer,
+      unlockKeys: {
+        keyAgreement: lowEntropy
+          ? {
+              commitment: await keyAgreementCommitment({
+                keyAgreementKeyMultibase: standing.keyAgreementKeyMultibase
+              })
+            }
+          : { publicKeyMultibase: standing.keyAgreementKeyMultibase },
+        updateKeyMultibase: rung0.keyMultibase
+      },
+      ladderSeed,
+      expectedDid: pointer.did,
+      pinStore: session.profile.persistence.logPins,
+      logId: accountLogPinId({ spaceId: pointer.spaceId })
+    })
+    invalidateVerifiedLog({ profile: session.profile })
+    // The escrow, anchored at the entry just published: the new credential's
+    // standing key into every epoch. Signed by the ACTING credential's
+    // ladder VM, which the post-entry document still lists.
+    await addUserKeyRosterRecipient({
+      store: ctx.rosterStore,
+      recipient: {
+        id: standing.recipientKid,
+        publicKeyMultibase: standing.keyAgreementKeyMultibase
+      },
+      ownerKeyAgreementKey: ctx.standingKeyAgreementKey
+    })
+  } else {
+    const { clientSeed } = session.profile
+    if (!clientSeed) {
+      throw new Error(
+        "Establishing a standing unlock credential requires this client's " +
+          'seed in the session.'
+      )
+    }
+    // 1. Decryption material first: the credential's wrap into every roster
+    // epoch. Idempotent -- a wrap already standing is returned as-is.
+    await addUserKeyRosterRecipient({
+      store: ctx.rosterStore,
+      recipient: {
+        id: standing.recipientKid,
+        publicKeyMultibase: standing.keyAgreementKeyMultibase
+      },
+      ownerKeyAgreementKey: ctx.clientKeyAgreementKey
+    })
+
+    // 2. The document entry: the keyAgreement publication (commitment for a
+    // low-entropy credential, verbatim for a high-entropy one) and the hash
+    // of ladder rung 0 in `nextKeyHashes`.
+    await publishUnlockKey({
+      idStore: ctx.idStore,
+      signer: ctx.signer,
+      unlockKeys: {
+        keyAgreement: lowEntropy
+          ? {
+              commitment: await keyAgreementCommitment({
+                keyAgreementKeyMultibase: standing.keyAgreementKeyMultibase
+              })
+            }
+          : { publicKeyMultibase: standing.keyAgreementKeyMultibase },
+        updateKeyMultibase: rung0.keyMultibase
+      },
+      ladderSeed,
+      expectedDid: pointer.did,
+      pinStore: session.profile.persistence.logPins,
+      logId: accountLogPinId({ spaceId: pointer.spaceId })
+    })
+    invalidateVerifiedLog({ profile: session.profile })
+
+    // 3. The bridge and sibling delegations, signed by the bound
+    // credential's own ladder VM (invariant 17).
+    const minted = await mintDelegations()
+    delegation = minted.delegation
+    delegatedClients = minted.delegatedClients
+
+    // 3b. The annex rung commit, best-effort: nothing licenses a bind to
+    // mint a generation, and the lockout consequence stands as documented.
+    if (minted.clientAnnexDid) {
+      try {
+        await commitAnnexRung({ clientAnnexDid: minted.clientAnnexDid })
+      } catch (err) {
+        log.warn(
+          err instanceof ClientAnnexRungCommitSkipped
+            ? 'The login credential carries no ladder seed; the bound credential waits for the next generation swap'
+            : (err as { name?: string }).name ===
+                'ClientAnnexRungUncommittedError'
+              ? "The login credential's rung is not committed in the pointed generation; the bound credential waits for the next generation swap"
+              : "Could not commit the bound credential's annex rung",
+          { err }
+        )
+      }
+    }
+
+    // 4. The re-bind: the unlock record in the standing layout.
+    bound = await bindUnlockSecret({
+      clientSeed,
+      controller,
+      secret,
+      kdf,
+      email,
+      userKey,
+      webvhUpdateKeys: ctx.clientWebvhKeys,
+      pointer,
+      delegateManagementTo: unlockManagementGrantee({ pointer, controller }),
+      delegation,
+      ...(delegatedClients ? { delegatedClients } : {}),
+      ladderSeed,
+      credential,
+      idb
+    })
+  }
 
   const delegationKeyId = delegationProofKeyId(delegation)
   const delegationExpires = (delegation as { expires?: string }).expires
@@ -347,9 +495,18 @@ export async function establishStandingUnlock({
     : undefined
   return {
     unlockSpaceId: bound.unlockSpaceId,
-    manageCapability: bound.manageCapability,
-    persistClientKeys: bound.persistClientKeys,
+    ...(bound.manageCapability
+      ? { manageCapability: bound.manageCapability }
+      : {}),
+    ...(bound.persistClientKeys
+      ? { persistClientKeys: bound.persistClientKeys }
+      : {}),
     ladderSeed,
+    // The bound credential's own sibling delegation into the client annex,
+    // handed back so a caller retiring ANOTHER credential can reach the annex
+    // log through this one: its own sibling stops verifying the moment its
+    // ladder VM leaves the document.
+    ...(delegatedClients ? { delegatedClients } : {}),
     standingFields: {
       rosterKid: standing.recipientKid,
       keyAgreementKeyMultibase: standing.keyAgreementKeyMultibase,
@@ -368,6 +525,18 @@ export async function establishStandingUnlock({
           }
         : {})
     }
+  }
+}
+
+/**
+ * The bind's annex-commit stage had no acting ladder seed to sign with. The
+ * enrolled branch logs and carries on; the ladder branch never raises it,
+ * since a session on that branch holds a seed by construction.
+ */
+class ClientAnnexRungCommitSkipped extends Error {
+  constructor() {
+    super('The acting session carries no ladder seed for the annex commit.')
+    this.name = 'ClientAnnexRungCommitSkipped'
   }
 }
 
@@ -408,7 +577,7 @@ export async function establishClientAnnexGeneration({
   idb?: IDBFactory
 }): Promise<void> {
   const { remoteStore, pointer, clientWebvhKeys, keyAgent } =
-    requireEnrolledClientContext({
+    requireEnrolledCeremonyContext({
       session,
       action: 'Establishing the annex-generation inventory'
     })

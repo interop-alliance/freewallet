@@ -1,8 +1,9 @@
 // @vitest-environment node
 /**
- * FW-295: a transient session makes no unlock-methods registry call at all.
- * `backfillPassphraseUnlockMethod` must return `null` before even a read on
- * a transient session, and must otherwise proceed to the ordinary read.
+ * The backfill reaches its registry read on BOTH storage tiers. FW-295's
+ * transient gate was retired with the account-ceremony context: a transient
+ * session reads and writes the registry under the visit's generation
+ * delegation rather than being turned away before the first read.
  */
 import { describe, expect, it, vi } from 'vitest'
 import type { Session } from '@/types/auth'
@@ -46,8 +47,8 @@ function fakeSession({ storage }: { storage: string }): {
   return { session, cacheLoad }
 }
 
-describe('backfillPassphraseUnlockMethod (FW-295 transient gate)', () => {
-  it('makes no registry call on a transient session', async () => {
+describe('backfillPassphraseUnlockMethod (both storage tiers)', () => {
+  it('proceeds to the read on a transient session', async () => {
     const { session, cacheLoad } = fakeSession({
       storage: STORAGE_IN_MEMORY
     })
@@ -55,7 +56,7 @@ describe('backfillPassphraseUnlockMethod (FW-295 transient gate)', () => {
     const result = await backfillPassphraseUnlockMethod({ session })
 
     expect(result).toBeNull()
-    expect(cacheLoad).not.toHaveBeenCalled()
+    expect(cacheLoad).toHaveBeenCalledTimes(1)
   })
 
   it('proceeds to the read on a browser-local session', async () => {

@@ -24,8 +24,8 @@
  * makes tap-free revocation of a lost method possible. It grants GET/DELETE on
  * that one unlock Space only (deletion of the method, never decryption), and
  * sits JWE-wrapped to the vault KAK like the rest of the record, so the server
- * never reads it. `revokeUnlockMethod` invokes it with the session's root key
- * to retire a lost passkey; entries predating the capability fall back to
+ * never reads it. `revokeUnlockMethod` retires a lost passkey through it;
+ * entries predating the capability fall back to
  * `revokeUnlockMethodByCeremony` (a tap on the passkey being removed).
  */
 import type {
@@ -43,7 +43,7 @@ import {
   WAS_SERVER_URL
 } from '@/app.config'
 import type { Session } from '@/types/auth'
-import { isBrowserLocalSession } from '@/session/persistence'
+import type { AccountCeremonyContext } from '@/session/accountCeremonyContext'
 import {
   assertPasskeyPrf,
   registerPasskey,
@@ -585,18 +585,23 @@ async function casUpdateRegistryRecord({
  * @param options.session {Session}
  * @param options.mutate {Function}   fresh record (or null) to the next
  *   record, or null for "no write needed"
+ * @param [options.capability] {IZcap}   an invocation capability every request
+ *   rides (a transient session's generation delegation); the root capability
+ *   is invoked otherwise
  * @returns {Promise<UnlockMethodsRecord | null>}   the written record, or the
  *   current one when mutate declined (null when none exists)
  * @throws {UnlockRegistryStaleSealError}
  */
 export async function updateUnlockMethods({
   session,
-  mutate
+  mutate,
+  capability
 }: {
   session: Session
   mutate: (
     current: UnlockMethodsRecord | null
   ) => UnlockMethodsRecord | null | Promise<UnlockMethodsRecord | null>
+  capability?: IZcap
 }): Promise<UnlockMethodsRecord | null> {
   const controller = session.user.id
   const { unlockMethodsCache } = session.profile.persistence
@@ -638,7 +643,12 @@ export async function updateUnlockMethods({
   let ensured = false
   return await casUpdateRegistryRecord({
     read: () =>
-      getUnlockMethodsRecord({ storageServerUrl, zcapClient, spaceId }),
+      getUnlockMethodsRecord({
+        storageServerUrl,
+        zcapClient,
+        spaceId,
+        ...(capability ? { capability } : {})
+      }),
     unwrap: async stored => {
       try {
         return await unwrapRecord({
@@ -659,7 +669,8 @@ export async function updateUnlockMethods({
         await ensureUnlockMethodsCollection({
           storageServerUrl,
           zcapClient,
-          spaceId
+          spaceId,
+          ...(capability ? { capability } : {})
         })
         ensured = true
       }
@@ -668,6 +679,7 @@ export async function updateUnlockMethods({
         zcapClient,
         spaceId,
         record,
+        ...(capability ? { capability } : {}),
         ...precondition
       })
     },
@@ -987,13 +999,16 @@ function isSameMethod(candidate: UnlockMethod, target: UnlockMethod): boolean {
  */
 async function dropRegistryEntry({
   session,
-  entry
+  entry,
+  capability
 }: {
   session: Session
   entry: UnlockMethod
+  capability?: IZcap
 }): Promise<void> {
   await updateUnlockMethods({
     session,
+    ...(capability ? { capability } : {}),
     mutate: current => {
       if (!current) {
         return null
@@ -1193,6 +1208,65 @@ export function unlockSpaceDeletionRefusal({
 }
 
 /**
+ * How a caller reads a SIBLING credential's unlock record: the client that
+ * sends the GET, plus the capability it invokes. One shape for both kinds of
+ * acting session, so the two callers that settle a registry entry against its
+ * record (the account-deletion walk's pending-entry discovery, and the
+ * pre-pivot pending-entry refusal the last-client transition and the
+ * ladder-branch disconnect share) cannot drift.
+ *
+ * An enrolled client invokes the stored management zcap itself. A session
+ * acting through a standing credential's ladder cannot: that capability is
+ * delegated to the account DID, and the ladder VM carries no invocation
+ * relation. It mints a GET-only child of the stored capability instead and
+ * sends it as the ladder VM's own bare did:key -- the same single-verb child
+ * the deletion walk mints, and all the server admits from a ladder. A parent
+ * that allows no GET makes the entry unreadable rather than refusing the
+ * caller, so the reader resolves `undefined` and the caller decides.
+ *
+ * @param options {object}
+ * @param options.session {Session}
+ * @param [options.signer] {object}   the ladder's delegator, invoker and
+ *   delegatee; absent, the session acts as an enrolled client
+ * @param options.signer.zcapClient {ZcapClient}   the delegating signer
+ * @param options.signer.invoker {ZcapClient}   the client that sends the GET
+ * @param options.signer.controller {string}   the delegatee DID
+ * @returns {Function}   `(entry) => Promise<{ zcapClient, capability } | undefined>`
+ */
+export function unlockEntryReaderFor({
+  session,
+  signer
+}: {
+  session: Session
+  signer?: { zcapClient: ZcapClient; invoker: ZcapClient; controller: string }
+}): (
+  entry: UnlockMethod
+) => Promise<{ zcapClient: ZcapClient; capability: IZcap } | undefined> {
+  return async (entry: UnlockMethod) => {
+    const parent = entry.manageCapability as IZcap
+    if (!signer) {
+      return {
+        zcapClient: managementZcapClient({ session, capability: parent }),
+        capability: parent
+      }
+    }
+    if (unlockSpaceDeletionRefusal({ session, entry, signer, verb: 'GET' })) {
+      return undefined
+    }
+    return {
+      zcapClient: signer.invoker,
+      capability: await mintSpaceVerbCapability({
+        zcapClient: signer.zcapClient,
+        parent,
+        verb: 'GET',
+        controller: signer.controller,
+        ttlMs: DELETION_ZCAP_TTL_MS
+      })
+    }
+  }
+}
+
+/**
  * Deletes one unlock Space through a freshly minted DELETE-only child of the
  * entry's management zcap, rather than by invoking that three-verb capability
  * directly. The storage server admits a delegated Space DELETE only when the
@@ -1282,8 +1356,10 @@ export async function deleteUnlockSpaceForEntry({
 }
 
 /**
- * Revokes an unlock method tap-free: deletes its unlock Space with the entry's
- * management zcap (invoked by the session's ROOT zcapClient), drops the local
+ * Revokes an unlock method tap-free: deletes its unlock Space through a
+ * DELETE-only child of the entry's management zcap (signed and invoked by the
+ * session's root key on the enrolled kind, by the acting credential's ladder
+ * VM on the ladder kind), drops the local
  * keyring cache for that Space, then removes the entry from the registry. This
  * is the path for a LOST passkey -- no ceremony on the authenticator being
  * removed. With a WAS server configured it requires a usable
@@ -1313,15 +1389,26 @@ export async function deleteUnlockSpaceForEntry({
  */
 export async function revokeUnlockMethod({
   session,
+  context,
   entry,
   idb,
   verb = 'removing an unlock method'
 }: {
   session: Session
+  context?: AccountCeremonyContext | null
   entry: UnlockMethod
   idb?: IDBFactory
   verb?: string
 }): Promise<CredentialRotationOutcome | null> {
+  // Who signs and sends the DELETE-only child of the entry's management
+  // zcap. On the ladder branch it is the acting credential's ladder VM,
+  // delegating to (and invoking as) its own bare did:key: that capability is
+  // delegated to the account DID, and this session's per-visit annex VM is
+  // not it, so a root-signed child would be refused as the same masked 404 an
+  // absent Space returns -- and read below as "already gone", which is what
+  // orphans the Space. An enrolled session keeps the root signer.
+  const deleter =
+    context?.kind === 'ladder' ? { signer: context.ladderDeleter } : {}
   // The read-only pre-flight, BEFORE the rotation below: a capability this
   // session cannot delegate a usable child from refuses the whole revocation
   // with the credential still standing, so the "tap the passkey being
@@ -1329,7 +1416,7 @@ export async function revokeUnlockMethod({
   // finds a removable entry. Refusing after the retirement would leave an
   // entry nothing can remove.
   if (WAS_SERVER_URL) {
-    const refusal = unlockSpaceDeletionRefusal({ session, entry })
+    const refusal = unlockSpaceDeletionRefusal({ session, entry, ...deleter })
     if (refusal) {
       throw new Error(
         `This unlock method's management capability is unusable from this ` +
@@ -1347,27 +1434,50 @@ export async function revokeUnlockMethod({
   // one key. A recovery-code entry has already rotated in its own ceremony.
   const rotation =
     entry.type === 'passphrase' || entry.type === 'passkey'
-      ? await rotateOffUnlockCredential({ session, method: entry, verb })
+      ? await rotateOffUnlockCredential({
+          session,
+          ...(context !== undefined ? { context } : {}),
+          method: entry,
+          verb
+        })
       : null
   if (WAS_SERVER_URL) {
-    const outcome = await deleteUnlockSpaceForEntry({ session, entry })
-    if (outcome === 'not-found') {
-      // Already gone, or this capability no longer authorizes the delete --
-      // the server masks the two as one 404. Retiring the method is
-      // idempotent either way, and the local state and registry entry below
-      // are what the caller is really after.
-      log.info('The unlock Space was already gone (or unreachable)', {
-        unlockSpaceId: entry.unlockSpaceId
-      })
+    const outcome = await deleteUnlockSpaceForEntry({
+      session,
+      entry,
+      ...deleter
+    })
+    if (outcome !== 'deleted') {
+      // `not-found` is the server's masked 404: absent OR unauthorized.
+      // Nothing here probes the Space first, so this run holds no evidence
+      // that it was already gone, and grading it as a deletion would drop the
+      // registry entry that names the only Space the account can still find
+      // it by. Reported as a residue rather than reported as done: the
+      // retirement itself is idempotent, and the registry entry below is what
+      // the caller is really after.
+      log.warn(
+        'The unlock Space was not deleted; it stands as a residue of the ' +
+          'removal',
+        { unlockSpaceId: entry.unlockSpaceId, outcome }
+      )
     }
   }
   // Retiring the method also retires this client's local records under it:
   // the keyring cache and the client-key wrap (other methods keep their own
-  // wraps of the same key set). Both go straight to the session database:
-  // they exist only on a remembered browser, and this path is reached only
-  // from remembered-session ceremonies.
+  // wraps of the same key set). Both live in the session database, which a
+  // transient visit never opens. `deleteUnlockLocalState` runs its own
+  // create-nothing existence probe first, so this call is a no-op from a
+  // transient session rather than a database this visit would create.
   await deleteUnlockLocalState({ spaceId: entry.unlockSpaceId, idb })
-  await dropRegistryEntry({ session, entry })
+  await dropRegistryEntry({
+    session,
+    entry,
+    // Read at the moment of the write rather than captured earlier: the
+    // renewal the caller may have run replaced the capability.
+    ...(context?.invoker.capability
+      ? { capability: context.invoker.capability }
+      : {})
+  })
   return rotation
 }
 
@@ -1457,12 +1567,14 @@ export async function deleteUnlockMethodSpace({
  */
 export async function revokeUnlockMethodByCeremony({
   session,
+  context,
   entry,
   idb,
   signal,
   verb = 'removing a passkey'
 }: {
   session: Session
+  context?: AccountCeremonyContext | null
   entry: PasskeyUnlockMethod
   idb?: IDBFactory
   signal?: AbortSignal
@@ -1491,9 +1603,14 @@ export async function revokeUnlockMethodByCeremony({
   // passkey still standing and its entry still removable, rather than after
   // the removal has begun. The tap put the seed in hand, so this pre-flight
   // asks exactly what the retirement below will.
-  await preflightCredentialRetirement({ session, method })
+  await preflightCredentialRetirement({
+    session,
+    ...(context !== undefined ? { context } : {}),
+    method
+  })
   const rotation = await rotateOffUnlockCredential({
     session,
+    ...(context !== undefined ? { context } : {}),
     method,
     verb
   })
@@ -1503,7 +1620,13 @@ export async function revokeUnlockMethodByCeremony({
     idb,
     credential
   })
-  await dropRegistryEntry({ session, entry })
+  await dropRegistryEntry({
+    session,
+    entry,
+    ...(context?.invoker.capability
+      ? { capability: context.invoker.capability }
+      : {})
+  })
   return rotation
 }
 
@@ -1775,13 +1898,13 @@ function shouldAdoptFreshCapability({
  * passkeys section, through `loadUnlockRegistry`) can use this as its
  * load-plus-backfill entry point.
  *
- * A transient session makes no call from HERE and returns `null` immediately,
- * before even a read: this is the registry's WRITE half, and minting or
- * rewriting a registry stays browser-local-only. Such
- * a session reads the registry instead, under its generation delegation
- * (`loadUnlockRegistry`, the Settings section's entry point). Its one
- * registry write is `refreshTransientManageCapability`, which creates nothing
- * and touches only the acting credential's own management zcap.
+ * A transient session runs the same passes, riding the generation delegation
+ * handed in as `capability` (its annex-signed root invocation would be
+ * refused under the current-key-set rule). The write protocol's own guards
+ * are what keep the write honest on either session kind: every write is a
+ * compare-and-swap on the ETag of a fresh read, and a refresh carries the
+ * acting credential's key-agreement multibase and writes nothing on a
+ * mismatch.
  *
  * The registry is created only when `createIfMissing` is set (a fresh 16-byte
  * webAuthnUserId is minted): the lazy-creation points are first passkey
@@ -1794,18 +1917,20 @@ function shouldAdoptFreshCapability({
  * @param options.session {Session}
  * @param [options.createIfMissing] {boolean}   mint the registry when absent;
  *   default false
+ * @param [options.capability] {IZcap}   an invocation capability every request
+ *   rides (a transient session's generation delegation); the root capability
+ *   is invoked otherwise
  * @returns {Promise<UnlockMethodsRecord | null>}
  */
 export async function backfillPassphraseUnlockMethod({
   session,
-  createIfMissing = false
+  createIfMissing = false,
+  capability
 }: {
   session: Session
   createIfMissing?: boolean
+  capability?: IZcap
 }): Promise<UnlockMethodsRecord | null> {
-  if (!isBrowserLocalSession(session.profile.persistence)) {
-    return null
-  }
   const { unlockMethod, keyAgreementKey, keyResolver } = session.profile
   // The vault keys are needed to read (let alone write) the registry.
   if (!keyAgreementKey || !keyResolver) {
@@ -1817,8 +1942,9 @@ export async function backfillPassphraseUnlockMethod({
   // is merged on a re-read rather than reverted.
   return await updateUnlockMethods({
     session,
+    ...(capability ? { capability } : {}),
     mutate: record => {
-      // A passkey full session refreshes only its own entry's management zcap
+      // A passkey session refreshes only its own entry's management zcap
       // (matched on unlock Space): the login minted a fresh delegation, and
       // the stored copy goes stale at the one-year TTL. It never creates
       // entries.
@@ -2116,7 +2242,7 @@ export async function refreshStandingDelegationFields({
  * @param options.unlockSpaceId {string}   the new passphrase's unlock Space
  * @param [options.manageCapability] {IZcap}   the management zcap the new
  *   bind delegated to the account controller
- * @param options.persistClientKeys {Function}   the re-wrap closure over the
+ * @param [options.persistClientKeys] {Function}   the re-wrap closure over the
  *   new unlock identity (returned by `changePassphrase`)
  * @returns {void}
  */
@@ -2129,9 +2255,13 @@ export function adoptPassphraseRebind({
   session: Session
   unlockSpaceId: string
   manageCapability?: IZcap
-  persistClientKeys: (changes: PersistableClientKeys) => Promise<void>
+  persistClientKeys?: (changes: PersistableClientKeys) => Promise<void>
 }): void {
-  session.profile.persistClientKeys = persistClientKeys
+  // A ladder-anchored bind writes no client-key record, so it carries no
+  // persist closure and the session keeps whatever it had (nothing).
+  if (persistClientKeys) {
+    session.profile.persistClientKeys = persistClientKeys
+  }
   session.profile.unlockMethod = {
     type: 'passphrase',
     unlockSpaceId,

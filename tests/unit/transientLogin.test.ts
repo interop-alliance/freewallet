@@ -70,6 +70,25 @@ vi.mock('@/session/keyring', async importOriginal => ({
   fetchTransientKeyring: vi.fn()
 }))
 
+// The login-time registry chain's passes, stubbed at their own module seams
+// so the order the chain runs them in is observable.
+vi.mock('@/session/registryReseal', async importOriginal => ({
+  ...(await importOriginal<typeof import('@/session/registryReseal')>()),
+  repairStaleUnlockRegistrySeal: vi.fn(async () => undefined)
+}))
+
+vi.mock('@/session/pendingRetirement', async importOriginal => ({
+  ...(await importOriginal<typeof import('@/session/pendingRetirement')>()),
+  repairTornPassphraseRetirement: vi.fn(async () => undefined),
+  rebuildBarePasskeyEntry: vi.fn(async () => undefined)
+}))
+
+vi.mock('@/session/unlockMethods', async importOriginal => ({
+  ...(await importOriginal<typeof import('@/session/unlockMethods')>()),
+  backfillPassphraseUnlockMethod: vi.fn(async () => null),
+  refreshTransientManageCapability: vi.fn(async () => undefined)
+}))
+
 import {
   delegatedWebvhLogStore,
   ensureDidWebProjection,
@@ -94,6 +113,15 @@ import {
   passphraseRegistryUpsertHook
 } from '@/session/credentialAnchoredGenesis'
 import { fetchTransientKeyring } from '@/session/keyring'
+import { repairStaleUnlockRegistrySeal } from '@/session/registryReseal'
+import {
+  rebuildBarePasskeyEntry,
+  repairTornPassphraseRetirement
+} from '@/session/pendingRetirement'
+import {
+  backfillPassphraseUnlockMethod,
+  refreshTransientManageCapability
+} from '@/session/unlockMethods'
 import { initSessionFromSeed } from '@/session/initSession'
 import type { TransientKeyringFetchResult } from '@/session/keyring'
 import { transientSessionStores } from '@/session/persistence'
@@ -720,7 +748,11 @@ describe('transientSessionFromKeyringHit -- the did:web projection mend', () => 
 
     // The store: the account Space's world-readable `id` collection, read
     // unauthenticated and written under the visit's generation delegation as
-    // the annex verification method.
+    // the annex verification method. It resolves its delegation at each use
+    // rather than at construction, so the assertion drives one read through
+    // it.
+    const { store } = vi.mocked(ensureDidWebProjection).mock.calls[0]![0]
+    await store.getIdResourceRaw({ resourceId: 'did.json' })
     expect(delegatedWebvhLogStore).toHaveBeenCalledWith({
       host: POINTER.host,
       spaceId: POINTER.spaceId,
@@ -802,7 +834,7 @@ describe('transientSessionFromKeyringHit -- the did:web projection mend', () => 
     await vi.waitFor(() =>
       expect(capture.events).toContainEqual(
         expect.objectContaining({
-          ns: 'fw:session:transient',
+          ns: 'fw:session:annex',
           level: 'warn',
           msg: expect.stringContaining('did:web projection')
         })
@@ -1487,5 +1519,119 @@ describe("transientSessionFromKeyringHit -- the caller's account-log head", () =
     const memoized = await verifiedAccountLog({ profile: session.profile })
     expect(memoized.doc).toEqual({ id: POINTER.did, fresh: true })
     expect(vi.mocked(verifyAccountLog).mock.calls).toHaveLength(2)
+  })
+})
+
+describe('transientSessionFromKeyringHit -- the login-time registry chain', () => {
+  const MANAGE_CAPABILITY = { id: 'urn:zcap:manage' }
+  const LIVE_CAPABILITY = { id: 'urn:zcap:generation-renewed' }
+
+  /**
+   * Replaces the assembled-session stub with one the chain can act on: a
+   * remote store to reach, a promoted account pointer, and the capability
+   * the visit rides NOW (a stage above may have renewed the generation
+   * delegation the composition started on).
+   *
+   * @param options {object}
+   * @param [options.invocationCapability] {object} the live capability
+   *   stamped on the profile, or none.
+   */
+  function primeChainSession({
+    invocationCapability
+  }: { invocationCapability?: object } = {}) {
+    vi.mocked(initSessionFromSeed).mockResolvedValue({
+      session: {
+        user: { id: 'did:key:z6MkVisitKey' },
+        isGuest: false,
+        storage: { remoteStore: { isRemoteStore: true } },
+        profile: {
+          persistence: { logPins: {} },
+          accountPointer: POINTER,
+          zcapClient: { isSessionZcapClient: true },
+          ...(invocationCapability ? { invocationCapability } : {})
+        }
+      },
+      userExists: true
+    } as never)
+  }
+
+  it('runs the management-zcap refresh last, after the other passes', async () => {
+    primeHappyPath()
+    primeChainSession({ invocationCapability: LIVE_CAPABILITY })
+    const found = makeFound({ manageCapability: MANAGE_CAPABILITY } as never)
+
+    const { session } = await transientSessionFromKeyringHit({
+      found,
+      type: 'passphrase',
+      persistence: transientSessionStores()
+    })
+    await session.registryReady
+
+    // One ordered chain: the refresh compare-and-swaps the same registry
+    // entry the passes above rewrite, so it runs after them rather than
+    // beside them.
+    const order = [
+      vi.mocked(repairStaleUnlockRegistrySeal).mock.invocationCallOrder[0]!,
+      vi.mocked(repairTornPassphraseRetirement).mock.invocationCallOrder[0]!,
+      vi.mocked(rebuildBarePasskeyEntry).mock.invocationCallOrder[0]!,
+      vi.mocked(backfillPassphraseUnlockMethod).mock.invocationCallOrder[0]!,
+      vi.mocked(refreshTransientManageCapability).mock.invocationCallOrder[0]!
+    ]
+    expect(order).toEqual([...order].sort((left, right) => left - right))
+
+    // The capability is read live off the profile, not the one the visit
+    // started on.
+    expect(refreshTransientManageCapability).toHaveBeenCalledWith(
+      expect.objectContaining({
+        spaceId: POINTER.spaceId,
+        unlockSpaceId: 'unlock-space-1',
+        manageCapability: MANAGE_CAPABILITY,
+        capability: LIVE_CAPABILITY
+      })
+    )
+  })
+
+  it('falls back to the generation delegation the visit started on', async () => {
+    primeHappyPath()
+    primeChainSession()
+    const { session } = await transientSessionFromKeyringHit({
+      found: makeFound({ manageCapability: MANAGE_CAPABILITY } as never),
+      type: 'passphrase',
+      persistence: transientSessionStores()
+    })
+    await session.registryReady
+    expect(refreshTransientManageCapability).toHaveBeenCalledWith(
+      expect.objectContaining({ capability: GENERATION_DELEGATION })
+    )
+  })
+
+  it('skips the refresh with no management zcap, and in a popup', async () => {
+    primeHappyPath()
+    primeChainSession({ invocationCapability: LIVE_CAPABILITY })
+    // A record carrying no management zcap: the chain still runs, the
+    // refresh has nothing to refresh.
+    const plain = await transientSessionFromKeyringHit({
+      found: makeFound(),
+      type: 'passphrase',
+      persistence: transientSessionStores()
+    })
+    await plain.session.registryReady
+    expect(backfillPassphraseUnlockMethod).toHaveBeenCalled()
+    expect(refreshTransientManageCapability).not.toHaveBeenCalled()
+
+    vi.clearAllMocks()
+    primeHappyPath()
+    primeChainSession({ invocationCapability: LIVE_CAPABILITY })
+    // The CHAPI popup skips the whole chain, the refresh with it.
+    const popup = await transientSessionFromKeyringHit({
+      found: makeFound({ manageCapability: MANAGE_CAPABILITY } as never),
+      type: 'passphrase',
+      persistence: transientSessionStores(),
+      popup: true
+    })
+    await popup.session.registryReady
+    expect(popup.session.registryReady).toBeUndefined()
+    expect(backfillPassphraseUnlockMethod).not.toHaveBeenCalled()
+    expect(refreshTransientManageCapability).not.toHaveBeenCalled()
   })
 })

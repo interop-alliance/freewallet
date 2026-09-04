@@ -437,7 +437,12 @@ describe('canIssueRecoveryCode', () => {
 })
 
 describe('the registry bookkeeping', () => {
-  const session = { user: { id: 'did:key:z6MkTest' } } as unknown as Session
+  // An enrolled session: no invocation capability, so the registry writes
+  // root-invoke.
+  const session = {
+    user: { id: 'did:key:z6MkTest' },
+    profile: {}
+  } as unknown as Session
 
   it('mints the registry on first use and replaces on matching kid', async () => {
     const codeA = await recoveryClientFromCode({

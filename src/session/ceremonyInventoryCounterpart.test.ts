@@ -121,7 +121,7 @@ describe('ceremony inventory counterpart', () => {
 
   it('exempts only ceremonies with no module yet', () => {
     for (const row of exemptRows) {
-      expect(row.ceremony).toBe('Step-up ceremony')
+      expect(row.ceremony).toBe('Credential-anchored ceremony branches')
     }
   })
 
