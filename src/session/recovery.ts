@@ -3077,16 +3077,27 @@ export async function recordRemintedEntry({
  * @param [options.registryRecord] {UnlockMethodsRecord | null}   the
  *   unlock-methods registry, when the caller already read it (the revocation
  *   cascade reads it once for its document edit and this stage)
+ * @param [options.retiringKeyMultibases] {string[]}   keys the document
+ *   still lists whose authority is about to end (a credential retirement
+ *   names the ladder VM its strike entry removes), so every delegation they
+ *   signed is re-minted while they still stand
+ * @param [options.excludeUnlockSpaceIds] {string[]}   registry entries to
+ *   leave out -- the retiring credential's own, whose record dies with its
+ *   unlock Space
  * @returns {Promise<{ reminted: number; skipped: number }>}
  */
 export async function remintRecoveryDelegations({
   session,
   doc,
-  registryRecord: prefetched
+  registryRecord: prefetched,
+  retiringKeyMultibases = [],
+  excludeUnlockSpaceIds = []
 }: {
   session: Session
   doc: Parameters<typeof remintDelegationsCore>[0]['doc']
   registryRecord?: UnlockMethodsRecord | null
+  retiringKeyMultibases?: string[]
+  excludeUnlockSpaceIds?: string[]
 }): Promise<{ reminted: number; skipped: number }> {
   const pointer = session.profile.accountPointer
   const keyAgent = session.profile.keyAgent
@@ -3095,7 +3106,7 @@ export async function remintRecoveryDelegations({
   }
   const record =
     prefetched !== undefined ? prefetched : await getUnlockMethods({ session })
-  const remintEntries = remintEntriesOf({ record })
+  const remintEntries = remintEntriesOf({ record, excludeUnlockSpaceIds })
   if (remintEntries.length === 0) {
     return { reminted: 0, skipped: 0 }
   }
@@ -3105,6 +3116,7 @@ export async function remintRecoveryDelegations({
     pointer,
     storageServerUrl: WAS_SERVER_URL,
     zcapClient: session.profile.zcapClient,
+    retiringKeyMultibases,
     mintDelegatedClientsDelegation: delegatedClientsDelegationMinter({
       doc,
       zcapClient: session.profile.zcapClient,

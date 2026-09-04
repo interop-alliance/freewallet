@@ -4,6 +4,13 @@
 
 ### Fixed
 
+- Retiring a passphrase or passkey from a remembered session now re-mints the
+  other standing credentials' records and bridge delegations before the strike
+  entry removes the retired credential's ladder VM. The retirement binds
+  `retireUnlockCredential`'s stage-0 closure to `remintRecoveryDelegations`,
+  which takes the doomed VM ids as `retiringKeyMultibases` and leaves the
+  retiring credential's own registry entry out (`excludeUnlockSpaceIds`); the
+  callers pass that entry's unlock Space id on the `method` argument.
 - The rotated user key now reaches a live session's storage ciphers. The
   in-band adoption fires before the collection fan-out, while every collection
   still carries the epoch the rotation retires, so rebuilding the ciphers

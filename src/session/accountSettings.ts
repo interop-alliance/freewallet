@@ -581,6 +581,7 @@ export async function changeAccountPassphrase({
         method: {
           type: 'passphrase',
           ...oldStanding,
+          ...(oldEntry ? { unlockSpaceId: oldEntry.unlockSpaceId } : {}),
           // The old record's ladder seed, captured by the read-only
           // verification before the old unlock Space was deleted: the
           // retirement's ladder attribution then holds every rung a priori
@@ -1367,7 +1368,8 @@ async function recoverFailedPasskeyEstablishment({
           keyAgreementKeyMultibase:
             credential.standing.keyAgreementKeyMultibase,
           updateKeyMultibase: rung0.keyMultibase,
-          ladderSeed
+          ladderSeed,
+          unlockSpaceId: credential.unlock.spaceId
         },
         verb: 'cleaning up a failed passkey addition'
       })

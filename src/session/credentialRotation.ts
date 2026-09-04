@@ -62,6 +62,7 @@ import {
   ceremonyRides,
   type AccountCeremonyContext
 } from '@/session/accountCeremonyContext'
+import { remintRecoveryDelegations } from '@/session/recovery'
 import { sessionRosterStore } from '@/session/rosterStore'
 import { adoptRotatedUserKeyInBand } from '@/session/userKeyAdoption'
 import {
@@ -114,6 +115,9 @@ export interface CredentialRotationOutcome {
  *   taken as the retired seed when the recorded update key is a rung of its
  *   ladder (`settleLadderSeeds`) -- the tap-free removal of the credential
  *   this session logged in with
+ * @param [options.method.unlockSpaceId] {string}   the credential's unlock
+ *   Space, so the dependent-record re-mint leaves its own registry entry out:
+ *   that record dies with the Space the caller deletes
  * @param [options.survivingLadderSeed] {Uint8Array}   a SURVIVING standing
  *   credential's ladder seed (a passphrase change passes the new
  *   credential's), preferred over the session's login seed for the annex
@@ -163,6 +167,7 @@ export async function rotateOffUnlockCredential({
     keyAgreementKeyMultibase?: string
     updateKeyMultibase?: string
     ladderSeed?: Uint8Array
+    unlockSpaceId?: string
   }
   survivingLadderSeed?: Uint8Array
   survivingKeyAgreementKey?: IKeyAgreementKey
@@ -293,6 +298,36 @@ export async function rotateOffUnlockCredential({
     ...(session.profile.userKey ? { userKey: session.profile.userKey } : {}),
     clientKeyAgreementKey: unwrapKey,
     pinnedEpochId,
+    // Stage 0, the enrolled branch's alone: the other standing credentials'
+    // records and bridges, re-signed under this client's account key BEFORE
+    // the strike entry removes the retired credential's ladder VM (the
+    // last-client transition signs sibling records with one). The ceremony
+    // names the doomed VM ids; the retiring credential's own entry is left
+    // out, since its record dies with the unlock Space the caller deletes.
+    // On the ladder branch every record is signed by its own credential's
+    // ladder VM, so the strike rots no sibling and the ceremony skips the
+    // stage itself.
+    ...(context.kind === 'enrolled'
+      ? {
+          remintDependentRecords: async ({
+            document,
+            retiringKeyMultibases
+          }: {
+            document: object
+            retiringKeyMultibases: string[]
+          }) =>
+            await remintRecoveryDelegations({
+              session,
+              doc: document as Parameters<
+                typeof remintRecoveryDelegations
+              >[0]['doc'],
+              retiringKeyMultibases,
+              ...(method.unlockSpaceId
+                ? { excludeUnlockSpaceIds: [method.unlockSpaceId] }
+                : {})
+            })
+        }
+      : {}),
     onUserKeyAdopted: async ({ userKey, latestEpochId, descriptor }) =>
       // The in-band adoption: the registry is re-sealed to the rotated key
       // BEFORE this browser's stored copy of the old one dies, so a tab
