@@ -3011,6 +3011,25 @@ remembered-login sweep. The retire-direction convergence of any later
 ladder-branch ceremony is the only mender, and the user may never run one --
 the same bound the transient recovery's roster-append residue has.
 
+One more state the credential-keyed ladder VM lifecycle produces is
+recorded here because its design predicted it as a client-less open gap.
+An account running the last-client transition with N standing credentials
+lands client-less carrying N standing ladder VMs, one per credential, since
+the transition strikes only the departing client's inventory. As designed,
+none was retirable there: credential retirement was a remembered-session
+ceremony, and the transition had just removed the last enrolled client. The
+same fact kept N at 1 on the default account shape, since an account that
+could not retire a credential could not add one either, so "credential
+rotation remains the remedy" held wherever N could exceed 1. That prediction
+was overtaken before it was recorded. The credential ceremonies now run on
+the ladder kind too (see "The account-ceremony context"), so a transient
+login with any one standing credential retires the others through the
+passphrase change and the passkey removal, and the one refusal left is
+removing the credential the visit itself entered on
+(`ActingCredentialRemovalError`). What remains is a bound rather than a gap:
+each standing VM stays a live delegation signer until its credential is
+retired, and retiring one takes a login on a different credential.
+
 Mender unreachable was self-enrollment's cost before FW-356. The add entry
 that publishes a new client used to strike every ladder VM the document
 listed, rotting every other standing credential's bridge delegation, its

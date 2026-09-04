@@ -234,9 +234,12 @@ export function transientRefusalKey(
     case 'roster-mint-refused':
       return 'auth.errors.transientRosterMintRefused'
     // The annex-generation family: no live generation the credential's
-    // sibling delegation can reach. No remedy exists that a credential-only
-    // visit can run until the ladder-signed generation mint lands, so the
-    // copy is the honest refusal and offers none.
+    // sibling delegation can reach. The readiness stage already tried the
+    // ladder-signed mend (a fresh generation, a renewed delegation, a
+    // re-minted sibling) before this refusal stood, so a retry re-runs the
+    // same stage and the copy offers no remedy. Nearly unreachable on an
+    // account anchoring this credential's ladder VM; it survives for the
+    // fallback path the readiness stage refuses on.
     case 'no-delegated-clients':
     case 'no-clientAnnex-generation':
     case 'no-generation-delegation':

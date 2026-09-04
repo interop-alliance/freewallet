@@ -15,6 +15,11 @@
   provisioning roster, so every account already has it, and the ensure cost
   each session's first registry write one describe and one PUT.
   `ensureUnlockMethodsCollection` is gone.
+- ARCHITECTURE.md's Ceremony inventory records the state a last-client
+  transition leaves on an account with several standing credentials (one
+  standing ladder VM per credential), and that each is retirable from a
+  transient login on another credential. The annex-family login refusal
+  comment no longer describes a mend that has since landed.
 
 ### Fixed
 
