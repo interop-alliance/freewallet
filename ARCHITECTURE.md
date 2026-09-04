@@ -653,7 +653,7 @@ The pin store is in-memory on both persistence strategies
 (`decisions/0012-no-durable-continuity-pins.md`). The rule, stated once here
 for the whole document: continuity is checked within a session and not
 across sessions. One login makes many log reads, a transient visit resolving
-the annex log three times beside the account log and the roster, and the pin
+the annex log beside the account log and the roster, and the pin
 catches a host serving inconsistent versions across them. Nothing carries a
 pin from one visit to the next, on any browser, so remembered and transient
 sessions have identical continuity properties. The successor to a pin is

@@ -75,15 +75,13 @@ test.describe.serial('transient login residue', () => {
       const user = await signupViaWizard(page, testInfo)
       passphrase = user.passphrase
       // The wait stands in for the product gap FW-354 describes; it does not
-      // close it. The remembered signup's self-enrollment strikes the
-      // credential's ladder VM, which rots the record's bridge, its
-      // `delegatedClients` sibling, and the generation's embedded delegation;
-      // the replacements are attempted on the un-awaited login-time chain.
-      // Closing this context the moment the dashboard renders aborts that
-      // chain mid-flight, and which repair landed decides which refusal the
-      // transient login below reports. So the fixture waits -- which proves
-      // the transient login works once the repairs have run, and says nothing
-      // about the window in which they have not.
+      // close it. The remembered signup's login-time chain runs its registry
+      // writes on a promise nothing awaits. Closing this context the moment
+      // the dashboard renders aborts that chain mid-flight, and which write
+      // landed can change what the transient login below reports. So the
+      // fixture waits -- which proves the transient login works once the
+      // chain has run, and says nothing about the window in which it has
+      // not.
       const waitedMs = await awaitLoginChain(page)
       testInfo.annotations.push({
         type: 'login-chain wait',

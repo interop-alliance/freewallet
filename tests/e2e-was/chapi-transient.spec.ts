@@ -374,11 +374,10 @@ test.describe.serial('the CHAPI popup on a transient session', () => {
       const page = await context.newPage()
       // This browser IS a remembered enrolled client of its own account.
       const remembered = await signupViaWizard(page, testInfo)
-      // The self-enrollment this signup ran struck the credential's ladder
-      // VM, and the replacements for the three members it rotted ride the
-      // login-time chain nothing awaits (FW-354). Starting the popup visit
-      // before that chain settles races it, so the fixture waits; the wait
-      // stands in for the product gap rather than closing it.
+      // This signup's registry writes ride the login-time chain nothing
+      // awaits (FW-354). Starting the popup visit before that chain settles
+      // races it, so the fixture waits; the wait stands in for the product
+      // gap rather than closing it.
       await awaitLoginChain(page)
 
       await withoutUnpartitionedStorageAccess({ page })

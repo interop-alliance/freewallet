@@ -1344,10 +1344,8 @@ async function sessionFromKeyringHit({
   // credential the entry names -- the backfill only refreshes fields on it.
   // An existing registry not yet materialized stays that way (no
   // `createIfMissing`). The remote-direct popup is excluded, as it always
-  // was; a transient session has no `registryReady` and so no backfill,
-  // which is the browser-local-only rule the registry's writers live under
-  // (its read is open to a transient session under the generation
-  // delegation).
+  // was. A transient login runs its own backfill, on the registry chain it
+  // builds in `transientLogin.ts`; this site is the remembered path's.
   if (session.registryReady && !popup) {
     session.registryReady = session.registryReady.then(async () => {
       try {
@@ -1363,12 +1361,10 @@ async function sessionFromKeyringHit({
   // or inside the renewal window (the same annual clock and shared predicate
   // as the recovery delegations), or its signer no longer listed under
   // `capabilityDelegation` in the verified account document (the relation a
-  // delegation proof verifies against, and the current-key-set rot a
-  // self-enrollment's window
-  // close inflicts on ladder-VM-signed members -- the ceremony tail below
-  // reseals them in the same login, and this predicate is what makes a torn
-  // tail heal at the next login). One pass reseals both. Best-effort, behind
-  // provisioning.
+  // delegation proof verifies against). A self-enrollment leaves every
+  // ladder VM standing, so the rot this predicate catches comes from
+  // elsewhere -- a credential retirement strikes its own ladder VM. One
+  // pass reseals both. Best-effort, behind provisioning.
   const rebindStandingRecord = found.rebindStandingRecord
   const standingDelegation = found.standing?.delegation
   const standingDelegatedClients = found.standing?.delegatedClients
@@ -1570,10 +1566,10 @@ async function sessionFromKeyringHit({
 
   // The generation-delegation self-heal: the pointed generation's embedded
   // delegation is renewed when it is expiring OR its signer has left the
-  // verified account document -- the rot a self-enrollment's window close
-  // inflicts on a ladder-VM-signed delegation (the ceremony-tail half of
-  // that reseal), and the standing backstop for a revocation cascade whose
-  // own re-mint stage was skipped. Signed by the login credential's static
+  // verified account document -- the rot a credential retirement's
+  // ladder-VM strike inflicts on a ladder-VM-signed delegation, and the
+  // standing backstop for a revocation cascade whose own re-mint stage was
+  // skipped. Signed by the login credential's static
   // annex rung 0; a healthy delegation is one no-op read. Best-effort: a
   // rung the generation does not commit (a credential bound mid-generation)
   // skips quietly, everything else warns and the next login retries.

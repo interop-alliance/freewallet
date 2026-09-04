@@ -136,7 +136,7 @@ describe('seedWelcomeContent', () => {
     // The seeds must be attributed to the account pointer's did:webvh --
     // never to the per-visit ephemeral `user.id`, and not to the record's
     // bound controller either (on a credential-anchored account that is the
-    // ladder VM's bootstrap did:key, retired at the first self-enrollment).
+    // ladder VM's bootstrap did:key, not the account identity).
     ;(
       session.profile as unknown as {
         accountController?: string
