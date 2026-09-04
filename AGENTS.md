@@ -58,8 +58,13 @@ item structure shared with the isomorphic-lib-template and dcw roadmaps.
 Never create a parallel task list elsewhere. The full item schema lives in
 that file's header; the rules that apply when working an item:
 
-- Item ids are permanent and never reused; a new item takes the next unused
-  number regardless of section.
+- Item ids are permanent and never reused. The `nextAvailableId: <n>` line at
+  the top of `_spec/ROADMAP.md` is the sole source of the next id: filing an
+  item takes `n` and rewrites the line to `n + 1`, in the same edit. Never
+  derive the next id by scanning the roadmap; the highest id usually lives in
+  `_spec/historical/archived-roadmap.md`, not in the open roadmap. If the
+  counter's id already appears in either file, the counter is stale: reset it
+  to one past the highest id across both files, then take it.
 - Statuses are edited in place; acceptance checkboxes are ticked as they are
   met.
 - **Completing an item includes archiving it**: in the same pass that marks
