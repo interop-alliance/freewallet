@@ -21,7 +21,7 @@ const wasState = vi.hoisted(() => ({
   records: new Map<string, unknown>(),
   versions: new Map<string, number>(),
   // Every capability each seam was invoked with, in call order.
-  capabilities: { read: [], ensure: [], put: [] } as Record<string, unknown[]>,
+  capabilities: { read: [], put: [] } as Record<string, unknown[]>,
   // A one-shot hook fired at the START of the next PUT: the seam that lands a
   // concurrent write between a read and its PUT.
   beforePut: undefined as (() => void | Promise<void>) | undefined
@@ -35,11 +35,6 @@ vi.mock('@/app.config', async importOriginal => ({
 }))
 
 vi.mock('@/stores/wasRemoteStore', () => ({
-  ensureUnlockMethodsCollection: vi.fn(
-    async ({ capability }: { capability?: IZcap }) => {
-      wasState.capabilities.ensure!.push(capability)
-    }
-  ),
   putUnlockMethodsRecord: vi.fn(
     async ({
       spaceId,
@@ -132,7 +127,7 @@ beforeEach(() => {
   wasState.url = 'https://was.example.test'
   wasState.records = new Map()
   wasState.versions = new Map()
-  wasState.capabilities = { read: [], ensure: [], put: [] }
+  wasState.capabilities = { read: [], put: [] }
   wasState.beforePut = undefined
   vi.clearAllMocks()
 })
@@ -146,7 +141,6 @@ describe('the registry write under a generation delegation', () => {
       mutate: current => current ?? emptyUnlockMethodsRegistry()
     })
     expect(wasState.capabilities.read).toEqual([GENERATION_DELEGATION])
-    expect(wasState.capabilities.ensure).toEqual([GENERATION_DELEGATION])
     expect(wasState.capabilities.put).toEqual([GENERATION_DELEGATION])
   })
 
@@ -159,7 +153,7 @@ describe('the registry write under a generation delegation', () => {
       capability: GENERATION_DELEGATION,
       mutate: () => emptyUnlockMethodsRegistry()
     })
-    wasState.capabilities = { read: [], ensure: [], put: [] }
+    wasState.capabilities = { read: [], put: [] }
     wasState.beforePut = () => {
       wasState.versions.set('space-123', 99)
     }

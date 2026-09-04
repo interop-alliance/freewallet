@@ -84,7 +84,6 @@ import {
   mintSpaceVerbCapability
 } from '@interop/wallet-core/clientAnnex'
 import {
-  ensureUnlockMethodsCollection,
   getUnlockMethodsRecord,
   putUnlockMethodsRecord
 } from '@/stores/wasRemoteStore'
@@ -571,9 +570,8 @@ async function casUpdateRegistryRecord({
  * yet) and returns the record to store, or `null` for "no write needed"; it
  * may run more than once, so a caller expresses an intent computed beforehand
  * (upsert this entry, drop that one) rather than reusing a stale page-held
- * record as the base. Wraps under the vault KAK, ensures the `unlock-methods`
- * collection exists before the first PUT, and refreshes the local cache the
- * way a read does: saved after a landed write (or a declined one over an
+ * record as the base. Wraps under the vault KAK and refreshes the local cache
+ * the way a read does: saved after a landed write (or a declined one over an
  * existing record), dropped on a true absent. With no WAS server the local
  * cache is the only copy and the loop is one read-modify-write over it.
  *
@@ -640,7 +638,6 @@ export async function updateUnlockMethods({
   const storageServerUrl = WAS_SERVER_URL
   const zcapClient = session.profile.zcapClient
   const spaceId = requireSpaceId(session)
-  let ensured = false
   return await casUpdateRegistryRecord({
     read: () =>
       getUnlockMethodsRecord({
@@ -665,15 +662,6 @@ export async function updateUnlockMethods({
     },
     wrap: record => wrapRecord({ record, keyAgreementKey, keyResolver }),
     write: async (record, precondition) => {
-      if (!ensured) {
-        await ensureUnlockMethodsCollection({
-          storageServerUrl,
-          zcapClient,
-          spaceId,
-          ...(capability ? { capability } : {})
-        })
-        ensured = true
-      }
       await putUnlockMethodsRecord({
         storageServerUrl,
         zcapClient,
@@ -708,8 +696,8 @@ export async function updateUnlockMethods({
  * callers are transient visits.
  *
  * @param options {object}
- * @param options.zcapClient {ZcapClient}   the client the collection ensure,
- *   the record GET, and the record PUT invoke with
+ * @param options.zcapClient {ZcapClient}   the client the record GET and the
+ *   record PUT invoke with
  * @param options.spaceId {string}   the data Space id
  * @param options.userKey {UserKey}   the user key whose vault KAK the stored
  *   record is sealed to
@@ -750,7 +738,6 @@ export async function updateUnlockMethodsWithClient({
   const writeKeys = writeUserKey
     ? userKeyVaultKeys({ userKey: writeUserKey })
     : readKeys
-  let ensured = false
   return await casUpdateRegistryRecord({
     read: () =>
       getUnlockMethodsRecord({
@@ -772,15 +759,6 @@ export async function updateUnlockMethodsWithClient({
         keyResolver: writeKeys.keyResolver
       }),
     write: async (record, precondition) => {
-      if (!ensured) {
-        await ensureUnlockMethodsCollection({
-          storageServerUrl,
-          zcapClient,
-          spaceId,
-          ...(capability ? { capability } : {})
-        })
-        ensured = true
-      }
       await putUnlockMethodsRecord({
         storageServerUrl,
         zcapClient,

@@ -1268,42 +1268,6 @@ function unlockSpaceClient({
 }
 
 /**
- * Ensures the `unlock-methods` collection exists in the user's DATA Space
- * (upsert -- idempotent), so the first registry PUT has somewhere to land. The
- * data Space itself already exists (provisioned at signup), so only the
- * collection is configured. Runs with the root capability, so `force` lets the
- * upsert treat a 404 from the pre-merge describe as genuinely absent. As with
- * the keyring, the collection is plaintext on the server (it stores a
- * JWE-wrapped record, opaque to the server).
- *
- * @param options {object}
- * @param options.storageServerUrl {string}
- * @param options.zcapClient {ZcapClient}   the data identity's root client
- * @param options.spaceId {string}   the data Space id
- * @param [options.capability] {IZcap}   an invocation capability every request
- *   rides (the transient recovery ceremony's generation delegation); the root
- *   capability is invoked otherwise
- * @returns {Promise<void>}
- */
-export async function ensureUnlockMethodsCollection({
-  storageServerUrl,
-  zcapClient,
-  spaceId,
-  capability
-}: {
-  storageServerUrl: string
-  zcapClient: ZcapClient
-  spaceId: string
-  capability?: IZcap
-}): Promise<void> {
-  const was = unlockSpaceClient({ storageServerUrl, zcapClient })
-  await was
-    .space(spaceId, { capability })
-    .collection(UNLOCK_METHODS_COLLECTION.id)
-    .configure({ name: UNLOCK_METHODS_COLLECTION.name, force: true })
-}
-
-/**
  * Reads the unlock-methods registry record from the data Space, or returns
  * `null` when it does not exist yet. A network / unreachable error propagates.
  * The served ETag rides beside the record so a later conditional PUT can name

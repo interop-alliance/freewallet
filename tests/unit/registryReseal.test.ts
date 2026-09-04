@@ -31,7 +31,6 @@ vi.mock('@/app.config', async importOriginal => ({
 }))
 
 vi.mock('@/stores/wasRemoteStore', () => ({
-  ensureUnlockMethodsCollection: vi.fn(async () => {}),
   putUnlockMethodsRecord: vi.fn(
     async ({
       spaceId,

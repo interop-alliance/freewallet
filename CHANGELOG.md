@@ -10,6 +10,11 @@
   matching wallet-core 0.66.0, which anchors the store's controller view
   itself through `setMinimumControllerVersion`. `ladderSignedRosterStoreFor`
   is gone.
+- The unlock-methods registry write no longer re-creates the
+  `unlock-methods` collection before its first PUT. The collection is in the
+  provisioning roster, so every account already has it, and the ensure cost
+  each session's first registry write one describe and one PUT.
+  `ensureUnlockMethodsCollection` is gone.
 
 ### Fixed
 

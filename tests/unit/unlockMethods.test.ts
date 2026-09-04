@@ -66,7 +66,6 @@ vi.mock('@/app.config', async importOriginal => ({
 }))
 
 vi.mock('@/stores/wasRemoteStore', () => ({
-  ensureUnlockMethodsCollection: vi.fn(async () => {}),
   putUnlockMethodsRecord: vi.fn(
     async ({
       spaceId,
@@ -193,7 +192,6 @@ import { rootCapabilityId } from '@interop/was-client/paths'
 import { DELETION_ZCAP_TTL_MS } from '@interop/wallet-core/clientAnnex'
 import { mintUserKey, type UserKey } from '@interop/wallet-core/keys'
 import {
-  ensureUnlockMethodsCollection,
   getUnlockMethodsRecord,
   putUnlockMethodsRecord
 } from '@/stores/wasRemoteStore'
@@ -535,7 +533,6 @@ describe('put / get round-trip', () => {
     const record = sampleRecord()
 
     await seedRegistry({ session, record })
-    expect(ensureUnlockMethodsCollection).toHaveBeenCalledOnce()
 
     // The remote body is the JWE-wrapped envelope, not the plaintext record.
     const stored = wasState.records.get(DATA_SPACE_ID) as {
@@ -574,7 +571,6 @@ describe('no-WAS cache-only path', () => {
     const record = sampleRecord()
 
     await seedRegistry({ session, record })
-    expect(ensureUnlockMethodsCollection).not.toHaveBeenCalled()
     expect(wasState.records.size).toBe(0)
 
     const found = await getUnlockMethods({ session })
@@ -1311,7 +1307,6 @@ describe('refreshTransientManageCapability', () => {
     await refresh({ userKey })
 
     expect(putUnlockMethodsRecord).not.toHaveBeenCalled()
-    expect(ensureUnlockMethodsCollection).not.toHaveBeenCalled()
   })
 
   it("skips an entry recording another credential's key-agreement key", async () => {
