@@ -81,15 +81,6 @@ vi.mock('@interop/wallet-core/keyring', async importOriginal => {
 const { getUnlockKeyringWithCapability } =
   await import('@interop/wallet-core/keyring')
 
-vi.mock('@interop/wallet-core/keys', async importOriginal => {
-  const actual = await importOriginal<object>()
-  return {
-    ...actual,
-    userKeyRosterDescriptorStore: vi.fn(() => ({ rosterStore: true })),
-    userKeyRosterLogSigner: vi.fn(() => ({ signer: true }))
-  }
-})
-
 vi.mock('@interop/wallet-core/recovery', async importOriginal => {
   const actual = await importOriginal<object>()
   return {
@@ -147,8 +138,12 @@ const { remintEntriesOf, recordRemintedEntry } =
   await import('@/session/recovery')
 
 vi.mock('@/session/rosterStore', () => ({
-  sessionRosterStore: vi.fn(() => ({ sessionRosterStore: true }))
+  sessionRosterStore: vi.fn(() => ({
+    read: vi.fn(),
+    setMinimumControllerVersion: vi.fn()
+  }))
 }))
+const { sessionRosterStore } = await import('@/session/rosterStore')
 
 vi.mock('@/session/standingUnlock', () => ({
   unlockLogStore: vi.fn(() => ({ unlockLogStore: true }))
@@ -708,7 +703,16 @@ describe('forgetThisBrowser (the ceremony grades)', () => {
     })
     expect(typeof options.annex.storeFor).toBe('function')
     expect(typeof options.annex.revoke).toBe('function')
-    expect(typeof options.rosterStoreFor).toBe('function')
+    // One ladder-signed roster store, not a factory: the ceremony anchors
+    // its controller view itself through `setMinimumControllerVersion`.
+    expect(typeof options.rosterStore.read).toBe('function')
+    expect(typeof options.rosterStore.setMinimumControllerVersion).toBe(
+      'function'
+    )
+    expect(vi.mocked(sessionRosterStore)).toHaveBeenCalledWith({
+      profile: session.profile,
+      keyAgent: { id: 'did:key:zLadderVm' }
+    })
     expect(options.clientLogStore).toEqual({ webvhIdStore: true })
     expect(typeof options.onBeforeRemoval).toBe('function')
     expect(options.expectedDid).toBe(pointer.did)

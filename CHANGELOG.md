@@ -2,6 +2,15 @@
 
 ## 0.49.1 - TBD
 
+### Changed
+
+- The last-client forget transition hands `forgetLastEnrolledClient` one
+  ladder-signed roster store (`sessionRosterStore` with the credential's
+  ladder VM as `keyAgent`) in place of the per-log `rosterStoreFor` factory,
+  matching wallet-core 0.66.0, which anchors the store's controller view
+  itself through `setMinimumControllerVersion`. `ladderSignedRosterStoreFor`
+  is gone.
+
 ### Fixed
 
 - A recovery spend now retires every pre-recovery passphrase and passkey

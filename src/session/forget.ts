@@ -76,7 +76,7 @@
  * and the mediator-origin registration bit are unreachable, and ciphertext
  * this browser already fetched stays readable to whoever holds it.
  */
-import { deriveNextKeyHash, type DIDLog } from '@interop/did-method-webvh'
+import { deriveNextKeyHash } from '@interop/did-method-webvh'
 import { WasClient } from '@interop/was-client'
 import {
   clientAnnexLogStore,
@@ -93,14 +93,9 @@ import type {
 } from '@interop/wallet-core/clientAnnex'
 import { agentsFromSeed } from '@interop/wallet-core/identity'
 import {
-  userKeyRosterDescriptorStore,
-  userKeyRosterLogSigner
-} from '@interop/wallet-core/keys'
-import {
   delegateLogWrite,
   delegationProofKeyId
 } from '@interop/wallet-core/recovery'
-import { webvhResourceLogController } from '@interop/wallet-core/resourceLog'
 import {
   accountLogPinId,
   clientSigningKeyMultibase,
@@ -494,10 +489,15 @@ export async function forgetThisBrowser({
         // bridge-invoked reinstall would be refused under the
         // current-key-set rule.
         clientLogStore: remoteStore.webvhIdStore(),
-        rosterStoreFor: await ladderSignedRosterStoreFor({
-          session,
-          pointer,
-          ladderSeed
+        // Appends SIGNED BY THE LADDER VM: the key the post-removal document
+        // still lists, so the roster head needs no seal repair on an account
+        // where no enrolled client's login sweep will ever run again. The
+        // ceremony anchors the store's controller view itself
+        // (`setMinimumControllerVersion`); the requests invoke under this
+        // still-standing client.
+        rosterStore: sessionRosterStore({
+          profile: session.profile,
+          keyAgent: await ladderVmAgent({ ladderSeed })
         }),
         annex: annexCeremonyReach({ session, pointer }),
         unlockMethods: unlockMethodsRemintReach({
@@ -531,44 +531,6 @@ export async function forgetThisBrowser({
     clearWriter: true
   })
   return { ...outcome, wipeFailed: failed, wipeUnverified: unverified }
-}
-
-/**
- * The last-client transition's roster store builder: appends SIGNED BY THE
- * LADDER VM (the key the post-removal document still lists, so the roster
- * head needs no seal repair on an account where no enrolled client's
- * login sweep will ever run again), the controller view resolved from the
- * post-install log the ceremony supplies (the ceremony-tail license's
- * inventory-changing anchor), and the HTTP requests invoked under this
- * still-standing client.
- *
- * @param options {object}
- * @param options.session {Session}
- * @param options.pointer {{ host: string, spaceId: string }}
- * @param options.ladderSeed {Uint8Array}
- * @returns {Promise<Function>}   `({ did, log }) => store`
- */
-async function ladderSignedRosterStoreFor({
-  session,
-  pointer,
-  ladderSeed
-}: {
-  session: Session
-  pointer: { host: string; spaceId: string }
-  ladderSeed: Uint8Array
-}) {
-  const signer = userKeyRosterLogSigner({
-    keyAgent: await ladderVmAgent({ ladderSeed })
-  })
-  return ({ did, log }: { did: string; log: DIDLog }) =>
-    userKeyRosterDescriptorStore({
-      storageServerUrl: pointer.host,
-      zcapClient: session.profile.zcapClient,
-      spaceId: pointer.spaceId,
-      resolveController: async () => webvhResourceLogController({ did, log }),
-      pinStore: session.profile.persistence.logPins,
-      signer
-    })
 }
 
 /**

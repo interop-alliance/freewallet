@@ -909,10 +909,13 @@ amendment). Its stages, in order:
 2. The roster rotation off this client's wrap: ladder-signed and anchored at
    the install entry (the ceremony-tail license's inventory-changing
    version), but HTTP-invoked under the still-standing client. The roster
-   store is built with the ladder VM's signer over the ceremony-supplied
-   post-install log (`ladderSignedRosterStoreFor`), so the roster head stays
-   signed by a key the post-removal document lists and needs no seal repair
-   on an account that never runs a login sweep again.
+   store is the session store with the ladder VM's signer
+   (`sessionRosterStore` with a `keyAgent` override), so the roster head
+   stays signed by a key the post-removal document lists and needs no seal
+   repair on an account that never runs a login sweep again. The ceremony
+   anchors that store's controller view itself
+   (`setMinimumControllerVersion`): at the pre-transition head for its
+   opening probe, and at the post-install head for the rotation.
 3. The collection fan-out.
 4. The forced replacement of the embedded generation delegation with a fresh
    ladder-signed one, and the revocation, through this client's `WasClient`,
