@@ -23,6 +23,15 @@
 
 ### Fixed
 
+- The recovery tails delete a retired credential's unlock Space only once
+  the registry write dropping its entry has landed. A failed write (a
+  transport error or a lost compare-and-swap) used to delete the Spaces
+  anyway, leaving the registry naming Spaces that were gone, which the next
+  passphrase change or last-client transition refused on. The spend resume
+  now drops the retired entries and deletes their Spaces on every arm, not
+  only when a successor entry is missing. The residue a tear between the
+  landed drop and the deletes leaves (nameless, inert unlock Spaces) is
+  recorded in ARCHITECTURE.md's Ceremony inventory.
 - A recovery spend now retires every pre-recovery passphrase and passkey
   in freewallet's own tails, matching the document strike wallet-core 0.65.0
   made. All three registry mutations (the remembered spend, its resume, and

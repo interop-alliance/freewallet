@@ -1900,10 +1900,16 @@ entry whose recorded key-agreement key the document publishes in neither
 form. Each retired entry's unlock Space is then deleted best-effort through
 a DELETE-only child of its own management zcap, signed by the fresh
 credential's ladder VM and sent by its bare did:key; a refusal is reported
-rather than failing the run. The visit then enters through the ordinary
-transient composition with zero local residue.
+rather than failing the run. The deletes run only once the registry write
+that dropped the entries has landed. A registry naming a deleted Space is
+the worse residue, since every later registry-driven walk fails to read the
+record it names, so a failed registry write deletes nothing and leaves the
+entries for a later registry pass to drop; a tear between the landed drop and
+the deletes leaves the Spaces nameless instead (a third residue, below). The
+visit then enters through the ordinary transient composition with zero local
+residue.
 
-Two residues remain. A tear inside the append leaves the spent code dead
+Three residues remain. A tear inside the append leaves the spent code dead
 (its key left the document, so a re-run refuses it as spent) and the current
 epoch wrapped to the removed code alone. No login sweep runs on a
 client-less account, so the mender is a repair holding both the spent code
@@ -1912,6 +1918,13 @@ sibling). It would run the same append under the ceremony-tail license's
 still-unused shot, and is not built yet. A rotation torn mid-fan-out on a
 client-less account has no repair either, and a stranded collection stays
 keyed to the spent code until the next remembered login or a spend re-run.
+The third is the retired credentials' unlock Spaces: a tail torn between the
+registry drop and the deletes leaves them standing with nothing naming them,
+and a registry write that failed leaves their entries standing with no pass
+on this tail to drop them, since no resume runs here. Both are inert. A
+nameless Space holds a record whose credential can no longer unwrap the user
+key or sign anything the document backs, and a lingering retired entry is
+dropped by the next spend's own registry pass.
 
 The remembered spend, the `rememberBrowser` entry, differs from here on. Its
 continuation mints a fresh enrolled-client key set instead. The
@@ -1930,7 +1943,11 @@ key unwraps from the code's wrap and mandatorily rotates off it. The
 registry mutation (spent entry out, every retired passphrase and passkey
 entry out with it, successors in) runs between the re-seal and the cascade,
 and the new enrolled client then deletes each retired entry's unlock Space
-and this browser's unlock-local state for it, best-effort. The replacement
+and this browser's unlock-local state for it, best-effort, and only once
+that registry write has landed (the transient tail's rule above). A write
+that failed leaves the entries named and their Spaces standing, and the
+spend resume's registry pass drops and deletes them on every arm, whether or
+not the successors already stand. The replacement
 code is pushed hard, its save confirm completing the local record and
 clearing the carrier. The spent code's unlock Space is deleted, so a spent
 code thereafter fails distinctly. A
@@ -3009,7 +3026,13 @@ keeps wrapping the current key to the removed client. The row is gone from
 the listing, so there is no re-click, and the account it leaves runs no
 remembered-login sweep. The retire-direction convergence of any later
 ladder-branch ceremony is the only mender, and the user may never run one --
-the same bound the transient recovery's roster-append residue has.
+the same bound the transient recovery's roster-append residue has. A ninth
+is the retired credentials' unlock Spaces on any recovery spend, torn between
+the landed registry drop and the deletes: the entries are gone, so nothing
+names the Spaces again, and no mender can. The residue is inert (the
+credentials' inventory is out of the document and the roster) and is the
+class the account-deletion walk already leaves behind, since that walk is
+registry-driven too.
 
 One more state the credential-keyed ladder VM lifecycle produces is
 recorded here because its design predicted it as a client-less open gap.

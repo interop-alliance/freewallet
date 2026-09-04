@@ -955,6 +955,16 @@ export interface RecoveryOutcome {
  * thrown -- the credential's inventory is already out of the document and the
  * roster, so a surviving Space can locate an account but never act on it.
  *
+ * Entry-drop-first, and the deletes run only for entries whose drop landed.
+ * The two states a tear can leave are not symmetric: a Space nobody names is
+ * inert residue (the class the account-deletion walk already leaves), while
+ * a registry entry naming a deleted Space makes every later registry-driven
+ * walk fail to read the record it names, and a passphrase change or the
+ * last-client transition then refuses. So a failed registry write deletes
+ * nothing, and the entries stay in the registry for a later pass to drop
+ * again; a tear between the landed drop and the deletes leaves the nameless
+ * Spaces behind, with no mender.
+ *
  * @param options {object}
  * @param options.entries {UnlockMethod[]}   the retired registry entries
  * @param options.zcapClient {ZcapClient}   the delegating signer
@@ -1568,7 +1578,8 @@ export async function recoverAccountWithCode({
   const recordBind = newRecordBind
   const replacementMethod = replacementEntry
   const newBridge = bridge
-  // Filled by the mutation below, consumed by the Space deletes after it.
+  // Filled by the mutation below, consumed by the Space deletes after it
+  // only once the write has landed (see `deleteRetiredCredentialSpaces`).
   let retired: UnlockMethod[] = []
   try {
     const bridgeKeyId = delegationProofKeyId(newBridge)
@@ -1659,14 +1670,17 @@ export async function recoverAccountWithCode({
     })
     log.debug('Recovery-spend registry mutation written in the ceremony tail')
   } catch (err) {
+    // The drop did not land, so the registry still names every retired
+    // Space: nothing is deleted here, and the spend resume's registry pass
+    // finds the entries again and finishes both halves.
+    retired = []
     log.warn('Could not update the unlock-methods registry during recovery', {
       err
     })
   }
 
-  // The retired credentials' unlock Spaces, and their browser-local state:
-  // the entries are out of the registry, so nothing else would ever name
-  // them again.
+  // The retired credentials' unlock Spaces, and their browser-local state,
+  // only for entries the drop above took out of the registry.
   await deleteRetiredCredentialSpaces({
     entries: retired,
     zcapClient: newZcapClient,
@@ -2093,8 +2107,11 @@ export async function resumeRecoverySpend({
   }
 
   // 3. The registry backfill (best-effort): re-apply the tail's registry
-  // mutation when the registry does not yet record both successors.
-  // Filled by the mutation inside, consumed by the Space deletes after it.
+  // mutation when the registry does not yet record both successors, and
+  // drop the retired credentials' entries on every arm -- a tail whose
+  // registry write failed left them named, with their Spaces still standing.
+  // Filled by whichever mutation runs, consumed by the Space deletes after it
+  // only once that write has landed (see `deleteRetiredCredentialSpaces`).
   let retired: UnlockMethod[] = []
   if (replacement) {
     try {
@@ -2103,6 +2120,32 @@ export async function resumeRecoverySpend({
         spaceId: pointer.spaceId,
         userKey
       })
+      const doc = await accountDocument()
+      // Every pre-recovery passphrase and passkey left the document in the
+      // add-and-retire entry, so its registry entry names a credential
+      // nothing backs. The new passphrase's own unlock Space is spared: it
+      // is re-upserted below.
+      const retiredIn = async (
+        registry: UnlockMethodsRecord | null
+      ): Promise<UnlockMethod[]> =>
+        (await findRetiredCredentialEntries({ doc, did, registry })).filter(
+          retiredEntry => retiredEntry.unlockSpaceId !== found.unlockSpaceId
+        )
+      const withoutRetired = async (
+        base: UnlockMethodsRecord
+      ): Promise<UnlockMethodsRecord> => {
+        retired = await retiredIn(base)
+        const retiredSpaceIds = new Set(
+          retired.map(retiredEntry => retiredEntry.unlockSpaceId)
+        )
+        return {
+          ...base,
+          methods: base.methods.filter(
+            method => !retiredSpaceIds.has(method.unlockSpaceId)
+          )
+        }
+      }
+      const retiredStanding = (await retiredIn(existing)).length > 0
       const hasReplacement = recoveryEntriesOf({ record: existing }).some(
         entry => entry.recoveryKid === replacement.recipientKid
       )
@@ -2164,31 +2207,19 @@ export async function resumeRecoverySpend({
           entry.recoveryKid,
           ...(spentKid ? [spentKid] : [])
         ])
-        const doc = await accountDocument()
         await updateUnlockMethodsWithClient({
           zcapClient: newZcapClient,
           spaceId: pointer.spaceId,
           userKey,
           mutate: async current => {
-            const base = current ?? emptyUnlockMethodsRegistry()
-            // Every pre-recovery passphrase and passkey left the document in
-            // the add-and-retire entry, so its registry entry names a
-            // credential nothing backs. The new passphrase's own unlock
-            // Space is spared: it is re-upserted below.
-            retired = (
-              await findRetiredCredentialEntries({ doc, did, registry: base })
-            ).filter(
-              retiredEntry => retiredEntry.unlockSpaceId !== found.unlockSpaceId
-            )
-            const retiredSpaceIds = new Set(
-              retired.map(retiredEntry => retiredEntry.unlockSpaceId)
+            const base = await withoutRetired(
+              current ?? emptyUnlockMethodsRegistry()
             )
             const methods = [
               ...base.methods.filter(
                 method =>
-                  (method.type !== 'recovery-code' ||
-                    !dropped.has(method.recoveryKid)) &&
-                  !retiredSpaceIds.has(method.unlockSpaceId)
+                  method.type !== 'recovery-code' ||
+                  !dropped.has(method.recoveryKid)
               ),
               entry
             ]
@@ -2212,16 +2243,37 @@ export async function resumeRecoverySpend({
           zcapClient: newZcapClient,
           spaceId: pointer.spaceId,
           userKey,
-          mutate: current =>
+          mutate: async current =>
             upsertPassphraseUnlockMethod({
-              record: current ?? emptyUnlockMethodsRegistry(),
+              record: await withoutRetired(
+                current ?? emptyUnlockMethodsRegistry()
+              ),
               unlockSpaceId: found.unlockSpaceId,
               manageCapability: found.manageCapability,
               standing: standingFields
             })
         })
+      } else if (retiredStanding) {
+        // Both successors stand and the entry needs no upgrade, but the
+        // registry still names retired credentials: the tail's drop never
+        // landed. The drop alone, so the deletes below have a landed write
+        // to follow.
+        log.info(
+          "Recovery-spend resume: dropping the retired credentials' registry entries"
+        )
+        await updateUnlockMethodsWithClient({
+          zcapClient: newZcapClient,
+          spaceId: pointer.spaceId,
+          userKey,
+          mutate: async current =>
+            withoutRetired(current ?? emptyUnlockMethodsRegistry())
+        })
       }
     } catch (err) {
+      // The drop did not land, so the registry still names every retired
+      // Space: nothing is deleted here, and the next resume finds the
+      // entries again.
+      retired = []
       log.warn(
         'Could not backfill the unlock-methods registry during the spend resume',
         { err }
@@ -2229,9 +2281,8 @@ export async function resumeRecoverySpend({
     }
   }
 
-  // The retired credentials' unlock Spaces, and their browser-local state:
-  // their entries are out of the registry, so nothing else would name them
-  // again.
+  // The retired credentials' unlock Spaces, and their browser-local state,
+  // only for entries the drop above took out of the registry.
   await deleteRetiredCredentialSpaces({
     entries: retired,
     zcapClient: newZcapClient,
@@ -2808,15 +2859,20 @@ async function recoverAccountTransient({
       }
     })
   } catch (err) {
+    // The drop did not land, so the registry still names every retired
+    // Space: nothing is deleted here. No resume runs on this tail, so the
+    // entries stand until a later ceremony's own registry read finds them.
+    retired = []
     log.warn('Could not update the unlock-methods registry during recovery', {
       err
     })
   }
 
-  // The retired credentials' unlock Spaces. Remote only: a transient visit
-  // touches no local storage. The fresh ladder VM is the delegator, and its
-  // bare did:key -- the bootstrap identity, which carries no invocation
-  // relation under its account form -- is what sends each DELETE.
+  // The retired credentials' unlock Spaces, only for entries the drop above
+  // took out of the registry. Remote only: a transient visit touches no
+  // local storage. The fresh ladder VM is the delegator, and its bare
+  // did:key -- the bootstrap identity, which carries no invocation relation
+  // under its account form -- is what sends each DELETE.
   await deleteRetiredCredentialSpaces({
     entries: retired,
     zcapClient: ladderZcap,

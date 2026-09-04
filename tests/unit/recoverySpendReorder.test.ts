@@ -18,7 +18,10 @@
  *   deleted exactly there;
  * - the spend resume finishes the escrows from the persisted unwrap key at
  *   the pivot-to-escrow kill points, backfills the registry, and hands the
- *   show-once prompt back until the confirm.
+ *   show-once prompt back until the confirm;
+ * - the retired credentials' unlock Spaces are deleted only once the
+ *   registry drop naming them has landed, and the resume drops and deletes
+ *   them on every arm.
  *
  * The remote halves are mocked at their module seams; the codes, the unlock
  * identities, and the stored records are real.
@@ -36,6 +39,8 @@ const state = vi.hoisted(() => ({
   omitCommitted: false,
   registryWrites: [] as unknown[],
   registryRecord: null as unknown,
+  failNextRegistryWrite: false,
+  deletedEntrySpaceIds: [] as string[],
   escrows: [] as Array<{ recipientId: string; ownerKid: string }>,
   rosterReads: 0,
   rosterUnwrapFailuresBeforeSuccess: 0,
@@ -198,10 +203,21 @@ vi.mock('@/session/unlockMethods', async importOriginal => ({
   updateUnlockMethodsWithClient: vi.fn(async ({ mutate }) => {
     state.calls.push('registryMutation')
     const next = await mutate(state.registryRecord as never)
+    if (state.failNextRegistryWrite) {
+      state.failNextRegistryWrite = false
+      throw new Error('registry write failed (simulated lost CAS race)')
+    }
     state.registryWrites.push(next)
     state.registryRecord = next
     return next
-  })
+  }),
+  deleteUnlockSpaceForEntry: vi.fn(
+    async ({ entry }: { entry: { unlockSpaceId: string } }) => {
+      state.calls.push('deleteRetiredSpace')
+      state.deletedEntrySpaceIds.push(entry.unlockSpaceId)
+      return 'deleted' as const
+    }
+  )
 }))
 
 import {
@@ -311,6 +327,36 @@ async function docPublishingCommitment({
   }
 }
 
+/**
+ * A registry entry for a pre-recovery passphrase the add-and-retire entry
+ * struck: its key-agreement multibase is real (the retired-entry detector
+ * hashes it into a commitment) and the mocked document publishes neither
+ * form, so every registry pass finds it retired. The management zcap names
+ * its own controller, the delegatee the remembered tail's deletes take.
+ *
+ * @returns {Promise<Record<string, unknown>>}
+ */
+async function retiredPassphraseEntry(): Promise<Record<string, unknown>> {
+  const { agentsFromSeed } = await import('@interop/wallet-core/identity')
+  const { keyAgreementKey } = await agentsFromSeed({
+    seed: new Uint8Array(32).fill(7)
+  })
+  return {
+    type: 'passphrase',
+    createdAt: '2026-09-01T00:00:00.000Z',
+    unlockSpaceId: 'unlock-retired-passphrase',
+    keyAgreementKeyMultibase: (
+      keyAgreementKey as unknown as { publicKeyMultibase: string }
+    ).publicKeyMultibase,
+    manageCapability: {
+      id: 'urn:zcap:delegated:manage-retired',
+      controller: 'did:key:z6MkRetiredUnlockIdentity',
+      invocationTarget: `${POINTER.host}/space/unlock-retired-passphrase`,
+      allowedAction: ['GET', 'PUT', 'DELETE']
+    }
+  }
+}
+
 beforeEach(() => {
   state.records.clear()
   state.calls = []
@@ -320,6 +366,8 @@ beforeEach(() => {
   state.omitCommitted = false
   state.registryWrites = []
   state.registryRecord = null
+  state.failNextRegistryWrite = false
+  state.deletedEntrySpaceIds = []
   state.escrows = []
   state.rosterReads = 0
   state.rosterUnwrapFailuresBeforeSuccess = 0
@@ -685,6 +733,55 @@ describe('the standing-establishment success gate', () => {
   })
 })
 
+describe('the retired credentials -- entry-drop-first, deletes gated on the drop', () => {
+  it('drops the retired entries, then deletes their Spaces, once the registry write lands', async () => {
+    const { code } = await storeRecordForCode()
+    const { idb } = createFakeSessionIdb()
+    state.registryRecord = { methods: [await retiredPassphraseEntry()] }
+
+    await recoverAccountWithCode({
+      code,
+      newPassphrase: NEW_PASSPHRASE,
+      rememberBrowser: true,
+      idb
+    })
+
+    const written = state.registryRecord as {
+      methods: Array<{ unlockSpaceId?: string }>
+    }
+    expect(
+      written.methods.some(
+        method => method.unlockSpaceId === 'unlock-retired-passphrase'
+      )
+    ).toBe(false)
+    expect(state.deletedEntrySpaceIds).toEqual(['unlock-retired-passphrase'])
+    expect(state.calls.indexOf('deleteRetiredSpace')).toBeGreaterThan(
+      state.calls.indexOf('registryMutation')
+    )
+  })
+
+  it('deletes no Space when the registry write fails: the entries still name them', async () => {
+    const { code } = await storeRecordForCode()
+    const { idb } = createFakeSessionIdb()
+    const entry = await retiredPassphraseEntry()
+    state.registryRecord = { methods: [entry] }
+    state.failNextRegistryWrite = true
+
+    await recoverAccountWithCode({
+      code,
+      newPassphrase: NEW_PASSPHRASE,
+      rememberBrowser: true,
+      idb
+    })
+
+    expect(state.calls).toContain('registryMutation')
+    expect(state.deletedEntrySpaceIds).toEqual([])
+    expect((state.registryRecord as { methods: unknown[] }).methods).toContain(
+      entry
+    )
+  })
+})
+
 describe('resumeRecoverySpend -- the spend-completion resume', () => {
   // The new passphrase's derived standing client -- REAL (the standing
   // backfill computes a commitment over its key-agreement multibase), and
@@ -933,6 +1030,76 @@ describe('resumeRecoverySpend -- the spend-completion resume', () => {
         escrow => escrow.recipientId === standingClient.recipientKid
       )
     ).toBe(true)
+  })
+
+  it('drops and deletes the retired credentials even when both successors already stand', async () => {
+    const { found, replacement, standingClient } = await makeSpendFound()
+    state.rosterRecipients = [
+      'everyone-already-escrowed',
+      standingClient.recipientKid
+    ]
+    const retired = await retiredPassphraseEntry()
+    // The tail's write with both successors landed before, or the drop is
+    // all that is missing: either way the retired entry is still named.
+    state.registryRecord = {
+      methods: [
+        retired,
+        {
+          type: 'recovery-code',
+          label: 'Replacement code',
+          createdAt: '2026-09-01T00:00:00.000Z',
+          unlockSpaceId: 'unlock-replacement',
+          recoveryKid: replacement.recipientKid,
+          keyAgreementKeyMultibase: 'zReplacement',
+          updateKeyMultibase: 'z6MkReplacementRung0'
+        },
+        {
+          type: 'passphrase',
+          createdAt: '2026-09-01T00:00:00.000Z',
+          unlockSpaceId: 'unlock-space-new-passphrase',
+          keyAgreementKeyMultibase: standingClient.keyAgreementKeyMultibase,
+          rosterKid: standingClient.recipientKid
+        }
+      ]
+    }
+
+    const capture = captureSink()
+    addSink(capture.sink)
+    await resumeRecoverySpend({ found })
+
+    // The drop-only arm, not the successor backfill.
+    expect(
+      capture.events.some(event =>
+        String(event.msg).includes(
+          "dropping the retired credentials' registry entries"
+        )
+      )
+    ).toBe(true)
+    const written = state.registryRecord as {
+      methods: Array<{ unlockSpaceId?: string }>
+    }
+    expect(
+      written.methods.some(
+        method => method.unlockSpaceId === 'unlock-retired-passphrase'
+      )
+    ).toBe(false)
+    expect(written.methods).toHaveLength(2)
+    expect(state.deletedEntrySpaceIds).toEqual(['unlock-retired-passphrase'])
+  })
+
+  it('deletes no Space on the resume either when its drop fails', async () => {
+    const { found, standingClient } = await makeSpendFound()
+    state.rosterRecipients = [
+      'everyone-already-escrowed',
+      standingClient.recipientKid
+    ]
+    state.registryRecord = { methods: [await retiredPassphraseEntry()] }
+    state.failNextRegistryWrite = true
+
+    await resumeRecoverySpend({ found })
+
+    expect(state.calls).toContain('registryMutation')
+    expect(state.deletedEntrySpaceIds).toEqual([])
   })
 
   it('rethrows a roster refusal other than the unwrap miss unchanged', async () => {
