@@ -86,7 +86,8 @@ import {
   DEFAULT_PRESENTABLE_DID_METHODS,
   findAppKeyCredential
 } from '@interop/wallet-core/request'
-import { fetchAppManifest, type AppManifestInfo } from '@/lib/appManifest'
+import { fetchAppManifest } from '@/lib/appManifest'
+import { useAsyncLoad } from '@/hooks/useAsyncLoad'
 import { ZcapGrantsPanel } from './ZcapGrantsPanel'
 import { SiteProvidedText } from './SiteProvidedText'
 import { RequestSourcePanel } from './RequestSourcePanel'
@@ -233,9 +234,6 @@ export function WalletGetPage() {
   const [previewedAppKeyDid, setPreviewedAppKeyDid] = useState<string | null>(
     null
   )
-  // App Connect: the requesting origin's Web App Manifest (logo, description),
-  // fetched in the background for the consent screen; display-only garnish.
-  const [appManifest, setAppManifest] = useState<AppManifestInfo | null>(null)
   const [loginError, setLoginError] = useState<string | null>(null)
   // What the mint will actually produce, which under a transient session's
   // generation delegation is each configured TTL clamped to that parent.
@@ -336,25 +334,15 @@ export function WalletGetPage() {
     })
   }, [])
 
-  // App Connect: fetch the requesting origin's app manifest in the background
-  // so the consent screen can show the app's logo and description. Best-effort
-  // only -- a missing manifest (or no CORS) leaves the screen unchanged.
-  useEffect(() => {
-    if (!profile.appConnect || !requestOrigin) {
-      return
-    }
-    let cancelled = false
-    fetchAppManifest({ origin: requestOrigin })
-      .then(info => {
-        if (!cancelled && info) {
-          setAppManifest(info)
-        }
-      })
-      .catch(() => {})
-    return () => {
-      cancelled = true
-    }
-  }, [profile.appConnect, requestOrigin])
+  // App Connect: fetch the requesting origin's Web App Manifest (logo,
+  // description) in the background, for the consent screen; display-only
+  // garnish. Best-effort only -- a missing manifest (or no CORS) leaves the
+  // screen unchanged.
+  const { data: appManifest } = useAsyncLoad(
+    async () => fetchAppManifest({ origin: requestOrigin }),
+    [requestOrigin],
+    { enabled: !!profile.appConnect && !!requestOrigin }
+  )
 
   async function handleLogin(passphrase: string) {
     setLoginError(null)

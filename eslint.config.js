@@ -55,6 +55,11 @@ export default defineConfig([
 
       // React:
       'react/react-in-jsx-scope': 'off',
+      // useAsyncLoad takes (load, deps) like useEffect; check its deps too.
+      'react-hooks/exhaustive-deps': [
+        'warn',
+        { additionalHooks: '^useAsyncLoad$' }
+      ],
       'react-refresh/only-export-components': 'warn' // warn, not error
     }
   }

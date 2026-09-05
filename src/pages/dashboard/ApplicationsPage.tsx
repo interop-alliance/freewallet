@@ -15,7 +15,7 @@
  * its recorded storage grants and records the revocation, which is what takes
  * the row out of the listing.
  */
-import { useEffect, useState } from 'react'
+import { useState } from 'react'
 import { Link as RouterLink, useNavigate } from 'react-router'
 import { useTranslation } from 'react-i18next'
 import { MdChevronRight } from 'react-icons/md'
@@ -33,6 +33,7 @@ import { formatDate } from '@/lib/viewMappers/formatDate'
 import { DashboardLayout } from '@/components/DashboardLayout'
 import { LoadingSpinner } from '@/components/LoadingSpinner'
 import { RevokeAppDialog } from '@/components/RevokeAppDialog'
+import { useAsyncLoad } from '@/hooks/useAsyncLoad'
 import { useAuthStore } from '@/stores/authStore'
 import { showToast } from '@/stores/toastStore'
 import { dashboardStyles } from '@/styles/appStyles'
@@ -84,13 +85,6 @@ export function ApplicationsPage() {
   const navigate = useNavigate()
   const session = useAuthStore(state => state.session)
 
-  const [apps, setApps] = useState<ConnectedApp[]>([])
-  const [agents, setAgents] = useState<ConnectedAgent[]>([])
-  // The enrolled clients' signing keys from the verified account log, for the
-  // per-app grant-state check; undefined when the check is unavailable.
-  const [signingKeys, setSigningKeys] = useState<Set<string> | undefined>()
-  const [loading, setLoading] = useState(true)
-  const [loadError, setLoadError] = useState(false)
   const [revokeTarget, setRevokeTarget] = useState<ConnectedApp | null>(null)
   const [revokeAgentTarget, setRevokeAgentTarget] =
     useState<ConnectedAgent | null>(null)
@@ -101,44 +95,47 @@ export function ApplicationsPage() {
   // never purged -- an app's only identity lives in this collection).
   const [undecryptableAppKeys, setUndecryptableAppKeys] = useState(0)
   const [noEpochKeyAppKeys, setNoEpochKeyAppKeys] = useState(0)
+  // A failed purge shows the same warning a failed load does. It is its own
+  // state because the load's error is the hook's, and a successful load
+  // clears both.
+  const [purgeError, setPurgeError] = useState(false)
 
-  useEffect(() => {
-    let cancelled = false
-    async function load() {
+  const {
+    data: view,
+    loading,
+    error: loadError,
+    reload
+  } = useAsyncLoad(
+    async ({ isCancelled }) => {
       if (!session) {
-        setLoading(false)
-        return
+        return null
       }
-      try {
-        const {
-          apps: listed,
-          agents: listedAgents,
-          signingKeys: keys
-        } = await listApplicationsView({ session })
-        if (!cancelled) {
-          setApps(listed)
-          setAgents(listedAgents)
-          setSigningKeys(keys)
-          setUndecryptableAppKeys(session.storage.undecryptableAppKeys)
-          setNoEpochKeyAppKeys(session.storage.noEpochKeyAppKeys)
-          setLoadError(false)
-        }
-      } catch (err) {
+      const {
+        apps: listed,
+        agents: listedAgents,
+        signingKeys: keys
+      } = await listApplicationsView({ session })
+      if (!isCancelled()) {
+        setUndecryptableAppKeys(session.storage.undecryptableAppKeys)
+        setNoEpochKeyAppKeys(session.storage.noEpochKeyAppKeys)
+        setPurgeError(false)
+      }
+      return { apps: listed, agents: listedAgents, signingKeys: keys }
+    },
+    [session],
+    {
+      enabled: !!session,
+      onError: err => {
         log.error('Could not load connected applications', { err })
-        if (!cancelled) {
-          setLoadError(true)
-        }
-      } finally {
-        if (!cancelled) {
-          setLoading(false)
-        }
       }
     }
-    void load()
-    return () => {
-      cancelled = true
-    }
-  }, [session])
+  )
+
+  const apps = view?.apps ?? []
+  const agents = view?.agents ?? []
+  // The enrolled clients' signing keys from the verified account log, for the
+  // per-app grant-state check; undefined when the check is unavailable.
+  const signingKeys = view?.signingKeys
 
   function openRevokeDialog(app: ConnectedApp) {
     setRevokeError(false)
@@ -178,28 +175,6 @@ export function ApplicationsPage() {
       setRevokeError(true)
     } finally {
       setRevoking(false)
-    }
-  }
-
-  async function reload() {
-    if (!session) {
-      return
-    }
-    try {
-      const {
-        apps: listed,
-        agents: listedAgents,
-        signingKeys: keys
-      } = await listApplicationsView({ session })
-      setApps(listed)
-      setAgents(listedAgents)
-      setSigningKeys(keys)
-      setUndecryptableAppKeys(session.storage.undecryptableAppKeys)
-      setNoEpochKeyAppKeys(session.storage.noEpochKeyAppKeys)
-      setLoadError(false)
-    } catch (err) {
-      log.error('Could not reload connected applications', { err })
-      setLoadError(true)
     }
   }
 
@@ -244,7 +219,7 @@ export function ApplicationsPage() {
       })
     } catch (err) {
       log.error('Could not remove unreadable app connections', { err })
-      setLoadError(true)
+      setPurgeError(true)
     }
   }
 
@@ -254,7 +229,7 @@ export function ApplicationsPage() {
         <LoadingSpinner />
       ) : (
         <Stack sx={{ gap: 1, mt: 2 }}>
-          {loadError && (
+          {(!!loadError || purgeError) && (
             <Alert severity="warning">{t('applications.loadError')}</Alert>
           )}
           {noEpochKeyAppKeys > 0 && (

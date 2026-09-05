@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useCallback, useMemo, useState } from 'react'
 import Alert from '@mui/material/Alert'
 import Box from '@mui/material/Box'
 import Button from '@mui/material/Button'
@@ -25,6 +25,7 @@ import {
 } from 'react-icons/md'
 import { DashboardLayout } from '@/components/DashboardLayout'
 import { JsonHighlight } from '@/components/JsonHighlight'
+import { useAsyncLoad } from '@/hooks/useAsyncLoad'
 import { useAuthStore } from '@/stores/authStore'
 import { showToast } from '@/stores/toastStore'
 import { storageStyles } from '@/styles/appStyles'
@@ -73,9 +74,6 @@ export function CollectionContentsPage() {
   const storage = session?.storage
 
   const [collection, setCollection] = useState<StorageCollection | null>(null)
-  const [resources, setResources] = useState<StorageResource[]>([])
-  const [isLoading, setIsLoading] = useState(false)
-  const [errorKey, setErrorKey] = useState<string | null>(null)
 
   const [deleteDialogOpen, setDeleteDialogOpen] = useState(false)
   const [deletingCollection, setDeletingCollection] = useState(false)
@@ -115,58 +113,53 @@ export function CollectionContentsPage() {
     clearResourcePreview()
   }
 
-  useEffect(() => {
-    let cancelled = false
-
-    async function load() {
+  // The matched collection is set as the listing lands, so a failure to list
+  // its resources still leaves the collection itself on screen.
+  const {
+    data: contents,
+    loading: isLoading,
+    error: contentsError
+  } = useAsyncLoad(
+    async ({ isCancelled }) => {
       if (!storage?.hasRemoteStorage || !collectionId) {
         setCollection(null)
-        setResources([])
-        return
+        return { resources: [] as StorageResource[], errorKey: null }
       }
-      setIsLoading(true)
-      setErrorKey(null)
-      try {
-        const collections = await storage.listCollections()
-        if (cancelled) {
-          return
-        }
 
-        const match =
-          collections.find(collection => collection.id === collectionId) ?? null
-        setCollection(match)
+      const collections = await storage.listCollections()
+      if (isCancelled()) {
+        return { resources: [] as StorageResource[], errorKey: null }
+      }
 
-        if (!match) {
-          setResources([])
-          setErrorKey('storage.collectionNotFound')
-          return
-        }
+      const match =
+        collections.find(collection => collection.id === collectionId) ?? null
+      setCollection(match)
 
-        const items = await storage.listCollectionResources({
-          collectionUrl: match.url
-        })
-        if (cancelled) {
-          return
+      if (!match) {
+        return {
+          resources: [] as StorageResource[],
+          errorKey: 'storage.collectionNotFound'
         }
-        setResources(items)
-      } catch (err) {
+      }
+
+      const items = await storage.listCollectionResources({
+        collectionUrl: match.url
+      })
+      return { resources: items, errorKey: null }
+    },
+    [storage, collectionId],
+    {
+      enabled: Boolean(storage?.hasRemoteStorage && collectionId),
+      onError: err => {
         log.error('Failed to load collection contents', { err })
-        if (!cancelled) {
-          setErrorKey('storage.resourcesLoadError')
-          setResources([])
-        }
-      } finally {
-        if (!cancelled) {
-          setIsLoading(false)
-        }
       }
     }
+  )
 
-    load()
-    return () => {
-      cancelled = true
-    }
-  }, [storage, collectionId])
+  const resources = contentsError ? [] : (contents?.resources ?? [])
+  const errorKey = contentsError
+    ? 'storage.resourcesLoadError'
+    : (contents?.errorKey ?? null)
 
   const handleResourceOpen = useCallback(
     async (resource: StorageResource) => {

@@ -18,6 +18,7 @@ import { useAuthStore } from '@/stores/authStore'
 import { showToast } from '@/stores/toastStore'
 import { syncController } from '@/stores/syncController'
 import { flattenSearchValues } from '@/lib/searchValues'
+import { useAsyncLoad } from '@/hooks/useAsyncLoad'
 import { useSearch } from '@/hooks/useSearch'
 import { dashboardStyles } from '@/styles/appStyles'
 import { DashboardLayout } from '@/components/DashboardLayout'
@@ -51,29 +52,18 @@ export function DashboardPage() {
   const navigate = useNavigate()
   const session = useAuthStore(state => state.session)
   const [credentials, setCredentials] = useState<StoredCredential[]>([])
-  const [loading, setLoading] = useState(true)
   const [syncing, setSyncing] = useState(false)
   const [scanQrOpen, setScanQrOpen] = useState(false)
+  // Covers a failed load and a failed purge alike; a successful load clears it.
   const [loadError, setLoadError] = useState(false)
   // Rows the vault is unlocked for but that still would not decrypt (corrupted
   // or written under a mismatched KAK). Skipped by the list read; surfaced here
   // so the user can see and clear them rather than one poisoned row hanging the
   // page.
   const [undecryptableCount, setUndecryptableCount] = useState(0)
-  // The passkey-only safety notice: present when this wallet was created with a
-  // single passkey and no second unlock method has been added yet. Drives a
-  // recurring "add a second login method" prompt.
-  const [passkeySafetyNotice, setPasskeySafetyNotice] = useState<{
-    backupEligibility: boolean
-    backupState: boolean
-    createdAt: string
-  } | null>(null)
-  // The credential-anchored signup seeds its welcome content behind the
-  // dashboard navigation; while its promise is pending an indicator shows in
-  // place of the empty state, and the list reloads when it settles.
-  const [seeding, setSeeding] = useState(() =>
-    Boolean(session?.welcomeSeedReady)
-  )
+  // Dismissing the passkey-safety notice hides it for this visit only.
+  const [noticeDismissed, setNoticeDismissed] = useState(false)
+  const seedReady = session?.welcomeSeedReady
 
   const {
     query,
@@ -119,89 +109,64 @@ export function DashboardPage() {
     log.info('Dashboard rendered', { at: new Date().toISOString() })
   }, [])
 
-  useEffect(() => {
-    let cancelled = false
-
-    async function initialLoad() {
-      if (!session?.storage) {
-        return
-      }
-      try {
-        await loadCredentials(() => cancelled)
-      } catch (err) {
-        // A failed read must not leave the page spinning forever.
+  const { loading, reload } = useAsyncLoad(
+    ({ isCancelled }) => loadCredentials(isCancelled),
+    [loadCredentials],
+    {
+      enabled: Boolean(session?.storage),
+      // A failed read must not leave the page spinning forever.
+      onError: err => {
         log.error('Could not load credentials', { err })
-        if (!cancelled) {
-          setLoadError(true)
-        }
-      } finally {
-        if (!cancelled) {
-          setLoading(false)
-        }
+        setLoadError(true)
       }
     }
-    initialLoad()
+  )
 
-    // clean up effect
-    return () => {
-      cancelled = true
-    }
-  }, [session, loadCredentials])
-
-  useEffect(() => {
-    const seedReady = session?.welcomeSeedReady
-    if (!seedReady) {
-      return
-    }
-    let cancelled = false
-    async function awaitWelcomeSeed() {
+  // The credential-anchored signup seeds its welcome content behind the
+  // dashboard navigation; while its promise is pending an indicator shows in
+  // place of the empty state, and the list reloads when it settles.
+  const { loading: seeding } = useAsyncLoad(
+    async ({ isCancelled }) => {
       // Never rejects: the seeding helper is best-effort throughout.
       await seedReady
-      if (cancelled) {
+      if (isCancelled()) {
         return
       }
-      try {
-        await loadCredentials(() => cancelled)
-      } catch (err) {
-        // The initial load's error handling owns the loadError banner; a
-        // failed reload here just leaves the current (empty) list standing.
+      await loadCredentials(isCancelled)
+    },
+    [seedReady, loadCredentials],
+    {
+      enabled: Boolean(seedReady),
+      // The initial load's error handling owns the loadError banner; a
+      // failed reload here just leaves the current (empty) list standing.
+      onError: err => {
         log.error('Could not reload credentials after the welcome seed', {
           err
         })
-      } finally {
-        if (!cancelled) {
-          setSeeding(false)
-        }
       }
     }
-    void awaitWelcomeSeed()
-    return () => {
-      cancelled = true
-    }
-  }, [session, loadCredentials])
+  )
 
-  useEffect(() => {
-    let cancelled = false
-    async function loadNotice() {
+  // The passkey-only safety notice: present when this wallet was created with a
+  // single passkey and no second unlock method has been added yet. Drives a
+  // recurring "add a second login method" prompt.
+  const { data: loadedNotice } = useAsyncLoad(
+    async () => {
       if (!session || session.isGuest) {
-        return
+        return null
       }
-      try {
-        const notice = await session.profile.persistence.passkeyNotices.load({
-          controller: session.user.id
-        })
-        if (!cancelled) {
-          setPasskeySafetyNotice(notice)
-        }
-      } catch (err) {
+      return session.profile.persistence.passkeyNotices.load({
+        controller: session.user.id
+      })
+    },
+    [session],
+    {
+      onError: err => {
         log.error('Could not load the passkey-safety notice', { err })
       }
     }
-    void loadNotice()
-    return () => {
-      cancelled = true
-    }
-  }, [session])
+  )
+  const passkeySafetyNotice = noticeDismissed ? null : (loadedNotice ?? null)
 
   async function handleSync() {
     setSyncing(true)
@@ -209,10 +174,7 @@ export function DashboardPage() {
       // Kick an immediate replication cycle (no-op for guests / no remote);
       // pulled changes land in the local replica in the background.
       syncController.reSync()
-      await loadCredentials()
-    } catch (err) {
-      log.error('Could not refresh credentials', { err })
-      setLoadError(true)
+      await reload()
     } finally {
       // Always release the Sync button, even on a failed refresh.
       setSyncing(false)
@@ -315,7 +277,7 @@ export function DashboardPage() {
                 color="inherit"
                 size="small"
                 aria-label={t('common.close')}
-                onClick={() => setPasskeySafetyNotice(null)}
+                onClick={() => setNoticeDismissed(true)}
               >
                 <MdClose size={18} />
               </IconButton>

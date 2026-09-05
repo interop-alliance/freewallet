@@ -35,7 +35,7 @@ import Typography from '@mui/material/Typography'
 import { MdEdit } from 'react-icons/md'
 import { Link as RouterLink } from 'react-router'
 import { useTranslation } from 'react-i18next'
-import { useCallback, useEffect, useState } from 'react'
+import { useRef, useState } from 'react'
 import {
   enrollmentClientDid,
   parseEnrollmentRequest,
@@ -53,6 +53,7 @@ import {
   type AccountClientView
 } from '@/session/clients'
 import { approveEnrollment } from '@/lib/enrollment'
+import { useAsyncLoad } from '@/hooks/useAsyncLoad'
 import { forgetThisBrowser } from '@/session/forget'
 import { OnboardInviteCard } from '@/components/OnboardInviteCard'
 import { formatDate } from '@/lib/viewMappers/formatDate'
@@ -60,6 +61,25 @@ import { showToast } from '@/stores/toastStore'
 import { createLogger } from '@/lib/log'
 
 const log = createLogger('fw:ui:clients')
+
+/**
+ * How many times the initial listing is attempted, and how long it waits
+ * between attempts (~1 minute in all).
+ */
+const LIST_ATTEMPTS = 15
+const LIST_RETRY_MS = 4000
+
+/**
+ * Resolves after the given delay, so the polling load can wait between
+ * attempts.
+ *
+ * @param options {object}
+ * @param options.ms {number}
+ * @returns {Promise<void>}
+ */
+function sleep({ ms }: { ms: number }): Promise<void> {
+  return new Promise(resolve => setTimeout(resolve, ms))
+}
 
 /**
  * Whether a connect-code parse failure is the canonicality refusal -- a code
@@ -84,8 +104,10 @@ export function EnrolledClientsSection({ session }: { session: Session }) {
   // transition copy: the account lands ladder-anchored rather than stranded.
   const signerKind = accountSignerKind({ session })
   const ladderBranch = signerKind === 'ladder'
-  // `null` = not loaded yet (or the listing failed; `loadError` tells apart).
-  const [clients, setClients] = useState<AccountClientView[] | null>(null)
+  // The listing is `null` until the load below lands (or when it never
+  // does; `loadError` tells the two apart). `loadError` is its own state
+  // rather than the load's error, because the polling load sets it on the
+  // first failed attempt and clears it on a later success, mid-run.
   const [loadError, setLoadError] = useState(false)
   // Inline label editing: one row at a time, keyed by signing multibase.
   const [editingKey, setEditingKey] = useState<string | null>(null)
@@ -129,54 +151,58 @@ export function EnrolledClientsSection({ session }: { session: Session }) {
   const [enrollError, setEnrollError] = useState(false)
   const [connectCardOpen, setConnectCardOpen] = useState(false)
   const [onboardDone, setOnboardDone] = useState(false)
-
-  const loadClients = useCallback(async () => {
-    try {
-      const listed = await listAccountClients({ session })
-      setClients(listed)
-      setLoadError(false)
-    } catch (err) {
-      log.warn('Could not list the enrolled wallet clients', { err })
-      setLoadError(true)
-    }
-  }, [session])
+  // Whether a listing has ever landed, which is what tells the polling first
+  // load from a re-list.
+  const listedOnceRef = useRef(false)
 
   // The initial load polls: right after signup the did:webvh provisioning
   // (and the pointer promotion `canManageAccountClients` gates on) still runs
   // in the background, so the first attempts may find no log yet. Polling
   // stops on the first successful listing, or after ~1 minute for sessions
-  // that can never manage clients (no storage server configured).
-  useEffect(() => {
-    let cancelled = false
-    let attempts = 0
-    let timer: ReturnType<typeof setTimeout> | undefined
-    async function attemptLoad() {
-      attempts++
-      if (canManageAccountClients({ session })) {
-        try {
-          const listed = await listAccountClients({ session })
-          if (!cancelled) {
-            setClients(listed)
-            setLoadError(false)
-          }
-          return
-        } catch (err) {
-          log.warn('Could not list the enrolled wallet clients', { err })
-          if (!cancelled) {
-            setLoadError(true)
+  // that can never manage clients (no storage server configured). `reload` is
+  // the re-list every mutation below runs.
+  const { data, reload: loadClients } = useAsyncLoad(
+    async ({ isCancelled }) => {
+      // Only the load that has yet to see a listing polls; a re-list after a
+      // mutation is one attempt, so its caller is not held for the whole
+      // polling window when the read fails.
+      const attempts = listedOnceRef.current ? 1 : LIST_ATTEMPTS
+      let lastError: unknown = null
+      for (let attempt = 1; attempt <= attempts; attempt++) {
+        if (attempt > 1) {
+          await sleep({ ms: LIST_RETRY_MS })
+        }
+        if (isCancelled()) {
+          break
+        }
+        if (canManageAccountClients({ session })) {
+          try {
+            const listed = await listAccountClients({ session })
+            listedOnceRef.current = true
+            if (!isCancelled()) {
+              setLoadError(false)
+            }
+            return listed
+          } catch (err) {
+            lastError = err
+            log.warn('Could not list the enrolled wallet clients', { err })
+            if (!isCancelled()) {
+              setLoadError(true)
+            }
           }
         }
       }
-      if (!cancelled && attempts < 15) {
-        timer = setTimeout(() => void attemptLoad(), 4000)
+      // Every attempt failed: throwing leaves whatever listing is on screen
+      // standing, with the load error beside it. A session that can never
+      // manage clients simply has nothing to list.
+      if (lastError) {
+        throw lastError
       }
-    }
-    void attemptLoad()
-    return () => {
-      cancelled = true
-      clearTimeout(timer)
-    }
-  }, [session])
+      return null
+    },
+    [session]
+  )
+  const clients = data ?? null
 
   const handleSaveLabel = async (client: AccountClientView) => {
     const trimmed = labelDraft.trim()

@@ -1,4 +1,4 @@
-import { useMemo, useState, useEffect } from 'react'
+import { useMemo, useState } from 'react'
 import type { FuseOptionKey } from 'fuse.js'
 import {
   Box,
@@ -37,6 +37,7 @@ import {
   credentialActivityInfo,
   type HistoryTab
 } from '@/lib/historyActivity'
+import { useAsyncLoad } from '@/hooks/useAsyncLoad'
 import { useSearch } from '@/hooks/useSearch'
 import { createLogger } from '@/lib/log'
 
@@ -59,11 +60,36 @@ const HISTORY_SEARCH_KEYS: FuseOptionKey<HistoryItem>[] = [
 export function HistoryPage() {
   const { t, i18n } = useTranslation()
   const session = useAuthStore(state => state.session)
-  const [historyItems, setHistoryItems] = useState<HistoryItem[]>([])
+
+  const { data, loading } = useAsyncLoad(
+    async () => {
+      if (!session?.storage) {
+        return null
+      }
+      const [items, credentials] = await Promise.all([
+        session.storage.listHistoryItems(),
+        // Only used to decide which titles link, so a failed read degrades to
+        // plain-text titles rather than failing the whole page.
+        session.storage.listCredentials().catch(err => {
+          log.error('Could not load credentials', { err })
+          return []
+        })
+      ])
+      return { items, credentials }
+    },
+    [session],
+    {
+      enabled: Boolean(session?.storage),
+      onError: err => log.error('Could not load the history', { err })
+    }
+  )
+  const historyItems = useMemo<HistoryItem[]>(() => data?.items ?? [], [data])
   // The cids the wallet still holds, so an activity about a credential that
   // has since been deleted does not render a link to a missing page.
-  const [existingCids, setExistingCids] = useState<Set<string>>(new Set())
-  const [loading, setLoading] = useState(true)
+  const existingCids = useMemo(
+    () => new Set((data?.credentials ?? []).map(({ cid }) => cid)),
+    [data]
+  )
 
   const [tab, setTab] = useState<HistoryTab>('all')
 
@@ -139,35 +165,6 @@ export function HistoryPage() {
       }),
     [searchedItems, tab]
   )
-
-  useEffect(() => {
-    let cancelled = false
-
-    async function initialLoad() {
-      if (!session?.storage) {
-        return
-      }
-      const [items, credentials] = await Promise.all([
-        session.storage.listHistoryItems(),
-        // Only used to decide which titles link, so a failed read degrades to
-        // plain-text titles rather than failing the whole page.
-        session.storage.listCredentials().catch(err => {
-          log.error('Could not load credentials', { err })
-          return []
-        })
-      ])
-      if (!cancelled) {
-        setHistoryItems(items)
-        setExistingCids(new Set(credentials.map(({ cid }) => cid)))
-        setLoading(false)
-      }
-    }
-    initialLoad()
-
-    return () => {
-      cancelled = true
-    }
-  }, [session])
 
   return (
     <DashboardLayout title={t('history.title')}>

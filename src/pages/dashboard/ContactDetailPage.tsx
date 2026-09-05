@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useState } from 'react'
 import Alert from '@mui/material/Alert'
 import Avatar from '@mui/material/Avatar'
 import Box from '@mui/material/Box'
@@ -22,6 +22,7 @@ import { DashboardLayout } from '@/components/DashboardLayout'
 import { LoadingSpinner } from '@/components/LoadingSpinner'
 import { useAuthStore } from '@/stores/authStore'
 import { showToast } from '@/stores/toastStore'
+import { useAsyncLoad } from '@/hooks/useAsyncLoad'
 import { useCopyToClipboard } from '@/hooks/useCopyToClipboard'
 import { NotFoundPage } from '@/pages/NotFoundPage'
 import { contactDetailStyles, storageStyles } from '@/styles/appStyles'
@@ -180,35 +181,25 @@ export function ContactDetailPage() {
   const navigate = useNavigate()
   const { contactId } = useParams()
   const session = useAuthStore(state => state.session)
-  const [contact, setContact] = useState<ContactData | null>(null)
-  const [loading, setLoading] = useState(true)
 
-  useEffect(() => {
-    let cancelled = false
-
-    async function initialLoad() {
+  const { data: loaded, loading } = useAsyncLoad(
+    async () => {
       if (!session?.storage || !contactId) {
-        return
+        return null
       }
-      try {
-        const stored = await session.storage.loadContact({ id: contactId })
-        if (!cancelled) {
-          setContact(stored?.contact ?? null)
-        }
-      } catch (err) {
+      const stored = await session.storage.loadContact({ id: contactId })
+      return stored?.contact ?? null
+    },
+    [session, contactId],
+    {
+      enabled: !!session?.storage && !!contactId,
+      onError: err => {
         log.error('Could not load contact', { err })
-      } finally {
-        if (!cancelled) {
-          setLoading(false)
-        }
       }
     }
-    initialLoad()
+  )
 
-    return () => {
-      cancelled = true
-    }
-  }, [session, contactId])
+  const contact: ContactData | null = loaded ?? null
 
   const [deleteDialogOpen, setDeleteDialogOpen] = useState(false)
   const [deleting, setDeleting] = useState(false)

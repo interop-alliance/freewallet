@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useCallback, useMemo, useState } from 'react'
 import type { ReactNode } from 'react'
 import Alert from '@mui/material/Alert'
 import Box from '@mui/material/Box'
@@ -20,6 +20,7 @@ import { LoadingSpinner } from '@/components/LoadingSpinner'
 import { JsonHighlight } from '@/components/JsonHighlight'
 import { DeleteCredentialDialog } from '@/components/credentialDetails/DeleteCredentialDialog'
 import { useCredentialDelete } from '@/hooks/useCredentialDelete'
+import { useAsyncLoad } from '@/hooks/useAsyncLoad'
 import { useAuthStore } from '@/stores/authStore'
 import { storageStyles } from '@/styles/appStyles'
 import { credentialDetailStyles } from '@/styles/credentialStyles'
@@ -147,18 +148,136 @@ export function CollectionResourcePage() {
   const session = useAuthStore(state => state.session)
   const storage = session?.storage
 
-  const [resource, setResource] = useState<StorageResource | null>(null)
-  const [payload, setPayload] = useState<FetchedCollectionResource | null>(null)
-  // The stored EDV envelope source when this resource is encrypted (null for
-  // plaintext resources), and which source view the code block shows.
-  const [envelopeText, setEnvelopeText] = useState<string | null>(null)
+  // Which source view the code block shows. The stored EDV envelope source
+  // that backs the alternate view (null for plaintext resources) comes off the
+  // load below.
   const [sourceView, setSourceView] = useState<'decrypted' | 'envelope'>(
     'decrypted'
   )
-  const [isLoading, setIsLoading] = useState(true)
-  const [errorKey, setErrorKey] = useState<string | null>(null)
 
   const { copied, copy, reset: resetCopied } = useResourceSourceCopy()
+
+  const resourceAvailable = Boolean(
+    storage?.hasRemoteStorage && collectionId && resourceId
+  )
+
+  // One load resolves the matched resource, its viewable body, the stored EDV
+  // envelope source behind that body when the resource is encrypted, and the
+  // failure copy's i18n key when the resource cannot be shown. A run that was
+  // superseded resolves null, and its result is dropped.
+  const {
+    data: loaded,
+    loading: isLoading,
+    error: loadError
+  } = useAsyncLoad(
+    async ({
+      isCancelled
+    }): Promise<{
+      resource: StorageResource | null
+      payload: FetchedCollectionResource | null
+      envelopeText: string | null
+      errorKey: string | null
+    } | null> => {
+      if (!storage?.hasRemoteStorage || !collectionId || !resourceId) {
+        return null
+      }
+
+      resetCopied()
+
+      const collections = await storage.listCollections()
+      if (isCancelled()) {
+        return null
+      }
+
+      const matchCollection =
+        collections.find(collection => collection.id === collectionId) ?? null
+
+      if (!matchCollection) {
+        return {
+          resource: null,
+          payload: null,
+          envelopeText: null,
+          errorKey: 'storage.collectionNotFound'
+        }
+      }
+
+      const items = await storage.listCollectionResources({
+        collectionUrl: matchCollection.url
+      })
+      if (isCancelled()) {
+        return null
+      }
+
+      const matchResource = items.find(item => item.id === resourceId) ?? null
+
+      if (!matchResource) {
+        return {
+          resource: null,
+          payload: null,
+          envelopeText: null,
+          errorKey: 'storage.resourceNotFound'
+        }
+      }
+
+      const body = await storage.fetchCollectionResource(matchResource)
+      if (isCancelled()) {
+        return null
+      }
+
+      // The envelope source is kept around for the alternate view.
+      const decrypted = await decryptResourceBody({
+        storage,
+        collectionId,
+        body
+      })
+      if (isCancelled()) {
+        return null
+      }
+
+      if (body.kind === 'json') {
+        const data = decrypted ?? body.data
+        setSourceView('decrypted')
+        return {
+          resource: matchResource,
+          payload: { kind: 'json', data },
+          envelopeText:
+            decrypted !== undefined ? JSON.stringify(body.data, null, 2) : null,
+          errorKey: null
+        }
+      }
+      if (body.kind === 'text') {
+        return {
+          resource: matchResource,
+          payload: { kind: 'text', text: body.text },
+          envelopeText: null,
+          errorKey: null
+        }
+      }
+      // A binary body has no inline JSON/text rendering here.
+      return {
+        resource: matchResource,
+        payload: null,
+        envelopeText: null,
+        errorKey: 'storage.resourceNotViewable'
+      }
+    },
+    [storage, collectionId, resourceId, resetCopied],
+    {
+      enabled: resourceAvailable,
+      onError: err => {
+        log.error('Failed to load collection resource', { err })
+      }
+    }
+  )
+
+  const resource = loaded?.resource ?? null
+  const payload = loaded?.payload ?? null
+  const envelopeText = loaded?.envelopeText ?? null
+  const errorKey = !resourceAvailable
+    ? 'storage.resourceNotFound'
+    : loadError
+      ? 'storage.resourceLoadError'
+      : (loaded?.errorKey ?? null)
 
   // A Verifiable Credential body renders the rich credential card; any other
   // JSON (or text) body renders the generic viewer. `vc` is null in the latter
@@ -202,100 +321,6 @@ export function CollectionResourcePage() {
     title: vc ? credentialTitle(vc) : undefined,
     onSuccess: () => navigate(collectionPath)
   })
-
-  useEffect(() => {
-    let cancelled = false
-
-    async function load() {
-      if (!storage?.hasRemoteStorage || !collectionId || !resourceId) {
-        setErrorKey('storage.resourceNotFound')
-        setIsLoading(false)
-        return
-      }
-
-      setIsLoading(true)
-      setErrorKey(null)
-      resetCopied()
-
-      try {
-        const collections = await storage.listCollections()
-        if (cancelled) {
-          return
-        }
-
-        const matchCollection =
-          collections.find(collection => collection.id === collectionId) ?? null
-
-        if (!matchCollection) {
-          setErrorKey('storage.collectionNotFound')
-          return
-        }
-
-        const items = await storage.listCollectionResources({
-          collectionUrl: matchCollection.url
-        })
-        if (cancelled) {
-          return
-        }
-
-        const matchResource = items.find(item => item.id === resourceId) ?? null
-        setResource(matchResource)
-
-        if (!matchResource) {
-          setErrorKey('storage.resourceNotFound')
-          return
-        }
-
-        const body = await storage.fetchCollectionResource(matchResource)
-        if (cancelled) {
-          return
-        }
-
-        // The envelope source is kept around for the alternate view.
-        const decrypted = await decryptResourceBody({
-          storage,
-          collectionId,
-          body
-        })
-        if (cancelled) {
-          return
-        }
-
-        if (body.kind === 'json') {
-          const data = decrypted ?? body.data
-          setPayload({ kind: 'json', data })
-          setEnvelopeText(
-            decrypted !== undefined ? JSON.stringify(body.data, null, 2) : null
-          )
-          setSourceView('decrypted')
-          return
-        }
-        if (body.kind === 'text') {
-          setPayload({ kind: 'text', text: body.text })
-          setEnvelopeText(null)
-          return
-        }
-        // A binary body has no inline JSON/text rendering here.
-        setPayload(null)
-        setEnvelopeText(null)
-        setErrorKey('storage.resourceNotViewable')
-      } catch (err) {
-        log.error('Failed to load collection resource', { err })
-        if (!cancelled) {
-          setErrorKey('storage.resourceLoadError')
-        }
-      } finally {
-        if (!cancelled) {
-          setIsLoading(false)
-        }
-      }
-    }
-
-    void load()
-    return () => {
-      cancelled = true
-    }
-  }, [storage, collectionId, resourceId, resetCopied])
 
   const jsonText = useMemo(() => {
     if (payload?.kind === 'json') {

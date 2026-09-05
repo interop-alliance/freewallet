@@ -20,7 +20,7 @@ import TextField from '@mui/material/TextField'
 import Typography from '@mui/material/Typography'
 import { MdDeleteOutline } from 'react-icons/md'
 import { useTranslation } from 'react-i18next'
-import { useEffect, useState } from 'react'
+import { useState } from 'react'
 import type { Session } from '@/types/auth'
 import type { RecoveryCodeUnlockMethod } from '@/session/unlockMethods'
 import {
@@ -32,6 +32,7 @@ import {
   revokeRecoveryCode,
   type RecoveryHealthFlag
 } from '@/session/recovery'
+import { useAsyncLoad } from '@/hooks/useAsyncLoad'
 import { RecoveryCodeDisplay } from '@/components/RecoveryCodeDisplay'
 import { formatDate } from '@/lib/viewMappers/formatDate'
 import { createLogger } from '@/lib/log'
@@ -51,20 +52,18 @@ export function RecoveryCodesSection({ session }: { session: Session }) {
   const [revokingKid, setRevokingKid] = useState<string | null>(null)
   const [errorKey, setErrorKey] = useState<string | null>(null)
 
-  useEffect(() => {
-    let cancelled = false
-
-    async function initialLoad() {
+  useAsyncLoad(
+    async ({ isCancelled }) => {
       // Wait out the login-time registry passes first: reading mid-chain
       // could report a stale-seal or mid-repair registry as "no recovery
       // codes" (the listing swallows read failures) and skip the health
       // check for the whole visit.
       await session.registryReady
-      if (cancelled) {
+      if (isCancelled()) {
         return
       }
       const loaded = await listRecoveryCodeEntries({ session })
-      if (cancelled) {
+      if (isCancelled()) {
         return
       }
       setEntries(loaded)
@@ -74,20 +73,16 @@ export function RecoveryCodesSection({ session }: { session: Session }) {
             session,
             entries: loaded
           })
-          if (!cancelled) {
+          if (!isCancelled()) {
             setHealthFlags(flags)
           }
         } catch (err) {
           log.warn('Recovery health check failed', { err })
         }
       }
-    }
-
-    void initialLoad()
-    return () => {
-      cancelled = true
-    }
-  }, [session])
+    },
+    [session]
+  )
 
   const handleGenerate = () => {
     setErrorKey(null)

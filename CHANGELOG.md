@@ -4,6 +4,14 @@
 
 ### Changed
 
+- Every load-on-mount effect under `src/pages/` and `src/components/`
+  rides one hook, `useAsyncLoad` (`src/hooks/useAsyncLoad.ts`), which owns
+  the cancellation guard: a run superseded by a deps change, an unmount, or
+  a later `reload` drops its writes instead of setting state on a stale
+  render. The manual-refresh handlers (`handleSync` on the dashboard and
+  contacts pages, the storage page's refresh keys) call `reload` instead of
+  duplicating the load body. ESLint's `exhaustive-deps` checks the hook's
+  deps list.
 - The delegated log stores over the `id` collection (`annexReach.ts`,
   `standingUnlock.ts`) no longer pass `publicRead`; wallet-core 0.67.0's
   `delegatedWebvhLogStore` reads the collection's read mode off the wallet

@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from 'react'
+import { useMemo, useState } from 'react'
 import Alert from '@mui/material/Alert'
 import Avatar from '@mui/material/Avatar'
 import Box from '@mui/material/Box'
@@ -23,6 +23,7 @@ import { LoadingSpinner } from '@/components/LoadingSpinner'
 import { SearchField } from '@/components/SearchField'
 import { useAuthStore } from '@/stores/authStore'
 import { syncController } from '@/stores/syncController'
+import { useAsyncLoad } from '@/hooks/useAsyncLoad'
 import { useSearch } from '@/hooks/useSearch'
 import { flattenSearchValues } from '@/lib/searchValues'
 import { dashboardStyles } from '@/styles/appStyles'
@@ -60,10 +61,30 @@ const CONTACT_SEARCH_KEYS: FuseOptionKey<StoredContact>[] = [
 export function ContactsPage() {
   const { t } = useTranslation()
   const session = useAuthStore(state => state.session)
-  const [contacts, setContacts] = useState<StoredContact[]>([])
-  const [loading, setLoading] = useState(true)
-  const [loadError, setLoadError] = useState(false)
   const [syncing, setSyncing] = useState(false)
+
+  const { data, loading, error, reload } = useAsyncLoad(
+    async () => {
+      if (!session?.storage) {
+        return []
+      }
+      const stored = await session.storage.listContacts()
+      // The shared list order, so the same account lists identically on
+      // every replica.
+      return [...stored].sort((left, right) =>
+        compareContactsByName(left.contact, right.contact)
+      )
+    },
+    [session],
+    {
+      enabled: Boolean(session?.storage),
+      onError: err => {
+        log.error('Could not load contacts', { err })
+      }
+    }
+  )
+  const contacts = useMemo<StoredContact[]>(() => data ?? [], [data])
+  const loadError = error !== null
 
   const {
     query,
@@ -71,66 +92,13 @@ export function ContactsPage() {
     results: searchedContacts
   } = useSearch({ items: contacts, keys: CONTACT_SEARCH_KEYS })
 
-  // `isStale` lets the mount effect drop a read whose effect was cleaned up;
-  // the imperative refreshes never cancel and pass nothing.
-  const loadContacts = useCallback(
-    async (isStale?: () => boolean) => {
-      if (!session?.storage) {
-        return
-      }
-      const stored = await session.storage.listContacts()
-      if (isStale?.()) {
-        return
-      }
-      // The shared list order, so the same account lists identically on
-      // every replica.
-      setContacts(
-        [...stored].sort((left, right) =>
-          compareContactsByName(left.contact, right.contact)
-        )
-      )
-      setLoadError(false)
-    },
-    [session]
-  )
-
-  useEffect(() => {
-    let cancelled = false
-
-    async function initialLoad() {
-      if (!session?.storage) {
-        return
-      }
-      try {
-        await loadContacts(() => cancelled)
-      } catch (err) {
-        log.error('Could not load contacts', { err })
-        if (!cancelled) {
-          setLoadError(true)
-        }
-      } finally {
-        if (!cancelled) {
-          setLoading(false)
-        }
-      }
-    }
-    initialLoad()
-
-    return () => {
-      cancelled = true
-    }
-  }, [session, loadContacts])
-
   async function handleSync() {
     setSyncing(true)
     try {
       // Kick an immediate replication cycle (no-op for guests / no remote);
       // pulled changes land in the local replica in the background.
       syncController.reSync()
-      await loadContacts()
-    } catch (err) {
-      log.error('Could not refresh contacts', { err })
-      setLoadError(true)
+      await reload()
     } finally {
       // Always release the Sync button, even on a failed refresh.
       setSyncing(false)

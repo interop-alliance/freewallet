@@ -9,7 +9,7 @@
  * Repeats the Applications section's Revoke action; on success it navigates
  * back to the list (the toast survives the navigation).
  */
-import { useEffect, useState } from 'react'
+import { useState } from 'react'
 import { Link as RouterLink, useNavigate, useParams } from 'react-router'
 import { useTranslation } from 'react-i18next'
 import { MdArrowBack } from 'react-icons/md'
@@ -23,6 +23,7 @@ import { formatDate } from '@/lib/viewMappers/formatDate'
 import { DashboardLayout } from '@/components/DashboardLayout'
 import { LoadingSpinner } from '@/components/LoadingSpinner'
 import { RevokeAppDialog } from '@/components/RevokeAppDialog'
+import { useAsyncLoad } from '@/hooks/useAsyncLoad'
 import { useAuthStore } from '@/stores/authStore'
 import { showToast } from '@/stores/toastStore'
 import { dashboardStyles, storageStyles } from '@/styles/appStyles'
@@ -64,47 +65,39 @@ export function ApplicationDetailPage() {
   const { cid } = useParams()
   const session = useAuthStore(state => state.session)
 
-  const [app, setApp] = useState<ConnectedApp | null>(null)
-  // The enrolled clients' signing keys from the verified account log, for the
-  // grant-state check; undefined when the check is unavailable.
-  const [signingKeys, setSigningKeys] = useState<Set<string> | undefined>()
-  // Captured once when the app loads, so grant expiry is evaluated against a
-  // stable timestamp rather than an impure `Date.now()` call during render.
-  const [loadedAt, setLoadedAt] = useState(0)
-  const [loading, setLoading] = useState(true)
   const [revokeDialogOpen, setRevokeDialogOpen] = useState(false)
   const [revoking, setRevoking] = useState(false)
   const [revokeError, setRevokeError] = useState(false)
 
-  useEffect(() => {
-    let cancelled = false
-    async function load() {
+  const { data: view, loading } = useAsyncLoad(
+    async () => {
       if (!session || !cid) {
-        setLoading(false)
-        return
+        return null
       }
-      try {
-        const { apps, signingKeys: keys } = await listApplicationsView({
-          session
-        })
-        if (!cancelled) {
-          setApp(apps.find(entry => entry.cid === cid) ?? null)
-          setSigningKeys(keys)
-          setLoadedAt(Date.now())
-        }
-      } catch (err) {
+      const { apps, signingKeys } = await listApplicationsView({ session })
+      return {
+        app: apps.find(entry => entry.cid === cid) ?? null,
+        signingKeys,
+        // Captured once when the app loads, so grant expiry is evaluated
+        // against a stable timestamp rather than an impure `Date.now()` call
+        // during render.
+        loadedAt: Date.now()
+      }
+    },
+    [session, cid],
+    {
+      enabled: !!session && !!cid,
+      onError: err => {
         log.error('Could not load the connected application', { err })
-      } finally {
-        if (!cancelled) {
-          setLoading(false)
-        }
       }
     }
-    void load()
-    return () => {
-      cancelled = true
-    }
-  }, [session, cid])
+  )
+
+  const app: ConnectedApp | null = view?.app ?? null
+  // The enrolled clients' signing keys from the verified account log, for the
+  // grant-state check; undefined when the check is unavailable.
+  const signingKeys = view?.signingKeys
+  const loadedAt = view?.loadedAt ?? 0
 
   const grantsState = app
     ? deriveAppGrantsState({ app, currentSigningKeys: signingKeys })

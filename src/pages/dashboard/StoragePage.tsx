@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useMemo, useState } from 'react'
 import Alert from '@mui/material/Alert'
 import Box from '@mui/material/Box'
 import Button from '@mui/material/Button'
@@ -13,6 +13,7 @@ import { CollectionSharesDialog } from '@/components/storage/CollectionSharesDia
 import { CollectionsOverview } from '@/components/storage/StorageBrowser'
 import { StorageQuotaCard } from '@/components/storage/StorageQuotaCard'
 import { getCollectionDisplayName } from '@/components/storage/displayUtils'
+import { useAsyncLoad } from '@/hooks/useAsyncLoad'
 import { useAuthStore } from '@/stores/authStore'
 import { useSyncStatusStore } from '@/stores/syncStatusStore'
 import { showToast } from '@/stores/toastStore'
@@ -59,22 +60,11 @@ export const StoragePage = () => {
   const { t } = useTranslation()
   const navigate = useNavigate()
   const session = useAuthStore(state => state.session)
-  const [collections, setCollections] = useState<Array<StorageCollection>>([])
-  // The collection listing's failure copy, held as an i18n KEY and translated
-  // at render: keeping the translated string here would put `t` in the load
-  // effect's dependencies, so a language switch would refetch the whole
-  // listing.
-  const [collectionsErrorKey, setCollectionsErrorKey] = useState<string | null>(
-    null
-  )
-  const [isLoadingCollections, setIsLoadingCollections] = useState(false)
+  const [loadedCollections, setLoadedCollections] = useState<
+    Array<StorageCollection>
+  >([])
   const [isExporting, setIsExporting] = useState(false)
   const [isImporting, setIsImporting] = useState(false)
-  const [collectionsRefreshKey, setCollectionsRefreshKey] = useState(0)
-  const [sharesByCollection, setSharesByCollection] = useState<
-    Record<string, CollectionShare[]>
-  >({})
-  const [sharesRefreshKey, setSharesRefreshKey] = useState(0)
   const [sharesDialogCollectionId, setSharesDialogCollectionId] = useState<
     string | null
   >(null)
@@ -109,103 +99,99 @@ export const StoragePage = () => {
     void loadQuota()
   }, [loadQuota])
 
-  useEffect(() => {
-    if (!hasRemoteStorage || !session?.storage) {
-      return
-    }
-
-    let cancelled = false
-    const storage = session.storage
-
-    async function loadCollections() {
-      try {
-        const remoteCollections = await storage.listCollections()
-        if (cancelled) {
-          return
-        }
-
-        setCollections(remoteCollections)
-
-        const withCounts = await Promise.all(
-          remoteCollections.map(async collection => {
-            try {
-              const items = await storage.listCollectionResources({
-                collectionUrl: collection.url
-              })
-              return { ...collection, totalItems: items.length }
-            } catch (err) {
-              log.warn('Failed to count resources for collection', {
-                collectionId: collection.id,
-                err
-              })
-              return collection
-            }
-          })
-        )
-        if (cancelled) {
-          return
-        }
-        setCollections(withCounts)
-      } catch (error) {
-        log.error('Failed to list storage collections', { err: error })
-        if (!cancelled) {
-          setCollectionsErrorKey('storage.collectionsLoadError')
-          setCollections([])
-        }
-      } finally {
-        if (!cancelled) {
-          setIsLoadingCollections(false)
-        }
-      }
-    }
-
-    void (async () => {
-      await Promise.resolve()
-      if (cancelled) {
+  // The listing lands in two stages: the bare collections first, then the same
+  // list with each collection's resource count.
+  const {
+    loading: isLoadingCollections,
+    error: collectionsError,
+    reload: reloadCollections
+  } = useAsyncLoad(
+    async ({ isCancelled }) => {
+      const storage = session?.storage
+      if (!hasRemoteStorage || !storage) {
         return
       }
 
-      setIsLoadingCollections(true)
-      setCollectionsErrorKey(null)
-      await Promise.all([loadQuota(), loadCollections()])
-    })()
+      // The quota load runs beside the listing and reports through its own
+      // status state.
+      void loadQuota()
 
-    return () => {
-      cancelled = true
+      const remoteCollections = await storage.listCollections()
+      if (isCancelled()) {
+        return
+      }
+
+      setLoadedCollections(remoteCollections)
+
+      const withCounts = await Promise.all(
+        remoteCollections.map(async collection => {
+          try {
+            const items = await storage.listCollectionResources({
+              collectionUrl: collection.url
+            })
+            return { ...collection, totalItems: items.length }
+          } catch (err) {
+            log.warn('Failed to count resources for collection', {
+              collectionId: collection.id,
+              err
+            })
+            return collection
+          }
+        })
+      )
+      if (isCancelled()) {
+        return
+      }
+      setLoadedCollections(withCounts)
+    },
+    [hasRemoteStorage, session, loadQuota],
+    {
+      enabled: hasRemoteStorage && Boolean(session?.storage),
+      onError: err => {
+        log.error('Failed to list storage collections', { err })
+      }
     }
-  }, [hasRemoteStorage, session, collectionsRefreshKey, loadQuota])
+  )
+
+  const collections = useMemo(
+    () => (collectionsError ? [] : loadedCollections),
+    [collectionsError, loadedCollections]
+  )
+  // The collection listing's failure copy, derived as an i18n KEY and
+  // translated at render: keeping the translated string here would put `t` in
+  // the load's dependencies, so a language switch would refetch the whole
+  // listing.
+  const collectionsErrorKey = collectionsError
+    ? 'storage.collectionsLoadError'
+    : null
 
   // The reader rosters behind each collection row's "Shared" chip. A failure
   // is non-blocking: the chips simply do not appear, and the storage listing
   // itself stays usable.
-  useEffect(() => {
-    if (!hasRemoteStorage || !session) {
-      return
-    }
-
-    let cancelled = false
-    const activeSession = session
-
-    async function loadShares() {
-      try {
-        const record = await listSharedCollections({ session: activeSession })
-        if (!cancelled) {
-          setSharesByCollection(record)
-        }
-      } catch (err) {
+  const {
+    data: loadedShares,
+    error: sharesError,
+    reload: reloadShares
+  } = useAsyncLoad(
+    async (): Promise<Record<string, CollectionShare[]>> => {
+      if (!hasRemoteStorage || !session) {
+        return {}
+      }
+      return listSharedCollections({ session })
+    },
+    [hasRemoteStorage, session],
+    {
+      enabled: hasRemoteStorage && Boolean(session),
+      onError: err => {
         log.error('Could not load the collection shares', { err })
-        if (!cancelled) {
-          setSharesByCollection({})
-        }
       }
     }
+  )
 
-    void loadShares()
-
-    return () => {
-      cancelled = true
-    }
-  }, [hasRemoteStorage, session, sharesRefreshKey])
+  const sharesByCollection = useMemo(
+    () => (sharesError ? {} : (loadedShares ?? {})),
+    [loadedShares, sharesError]
+  )
 
   const handleExportSpace = async () => {
     if (!session?.storage) {
@@ -274,7 +260,7 @@ export const StoragePage = () => {
           throw new Error(t('storage.importSpaceRequiresRemote'))
         }
         spaceSummary = await session.storage.importSpace({ tarFile: file })
-        setCollectionsRefreshKey(key => key + 1)
+        void reloadCollections()
       }
 
       if (credentials.length > 0) {
@@ -418,7 +404,9 @@ export const StoragePage = () => {
           collectionName={sharesDialogCollectionName}
           shares={sharesByCollection[sharesDialogCollectionId] ?? []}
           onClose={() => setSharesDialogCollectionId(null)}
-          onRemoved={() => setSharesRefreshKey(key => key + 1)}
+          onRemoved={() => {
+            void reloadShares()
+          }}
         />
       )}
     </DashboardLayout>

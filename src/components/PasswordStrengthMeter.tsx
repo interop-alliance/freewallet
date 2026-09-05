@@ -8,10 +8,11 @@
  * jsdom (see the note in `passwordScorer.ts`). Exercise the meter via the
  * Playwright (browser) signup tests instead.
  */
-import { useDeferredValue, useEffect, useMemo, useState } from 'react'
+import { useDeferredValue, useEffect, useMemo } from 'react'
 import { Box, Stack, Typography } from '@mui/material'
 import { useTranslation } from 'react-i18next'
-import { getCachedScorer, loadScorer, type Scorer } from '@/lib/passwordScorer'
+import { getCachedScorer, loadScorer } from '@/lib/passwordScorer'
+import { useAsyncLoad } from '@/hooks/useAsyncLoad'
 import { passwordStrengthStyles } from '@/styles/appStyles'
 
 const SEGMENT_COUNT = 5
@@ -58,33 +59,20 @@ export function PasswordStrengthMeter({
   shortScoreWord: string
 }) {
   const { i18n } = useTranslation()
-  // Lazy initializer: a bare `useState(cachedScorer)` would treat the cached
-  // scorer function as an initializer and call it with no arguments (scoring
-  // `undefined`), so wrap it to return the function itself as the state value.
-  const [scorer, setScorer] = useState<Scorer | null>(() => getCachedScorer())
+  // The scorer travels wrapped in an object: a bare function as a state value
+  // would be taken for a state initializer / updater and called with no
+  // arguments (scoring `undefined`) instead of being stored.
+  const { data, error } = useAsyncLoad(
+    async () => ({ scorer: await loadScorer({ language: i18n.language }) }),
+    [i18n.language]
+  )
+  // Until the engine lands, the module's cached scorer (from an earlier mount)
+  // stands in.
+  const scorer = data?.scorer ?? getCachedScorer()
   // Set when the engine fails to load. The meter cannot measure strength, so it
   // degrades to an inert bar and reports a passing score -- gating submission on
   // length alone rather than blocking it until a full page reload.
-  const [loadFailed, setLoadFailed] = useState(false)
-
-  useEffect(() => {
-    let cancelled = false
-    loadScorer({ language: i18n.language })
-      .then(fn => {
-        if (!cancelled) {
-          setLoadFailed(false)
-          setScorer(() => fn)
-        }
-      })
-      .catch(() => {
-        if (!cancelled) {
-          setLoadFailed(true)
-        }
-      })
-    return () => {
-      cancelled = true
-    }
-  }, [i18n.language])
+  const loadFailed = !!error
 
   // Scoring is a synchronous zxcvbn pass, heavy enough to be felt between
   // keystrokes, so it runs against a deferred copy of the passphrase: the field

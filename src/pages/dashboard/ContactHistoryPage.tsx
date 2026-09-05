@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useState } from 'react'
 import Alert from '@mui/material/Alert'
 import Box from '@mui/material/Box'
 import Button from '@mui/material/Button'
@@ -17,6 +17,7 @@ import {
 } from '@interop/social-core'
 import { DashboardLayout } from '@/components/DashboardLayout'
 import { LoadingSpinner } from '@/components/LoadingSpinner'
+import { useAsyncLoad } from '@/hooks/useAsyncLoad'
 import { useAuthStore } from '@/stores/authStore'
 import { showToast } from '@/stores/toastStore'
 import { NotFoundPage } from '@/pages/NotFoundPage'
@@ -48,47 +49,35 @@ export function ContactHistoryPage() {
   const navigate = useNavigate()
   const { contactId } = useParams()
   const session = useAuthStore(state => state.session)
-  const [revisions, setRevisions] = useState<ContactRevisionPayload[]>([])
-  const [loading, setLoading] = useState(true)
   const [expandedId, setExpandedId] = useState<string | null>(null)
   const [restoring, setRestoring] = useState(false)
   const [restoreError, setRestoreError] = useState(false)
 
-  useEffect(() => {
-    let cancelled = false
-
-    async function load() {
+  const { data, loading } = useAsyncLoad(
+    async () => {
       if (!session?.storage || !contactId) {
-        return
+        return []
       }
-      try {
-        // The route param is the row id; revisions are keyed by the LOGICAL
-        // contact id inside the head payload (they differ for mobile-authored
-        // contacts), so resolve through the stored contact first.
-        const stored = await session.storage.loadContact({ id: contactId })
-        if (!stored) {
-          return
-        }
-        const items = await session.storage.listContactRevisions({
-          contactId: stored.contactId
-        })
-        if (!cancelled) {
-          setRevisions(items)
-        }
-      } catch (err) {
+      // The route param is the row id; revisions are keyed by the LOGICAL
+      // contact id inside the head payload (they differ for mobile-authored
+      // contacts), so resolve through the stored contact first.
+      const stored = await session.storage.loadContact({ id: contactId })
+      if (!stored) {
+        return []
+      }
+      return session.storage.listContactRevisions({
+        contactId: stored.contactId
+      })
+    },
+    [session, contactId],
+    {
+      enabled: Boolean(session?.storage && contactId),
+      onError: err => {
         log.error('Could not load contact history', { err })
-      } finally {
-        if (!cancelled) {
-          setLoading(false)
-        }
       }
     }
-    load()
-
-    return () => {
-      cancelled = true
-    }
-  }, [session, contactId])
+  )
+  const revisions: ContactRevisionPayload[] = data ?? []
 
   if (!contactId) {
     return <NotFoundPage />

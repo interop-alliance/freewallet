@@ -63,6 +63,7 @@ import { PassphraseStrengthField } from '@/components/PassphraseStrengthField'
 import { formatDate } from '@/lib/viewMappers/formatDate'
 import { RecoveryCodesSection } from '@/components/RecoveryCodesSection'
 import { EnrolledClientsSection } from '@/components/EnrolledClientsSection'
+import { useAsyncLoad } from '@/hooks/useAsyncLoad'
 import { dashboardStyles } from '@/styles/appStyles'
 import { type ReactNode, useEffect, useState } from 'react'
 import { useAuthStore } from '@/stores/authStore'
@@ -177,27 +178,24 @@ export function SettingsPage() {
   const [handleSaving, setHandleSaving] = useState(false)
   const [handleSaved, setHandleSaved] = useState(false)
 
-  useEffect(() => {
-    let cancelled = false
-    async function loadHandle() {
+  useAsyncLoad(
+    async ({ isCancelled }) => {
       if (!session) {
         return
       }
-      try {
-        const current = await readLoginHandle({ session })
-        if (!cancelled) {
-          setHandle(current)
-          setSavedHandle(current)
-        }
-      } catch (err) {
+      const current = await readLoginHandle({ session })
+      if (!isCancelled()) {
+        setHandle(current)
+        setSavedHandle(current)
+      }
+    },
+    [session],
+    {
+      onError: (err: unknown) => {
         log.error('Could not load the login handle', { err })
       }
     }
-    void loadHandle()
-    return () => {
-      cancelled = true
-    }
-  }, [session])
+  )
 
   const handleSaveHandle = async () => {
     if (!session) {
@@ -555,12 +553,8 @@ export function SettingsPage() {
   // passphrase entry (the registry's backfill point), falling back to a plain
   // read; a transient session reads only. A read failure shows a non-blocking
   // load error but leaves the rest of the section working.
-  useEffect(() => {
-    if (!session || !canListUnlockMethods) {
-      return
-    }
-    let cancelled = false
-    async function loadRegistry() {
+  useAsyncLoad(
+    async ({ isCancelled }) => {
       if (!session) {
         return
       }
@@ -570,11 +564,11 @@ export function SettingsPage() {
         // about to mend (and hand ceremonies a registry view the passes are
         // still rewriting).
         await session.registryReady
-        if (cancelled) {
+        if (isCancelled()) {
           return
         }
         const record = await loadUnlockRegistry({ session })
-        if (!cancelled) {
+        if (!isCancelled()) {
           setUnlockRegistry(record)
           setRegistryLoaded(true)
           setRegistryLoadError(false)
@@ -582,7 +576,7 @@ export function SettingsPage() {
         }
       } catch (err) {
         log.error('Could not load the unlock methods', { err })
-        if (!cancelled) {
+        if (!isCancelled()) {
           setRegistryLoaded(true)
           setRegistryLoadError(true)
           setRegistryStaleSeal(
@@ -591,12 +585,10 @@ export function SettingsPage() {
           )
         }
       }
-    }
-    void loadRegistry()
-    return () => {
-      cancelled = true
-    }
-  }, [session, canListUnlockMethods])
+    },
+    [session],
+    { enabled: !!session && canListUnlockMethods }
+  )
   // The Key Management section renders only when a KMS server is
   // configured for a non-guest session (see initSession.ts).
   const kmsConfigured = !!KMS_SERVER_URL && !session?.isGuest

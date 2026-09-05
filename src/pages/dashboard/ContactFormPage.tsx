@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useState } from 'react'
 import Box from '@mui/material/Box'
 import Button from '@mui/material/Button'
 import IconButton from '@mui/material/IconButton'
@@ -17,6 +17,7 @@ import {
 } from '@interop/social-core'
 import { DashboardLayout } from '@/components/DashboardLayout'
 import { LoadingSpinner } from '@/components/LoadingSpinner'
+import { useAsyncLoad } from '@/hooks/useAsyncLoad'
 import { useAuthStore } from '@/stores/authStore'
 import { NotFoundPage } from '@/pages/NotFoundPage'
 import { contactFormStyles } from '@/styles/appStyles'
@@ -41,8 +42,6 @@ export function ContactFormPage() {
   const session = useAuthStore(state => state.session)
   const isEditing = Boolean(contactId)
 
-  const [loading, setLoading] = useState(isEditing)
-  const [notFound, setNotFound] = useState(false)
   const [saving, setSaving] = useState(false)
   const [errorMessage, setErrorMessage] = useState('')
 
@@ -65,64 +64,63 @@ export function ContactFormPage() {
   // positions of every row after it.
   const [invalidDidRows, setInvalidDidRows] = useState<number[]>([])
 
-  useEffect(() => {
-    let cancelled = false
-
-    async function loadExisting() {
-      if (!isEditing || !session?.storage || !contactId) {
-        return
+  const {
+    data: found,
+    loading,
+    error: loadError
+  } = useAsyncLoad(
+    async ({ isCancelled }) => {
+      if (!session?.storage || !contactId) {
+        return true
       }
-      try {
-        const stored = await session.storage.loadContact({ id: contactId })
-        if (cancelled) {
-          return
-        }
-        if (!stored) {
-          setNotFound(true)
-          return
-        }
-        const { contact } = stored
-        setExistingContact(contact)
-        setDisplayName(contact.displayName)
-        setGivenName(contact.givenName ?? '')
-        setFamilyName(contact.familyName ?? '')
-        setOrganization(contact.organization ?? '')
-        setNote(contact.note ?? '')
-        setPhoneNumbers(
-          (contact.phoneNumbers ?? []).map(phone => ({
-            label: phone.label,
-            value: phone.number,
-            digits: phone.digits,
-            countryCode: phone.countryCode,
-            id: phone.id
-          }))
-        )
-        setEmailAddresses(
-          (contact.emailAddresses ?? []).map(email => ({
-            label: email.label,
-            value: email.email,
-            id: email.id
-          }))
-        )
-        // `getDids` dedupes, so a contact merged from another replica does not
-        // present the same DID on two rows; `buildContact` dedupes again, for
-        // the duplicate the user can still type in by hand.
-        setDids(getDids(contact))
-      } catch (err) {
+      const stored = await session.storage.loadContact({ id: contactId })
+      if (isCancelled()) {
+        return true
+      }
+      if (!stored) {
+        return false
+      }
+      const { contact } = stored
+      setExistingContact(contact)
+      setDisplayName(contact.displayName)
+      setGivenName(contact.givenName ?? '')
+      setFamilyName(contact.familyName ?? '')
+      setOrganization(contact.organization ?? '')
+      setNote(contact.note ?? '')
+      setPhoneNumbers(
+        (contact.phoneNumbers ?? []).map(phone => ({
+          label: phone.label,
+          value: phone.number,
+          digits: phone.digits,
+          countryCode: phone.countryCode,
+          id: phone.id
+        }))
+      )
+      setEmailAddresses(
+        (contact.emailAddresses ?? []).map(email => ({
+          label: email.label,
+          value: email.email,
+          id: email.id
+        }))
+      )
+      // `getDids` dedupes, so a contact merged from another replica does not
+      // present the same DID on two rows; `buildContact` dedupes again, for
+      // the duplicate the user can still type in by hand.
+      setDids(getDids(contact))
+      return true
+    },
+    [session, contactId],
+    {
+      enabled: isEditing && !!session?.storage && !!contactId,
+      onError: err => {
         log.error('Could not load contact', { err })
-        setNotFound(true)
-      } finally {
-        if (!cancelled) {
-          setLoading(false)
-        }
       }
     }
-    loadExisting()
+  )
 
-    return () => {
-      cancelled = true
-    }
-  }, [session, contactId, isEditing])
+  // A contact the store did not have, and a load that threw, both send the
+  // page to the not-found view.
+  const notFound = found === false || loadError !== null
 
   /**
    * Applies a patch to one row of a phone / email list.

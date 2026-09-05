@@ -38,6 +38,7 @@ import {
 } from '@interop/wallet-core/enrollment'
 import type { Session } from '@/types/auth'
 import { accountCeremonyContext } from '@/session/accountCeremonyContext'
+import { useAsyncLoad } from '@/hooks/useAsyncLoad'
 import { useCopyToClipboard } from '@/hooks/useCopyToClipboard'
 import { OnboardConsentPanel } from '@/components/OnboardConsentPanel'
 import { createLogger } from '@/lib/log'
@@ -90,20 +91,29 @@ export function OnboardInviteCard({
     request: EnrollmentRequest
     label?: string
   } | null>(null)
-  // Bumping this re-runs the create-and-poll effect with a fresh exchange.
-  const [attempt, setAttempt] = useState(0)
   const abortRef = useRef<AbortController | null>(null)
   const { copied, copy } = useCopyToClipboard()
 
+  // Cancels the poll when the card goes away; a run that starts while one is
+  // in flight (a regenerated invite, a fresh session) aborts it itself, and
+  // the countdown aborts it on expiry.
   useEffect(() => {
-    const controller = new AbortController()
-    abortRef.current = controller
-    let cancelled = false
+    return () => {
+      abortRef.current?.abort(
+        new Error('The wallet onboarding invite was closed.')
+      )
+    }
+  }, [])
 
-    /**
-     * Creates the exchange, then polls it until the other wallet responds.
-     */
-    async function inviteAnotherWallet() {
+  // Creates the exchange, then polls it until the other wallet responds.
+  // `reload` is the regenerate-this-invite action.
+  const { reload: regenerateInvite } = useAsyncLoad(
+    async ({ isCancelled }) => {
+      abortRef.current?.abort(
+        new Error('The wallet onboarding invite was closed.')
+      )
+      const controller = new AbortController()
+      abortRef.current = controller
       setPhase('creating')
       setInteractionUrl('')
       setConsent(null)
@@ -125,7 +135,7 @@ export function OnboardInviteCard({
             controller: context.controller
           })
         })
-        if (cancelled) {
+        if (isCancelled()) {
           return
         }
         exchangeUrl = created.exchangeUrl
@@ -134,7 +144,7 @@ export function OnboardInviteCard({
         setPhase('live')
       } catch (err) {
         log.error('Could not create the wallet onboarding invite', { err })
-        if (!cancelled) {
+        if (!isCancelled()) {
           setPhase('error')
         }
         return
@@ -144,7 +154,7 @@ export function OnboardInviteCard({
           exchangeUrl,
           signal: controller.signal
         })
-        if (cancelled) {
+        if (isCancelled()) {
           return
         }
         // A malformed envelope has one remedy -- a fresh code -- so it ends
@@ -161,7 +171,7 @@ export function OnboardInviteCard({
           setPhase('invalid')
         }
       } catch (err) {
-        if (cancelled || controller.signal.aborted) {
+        if (isCancelled() || controller.signal.aborted) {
           return
         }
         // Matched by name, not instanceof: the class lives in
@@ -174,15 +184,9 @@ export function OnboardInviteCard({
         log.error('Polling the wallet onboarding invite failed', { err })
         setPhase('error')
       }
-    }
-
-    void inviteAnotherWallet()
-
-    return () => {
-      cancelled = true
-      controller.abort(new Error('The wallet onboarding invite was closed.'))
-    }
-  }, [attempt, session])
+    },
+    [session]
+  )
 
   // The countdown, running only while a code is on offer. Reaching zero ends
   // the poll -- the server's own exchange TTL is longer, so an expired card
@@ -324,7 +328,7 @@ export function OnboardInviteCard({
               sx={{ borderRadius: 2 }}
               onClick={() => {
                 setConsent(null)
-                setAttempt(current => current + 1)
+                void regenerateInvite()
               }}
             >
               {t('settings.onboardGenerateNew')}
