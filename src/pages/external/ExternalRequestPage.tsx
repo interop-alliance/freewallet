@@ -31,10 +31,7 @@ import { useTranslation } from 'react-i18next'
 import { useAuthStore } from '@/stores/authStore'
 import { loginWithPassphrase } from '@/session/initSession'
 import { loginErrorKey } from '@/session/loginErrorKey'
-import { recordWalletLogin } from '@/session/walletLoginActivity'
-import { checkRecoveryHealth } from '@/session/recovery'
-import { registerWallet } from '@/lib/registerWallet'
-import { showToast } from '@/stores/toastStore'
+import { completeAppLogin } from '@/session/completeAppLogin'
 import { useCopyToClipboard } from '@/hooks/useCopyToClipboard'
 import { chapiStyles } from '@/styles/appStyles'
 import type { Session } from '@/types/auth'
@@ -110,7 +107,6 @@ export function ExternalRequestPage() {
   const navigate = useNavigate()
   const location = useLocation()
   const liveSession = useAuthStore(state => state.session)
-  const adoptSession = useAuthStore(state => state.login)
   const { copied, copy } = useCopyToClipboard()
   const [pageState, setPageState] = useState<PageState>('opening')
   const [blockReason, setBlockReason] = useState<BlockReason | null>(null)
@@ -254,36 +250,15 @@ export function ExternalRequestPage() {
         return
       }
       loggedIn = result.session
-      await loggedIn.storageReady
+      // The session is adopted app-wide and stays on this page, so the
+      // shared post-login sequence runs without its navigation step.
+      await completeAppLogin({ session: loggedIn, t })
     } catch (err) {
       setLoginError(
         t(loginErrorKey({ err, label: 'External request login' }).key)
       )
       return
     }
-    // The session is adopted app-wide, so the post-login steps `/login` runs
-    // follow it here too: the CHAPI handler registration (otherwise never
-    // installed for this session), the unlock-methods backfill, the recovery
-    // health check, and the could-not-remember warning. All best-effort.
-    adoptSession(loggedIn)
-    recordWalletLogin({ session: loggedIn })
-    void registerWallet()
-    if (loggedIn.userKeyPersistFailed) {
-      showToast({
-        message: t('auth.login.rememberBrowserWarning'),
-        severity: 'warning'
-      })
-    }
-    void checkRecoveryHealth({ session: loggedIn })
-      .then(flags => {
-        if (flags.length > 0) {
-          showToast({
-            message: t('auth.login.recoveryHealthWarning'),
-            severity: 'warning'
-          })
-        }
-      })
-      .catch(err => log.warn('Recovery health check failed', { err }))
     setSession(loggedIn)
     try {
       await prepareConsent({ loggedIn, requestProfile: profile })

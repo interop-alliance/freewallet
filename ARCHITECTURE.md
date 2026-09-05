@@ -81,7 +81,8 @@ src/session/        Session bootstrap and the account ceremonies -- the
                     registryReseal.ts, userKeyAdoption.ts, userKeyCascade.ts,
                     appKeySweep.ts, clientAnnexGc.ts
   Shared parts      rosterStore.ts, annexReach.ts, recordEnvelope.ts,
-                    accountCeremonyContext.ts, completePopupLogin.ts,
+                    accountCeremonyContext.ts, completeAppLogin.ts (the
+                    page-level post-login sequence), completePopupLogin.ts,
                     walletLoginActivity.ts
 src/types/          Shared TypeScript interfaces
 src/i18n/           i18next config + locale JSON files

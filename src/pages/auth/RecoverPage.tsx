@@ -10,12 +10,11 @@ import Typography from '@mui/material/Typography'
 import { useTranslation } from 'react-i18next'
 import { Link as RouterLink, useNavigate } from 'react-router'
 import type { SubmitEvent } from 'react'
-import { recordWalletLogin } from '@/session/walletLoginActivity'
+import { completeAppLogin } from '@/session/completeAppLogin'
 import { useState } from 'react'
 import { AuthPageHeader } from '@/components/AuthPageHeader'
 import { PassphraseStrengthField } from '@/components/PassphraseStrengthField'
 import { authStyles } from '@/styles/appStyles'
-import { useAuthStore } from '@/stores/authStore'
 import { PASSWORD_RULES } from '@/app.config'
 import { loginWithPassphrase } from '@/session/initSession'
 import {
@@ -56,7 +55,6 @@ const log = createLogger('fw:ui:recover')
 export function RecoverPage() {
   const { t } = useTranslation()
   const navigate = useNavigate()
-  const login = useAuthStore(state => state.login)
   const [step, setStep] = useState<'code' | 'passphrase' | 'done'>('code')
   const [busy, setBusy] = useState(false)
   const [errorKey, setErrorKey] = useState<string | null>(null)
@@ -216,9 +214,7 @@ export function RecoverPage() {
         setErrorKey('auth.recover.errors.loginFailed')
         return
       }
-      await session.storageReady
-      login(session)
-      recordWalletLogin({ session })
+      await completeAppLogin({ session, t, navigate })
       if (remembered) {
         // Fire-and-forget behind the login-time registry chain
         // (`session.registryReady`), so the backfill cannot race the
@@ -231,7 +227,6 @@ export function RecoverPage() {
           updateRegistryAfterRecovery({ session, outcome })
         )
       }
-      navigate('/dashboard', { replace: true })
     } catch (err) {
       log.error('Recovery login failed', { err })
       setErrorKey('auth.recover.errors.loginFailed')

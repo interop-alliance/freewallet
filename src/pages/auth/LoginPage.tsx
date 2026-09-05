@@ -23,8 +23,7 @@ import type { SubmitEvent } from 'react'
 import { useEffect, useState } from 'react'
 import { loginWithPassphrase, loginWithPasskey } from '@/session/initSession'
 import { loginErrorKey } from '@/session/loginErrorKey'
-import { checkRecoveryHealth } from '@/session/recovery'
-import { recordWalletLogin } from '@/session/walletLoginActivity'
+import { completeAppLogin } from '@/session/completeAppLogin'
 import { showToast } from '@/stores/toastStore'
 import type { ClientWebvhUpdateKeys } from '@interop/wallet-core/webvh'
 import {
@@ -68,7 +67,6 @@ const FORGETTABLE_ERROR_KEYS = new Set([
 export function LoginPage() {
   const { t } = useTranslation()
   const navigate = useNavigate()
-  const login = useAuthStore(state => state.login)
   const location = useLocation()
   const state = location.state as AuthLocationState | null | undefined
   const bannerText = state?.authMessageKey
@@ -183,45 +181,16 @@ export function LoginPage() {
           state: { authMessageKey: 'auth.errors.profileNotFound' }
         })
       }
-      // Session creation fired `ensureUserCollections` as `session.storageReady`;
-      // wait for the collections to be provisioned/opened before proceeding.
-      // The login-time registry passes run AFTER navigation, serialized on
-      // `session.registryReady` -- navigation deliberately does not wait on
-      // them (FW-300).
-      await session.storageReady
-      login(session)
-      recordWalletLogin({ session })
-      // The roster read adopted a rotated user key but could not write this
-      // browser's copy of it (the client-key record): the session is fine,
-      // so warn rather than fail the login.
-      if (session.userKeyPersistFailed) {
-        showToast({
-          message: t('auth.login.rememberBrowserWarning'),
-          severity: 'warning'
-        })
-      }
-      // The login-time recovery health check: a recovery delegation signed by
-      // a since-removed client rots silently and would brick recovery exactly
-      // when it is needed, so nudge now rather than then.
-      void checkRecoveryHealth({ session })
-        .then(flags => {
-          if (flags.length > 0) {
-            showToast({
-              message: t('auth.login.recoveryHealthWarning'),
-              severity: 'warning'
-            })
-          }
-        })
-        .catch(err => log.warn('Recovery health check failed', { err }))
       if (session.recoverySpendPrompt) {
         // The login resumed a torn recovery spend that still owes the
         // show-once replacement-code display: render it here and gate the
         // record completion (and navigation) on the save confirm, exactly
         // as the /recover page does.
+        await completeAppLogin({ session, t })
         setSpendPrompt(session.recoverySpendPrompt)
         return
       }
-      navigate('/dashboard', { replace: true })
+      await completeAppLogin({ session, t, navigate })
     } catch (err) {
       const { key } = loginErrorKey({ err, label: 'Login' })
       setErrorKey(key)
@@ -313,10 +282,7 @@ export function LoginPage() {
         webvhUpdateKeys: enrollment.webvhUpdateKeys,
         passphrase: enrollment.passphrase
       })
-      await session.storageReady
-      login(session)
-      recordWalletLogin({ session })
-      navigate('/dashboard', { replace: true })
+      await completeAppLogin({ session, t, navigate })
     } catch (err) {
       if (err instanceof EnrollmentPendingError) {
         setEnrollErrorKey('auth.enroll.pending')
@@ -406,15 +372,7 @@ export function LoginPage() {
         setErrorKey('auth.errors.passkeyNoAccount')
         return
       }
-      // Session creation fired `ensureUserCollections` as `session.storageReady`;
-      // wait for the collections to be provisioned/opened before proceeding.
-      // The login-time registry passes run AFTER navigation, serialized on
-      // `session.registryReady` -- navigation deliberately does not wait on
-      // them (FW-300).
-      await session.storageReady
-      login(session)
-      recordWalletLogin({ session })
-      navigate('/dashboard', { replace: true })
+      await completeAppLogin({ session, t, navigate })
     } catch (err) {
       if (err instanceof PasskeyCancelledError) {
         // The user dismissed or aborted the ceremony -- nothing to report.

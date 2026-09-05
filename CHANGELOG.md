@@ -28,6 +28,14 @@
   matching wallet-core 0.66.0, which anchors the store's controller view
   itself through `setMinimumControllerVersion`. `ladderSignedRosterStoreFor`
   is gone.
+- The five page-level login sites (the login page's passphrase, passkey,
+  and enrollment-completion handlers, the external request page's in-place
+  login, and the recovery page's final login) run one post-login sequence,
+  `completeAppLogin` (`src/session/completeAppLogin.ts`): storage-ready
+  wait, store adoption, Login activity, CHAPI handler registration, the
+  could-not-remember warning, the recovery health nudge, and navigation.
+  The passkey and enrollment-completion handlers previously dropped the
+  warning and the nudge.
 - The unlock-methods registry write no longer re-creates the
   `unlock-methods` collection before its first PUT. The collection is in the
   provisioning roster, so every account already has it, and the ensure cost
