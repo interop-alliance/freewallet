@@ -1426,15 +1426,15 @@ export class StorageManager {
    * carries the replica. The collection is plaintext and keyed by the
    * credential's content cid, so a row's id IS its cid.
    *
-   * `skipCids` names the cids whose bodies the caller does not need (the
-   * app-key sweep already reaches those through `deleteCredential`, which
-   * retracts their public copies). They are left out of the result and, more
-   * to the point, out of the remote body fetches -- so the sweep costs one
-   * remote listing plus a `GET` per public copy that has NO private row,
-   * rather than a `GET` per public credential on every login.
+   * `skipCids` names the cids the caller does not need (the app-key sweep
+   * already reaches those through `deleteCredential`, which retracts their
+   * public copies). They are left out of the result. The remote collection
+   * is read by paging its `changes` feed, so the sweep costs a page walk of
+   * the public collection per login rather than a `GET` per public
+   * credential.
    *
-   * A remote listing or fetch failure throws: an unreadable remote collection
-   * is not an empty one.
+   * A remote listing failure throws: an unreadable remote collection is not
+   * an empty one.
    *
    * @param options {object}
    * @param [options.skipCids] {Set<string>}
@@ -1456,27 +1456,14 @@ export class StorageManager {
     if (!remote) {
       return [...byCid.values()]
     }
-    const resources = await remote.listSyncedResources({
+    const resources = await remote.listSyncedDocuments({
       logicalKey: 'publicCredentials'
     })
-    const missing = resources
-      .map(({ id }) => id)
-      .filter(id => wanted(id) && !byCid.has(id))
-    const bodies = await Promise.all(
-      missing.map(id =>
-        remote.getSyncedResource({
-          logicalKey: 'publicCredentials',
-          resourceId: id
-        })
-      )
-    )
-    missing.forEach((cid, index) => {
-      const body = bodies[index]
-      if (body === undefined) {
-        return
+    for (const { id: cid, data } of resources) {
+      if (wanted(cid) && !byCid.has(cid)) {
+        byCid.set(cid, { cid, vc: data as unknown as IVerifiableCredential })
       }
-      byCid.set(cid, { cid, vc: body as unknown as IVerifiableCredential })
-    })
+    }
     return [...byCid.values()]
   }
 

@@ -4,6 +4,31 @@
 
 ### Changed
 
+- Issuer-registry lookups are cached on two layers
+  (`src/lib/registryManager.ts`), each entry fresh for five minutes and both
+  layers cleared at logout. `lookupDid` is memoized by DID, with concurrent
+  lookups of one DID sharing a single run, and the DID-independent registry
+  bodies (each `dcc-legacy` list file, each `oidf` entity configuration) are
+  cached by URL one layer down, read to completion under the per-hop
+  deadline; concurrent misses of one URL share one request. A dashboard
+  with N credentials now downloads each registry body once instead of N
+  times per registry. Failures are not kept: a body that threw, answered
+  non-ok, or would not parse, and a lookup that left a registry unchecked or
+  ran on the fallback list, are retried by the next lookup.
+- The replica-less backend (`RemoteDirectStore`, every transient session
+  and the CHAPI popup) lists a synced collection through was-client's new
+  `Collection.documents()`, the snapshot walk over the `changes` feed, under
+  the bound invocation capability (`WASRemoteStore.listSyncedDocuments`)
+  instead of listing ids and then fetching one resource per signed GET. The
+  credential and app-key scans, history, public credentials, contacts, and
+  contact revisions all ride it, as does the app-key sweep's remote consult
+  of `public-credentials`; `listSyncedResources` is gone. Tombstones drop, a
+  resource rewritten mid-walk takes its latest feed state, a live entry the
+  server could not read fails the listing rather than dropping the
+  resource, and a missing collection lists as empty. The cost now grows per
+  page rather than per resource. The unknown-epoch refresh and the
+  decrypt-failure classification are unchanged. Requires
+  `@interop/was-client` 0.48.0.
 - `loginWithPassphrase` and `loginWithPasskey` are thin entries over one
   `loginWithUnlockCredential` body in `src/session/initSession.ts`: the
   routing decision, the transient arm, the keyring fetch, the

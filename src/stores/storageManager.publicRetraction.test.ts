@@ -68,11 +68,8 @@ function makeFakeRemote({
   const rows = new Map<string, Json>(Object.entries(resources))
   const fake = {
     spaceId: 's-space',
-    listSyncedResources: vi.fn(async () =>
-      [...rows.keys()].map(id => ({
-        id,
-        url: `https://was.example/space/s-space/public-credentials/${id}`
-      }))
+    listSyncedDocuments: vi.fn(async () =>
+      [...rows].map(([id, data]) => ({ id, data }))
     ),
     getSyncedResource: vi.fn(async ({ resourceId }: { resourceId: string }) =>
       rows.get(resourceId)
@@ -217,18 +214,15 @@ describe('StorageManager.listPublicCredentials', () => {
     })
 
     expect(listed.map(({ cid }) => cid)).toEqual(['cid-remote'])
-    // The skipped cid's body is never fetched: its private row's delete
-    // retracts it.
-    expect(fake.getSyncedResource).toHaveBeenCalledTimes(1)
-    expect(fake.getSyncedResource).toHaveBeenCalledWith({
-      logicalKey: 'publicCredentials',
-      resourceId: 'cid-remote'
-    })
+    // One page walk, no per-resource GET: the skipped cid's private row's
+    // delete retracts it.
+    expect(fake.listSyncedDocuments).toHaveBeenCalledTimes(1)
+    expect(fake.getSyncedResource).not.toHaveBeenCalled()
   })
 
   it('throws when the remote listing fails', async () => {
     const { fake } = makeFakeRemote()
-    fake.listSyncedResources.mockImplementationOnce(async () => {
+    fake.listSyncedDocuments.mockImplementationOnce(async () => {
       throw new Error('collection unreachable')
     })
     const storage = await makeStorage(fake as unknown as WASRemoteStore)

@@ -14,8 +14,10 @@
  *   drives, so a credential stored locally would be stranded and a list would
  *   always come back empty. This backend reads and writes the standard synced
  *   collections straight over the remote WAS collections
- *   (`WASRemoteStore.listSyncedResources` / `getSyncedResource` /
- *   `putSyncedResource` / `deleteSyncedResource`).
+ *   (`WASRemoteStore.listSyncedDocuments`, which pages the collection's
+ *   `changes` feed, plus `getSyncedResource` / `putSyncedResource` /
+ *   `deleteSyncedResource`). A listing costs one request per feed page
+ *   rather than one per resource.
  *
  * Both backends encrypt/decrypt through the SAME per-collection {@link DocCipher}
  * instances the session built (`@interop/was-client/edv`): the content-derived
@@ -272,12 +274,7 @@ export class RemoteDirectStore implements SyncedCollectionStore {
     noEpochKey: number
   }> {
     const cipher = this.#cipherFor(logicalKey)
-    const resources = await this.#remote.listSyncedResources({ logicalKey })
-    const bodies = await Promise.all(
-      resources.map(({ id }) =>
-        this.#remote.getSyncedResource({ logicalKey, resourceId: id })
-      )
-    )
+    const resources = await this.#remote.listSyncedDocuments({ logicalKey })
     const entries: Array<{
       resourceId: string
       cid: string
@@ -287,8 +284,8 @@ export class RemoteDirectStore implements SyncedCollectionStore {
     let unknownEpoch = 0
     let noEpochKey = 0
     const decrypted = await Promise.all(
-      bodies.map(async data => {
-        if (data === undefined || !isEncryptedEnvelope(data)) {
+      resources.map(async ({ data }) => {
+        if (!isEncryptedEnvelope(data)) {
           return { vc: data as unknown as IVerifiableCredential | undefined }
         }
         try {
@@ -630,24 +627,16 @@ export class RemoteDirectStore implements SyncedCollectionStore {
     Array<{ id: string; doc: WalletActivity }>
   > {
     const cipher = this.#cipherFor('walletActivity')
-    const resources = await this.#remote.listSyncedResources({
+    const resources = await this.#remote.listSyncedDocuments({
       logicalKey: 'walletActivity'
     })
-    const bodies = await Promise.all(
-      resources.map(({ id }) =>
-        this.#remote.getSyncedResource({
-          logicalKey: 'walletActivity',
-          resourceId: id
-        })
-      )
-    )
     const seen = new Set<string>()
     const items: Array<{ id: string; doc: WalletActivity }> = []
     let unknownEpoch = 0
     // Same shape as the credential scan: decrypt in parallel, fold in order.
     const decrypted = await Promise.all(
-      bodies.map(async data => {
-        if (data === undefined || !isEncryptedEnvelope(data)) {
+      resources.map(async ({ data }) => {
+        if (!isEncryptedEnvelope(data)) {
           return { activity: data as unknown as WalletActivity | undefined }
         }
         try {
@@ -733,35 +722,18 @@ export class RemoteDirectStore implements SyncedCollectionStore {
   /**
    * Lists the remote `public-credentials` collection's resources. The
    * collection is plaintext and keyed by the credential's content cid, so each
-   * resource id IS the cid and each body IS the credential; a resource that
-   * has gone away between the listing and its read is skipped.
+   * resource id IS the cid and each body IS the credential.
    *
    * @returns {Promise<Array<StoredCredential>>}
    */
   async listPublicCredentials(): Promise<Array<StoredCredential>> {
-    const resources = await this.#remote.listSyncedResources({
+    const resources = await this.#remote.listSyncedDocuments({
       logicalKey: 'publicCredentials'
     })
-    const bodies = await Promise.all(
-      resources.map(({ id }) =>
-        this.#remote.getSyncedResource({
-          logicalKey: 'publicCredentials',
-          resourceId: id
-        })
-      )
-    )
-    const credentials: StoredCredential[] = []
-    resources.forEach(({ id }, index) => {
-      const body = bodies[index]
-      if (body === undefined) {
-        return
-      }
-      credentials.push({
-        cid: id,
-        vc: body as unknown as IVerifiableCredential
-      })
-    })
-    return credentials
+    return resources.map(({ id, data }) => ({
+      cid: id,
+      vc: data as unknown as IVerifiableCredential
+    }))
   }
 
   get unknownEpochContacts(): number {
@@ -816,19 +788,11 @@ export class RemoteDirectStore implements SyncedCollectionStore {
    * @returns {Promise<Array<StoredContact>>}
    */
   async listContacts(): Promise<Array<StoredContact>> {
-    const resources = await this.#remote.listSyncedResources({
+    const resources = await this.#remote.listSyncedDocuments({
       logicalKey: 'contacts'
     })
-    const bodies = await Promise.all(
-      resources.map(({ id }) =>
-        this.#remote.getSyncedResource({
-          logicalKey: 'contacts',
-          resourceId: id
-        })
-      )
-    )
     const decrypted = await Promise.all(
-      bodies.map(data => this.#decryptContactHead({ data }))
+      resources.map(({ data }) => this.#decryptContactHead({ data }))
     )
     const contacts: StoredContact[] = []
     let unknownEpoch = 0
@@ -1168,20 +1132,12 @@ export class RemoteDirectStore implements SyncedCollectionStore {
     contactId: string
   }): Promise<Array<ContactRevisionPayload>> {
     const cipher = this.#cipherFor('contactsHistory')
-    const resources = await this.#remote.listSyncedResources({
+    const resources = await this.#remote.listSyncedDocuments({
       logicalKey: 'contactsHistory'
     })
-    const bodies = await Promise.all(
-      resources.map(({ id }) =>
-        this.#remote.getSyncedResource({
-          logicalKey: 'contactsHistory',
-          resourceId: id
-        })
-      )
-    )
     const decrypted = await Promise.all(
-      bodies.map(async data => {
-        if (data === undefined || !isEncryptedEnvelope(data)) {
+      resources.map(async ({ data }) => {
+        if (!isEncryptedEnvelope(data)) {
           return { raw: data }
         }
         try {

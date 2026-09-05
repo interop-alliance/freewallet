@@ -5,6 +5,7 @@ import { setTransientPrefs } from '@/lib/prefsStorage'
 import { syncController } from '@/stores/syncController'
 import { discardSession } from '@/stores/sessionTeardown'
 import { clearSetup } from '@/stores/setupStore'
+import { clearRegistryLookupCaches } from '@/lib/registryManager'
 
 /**
  * E2E test seam. Space export / import (and the collection delete a round-trip
@@ -101,6 +102,8 @@ export const useAuthStore = create<AuthState>()((set, get) => ({
     // A setup run parked in the setup store outlives this session otherwise,
     // and a later `/lobby` mount would enter the account it holds.
     clearSetup()
+    // Issuer-registry answers are per session too.
+    clearRegistryLookupCaches()
     publishStorageSeam(null)
     publishLoginChainSeam(null)
     setTransientPrefs({ active: false })

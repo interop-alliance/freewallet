@@ -9,6 +9,12 @@ vi.mock('@interop/wallet-core/keys', async importOriginal => ({
   wasClientLabelsStore: vi.fn(() => ({ isLabelsStore: true }))
 }))
 
+vi.mock('../../src/app.config', async importOriginal => ({
+  ...(await importOriginal<typeof import('../../src/app.config')>()),
+  // Small feed pages so the listSyncedDocuments walk exercises resumption.
+  WAS_SYNC_BATCH_SIZE: 2
+}))
+
 import { wasClientLabelsStore } from '@interop/wallet-core/keys'
 import { mintSpaceId, WASRemoteStore } from '../../src/stores/wasRemoteStore'
 import { deriveSpaceId } from '@interop/was-client/sync'
@@ -367,23 +373,51 @@ describe('WASRemoteStore.collectionMeta', () => {
   })
 })
 
-describe('WASRemoteStore.listSyncedResources', () => {
-  it('lists resource ids/urls of a standard collection (id-addressed)', async () => {
-    const items = [
-      { id: 'z6Env1', url: '/space/space-id/private-credentials/z6Env1' },
-      { id: 'z6Env2', url: '/space/space-id/private-credentials/z6Env2' }
-    ]
-    const list = vi.fn().mockResolvedValue({ totalItems: 2, items })
-    const collection = vi.fn().mockReturnValue({ list })
+describe('WASRemoteStore.listSyncedDocuments', () => {
+  it('reads the feed snapshot under the bound capability at the configured page size', async () => {
+    const capability = { id: 'urn:zcap:gen' } as unknown as IZcap
+    const documents = vi.fn().mockResolvedValue([
+      { id: 'b', _deleted: false, updatedAt: 't', version: 2, data: { n: 3 } },
+      { id: 'c', _deleted: false, updatedAt: 't', version: 1, data: { n: 4 } }
+    ])
+    const collection = vi.fn().mockReturnValue({ documents })
     const space = vi.fn().mockReturnValue({ collection })
     const store = storeWithStubbedClient({ space })
+    store.adoptInvocationCapability({ capability })
 
     await expect(
-      store.listSyncedResources({ logicalKey: 'privateCredentials' })
-    ).resolves.toEqual(items)
-    // No capability attached to the space handle: root invocation.
-    expect(space).toHaveBeenCalledWith('space-id', { capability: undefined })
-    expect(collection).toHaveBeenCalledWith('private-credentials')
+      store.listSyncedDocuments({ logicalKey: 'walletActivity' })
+    ).resolves.toEqual([
+      { id: 'b', data: { n: 3 } },
+      { id: 'c', data: { n: 4 } }
+    ])
+    expect(space).toHaveBeenCalledWith('space-id', { capability })
+    expect(collection).toHaveBeenCalledWith('wallet-activity')
+    expect(documents).toHaveBeenCalledWith({ pageSize: 2 })
+  })
+
+  it('lists a missing collection as empty', async () => {
+    const documents = vi.fn().mockResolvedValue(null)
+    const collection = vi.fn().mockReturnValue({ documents })
+    const store = storeWithStubbedClient({
+      space: vi.fn().mockReturnValue({ collection })
+    })
+
+    await expect(
+      store.listSyncedDocuments({ logicalKey: 'appConnections' })
+    ).resolves.toEqual([])
+  })
+
+  it('wraps a failed walk in a named error', async () => {
+    const documents = vi.fn().mockRejectedValue(new Error('boom'))
+    const collection = vi.fn().mockReturnValue({ documents })
+    const store = storeWithStubbedClient({
+      space: vi.fn().mockReturnValue({ collection })
+    })
+
+    await expect(
+      store.listSyncedDocuments({ logicalKey: 'contacts' })
+    ).rejects.toThrow('Failed to list documents in collection "contacts".')
   })
 })
 

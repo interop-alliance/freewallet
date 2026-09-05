@@ -414,14 +414,263 @@ describe('registryManager', () => {
     })
   })
 
-  it('__resetRegistryCacheForTests clears the cached list', async () => {
+  describe('caching', () => {
+    function countingRoutes(extra: Record<string, Route> = {}) {
+      const counts: Record<string, number> = {}
+      const counted =
+        (url: string, route: Route): Route =>
+        () => {
+          counts[url] = (counts[url] ?? 0) + 1
+          return route()
+        }
+      stubFetch({
+        [DIRECT_REGISTRIES_URL]: counted(DIRECT_REGISTRIES_URL, () =>
+          registriesResponse([...REGISTRY_PAYLOAD, OIDF_REGISTRY])
+        ),
+        [LEGACY_URL]: counted(LEGACY_URL, () => jsonResponse(LEGACY_BODY)),
+        [proxied(TRUST_ANCHOR_EC)]: counted(proxied(TRUST_ANCHOR_EC), () =>
+          jwtResponse({ metadata: REGISTRY_METADATA })
+        ),
+        [proxied(`${FEDERATION_FETCH}?sub=${DID}`)]: counted(
+          proxied(`${FEDERATION_FETCH}?sub=${DID}`),
+          () => jwtResponse({ metadata: ISSUER_METADATA })
+        ),
+        [proxied(`${FEDERATION_FETCH}?sub=did:key:z456`)]: counted(
+          proxied(`${FEDERATION_FETCH}?sub=did:key:z456`),
+          () => new Response('', { status: 404 })
+        ),
+        ...extra
+      })
+      return counts
+    }
+
+    it('memoizes a lookup by DID: the second makes no request at all', async () => {
+      const counts = countingRoutes()
+      const { registryManager } = await loadRegistryManager()
+
+      const first = await registryManager.lookupDid(DID)
+      const second = await registryManager.lookupDid(DID)
+
+      expect(second).toEqual(first)
+      expect(counts).toEqual({
+        [DIRECT_REGISTRIES_URL]: 1,
+        [LEGACY_URL]: 1,
+        [proxied(TRUST_ANCHOR_EC)]: 1,
+        [proxied(`${FEDERATION_FETCH}?sub=${DID}`)]: 1
+      })
+    })
+
+    it('downloads each DID-independent body once across distinct DIDs', async () => {
+      const counts = countingRoutes()
+      const { registryManager } = await loadRegistryManager()
+
+      const first = await registryManager.lookupDid(DID)
+      const second = await registryManager.lookupDid('did:key:z456')
+
+      expect(first.matchingIssuers).toHaveLength(2)
+      expect(second.matchingIssuers).toEqual([])
+      expect(second.uncheckedRegistries).toEqual([])
+      // The legacy file and the entity configuration are shared; only the
+      // federation fetch, which carries the DID, runs per lookup.
+      expect(counts[LEGACY_URL]).toBe(1)
+      expect(counts[proxied(TRUST_ANCHOR_EC)]).toBe(1)
+      expect(counts[proxied(`${FEDERATION_FETCH}?sub=${DID}`)]).toBe(1)
+      expect(counts[proxied(`${FEDERATION_FETCH}?sub=did:key:z456`)]).toBe(1)
+    })
+
+    it('shares one run between concurrent lookups of one DID', async () => {
+      const counts = countingRoutes()
+      const { registryManager } = await loadRegistryManager()
+
+      const results = await Promise.all(
+        Array.from({ length: 5 }, () => registryManager.lookupDid(DID))
+      )
+
+      expect(results.every(result => result.matchingIssuers.length === 2)).toBe(
+        true
+      )
+      expect(counts[LEGACY_URL]).toBe(1)
+      expect(counts[proxied(TRUST_ANCHOR_EC)]).toBe(1)
+      expect(counts[proxied(`${FEDERATION_FETCH}?sub=${DID}`)]).toBe(1)
+    })
+
+    it('does not memoize a lookup that left a registry unchecked', async () => {
+      let anchorAttempt = 0
+      const counts = countingRoutes({
+        [proxied(TRUST_ANCHOR_EC)]: () => {
+          anchorAttempt += 1
+          if (anchorAttempt === 1) {
+            throw new TypeError('Failed to fetch')
+          }
+          return jwtResponse({ metadata: REGISTRY_METADATA })
+        }
+      })
+      const { registryManager } = await loadRegistryManager()
+
+      const first = await registryManager.lookupDid(DID)
+      expect(first.uncheckedRegistries).toEqual([OIDF_REGISTRY])
+
+      const second = await registryManager.lookupDid(DID)
+      expect(second.uncheckedRegistries).toEqual([])
+      expect(second.matchingIssuers).toHaveLength(2)
+      // The retry re-fetched only the hop that failed; the legacy body was
+      // served from the cache.
+      expect(anchorAttempt).toBe(2)
+      expect(counts[LEGACY_URL]).toBe(1)
+    })
+
+    it('does not cache a non-ok registry body', async () => {
+      let legacyAttempt = 0
+      countingRoutes({
+        [LEGACY_URL]: () => {
+          legacyAttempt += 1
+          return legacyAttempt === 1
+            ? new Response('nope', { status: 502 })
+            : jsonResponse(LEGACY_BODY)
+        }
+      })
+      const { registryManager } = await loadRegistryManager()
+
+      const first = await registryManager.lookupDid(DID)
+      expect(first.uncheckedRegistries).toEqual([LEGACY_REGISTRY])
+
+      const second = await registryManager.lookupDid(DID)
+      expect(second.uncheckedRegistries).toEqual([])
+      expect(legacyAttempt).toBe(2)
+    })
+
+    it('shares one body fetch between concurrent misses of distinct DIDs', async () => {
+      const counts = countingRoutes()
+      const { registryManager } = await loadRegistryManager()
+
+      const [first, second] = await Promise.all([
+        registryManager.lookupDid(DID),
+        registryManager.lookupDid('did:key:z456')
+      ])
+
+      expect(first.matchingIssuers).toHaveLength(2)
+      expect(second.matchingIssuers).toEqual([])
+      expect(counts[LEGACY_URL]).toBe(1)
+      expect(counts[proxied(TRUST_ANCHOR_EC)]).toBe(1)
+    })
+
+    it('does not cache an ok body the client cannot parse', async () => {
+      let legacyAttempt = 0
+      countingRoutes({
+        [LEGACY_URL]: () => {
+          legacyAttempt += 1
+          return legacyAttempt === 1
+            ? new Response('<html>captive portal</html>', { status: 200 })
+            : jsonResponse(LEGACY_BODY)
+        }
+      })
+      const { registryManager } = await loadRegistryManager()
+
+      const first = await registryManager.lookupDid(DID)
+      expect(first.uncheckedRegistries).toEqual([LEGACY_REGISTRY])
+
+      const second = await registryManager.lookupDid(DID)
+      expect(second.uncheckedRegistries).toEqual([])
+      expect(legacyAttempt).toBe(2)
+    })
+
+    it('lets a lookup that joined a failed body read fetch for itself', async () => {
+      let legacyAttempt = 0
+      let failFirst: (err: Error) => void = () => undefined
+      countingRoutes({
+        [LEGACY_URL]: () => {
+          legacyAttempt += 1
+          if (legacyAttempt === 1) {
+            return new Promise<Response>((_resolve, reject) => {
+              failFirst = reject
+            })
+          }
+          return jsonResponse(LEGACY_BODY)
+        }
+      })
+      const { registryManager } = await loadRegistryManager()
+
+      const first = registryManager.lookupDid(DID)
+      // The second lookup joins the first's in-flight legacy read...
+      await new Promise(resolve => setTimeout(resolve, 0))
+      const second = registryManager.lookupDid('did:key:z456')
+      await new Promise(resolve => setTimeout(resolve, 0))
+      // ...which then fails (its hop's deadline fired).
+      failFirst(new DOMException('aborted', 'AbortError'))
+
+      expect((await first).uncheckedRegistries).toEqual([LEGACY_REGISTRY])
+      const joined = await second
+      expect(joined.uncheckedRegistries).toEqual([])
+      expect(legacyAttempt).toBe(2)
+    })
+
+    it('expires a memoized lookup and a cached body after the TTL', async () => {
+      vi.useFakeTimers()
+      try {
+        const counts = countingRoutes()
+        const { registryManager, LOOKUP_CACHE_TTL_MS } =
+          await loadRegistryManager()
+
+        await registryManager.lookupDid(DID)
+        vi.setSystemTime(Date.now() + LOOKUP_CACHE_TTL_MS + 1)
+        await registryManager.lookupDid(DID)
+
+        expect(counts[LEGACY_URL]).toBe(2)
+        expect(counts[proxied(TRUST_ANCHOR_EC)]).toBe(2)
+      } finally {
+        vi.useRealTimers()
+      }
+    })
+
+    it('clearRegistryLookupCaches drops both layers but keeps the list', async () => {
+      const counts = countingRoutes()
+      const { registryManager, clearRegistryLookupCaches } =
+        await loadRegistryManager()
+
+      await registryManager.lookupDid(DID)
+      clearRegistryLookupCaches()
+      await registryManager.lookupDid(DID)
+
+      expect(counts[DIRECT_REGISTRIES_URL]).toBe(1)
+      expect(counts[LEGACY_URL]).toBe(2)
+    })
+
+    it('does not memoize a lookup that ran on the fallback list', async () => {
+      let listAttempt = 0
+      const counts = countingRoutes({
+        [DIRECT_REGISTRIES_URL]: () => {
+          listAttempt += 1
+          if (listAttempt === 1) {
+            throw new TypeError('Failed to fetch')
+          }
+          return registriesResponse()
+        },
+        [FALLBACK_URL]: () => jsonResponse({ registry: {} })
+      })
+      const { registryManager } = await loadRegistryManager()
+
+      const first = await registryManager.lookupDid(DID)
+      expect(first.matchingIssuers).toEqual([])
+
+      const second = await registryManager.lookupDid(DID)
+      expect(second.matchingIssuers).toEqual([LEGACY_MATCH])
+      expect(listAttempt).toBe(2)
+      expect(counts[LEGACY_URL]).toBe(1)
+    })
+  })
+
+  it('__resetRegistryCacheForTests clears every cache', async () => {
     let listFetches = 0
+    let legacyFetches = 0
     stubFetch({
       [DIRECT_REGISTRIES_URL]: () => {
         listFetches += 1
         return registriesResponse()
       },
-      [LEGACY_URL]: () => jsonResponse(LEGACY_BODY)
+      [LEGACY_URL]: () => {
+        legacyFetches += 1
+        return jsonResponse(LEGACY_BODY)
+      }
     })
 
     const { registryManager, __resetRegistryCacheForTests } =
@@ -429,8 +678,10 @@ describe('registryManager', () => {
 
     await registryManager.lookupDid(DID)
     __resetRegistryCacheForTests()
-    await registryManager.lookupDid('did:key:z456')
+    await registryManager.lookupDid(DID)
 
+    // The list, the body cache, and the DID memo are all cleared.
     expect(listFetches).toBe(2)
+    expect(legacyFetches).toBe(2)
   })
 })

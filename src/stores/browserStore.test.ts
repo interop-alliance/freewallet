@@ -1337,7 +1337,7 @@ describe('StorageManager (local-first facade)', () => {
 /**
  * An in-memory stand-in for the remote WAS standard collections: one map of
  * resource-id to raw stored body per logical collection, exposing the same
- * `listSyncedResources` / `getSyncedResource` / `getSyncedResourceWithEtag` /
+ * `listSyncedDocuments` / `getSyncedResource` / `getSyncedResourceWithEtag` /
  * `putSyncedResource` / `deleteSyncedResource` surface the remote-direct
  * backend calls. `putSyncedResource` honors the conditional-write contract:
  * create-if-absent by default (a second write to an existing id reports
@@ -1374,11 +1374,8 @@ function makeFakeRemoteStore(): {
   const preconditionFailed = () =>
     Object.assign(new Error('precondition failed'), { status: 412 })
   const remoteStore = {
-    async listSyncedResources({ logicalKey }: { logicalKey: string }) {
-      return [...collectionFor(logicalKey).keys()].map(id => ({
-        id,
-        url: `/space/s/${logicalKey}/${id}`
-      }))
+    async listSyncedDocuments({ logicalKey }: { logicalKey: string }) {
+      return [...collectionFor(logicalKey)].map(([id, data]) => ({ id, data }))
     },
     async getSyncedResource({
       logicalKey,
@@ -1703,9 +1700,9 @@ describe('RemoteDirectStore', () => {
     let lists = 0
     const spied = {
       ...remoteStore,
-      async listSyncedResources(options: { logicalKey: string }) {
+      async listSyncedDocuments(options: { logicalKey: string }) {
         lists += 1
-        return remoteStore.listSyncedResources(options)
+        return remoteStore.listSyncedDocuments(options)
       }
     } as unknown as WASRemoteStore
     const store = new RemoteDirectStore({

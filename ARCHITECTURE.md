@@ -2477,16 +2477,21 @@ that `BrowserStore`, and the partitioned RxDB database is created even
 though nothing is ever routed to it.
 
 That backend serves credential, history, and public-link reads and writes
-straight over the remote WAS collections
-(`WASRemoteStore.listSyncedResources` / `getSyncedResource` /
-`putSyncedResource` / `deleteSyncedResource`), with the same per-collection
+straight over the remote WAS collections, with the same per-collection
 ciphers the local store uses, so the envelope, id, and key-epoch logic lives
-once. A write reproduces verbatim what background replication would have
-pushed: the raw EDV envelope under its content-derived envelope-hash id,
-created with `If-None-Match: *`, stamped with the same `Key-Epoch`. The main
-app's replication then pulls it cleanly. An unknown-epoch read (a rekey by
-another client) drives the same one-time descriptor refresh the local
-backend uses, so a fresh-epoch credential is never dropped.
+once. A listing is was-client's `Collection.documents()`, the snapshot walk
+over the `changes` feed (`WASRemoteStore.listSyncedDocuments`, under the
+bound invocation capability), one request per page rather than one per
+resource; the feed's tombstones drop out and a resource rewritten mid-walk
+keeps its latest state. Single-resource reads
+and writes go through `getSyncedResource` / `putSyncedResource` /
+`deleteSyncedResource`. A write reproduces verbatim what background
+replication would have pushed: the raw EDV envelope under its
+content-derived envelope-hash id, created with `If-None-Match: *`, stamped
+with the same `Key-Epoch`. The main app's replication then pulls it cleanly.
+An unknown-epoch read (a rekey by another client) drives the same one-time
+descriptor refresh the local backend uses, so a fresh-epoch credential is
+never dropped.
 
 Contacts are reachable in the popup over the same remote-direct path. Head
 rows are mutable and updated in place under `If-Match` compare-and-swap

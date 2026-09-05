@@ -7,10 +7,12 @@
  * lifecycle (create / exists / wipe), the storage-browser read-through over
  * arbitrary Collections and Resources, export / import, and quotas.
  *
- * One exception is the CHAPI popup: its local IndexedDB is a third-party
- * partitioned bucket no sync controller drives, so a remote-direct popup
- * session (see `StorageManager`) reads and writes the standard synced
- * collections here directly, through `listSyncedResources` /
+ * One exception is a replica-less session (the default transient session,
+ * and the CHAPI popup, whose local IndexedDB is a third-party partitioned
+ * bucket no sync controller drives): its remote-direct backend (see
+ * `StorageManager`) reads and writes the standard synced collections here
+ * directly, listing them by paging the `changes` feed
+ * (`listSyncedDocuments`) and reading and writing single resources through
  * `getSyncedResource` / `putSyncedResource` -- reproducing verbatim what
  * background replication would have pushed.
  *
@@ -49,7 +51,8 @@ import {
   KEY_MAP_COLLECTION,
   UNLOCK_METHODS_COLLECTION,
   UNLOCK_METHODS_RESOURCE,
-  WALLET_STANDARD_COLLECTIONS
+  WALLET_STANDARD_COLLECTIONS,
+  WAS_SYNC_BATCH_SIZE
 } from '@/app.config'
 import type { Json } from '@/lib/sync/types.js'
 import type { StorageCollection, StorageResource } from '@/lib/storage'
@@ -72,6 +75,13 @@ import {
 import { createLogger } from '@/lib/log'
 
 const log = createLogger('fw:storage:remote')
+
+/**
+ * The `changes` page size a synced-collection listing requests when no
+ * `VITE_WAS_SYNC_BATCH_SIZE` is configured: the spec's recommended server
+ * default, so the request and the server's own maximum agree.
+ */
+const SYNCED_LISTING_PAGE_SIZE = 100
 
 /**
  * Map from logical collection name to its WAS base URL.
@@ -905,38 +915,44 @@ export class WASRemoteStore {
   }
 
   /**
-   * Lists the raw resource entries (id + absolute url) of one of the wallet's
-   * standard synced collections, addressed straight from its collection id
-   * rather than the `collections` map -- which a remote-direct popup session
-   * never populates. Metadata only (no bodies), so it never touches the
-   * fail-closed encryption codec. Server order is preserved as-is; callers that
-   * need content ordering must derive it themselves (best-effort here).
+   * Reads the live JSON documents of one of the wallet's standard synced
+   * collections through was-client's `Collection.documents()`, the snapshot
+   * walk over the `changes` feed background replication pulls, under the
+   * bound invocation capability. One request per page rather than one per
+   * resource, so a replica-less session lists a collection in a handful of
+   * round trips. Bodies ship verbatim (the EDV envelope or a plaintext
+   * document) and bypass the fail-closed codec; feed order is preserved, and
+   * callers derive content ordering themselves. A missing collection (or one
+   * this session cannot see; the server answers 404 for both) lists as empty.
    *
    * @param options {object}
    * @param options.logicalKey {string}   e.g. 'privateCredentials' | 'walletActivity'.
-   * @returns {Promise<Array<{ id: string; url: string }>>}
+   * @returns {Promise<Array<{ id: string; data: Json }>>}
    */
-  async listSyncedResources({
+  async listSyncedDocuments({
     logicalKey
   }: {
     logicalKey: string
-  }): Promise<Array<{ id: string; url: string }>> {
+  }): Promise<Array<{ id: string; data: Json }>> {
     const collectionId = this.#collectionId(logicalKey)
-    let listing
+    let documents
     try {
-      listing = await this.#space().collection(collectionId).list()
+      documents = await this.#space()
+        .collection(collectionId)
+        .documents({
+          pageSize: WAS_SYNC_BATCH_SIZE ?? SYNCED_LISTING_PAGE_SIZE
+        })
     } catch (err) {
-      log.error('Error listing synced resources for collection', {
+      log.error('Error listing synced documents for collection', {
         collectionId,
         err
       })
       throw new Error(
-        `Failed to list resources in collection "${collectionId}".`,
+        `Failed to list documents in collection "${collectionId}".`,
         { cause: err }
       )
     }
-    const items = (listing?.items ?? []) as Array<{ id: string; url: string }>
-    return items.map(({ id, url }) => ({ id, url }))
+    return (documents ?? []).map(({ id, data }) => ({ id, data: data as Json }))
   }
 
   /**

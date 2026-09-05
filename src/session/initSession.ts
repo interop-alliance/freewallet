@@ -45,10 +45,11 @@ import {
 import {
   mintUserKey,
   userKeyVaultKeys,
+  type SealableEncryptionDescriptorStore,
   type UserKey,
   type UserKeyRosterReadResult
 } from '@interop/wallet-core/keys'
-import { accountRosterStore, sessionRosterStore } from '@/session/rosterStore'
+import { accountRosterStore } from '@/session/rosterStore'
 import {
   checkUserKeyRosterAtLogin as sharedCheckUserKeyRosterAtLogin,
   convergeUserKeyRosterToAccount
@@ -357,6 +358,9 @@ export async function initSessionFromSeed({
   // same read again.
   let activeUserKey = userKey
   let rosterRead: UserKeyRosterReadResult | null = null
+  // The store instance the login read came through: the sweep below writes
+  // through the same one, so its convergence is seeded from that read.
+  let loginRosterStore: SealableEncryptionDescriptorStore | undefined
   let userKeyPersistFailed = false
   if (
     userKey &&
@@ -374,7 +378,8 @@ export async function initSessionFromSeed({
       persistence,
       ...(accountLog ? { log: accountLog } : {})
     })
-    rosterRead = rosterCheck
+    rosterRead = rosterCheck.read
+    loginRosterStore = rosterCheck.store
     if (rosterRead?.rotated) {
       activeUserKey = rosterRead.userKey
       // A failed client-key-record write is non-fatal: the session runs on
@@ -495,9 +500,10 @@ export async function initSessionFromSeed({
     // are visible) and strictly best-effort: a failed sweep never fails the
     // login, and the next login (or revocation) converges the same branch.
     const remoteStore = storage.remoteStore
-    if (rosterRead && activeUserKey && remoteStore) {
+    if (rosterRead && loginRosterStore && activeUserKey && remoteStore) {
       const loginUserKey = activeUserKey
-      const loginDescriptor = rosterRead.descriptor
+      const loginRead = rosterRead
+      const rosterStore = loginRosterStore
       session.userKeySweep = storageReady
         .catch(() => {})
         .then(async () => {
@@ -512,8 +518,9 @@ export async function initSessionFromSeed({
             await convergeRosterToDocument({
               session,
               pointer: accountPointer,
+              store: rosterStore,
               userKey: loginUserKey,
-              descriptor: loginDescriptor,
+              read: loginRead,
               clientKeyAgreementKey: keyAgreementKey,
               persistence
             })
@@ -567,12 +574,20 @@ export async function initSessionFromSeed({
  * or verified (offline, an unpromoted account) leaves the login's own roster
  * read in place, since the sweep is best-effort by design.
  *
+ * The sweep writes through the store instance the login read came through,
+ * seeded with that read's validator, so a convergence that rotates or
+ * escrows acquires the roster log no second time: on a log-governed store
+ * every acquisition is a hash-chain walk with per-entry proof and
+ * chain-head-pin verification.
+ *
  * @param options {object}
  * @param options.session {Session}   the live session, whose vault keys and
  *   ciphers adopt a rotation
  * @param [options.pointer] {AccountPointer}
+ * @param options.store {SealableEncryptionDescriptorStore}   the roster store
+ *   the login read came through
  * @param options.userKey {UserKey}   the login's current per-user key
- * @param options.descriptor {CollectionEncryption}   the login's roster read
+ * @param options.read {UserKeyRosterReadResult}   the login's roster read
  * @param options.clientKeyAgreementKey {IKeyAgreementKey}   this client's own
  *   (identity) KAK -- its roster entry
  * @param options.persistence {SessionPersistence}   the session's persistence
@@ -583,19 +598,22 @@ export async function initSessionFromSeed({
 async function convergeRosterToDocument({
   session,
   pointer,
+  store,
   userKey,
-  descriptor,
+  read,
   clientKeyAgreementKey,
   persistence
 }: {
   session: Session
   pointer?: AccountPointer
+  store: SealableEncryptionDescriptorStore
   userKey: UserKey
-  descriptor: CollectionEncryption
+  read: UserKeyRosterReadResult
   clientKeyAgreementKey: IKeyAgreementKey
   persistence: SessionPersistence
 }): Promise<{ userKey: UserKey; rosterDescriptor: CollectionEncryption }> {
   const { keyAgent } = session.profile
+  const descriptor = read.descriptor
   if (!pointer || !isWebvhDid(pointer.did) || !WAS_SERVER_URL || !keyAgent) {
     return { userKey, rosterDescriptor: descriptor }
   }
@@ -610,9 +628,10 @@ async function convergeRosterToDocument({
         spaceId: pointer.spaceId,
         host: pointer.host
       },
-      store: sessionRosterStore({ profile: session.profile }),
+      store,
       userKey,
       descriptor,
+      ...(read.etag !== undefined ? { etag: read.etag } : {}),
       clientKeyAgreementKey,
       pinnedEpochId: await persistence.epochPins.load({ accountDid }),
       accountLogPinStore: persistence.logPins,
@@ -686,8 +705,9 @@ async function convergeRosterToDocument({
  * @param [options.log] {DIDLog}   the account log this login already verified
  *   for the same pointer, resolving the store's controller view with no
  *   second fetch
- * @returns {Promise<UserKeyRosterReadResult | null>}   the roster read, or
- *   null
+ * @returns {Promise<object>}   the roster read (or null), and the store
+ *   instance it came through, which the cascade-completion sweep writes
+ *   through so its convergence is seeded from that read
  */
 async function checkUserKeyRosterAtLogin({
   zcapClient,
@@ -705,20 +725,24 @@ async function checkUserKeyRosterAtLogin({
   clientKeyAgreementKey: IKeyAgreementKey
   persistence: SessionPersistence
   log?: DIDLog
-}): Promise<UserKeyRosterReadResult | null> {
+}): Promise<{
+  read: UserKeyRosterReadResult | null
+  store: SealableEncryptionDescriptorStore
+}> {
   const accountDid = pointer.did
-  return await sharedCheckUserKeyRosterAtLogin({
-    store: accountRosterStore({
-      zcapClient,
-      keyAgent,
-      pointer: {
-        did: accountDid,
-        spaceId: pointer.spaceId,
-        host: pointer.host
-      },
-      pinStore: persistence.logPins,
-      ...(accountLog ? { log: accountLog } : {})
-    }),
+  const store = accountRosterStore({
+    zcapClient,
+    keyAgent,
+    pointer: {
+      did: accountDid,
+      spaceId: pointer.spaceId,
+      host: pointer.host
+    },
+    pinStore: persistence.logPins,
+    ...(accountLog ? { log: accountLog } : {})
+  })
+  const read = await sharedCheckUserKeyRosterAtLogin({
+    store,
     userKey,
     clientKeyAgreementKey,
     pinnedEpochId: await persistence.epochPins.load({ accountDid }),
@@ -732,6 +756,7 @@ async function checkUserKeyRosterAtLogin({
       })
     }
   })
+  return { read, store }
 }
 
 /**

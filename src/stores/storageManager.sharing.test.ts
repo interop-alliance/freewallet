@@ -159,7 +159,7 @@ function makeFakeRemote(): {
     return entry
   }
   // The raw synced-resource bodies keyed by logical collection key -- what the
-  // remote-direct backend reads/writes over `listSyncedResources` etc.
+  // remote-direct backend reads/writes over `listSyncedDocuments` etc.
   const logicalToId: Record<string, string> = {
     privateCredentials: 'private-credentials',
     walletActivity: 'wallet-activity',
@@ -203,11 +203,8 @@ function makeFakeRemote(): {
     spaceHandle() {
       return space
     },
-    async listSyncedResources({ logicalKey }: { logicalKey: string }) {
-      return [...resourcesFor(logicalKey).keys()].map(id => ({
-        id,
-        url: `/space/${spaceId}/${logicalToId[logicalKey] ?? logicalKey}/${id}`
-      }))
+    async listSyncedDocuments({ logicalKey }: { logicalKey: string }) {
+      return [...resourcesFor(logicalKey)].map(([id, data]) => ({ id, data }))
     },
     async getSyncedResource({
       logicalKey,

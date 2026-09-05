@@ -123,8 +123,16 @@ function recordingWas(): {
     async describe() {
       return { name: collectionId, encryption: { scheme: 'edv' } }
     },
-    async list() {
-      return { items: [{ id: 'r1', url: `/x/${collectionId}/r1` }] }
+    async documents() {
+      return [
+        {
+          id: 'r1',
+          _deleted: false,
+          updatedAt: '2026-01-01T00:00:00.000Z',
+          version: 1,
+          data: { collectionId }
+        }
+      ]
     },
     resource(resourceId: string) {
       return {
@@ -183,13 +191,13 @@ function makeRecordedStore({ capability }: { capability?: IZcap }): {
 
 /**
  * Drives one representative operation per request shape: the Space handle
- * (describe), a collection handle (describe, list), and every raw
+ * (describe), a collection handle (describe, documents), and every raw
  * `was.request()` site the remote-direct backend and the quota read use.
  */
 async function driveStore(store: WASRemoteStore): Promise<void> {
   await store.userExists()
   await store.collectionEncryption({ collectionId: 'private-credentials' })
-  await store.listSyncedResources({ logicalKey: 'privateCredentials' })
+  await store.listSyncedDocuments({ logicalKey: 'privateCredentials' })
   await store.getSyncedResource({
     logicalKey: 'privateCredentials',
     resourceId: 'r1'
@@ -301,11 +309,8 @@ function makeFakeRemote(): {
     async collectionMeta() {
       return undefined
     },
-    async listSyncedResources({ logicalKey }: { logicalKey: string }) {
-      return [...resourcesFor(logicalKey).keys()].map(id => ({
-        id,
-        url: `/space/${spaceId}/${logicalToId[logicalKey] ?? logicalKey}/${id}`
-      }))
+    async listSyncedDocuments({ logicalKey }: { logicalKey: string }) {
+      return [...resourcesFor(logicalKey)].map(([id, data]) => ({ id, data }))
     },
     async getSyncedResource({
       logicalKey,
