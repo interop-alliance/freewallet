@@ -92,16 +92,64 @@ async function withSessionStore(
 }
 
 /**
- * The object-store key under which a Space's keyring record is cached. Keyed by
- * the unlock Space id, so several accounts (several unlock identities) can hold
- * caches side by side in the shared session database.
+ * One session-database entry family: the object-store key derived from an
+ * id under a fixed prefix, plus the save, load, and delete operations over
+ * it. The id field is named per family (`spaceId` for the unlock-layer
+ * entries, `controller` for the per-account ones), so an instance's
+ * operations carry the same option names the exported functions always had.
+ * `save` stores the given value verbatim and `load` returns it verbatim (or
+ * `null` on a miss); a family whose stored value is shaped or stamped wraps
+ * these in a thin function of its own.
  *
- * @param spaceId {string}
- * @returns {string}
+ * @param options {object}
+ * @param options.prefix {string}   the object-store key prefix
+ * @param options.idKey {string}   the name of the id field in every option
+ *   object
+ * @returns {object}
  */
-function keyringCacheKey(spaceId: string): string {
-  return `keyring/${spaceId}`
+function sessionEntry<IdKey extends string>({
+  prefix,
+  idKey
+}: {
+  prefix: string
+  idKey: IdKey
+}) {
+  type EntryOptions = { [Key in IdKey]: string } & { idb?: IDBFactory }
+  const key = (id: string): string => `${prefix}/${id}`
+  const keyOf = (options: EntryOptions): string => key(options[idKey])
+  return {
+    key,
+    async save(options: EntryOptions & { record: unknown }): Promise<void> {
+      await withSessionStore(
+        'readwrite',
+        store => store.put(options.record, keyOf(options)),
+        options.idb
+      )
+    },
+    async load(options: EntryOptions): Promise<unknown | null> {
+      const stored = await withSessionStore(
+        'readonly',
+        store => store.get(keyOf(options)),
+        options.idb
+      )
+      return stored === undefined ? null : stored
+    },
+    async delete(options: EntryOptions): Promise<void> {
+      await withSessionStore(
+        'readwrite',
+        store => store.delete(keyOf(options)),
+        options.idb
+      )
+    }
+  }
 }
+
+/**
+ * A Space's cached keyring record. Keyed by the unlock Space id, so several
+ * accounts (several unlock identities) can hold caches side by side in the
+ * shared session database.
+ */
+const keyringCache = sessionEntry({ prefix: 'keyring', idKey: 'spaceId' })
 
 /**
  * Caches a keyring record locally (keyed by its unlock Space id) so that
@@ -126,12 +174,11 @@ export async function saveKeyringCache({
   record: unknown
   idb?: IDBFactory
 }): Promise<void> {
-  await withSessionStore(
-    'readwrite',
-    store =>
-      store.put({ record, cachedAt: Date.now() }, keyringCacheKey(spaceId)),
+  await keyringCache.save({
+    spaceId,
+    record: { record, cachedAt: Date.now() },
     idb
-  )
+  })
 }
 
 /**
@@ -151,12 +198,8 @@ export async function loadKeyringCache({
   spaceId: string
   idb?: IDBFactory
 }): Promise<{ record: unknown; cachedAt: number | null } | null> {
-  const stored = await withSessionStore(
-    'readonly',
-    store => store.get(keyringCacheKey(spaceId)),
-    idb
-  )
-  if (stored === undefined || stored === null) {
+  const stored = await keyringCache.load({ spaceId, idb })
+  if (stored === null) {
     return null
   }
   const entry = stored as { record?: unknown; cachedAt?: unknown }
@@ -176,33 +219,18 @@ export async function loadKeyringCache({
  * @param [options.idb] {IDBFactory}
  * @returns {Promise<void>}
  */
-export async function deleteKeyringCache({
-  spaceId,
-  idb
-}: {
-  spaceId: string
-  idb?: IDBFactory
-}): Promise<void> {
-  await withSessionStore(
-    'readwrite',
-    store => store.delete(keyringCacheKey(spaceId)),
-    idb
-  )
-}
+export const deleteKeyringCache = keyringCache.delete
 
 /**
- * The object-store key under which an unlock method's wrapped client-key
- * record lives. Keyed by the unlock Space id -- like the keyring cache -- so
- * each unlock method (passphrase, each passkey) holds its own wrap of this
- * client's key set, and several accounts can coexist in the shared session
- * database.
- *
- * @param spaceId {string}   the unlock Space id
- * @returns {string}
+ * An unlock method's wrapped client-key record. Keyed by the unlock Space id
+ * -- like the keyring cache -- so each unlock method (passphrase, each
+ * passkey) holds its own wrap of this client's key set, and several accounts
+ * can coexist in the shared session database.
  */
-function clientKeyRecordKey(spaceId: string): string {
-  return `client-keys/${spaceId}`
-}
+const clientKeyRecords = sessionEntry({
+  prefix: 'client-keys',
+  idKey: 'spaceId'
+})
 
 /**
  * Saves a wrapped client-key record (this client's key set + cached user key,
@@ -216,21 +244,7 @@ function clientKeyRecordKey(spaceId: string): string {
  * @param [options.idb] {IDBFactory}
  * @returns {Promise<void>}
  */
-export async function saveClientKeyRecord({
-  spaceId,
-  record,
-  idb
-}: {
-  spaceId: string
-  record: unknown
-  idb?: IDBFactory
-}): Promise<void> {
-  await withSessionStore(
-    'readwrite',
-    store => store.put(record, clientKeyRecordKey(spaceId)),
-    idb
-  )
-}
+export const saveClientKeyRecord = clientKeyRecords.save
 
 /**
  * Whether this browser holds a client-key record for an unlock method,
@@ -271,20 +285,7 @@ export async function hasClientKeyRecord({
  * @param [options.idb] {IDBFactory}
  * @returns {Promise<unknown | null>}
  */
-export async function loadClientKeyRecord({
-  spaceId,
-  idb
-}: {
-  spaceId: string
-  idb?: IDBFactory
-}): Promise<unknown | null> {
-  const stored = await withSessionStore(
-    'readonly',
-    store => store.get(clientKeyRecordKey(spaceId)),
-    idb
-  )
-  return stored === undefined ? null : stored
-}
+export const loadClientKeyRecord = clientKeyRecords.load
 
 /**
  * Deletes a wrapped client-key record by its unlock Space id. Called only by
@@ -298,19 +299,7 @@ export async function loadClientKeyRecord({
  * @param [options.idb] {IDBFactory}
  * @returns {Promise<void>}
  */
-export async function deleteClientKeyRecord({
-  spaceId,
-  idb
-}: {
-  spaceId: string
-  idb?: IDBFactory
-}): Promise<void> {
-  await withSessionStore(
-    'readwrite',
-    store => store.delete(clientKeyRecordKey(spaceId)),
-    idb
-  )
-}
+export const deleteClientKeyRecord = clientKeyRecords.delete
 
 /**
  * Deletes the whole of what one unlock method leaves on a browser: its
@@ -346,15 +335,13 @@ export async function deleteUnlockLocalState({
 }
 
 /**
- * The object-store key under which this client's local "which account DID did
- * this data Space's log publish" mapping lives.
- *
- * @param spaceId {string}   the data Space id
- * @returns {string}
+ * This client's local "which account DID did this data Space's log publish"
+ * mapping, keyed by the data Space id.
  */
-function accountDidForSpaceKey(spaceId: string): string {
-  return `account-did/space/${spaceId}`
-}
+const accountDidForSpace = sessionEntry({
+  prefix: 'account-did/space',
+  idKey: 'spaceId'
+})
 
 /**
  * Records, locally, the account DID the data Space's log published as. A
@@ -380,15 +367,11 @@ export async function saveAccountDidForSpace({
   accountDid: string
   idb?: IDBFactory
 }): Promise<void> {
-  await withSessionStore(
-    'readwrite',
-    store =>
-      store.put(
-        { accountDid, savedAt: Date.now() },
-        accountDidForSpaceKey(spaceId)
-      ),
+  await accountDidForSpace.save({
+    spaceId,
+    record: { accountDid, savedAt: Date.now() },
     idb
-  )
+  })
 }
 
 /**
@@ -407,12 +390,8 @@ export async function loadAccountDidForSpace({
   spaceId: string
   idb?: IDBFactory
 }): Promise<string | null> {
-  const stored = await withSessionStore(
-    'readonly',
-    store => store.get(accountDidForSpaceKey(spaceId)),
-    idb
-  )
-  if (stored === null || stored === undefined) {
+  const stored = await accountDidForSpace.load({ spaceId, idb })
+  if (stored === null) {
     return null
   }
   const { accountDid } = stored as { accountDid?: unknown }
@@ -429,33 +408,19 @@ export async function loadAccountDidForSpace({
  * @param [options.idb] {IDBFactory}
  * @returns {Promise<void>}
  */
-export async function deleteAccountDidForSpace({
-  spaceId,
-  idb
-}: {
-  spaceId: string
-  idb?: IDBFactory
-}): Promise<void> {
-  await withSessionStore(
-    'readwrite',
-    store => store.delete(accountDidForSpaceKey(spaceId)),
-    idb
-  )
-}
+export const deleteAccountDidForSpace = accountDidForSpace.delete
 
 /**
- * The object-store key under which an account's unlock-methods registry record
- * is cached. Keyed by the data controller did:key, so several accounts can hold
- * caches side by side in the shared session database. (The controller DID, not
- * the data Space id, is the stable identity available wherever the registry is
- * read -- including no-WAS deployments that have no Space.)
- *
- * @param controller {string}   the data did:key
- * @returns {string}
+ * An account's cached unlock-methods registry record. Keyed by the data
+ * controller did:key, so several accounts can hold caches side by side in the
+ * shared session database. (The controller DID, not the data Space id, is the
+ * stable identity available wherever the registry is read -- including no-WAS
+ * deployments that have no Space.)
  */
-function unlockMethodsCacheKey(controller: string): string {
-  return `unlock-methods/${controller}`
-}
+const unlockMethodsCache = sessionEntry({
+  prefix: 'unlock-methods',
+  idKey: 'controller'
+})
 
 /**
  * Caches an unlock-methods registry record locally (keyed by the data
@@ -470,21 +435,7 @@ function unlockMethodsCacheKey(controller: string): string {
  * @param [options.idb] {IDBFactory}
  * @returns {Promise<void>}
  */
-export async function saveUnlockMethodsCache({
-  controller,
-  record,
-  idb
-}: {
-  controller: string
-  record: unknown
-  idb?: IDBFactory
-}): Promise<void> {
-  await withSessionStore(
-    'readwrite',
-    store => store.put(record, unlockMethodsCacheKey(controller)),
-    idb
-  )
-}
+export const saveUnlockMethodsCache = unlockMethodsCache.save
 
 /**
  * Loads a cached unlock-methods registry record by the data controller did:key,
@@ -495,20 +446,7 @@ export async function saveUnlockMethodsCache({
  * @param [options.idb] {IDBFactory}
  * @returns {Promise<unknown | null>}
  */
-export async function loadUnlockMethodsCache({
-  controller,
-  idb
-}: {
-  controller: string
-  idb?: IDBFactory
-}): Promise<unknown | null> {
-  const stored = await withSessionStore(
-    'readonly',
-    store => store.get(unlockMethodsCacheKey(controller)),
-    idb
-  )
-  return stored === undefined ? null : stored
-}
+export const loadUnlockMethodsCache = unlockMethodsCache.load
 
 /**
  * Deletes a cached unlock-methods registry record by the data controller
@@ -519,32 +457,17 @@ export async function loadUnlockMethodsCache({
  * @param [options.idb] {IDBFactory}
  * @returns {Promise<void>}
  */
-export async function deleteUnlockMethodsCache({
-  controller,
-  idb
-}: {
-  controller: string
-  idb?: IDBFactory
-}): Promise<void> {
-  await withSessionStore(
-    'readwrite',
-    store => store.delete(unlockMethodsCacheKey(controller)),
-    idb
-  )
-}
+export const deleteUnlockMethodsCache = unlockMethodsCache.delete
 
 /**
- * The object-store key under which an account's passkey-safety notice is
- * stored. Keyed by the data controller did:key -- matching the unlock-methods
- * cache -- so several accounts can hold notices side by side in the shared
- * session database.
- *
- * @param controller {string}   the data did:key
- * @returns {string}
+ * An account's passkey-safety notice. Keyed by the data controller did:key --
+ * matching the unlock-methods cache -- so several accounts can hold notices
+ * side by side in the shared session database.
  */
-function passkeySafetyKey(controller: string): string {
-  return `passkey-safety/${controller}`
-}
+const passkeySafetyNotices = sessionEntry({
+  prefix: 'passkey-safety',
+  idKey: 'controller'
+})
 
 /**
  * Saves the passkey-safety notice: the local-only, per-controller marker that a
@@ -572,19 +495,15 @@ export async function savePasskeySafetyNotice({
   backupState: boolean
   idb?: IDBFactory
 }): Promise<void> {
-  await withSessionStore(
-    'readwrite',
-    store =>
-      store.put(
-        {
-          backupEligibility,
-          backupState,
-          createdAt: new Date().toISOString()
-        },
-        passkeySafetyKey(controller)
-      ),
+  await passkeySafetyNotices.save({
+    controller,
+    record: {
+      backupEligibility,
+      backupState,
+      createdAt: new Date().toISOString()
+    },
     idb
-  )
+  })
 }
 
 /**
@@ -607,16 +526,11 @@ export async function loadPasskeySafetyNotice({
   backupState: boolean
   createdAt: string
 } | null> {
-  const stored = await withSessionStore(
-    'readonly',
-    store => store.get(passkeySafetyKey(controller)),
-    idb
-  )
-  return (
-    (stored as
-      | { backupEligibility: boolean; backupState: boolean; createdAt: string }
-      | undefined) ?? null
-  )
+  return (await passkeySafetyNotices.load({ controller, idb })) as {
+    backupEligibility: boolean
+    backupState: boolean
+    createdAt: string
+  } | null
 }
 
 /**
@@ -629,19 +543,7 @@ export async function loadPasskeySafetyNotice({
  * @param [options.idb] {IDBFactory}
  * @returns {Promise<void>}
  */
-export async function deletePasskeySafetyNotice({
-  controller,
-  idb
-}: {
-  controller: string
-  idb?: IDBFactory
-}): Promise<void> {
-  await withSessionStore(
-    'readwrite',
-    store => store.delete(passkeySafetyKey(controller)),
-    idb
-  )
-}
+export const deletePasskeySafetyNotice = passkeySafetyNotices.delete
 
 /**
  * Whether the session database exists at all, WITHOUT creating it.

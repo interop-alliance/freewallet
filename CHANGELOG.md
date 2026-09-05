@@ -4,6 +4,12 @@
 
 ### Changed
 
+- The five `freewallet-session` entry families in `src/lib/sessionKey.ts`
+  (keyring cache, client-key record, Space-to-DID mapping, unlock-methods
+  cache, passkey-safety notice) are instances of one `sessionEntry`
+  factory over the object store. The exported names and signatures are
+  unchanged; only the saves and loads that stamp or reshape their stored
+  value keep a wrapper of their own.
 - Every load-on-mount effect under `src/pages/` and `src/components/`
   rides one hook, `useAsyncLoad` (`src/hooks/useAsyncLoad.ts`), which owns
   the cancellation guard: a run superseded by a deps change, an unmount, or
