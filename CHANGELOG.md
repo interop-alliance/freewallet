@@ -4,6 +4,13 @@
 
 ### Changed
 
+- `loginWithPassphrase` and `loginWithPasskey` are thin entries over one
+  `loginWithUnlockCredential` body in `src/session/initSession.ts`: the
+  routing decision, the transient arm, the keyring fetch, the
+  `rememberBrowser` heal of an unpromoted account, and the bounded
+  stale-client-key-record retry are stated once. The passkey entry runs its
+  PRF assertion first; the passphrase entry alone passes `email` and the
+  torn-retirement repair's `loginCredential`.
 - The five `freewallet-session` entry families in `src/lib/sessionKey.ts`
   (keyring cache, client-key record, Space-to-DID mapping, unlock-methods
   cache, passkey-safety notice) are instances of one `sessionEntry`

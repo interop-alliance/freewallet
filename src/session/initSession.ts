@@ -74,7 +74,7 @@ import {
   mendCredentialAnchoredAccount,
   passphraseRegistryUpsertHook
 } from '@/session/credentialAnchoredGenesis'
-import { KEYRING_KDF } from '@interop/wallet-core/keyring'
+import { KEYRING_KDF, type UnlockKdf } from '@interop/wallet-core/keyring'
 import {
   routeUnlockLogin,
   transientSessionFromKeyringHit
@@ -929,19 +929,84 @@ export async function loginWithPassphrase({
   credential?: UnlockCredential
   rememberBrowser?: boolean
 }): Promise<{ session: Session | null; userExists: boolean }> {
-  // One bounded retry around the routing: a stale client-key record (bound
-  // to a different account than the unlock record points at) is wiped
-  // inside `sessionFromKeyringHit`, and the login re-routes as a
-  // record-less browser -- transient by default, self-enrolling under
-  // `rememberBrowser: true`. A credential the routing derived (the probed
-  // default path) is carried across the retry so the KDF does not re-run
-  // there; the explicit-`rememberBrowser` arms derive inside `fetchKeyring` as
-  // before.
+  return loginWithUnlockCredential({
+    secret: passphrase,
+    kdf: KEYRING_KDF,
+    type: 'passphrase',
+    email,
+    // For the torn-retirement repair's establish-first arm, which may need
+    // to make this credential standing before it can retire the one a
+    // residual pending-shaped entry names.
+    loginCredential: { secret: passphrase },
+    idb,
+    popup,
+    provisionStorage,
+    credential,
+    rememberBrowser
+  })
+}
+
+/**
+ * The one keyring login body both entry points run: the routing decision,
+ * the transient arm, the keyring fetch, the `rememberBrowser` heal of a
+ * standing record whose pointer names no did:webvh yet, and the bounded
+ * stale-client-key-record retry around `sessionFromKeyringHit`. The entries
+ * differ only in the secret and its KDF, the method literal, and the
+ * passphrase-only members (`email`, `loginCredential`).
+ *
+ * The retry: a stale client-key record (bound to a different account than
+ * the unlock record points at) is wiped inside `sessionFromKeyringHit`, and
+ * the login re-routes as a record-less browser -- transient by default,
+ * self-enrolling under `rememberBrowser: true`. A credential the routing
+ * derived (the probed default path) is carried across the retry so the KDF
+ * (or the one WebAuthn tap behind a passkey credential) is never repeated;
+ * the explicit-`rememberBrowser` arms derive inside `fetchKeyring` as before.
+ *
+ * @param options {object}
+ * @param [options.secret] {string | Uint8Array}   the unlock secret; may be
+ *   absent only when `credential` is supplied
+ * @param options.kdf {UnlockKdf}   the unlock method's KDF parameters
+ * @param options.type {'passphrase' | 'passkey'}   the unlock method
+ * @param [options.email] {string}   passphrase logins only
+ * @param [options.loginCredential] {object}   the typed secret, threaded
+ *   (with the derived credential once the routing has run the KDF) to the
+ *   torn-retirement repair; passphrase logins only
+ * @param [options.idb] {IDBFactory}
+ * @param [options.popup] {boolean}
+ * @param [options.provisionStorage] {boolean}
+ * @param [options.credential] {UnlockCredential}   an already-derived unlock
+ *   credential for the same secret
+ * @param [options.rememberBrowser] {boolean}   the explicit routing input
+ * @returns {Promise<{ session: Session | null, userExists: boolean }>}
+ */
+async function loginWithUnlockCredential({
+  secret,
+  kdf,
+  type,
+  email,
+  loginCredential,
+  idb,
+  popup,
+  provisionStorage,
+  credential,
+  rememberBrowser
+}: {
+  secret?: string | Uint8Array
+  kdf: UnlockKdf
+  type: 'passphrase' | 'passkey'
+  email?: string
+  loginCredential?: { secret: string }
+  idb?: IDBFactory
+  popup: boolean
+  provisionStorage: boolean
+  credential?: UnlockCredential
+  rememberBrowser?: boolean
+}): Promise<{ session: Session | null; userExists: boolean }> {
   let derived = credential
   for (let staleRetries = 0; ; staleRetries++) {
     const routed = await routeUnlockLogin({
-      secret: passphrase,
-      kdf: KEYRING_KDF,
+      ...(secret !== undefined ? { secret } : {}),
+      kdf,
       credential: derived,
       idb,
       rememberBrowser
@@ -956,7 +1021,7 @@ export async function loginWithPassphrase({
       }
       return transientSessionFromKeyringHit({
         found,
-        type: 'passphrase',
+        type,
         email,
         persistence: routed.persistence,
         credential: routed.credential,
@@ -966,19 +1031,20 @@ export async function loginWithPassphrase({
     derived = routed.credential ?? derived
 
     let found = await fetchKeyring({
-      secret: passphrase,
+      ...(secret !== undefined ? { secret } : {}),
+      kdf,
       idb,
       mintManageCapability: true,
       ...(derived ? { credential: derived } : {})
     })
-
     if (!found) {
       return { session: null, userExists: false }
     }
 
-    // The remembered resume entry: only under the explicit remember input, and
-    // only for a standing record whose pointer names no did:webvh (a
-    // remembered signup torn before its re-bind).
+    // The remembered resume entry: only under the explicit remember input,
+    // and only for a standing record whose pointer names no did:webvh (a
+    // remembered signup torn before the establishment's re-bind), healed and
+    // re-fetched before the self-enrollment.
     if (
       rememberBrowser === true &&
       found.standing?.ladderSeed &&
@@ -988,13 +1054,13 @@ export async function loginWithPassphrase({
       derived =
         derived ??
         (await deriveUnlockCredential({
-          secret: passphrase,
-          kdf: KEYRING_KDF
+          secret: secret as string | Uint8Array,
+          kdf
         }))
       found = await healUnpromotedRememberedAccount({
         found,
         credential: derived,
-        type: 'passphrase',
+        type,
         email,
         idb
       })
@@ -1003,18 +1069,19 @@ export async function loginWithPassphrase({
     try {
       return await sessionFromKeyringHit({
         found,
-        type: 'passphrase',
+        type,
         email,
         popup,
         provisionStorage,
         idb,
-        // For the torn-retirement repair's establish-first arm, which may
-        // need to make this credential standing before it can retire the
-        // one a residual pending-shaped entry names.
-        loginCredential: {
-          secret: passphrase,
-          ...(derived ? { derived } : {})
-        }
+        ...(loginCredential
+          ? {
+              loginCredential: {
+                ...loginCredential,
+                ...(derived ? { derived } : {})
+              }
+            }
+          : {})
       })
     } catch (err) {
       if (!(err instanceof StaleClientKeyRecordError)) {
@@ -1639,91 +1706,20 @@ export async function loginWithPasskey({
   rememberBrowser?: boolean
   credential?: UnlockCredential
 } = {}): Promise<{ session: Session | null; userExists: boolean }> {
-  let derived: UnlockCredential | undefined = credential
+  // The one WebAuthn tap, skipped when the caller already holds the derived
+  // credential; the shared body's stale-record retry never repeats it.
   let prfOutput: Uint8Array | undefined
-  if (!derived) {
+  if (!credential) {
     ;({ prfOutput } = await assertPasskeyPrf({ signal }))
   }
-
-  // The same bounded stale-record retry as the passphrase path: the retry
-  // re-routes with the already-derived credential, so the one WebAuthn tap
-  // above is never repeated.
-  for (let staleRetries = 0; ; staleRetries++) {
-    const routed = await routeUnlockLogin({
-      ...(prfOutput !== undefined ? { secret: prfOutput } : {}),
-      kdf: PASSKEY_KDF,
-      credential: derived,
-      idb,
-      rememberBrowser
-    })
-    if (routed.login === 'transient') {
-      const found = await fetchTransientKeyring({
-        credential: routed.credential,
-        accountLogPinStore: routed.persistence.logPins
-      })
-      if (!found) {
-        return { session: null, userExists: false }
-      }
-      return transientSessionFromKeyringHit({
-        found,
-        type: 'passkey',
-        persistence: routed.persistence,
-        credential: routed.credential,
-        popup
-      })
-    }
-    derived = routed.credential ?? derived
-
-    let found = await fetchKeyring({
-      ...(prfOutput !== undefined ? { secret: prfOutput } : {}),
-      kdf: PASSKEY_KDF,
-      idb,
-      mintManageCapability: true,
-      ...(derived ? { credential: derived } : {})
-    })
-    if (!found) {
-      return { session: null, userExists: false }
-    }
-
-    // The remembered resume entry, exactly as on the passphrase path: a
-    // standing record whose pointer names no did:webvh yet (a passkey
-    // signup torn before the establishment's re-bind) is healed and
-    // re-fetched before the self-enrollment.
-    if (
-      rememberBrowser === true &&
-      found.standing?.ladderSeed &&
-      found.pointer &&
-      !isWebvhDid(found.pointer.did)
-    ) {
-      derived =
-        derived ??
-        (await deriveUnlockCredential({
-          secret: prfOutput as Uint8Array,
-          kdf: PASSKEY_KDF
-        }))
-      found = await healUnpromotedRememberedAccount({
-        found,
-        credential: derived,
-        type: 'passkey',
-        idb
-      })
-    }
-
-    try {
-      return await sessionFromKeyringHit({
-        found,
-        type: 'passkey',
-        popup,
-        provisionStorage,
-        idb
-      })
-    } catch (err) {
-      if (!(err instanceof StaleClientKeyRecordError)) {
-        throw err
-      }
-      if (staleRetries > 0) {
-        throw new KeyringRecordUnusableError({ cause: err })
-      }
-    }
-  }
+  return loginWithUnlockCredential({
+    ...(prfOutput !== undefined ? { secret: prfOutput } : {}),
+    kdf: PASSKEY_KDF,
+    type: 'passkey',
+    idb,
+    popup,
+    provisionStorage,
+    credential,
+    rememberBrowser
+  })
 }
