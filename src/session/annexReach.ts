@@ -560,8 +560,7 @@ export function didWebProjectionStore({
       spaceId,
       collectionId: ID_COLLECTION.id,
       delegation: capability,
-      zcapClient,
-      publicRead: true
+      zcapClient
     })
   }
   return {

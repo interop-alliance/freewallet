@@ -149,8 +149,7 @@ export function unlockLogStore({
     spaceId: pointer.spaceId,
     collectionId: ID_COLLECTION.id,
     delegation,
-    zcapClient,
-    publicRead: true
+    zcapClient
   })
 }
 

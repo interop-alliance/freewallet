@@ -4,6 +4,10 @@
 
 ### Changed
 
+- The delegated log stores over the `id` collection (`annexReach.ts`,
+  `standingUnlock.ts`) no longer pass `publicRead`; wallet-core 0.67.0's
+  `delegatedWebvhLogStore` reads the collection's read mode off the wallet
+  Space roster spec.
 - The last-client forget transition hands `forgetLastEnrolledClient` one
   ladder-signed roster store (`sessionRosterStore` with the credential's
   ladder VM as `keyAgent`) in place of the per-log `rosterStoreFor` factory,

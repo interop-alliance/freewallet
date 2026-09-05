@@ -648,6 +648,10 @@ a per-log slot key wallet-core derives (`accountLogPinId` /
 `userKeyRosterPinId`, both `space/<spaceId>/<collection>/<resource>`), so
 two logs cannot clobber each other's pin. The slot key is host-free, so a
 log served from a claimed new host is checked against the pin already held.
+wallet-core also names the slot for a log-governed collection descriptor
+(`collectionDescriptorLogPinId`, `space/<spaceId>/key-map/<collectionId>.jsonl`);
+no collection descriptor in this wallet is log-governed yet, so nothing
+here produces that slot.
 
 The pin store is in-memory on both persistence strategies
 (`decisions/0012-no-durable-continuity-pins.md`). The rule, stated once here
@@ -1370,7 +1374,10 @@ since an invocation under the generation delegation needs that key's
 verification method in the annex document first. The store is aimed at the
 account Space's `id` collection under the generation delegation, signing as
 the annex VM. The `id` collection is world-readable, so the freshness read
-is an unauthenticated GET and only the republish invokes the delegation. The
+is an unauthenticated GET and only the republish invokes the delegation.
+wallet-core's `delegatedWebvhLogStore` reads that mode off the wallet Space
+roster's `isPublic` flag, so no store here states it: the account log's
+reads go unauthenticated, an annex generation's invoke the delegation. The
 ensure re-derives the projection from the resolved account document, compares
 it against the served body, and writes only on a difference, so a healthy
 account costs one GET and no write.

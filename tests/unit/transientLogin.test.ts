@@ -758,8 +758,7 @@ describe('transientSessionFromKeyringHit -- the did:web projection mend', () => 
       spaceId: POINTER.spaceId,
       collectionId: ID_COLLECTION.id,
       delegation: GENERATION_DELEGATION,
-      zcapClient: expect.objectContaining({ isClientAnnexZcapClient: true }),
-      publicRead: true
+      zcapClient: expect.objectContaining({ isClientAnnexZcapClient: true })
     })
     expect(ensureDidWebProjection).toHaveBeenCalledWith({
       store: expect.anything(),
