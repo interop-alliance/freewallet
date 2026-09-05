@@ -924,11 +924,12 @@ export async function wipeStaleClientResidue({
 }
 
 /**
- * The IndexedDB database-name shapes a wallet replica can carry: the current
- * `-wallet-db` and the legacy `-credentials-db` / `-sync-db`, each embedded
- * in the storage adapter's own naming.
+ * The IndexedDB database-name shape a wallet replica carries, `-wallet-db`,
+ * embedded in the storage adapter's own naming. The shared replica wipe
+ * matches the same shape, so what this probe reports is what the wipe
+ * removes.
  */
-const REPLICA_DB_NAME_PATTERN = /-(?:wallet|credentials|sync)-db/
+const REPLICA_DB_NAME_PATTERN = /-wallet-db/
 
 /**
  * Whether this browser holds any forgettable wallet data at all: a replica

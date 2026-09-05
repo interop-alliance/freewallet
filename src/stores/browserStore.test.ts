@@ -2193,7 +2193,13 @@ describe('wipeStorage (cross-tab teardown and verified completion)', () => {
     }
     vi.stubGlobal('BroadcastChannel', FakeChannel)
     const { deleted } = stubIndexedDb({
-      names: ['prefix-a-wallet-db', 'prefix-a-sync-db', 'other-wallet-db'],
+      names: [
+        'prefix-a-wallet-db',
+        'rxdb-dexie-prefix-a-wallet-db--0--internal',
+        'prefix-a-sync-db',
+        'prefix-a-credentials-db',
+        'other-wallet-db'
+      ],
       behavior: 'succeed'
     })
     const store = new BrowserStore({
@@ -2202,7 +2208,12 @@ describe('wipeStorage (cross-tab teardown and verified completion)', () => {
     })
     await store.wipeStorage()
     expect(posted).toEqual([{ dbPrefix: 'prefix-a' }])
-    expect(deleted.sort()).toEqual(['prefix-a-sync-db', 'prefix-a-wallet-db'])
+    // The current `-wallet-db` format alone; the legacy `-sync-db` and
+    // `-credentials-db` names are left where they are.
+    expect(deleted.sort()).toEqual([
+      'prefix-a-wallet-db',
+      'rxdb-dexie-prefix-a-wallet-db--0--internal'
+    ])
   })
 
   it('throws instead of reporting success while a deletion stays blocked', async () => {

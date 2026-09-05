@@ -236,7 +236,7 @@ export class BrowserStore {
    */
   async userExists(): Promise<boolean> {
     const databases = await indexedDB.databases()
-    return databases.some(db => db.name!.includes(this.dbPrefix))
+    return databases.some(db => db.name!.includes(`${this.dbPrefix}-wallet-db`))
   }
 
   /**
@@ -1748,9 +1748,8 @@ export class BrowserStore {
   }
 
   /**
-   * Removes the wallet database and any legacy local databases carrying this
-   * user's prefix (e.g. the pre-flip `-credentials-db` / `-sync-db`), with
-   * verified completion: sibling tabs are asked to drop their handles first
+   * Removes the wallet database (every IndexedDB database the storage adapter
+   * derives from `<prefix>-wallet-db`), with verified completion: sibling tabs are asked to drop their handles first
    * (the teardown broadcast), and the wipe re-probes `indexedDB.databases()`
    * at the end, throwing when any prefixed database survived -- it never
    * reports success on a deletion that is merely queued behind another open
@@ -1760,8 +1759,7 @@ export class BrowserStore {
    * does not depend on it for the deleting half: an open store is removed
    * through RxDB either way, and a closed one is removed by name (RxDB
    * knows its own Dexie naming). What the missing API costs is discovery
-   * and verification -- legacy databases carrying this prefix cannot be
-   * named, and nothing can be re-probed -- so the result reports
+   * and verification -- nothing can be re-probed -- so the result reports
    * `verified: false` and the caller states that honestly instead of
    * claiming a clean wipe.
    *
@@ -1802,17 +1800,18 @@ export class BrowserStore {
         }
         return { verified: false }
       }
+      const walletDbName = `${this.dbPrefix}-wallet-db`
       const databases = await indexedDB.databases()
       await Promise.all(
         databases
-          .filter(db => db.name!.includes(this.dbPrefix))
+          .filter(db => db.name!.includes(walletDbName))
           .map(db => this.#deleteDatabase(db.name!))
       )
       // Verified completion: the per-database deletes above log-and-resolve
       // on error and give up on a long block, so the probe below is the one
       // honest answer about what is actually gone.
       const remaining = (await indexedDB.databases()).filter(db =>
-        db.name!.includes(this.dbPrefix)
+        db.name!.includes(walletDbName)
       )
       if (remaining.length > 0) {
         throw new Error(

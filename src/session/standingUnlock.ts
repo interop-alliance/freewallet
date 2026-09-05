@@ -629,7 +629,7 @@ export async function establishClientAnnexGeneration({
         clientAnnexDid: generationDid
       }),
     idStore: remoteStore.webvhIdStore(),
-    updateKeys: clientWebvhKeys,
+    signer: { kind: 'client', updateKeys: clientWebvhKeys },
     pinStore: session.profile.persistence.logPins
   })
   const clientAnnexDid = pointed.clientAnnexDid

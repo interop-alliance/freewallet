@@ -275,6 +275,7 @@ describe('forgetBrowserWalletData (the no-unlock-material grade)', () => {
       names: [
         'rxdb-dexie-abc-123-wallet-db--0--internal',
         'abc-123-sync-db',
+        'abc-123-credentials-db',
         'freewallet-session',
         'unrelated-app-db'
       ]
@@ -290,14 +291,22 @@ describe('forgetBrowserWalletData (the no-unlock-material grade)', () => {
     const { failed } = await forgetBrowserWalletData()
     expect(failed).toEqual([])
     expect(deleted).toContain('rxdb-dexie-abc-123-wallet-db--0--internal')
-    expect(deleted).toContain('abc-123-sync-db')
     expect(deleted).toContain('freewallet-session')
     expect(deleted).not.toContain('unrelated-app-db')
+    // The legacy pre-RxDB names are not replica databases any more.
+    expect(deleted).not.toContain('abc-123-sync-db')
+    expect(deleted).not.toContain('abc-123-credentials-db')
     expect(keys()).toEqual(['fw-theme'])
   })
 
   it('reports nothing to forget on a never-remembered browser', async () => {
     stubIndexedDb({ names: ['unrelated-app-db'] })
+    stubLocalStorage({ entries: { 'fw-theme': 'dark' } })
+    expect(await hasForgettableBrowserData()).toBe(false)
+  })
+
+  it('does not report a legacy-named database as forgettable', async () => {
+    stubIndexedDb({ names: ['abc-123-sync-db', 'abc-123-credentials-db'] })
     stubLocalStorage({ entries: { 'fw-theme': 'dark' } })
     expect(await hasForgettableBrowserData()).toBe(false)
   })

@@ -131,6 +131,11 @@
   and carries no migration strategies, so the migration-schema plugin is no
   longer registered. A local replica written under the old schema is dropped
   and re-pulled from the WAS Space rather than migrated.
+- The forget probe (`hasForgettableBrowserData`) and the replica wipe
+  (`BrowserStore.wipeStorage`) enumerate the current `-wallet-db` replica
+  database format alone. The legacy pre-RxDB `-credentials-db` / `-sync-db`
+  names are neither reported as forgettable nor deleted, so the two sites
+  agree on what a browser holds.
 
 ### Fixed
 
