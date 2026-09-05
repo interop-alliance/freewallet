@@ -61,7 +61,7 @@ export function CredentialDetail({
   const hasActions = !!(actions?.onDelete || actions?.share)
   const fields = useMemo(() => getDisplayFields(vc), [vc])
   const createdDate = useMemo(() => getProofCreatedIso(vc), [vc])
-  const verification = useVerification(vc)
+  const verification = useVerification(vc, { cid })
   const [showRaw, setShowRaw] = useState(false)
   const rawJson = useMemo(() => JSON.stringify(vc, null, 2), [vc])
   const { copied, copy: copyRawJson } = useCopyToClipboard({

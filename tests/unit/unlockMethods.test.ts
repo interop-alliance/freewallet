@@ -2292,6 +2292,57 @@ describe('adoptPassphraseRebind', () => {
   })
 })
 
+describe('the authority a registry read and write ride', () => {
+  /**
+   * Every request the registry makes rides the visit's own capability,
+   * resolved inside the entry rather than threaded by each caller: a
+   * transient session holds nothing but its generation delegation over the
+   * account Space, and an annex-signed root invocation would be refused.
+   */
+  it("defaults to the session's own invocation capability", async () => {
+    const idb = createFakeIdb()
+    const session = await makeSession(idb)
+    const capability = { id: 'urn:zcap:delegated:generation' }
+    session.profile.invocationCapability = capability as never
+    vi.mocked(getUnlockMethodsRecord).mockClear()
+    vi.mocked(putUnlockMethodsRecord).mockClear()
+
+    await updateUnlockMethods({ session, mutate: () => sampleRecord() })
+    await getUnlockMethods({ session })
+
+    for (const call of vi.mocked(getUnlockMethodsRecord).mock.calls) {
+      expect(call[0]).toMatchObject({ capability })
+    }
+    expect(putUnlockMethodsRecord).toHaveBeenCalledWith(
+      expect.objectContaining({ capability })
+    )
+  })
+
+  it('names no capability when the session holds none', async () => {
+    const session = await makeSession(createFakeIdb())
+    vi.mocked(getUnlockMethodsRecord).mockClear()
+
+    await getUnlockMethods({ session })
+
+    expect(
+      vi.mocked(getUnlockMethodsRecord).mock.calls[0]?.[0]
+    ).not.toHaveProperty('capability')
+  })
+
+  it('lets an explicit capability override the default', async () => {
+    const session = await makeSession(createFakeIdb())
+    session.profile.invocationCapability = { id: 'urn:zcap:stale' } as never
+    const capability = { id: 'urn:zcap:explicit' }
+    vi.mocked(getUnlockMethodsRecord).mockClear()
+
+    await getUnlockMethods({ session, capability: capability as never })
+
+    expect(vi.mocked(getUnlockMethodsRecord).mock.calls[0]?.[0]).toMatchObject({
+      capability
+    })
+  })
+})
+
 describe('rewrapUnlockMethodsRecord', () => {
   /**
    * A second, distinct vault key set (a different seed), standing in for the

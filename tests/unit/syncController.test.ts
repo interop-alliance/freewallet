@@ -2,9 +2,8 @@
  * Unit tests for `SyncController`'s lifecycle contract
  * (`src/stores/syncController.ts`), focused on the re-login / account-switch
  * fix: the login path must tear down a controller left running by a previous
- * session before starting the new one. A bare `start()` no-ops on its
- * already-running guard, so `restart()` (stop-then-start, serialized) is the
- * login entry point.
+ * session before starting the new one. `restart()` (stop-then-start,
+ * serialized) is the one entry point that starts replication.
  *
  * The RxDB replication machinery and the WAS sync port are mocked so the test
  * exercises only the controller's own lifecycle bookkeeping: how many
@@ -87,15 +86,6 @@ afterEach(async () => {
 })
 
 describe('SyncController lifecycle', () => {
-  it('a bare second start() no-ops on the already-running guard', async () => {
-    await syncController.start({ session: fakeSession({ spaceId: 'A' }) })
-    expect(createWasReplication).toHaveBeenCalledTimes(COLLECTION_COUNT)
-
-    await syncController.start({ session: fakeSession({ spaceId: 'A' }) })
-    // Still only the first batch: this is exactly the bug `restart()` fixes.
-    expect(createWasReplication).toHaveBeenCalledTimes(COLLECTION_COUNT)
-  })
-
   it('restart() cancels the running replications and starts fresh', async () => {
     await syncController.restart({ session: fakeSession({ spaceId: 'A' }) })
     expect(createWasReplication).toHaveBeenCalledTimes(COLLECTION_COUNT)
@@ -143,7 +133,7 @@ describe('SyncController lifecycle', () => {
 
   it('a guest session does not start replication', async () => {
     const guest = { ...fakeSession({ spaceId: 'A' }), isGuest: true } as Session
-    await syncController.start({ session: guest })
+    await syncController.restart({ session: guest })
     expect(createWasReplication).not.toHaveBeenCalled()
   })
 })

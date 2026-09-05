@@ -57,11 +57,7 @@ import { createRxDatabase, type RxCollection } from 'rxdb/plugins/core'
 import { getRxStorageMemory } from 'rxdb/plugins/storage-memory'
 import { uuidv7 } from 'uuidv7'
 
-import {
-  createWasReplication,
-  syncedDocMigrationStrategies,
-  syncedDocSchema
-} from '../../src/lib/sync'
+import { createWasReplication, syncedDocSchema } from '../../src/lib/sync'
 import type {
   SyncedDoc,
   WasSyncPort as FwWasSyncPort
@@ -827,18 +823,15 @@ describeConformance('cross-replica round-trip conformance', () => {
     const added = await fwDb.addCollections({
       contacts: {
         schema: syncedDocSchema(),
-        migrationStrategies: syncedDocMigrationStrategies(),
         conflictHandler: createContactsConflictHandler({
           getCipher: () => fwCiphers[CONTACTS_COLLECTION]
         })
       },
       contactsHistory: {
-        schema: syncedDocSchema(),
-        migrationStrategies: syncedDocMigrationStrategies()
+        schema: syncedDocSchema()
       },
       privateCredentials: {
-        schema: syncedDocSchema(),
-        migrationStrategies: syncedDocMigrationStrategies()
+        schema: syncedDocSchema()
       }
     })
     fwCollections = {

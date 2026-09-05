@@ -18,17 +18,6 @@ describe('credentialActivityInfo', () => {
     expect(info).toEqual({ cid: 'abc', title: 'Diploma', verb: 'created' })
   })
 
-  it('accepts a bare cid string from older records', () => {
-    const info = credentialActivityInfo(
-      activity({
-        type: ['Delete'],
-        summary: 'Credential deleted',
-        object: 'abc'
-      })
-    )
-    expect(info).toEqual({ cid: 'abc', verb: 'deleted' })
-  })
-
   it('returns null for an Object.prototype key such as toString', () => {
     expect(
       credentialActivityInfo(

@@ -50,15 +50,14 @@
  * A passkey login mends the same bare shape through
  * {@link rebuildBarePasskeyEntry}, which rebuilds its own entry alone.
  */
-import type { IZcap } from '@interop/data-integrity-core'
 import { keyAgreementCommitment } from '@interop/wallet-core/webvh'
 import { unlockKeyVmId } from '@interop/wallet-core/unlock'
 import { KEYRING_KDF } from '@interop/wallet-core/keyring'
 import type { Session } from '@/types/auth'
+import { documentListsVmId } from '@/session/keyring'
 import type { KeyringFetchResult, UnlockCredential } from '@/session/keyring'
 import {
   accountCeremonyContext,
-  ceremonyRides,
   type AccountCeremonyContext
 } from '@/session/accountCeremonyContext'
 import {
@@ -118,8 +117,7 @@ export async function repairTornPassphraseRetirement({
   if (!context || !standingClient) {
     return
   }
-  const rides = ceremonyRides({ context })
-  const registry = await getUnlockMethods({ session, ...rides() })
+  const registry = await getUnlockMethods({ session })
   if (!registry) {
     // No registry at all is the backfill's business, not a repair's: it
     // creates the record, and the login after that finds an entry here.
@@ -145,8 +143,7 @@ export async function repairTornPassphraseRetirement({
       context,
       registry,
       entry,
-      mine,
-      ...rides()
+      mine
     })
     return
   }
@@ -295,8 +292,7 @@ export async function repairTornPassphraseRetirement({
         session,
         spaceId:
           session.profile.accountPointer?.spaceId ?? session.storage.spaceId!,
-        userKey: outcome.userKey,
-        ...rides()
+        userKey: outcome.userKey
       })
     }
   }
@@ -310,7 +306,6 @@ export async function repairTornPassphraseRetirement({
     : await standingFieldsOfKeyringHit({ found })
   await updateUnlockMethods({
     session,
-    ...rides(),
     mutate: current => {
       if (!current) {
         return null
@@ -348,8 +343,6 @@ export async function repairTornPassphraseRetirement({
  * @param [options.entry] {PassphraseUnlockMethod}   the bare entry, if any
  * @param options.mine {string}   the login credential's key-agreement
  *   multibase
- * @param [options.capability] {IZcap}   the invocation capability the write
- *   rides (the ladder branch's generation delegation)
  * @returns {Promise<void>}
  */
 async function rebuildBareEntry({
@@ -358,8 +351,7 @@ async function rebuildBareEntry({
   context,
   registry,
   entry,
-  mine,
-  capability
+  mine
 }: {
   session: Session
   found: KeyringFetchResult
@@ -367,7 +359,6 @@ async function rebuildBareEntry({
   registry: UnlockMethodsRecord
   entry?: PassphraseUnlockMethod
   mine: string
-  capability?: IZcap
 }): Promise<void> {
   const { doc } = await verifiedAccountLog({
     profile: session.profile,
@@ -388,7 +379,6 @@ async function rebuildBareEntry({
   const standing = await standingFieldsOfKeyringHit({ found })
   await updateUnlockMethods({
     session,
-    ...(capability ? { capability } : {}),
     mutate: current =>
       upsertPassphraseUnlockMethod({
         record: current ?? registry,
@@ -437,8 +427,7 @@ export async function rebuildBarePasskeyEntry({
   if (!context || !standingClient) {
     return
   }
-  const rides = ceremonyRides({ context })
-  const registry = await getUnlockMethods({ session, ...rides() })
+  const registry = await getUnlockMethods({ session })
   if (!registry) {
     return
   }
@@ -516,35 +505,5 @@ export async function documentListsCredential({
             })
           }
   })
-  return documentListsVm({ doc, vmId })
-}
-
-/**
- * Whether the account document lists a verification method by id, over both
- * the `verificationMethod` set (where wallet-core's own inventory edit looks)
- * and the `keyAgreement` relation, whose members may be ids or embedded
- * methods.
- *
- * @param options {object}
- * @param options.doc {object}   the verified account document
- * @param options.vmId {string}
- * @returns {boolean}
- */
-function documentListsVm({
-  doc,
-  vmId
-}: {
-  doc: object
-  vmId: string
-}): boolean {
-  const { verificationMethod = [], keyAgreement = [] } = doc as {
-    verificationMethod?: { id?: string }[]
-    keyAgreement?: (string | { id?: string })[]
-  }
-  return (
-    verificationMethod.some(method => method?.id === vmId) ||
-    keyAgreement.some(member =>
-      typeof member === 'string' ? member === vmId : member?.id === vmId
-    )
-  )
+  return documentListsVmId({ doc, vmId })
 }

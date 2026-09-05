@@ -10,10 +10,7 @@ import { afterEach, describe, it, expect } from 'vitest'
 import { createRxDatabase, type RxDatabase } from 'rxdb/plugins/core'
 import { getRxStorageMemory } from 'rxdb/plugins/storage-memory'
 import { createWasReplication } from './wasReplication'
-import {
-  syncedDocMigrationStrategies,
-  syncedDocSchema
-} from './syncedDocSchema'
+import { syncedDocSchema } from './syncedDocSchema'
 import { formatEtag } from './pushWrites'
 import {
   WasSyncConflictError,
@@ -184,8 +181,7 @@ async function openCollection() {
   })
   const { synced } = await db.addCollections({
     synced: {
-      schema: syncedDocSchema(),
-      migrationStrategies: syncedDocMigrationStrategies()
+      schema: syncedDocSchema()
     }
   })
   return synced

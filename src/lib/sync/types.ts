@@ -76,10 +76,9 @@ export interface WireDoc {
  * collisions. `_deleted` is managed by RxDB via `deletedField` and so is not
  * part of this "clean" shape (handlers work with RxDB's `WithDeleted<SyncedDoc>`).
  * `createdBy` is the server-managed creator `did:key` DID carried down from the
- * feed (absent when the server recorded no creator); it is persisted on the
- * schema at `version: 1`. `epoch` is the key-epoch id the resource's envelope was
- * encrypted under (absent = pre-epoch, encrypted directly to the vault key);
- * opaque to the sync layer and persisted on the schema at `version: 2`.
+ * feed (absent when the server recorded no creator). `epoch` is the key-epoch id
+ * the resource's envelope was encrypted under (absent = pre-epoch, encrypted
+ * directly to the vault key); it is opaque to the sync layer.
  */
 export interface SyncedDoc {
   id: string

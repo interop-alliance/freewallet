@@ -331,7 +331,7 @@ describe('the bind under the spend obligations', () => {
 
     // The freshly written record supersedes the fast-clock one: its stamp is
     // strictly newer, so no reader sees the rewrite as the older of the two.
-    const found = await fetchKeyring({ passphrase: PASSPHRASE, idb })
+    const found = await fetchKeyring({ secret: PASSPHRASE, idb })
     expect(Date.parse(found!.createdAt)).toBeGreaterThan(
       Date.parse(fastCreatedAt)
     )
@@ -393,7 +393,7 @@ describe('the bind under the spend obligations', () => {
       idb
     })
 
-    const found = await fetchKeyring({ passphrase: PASSPHRASE, idb })
+    const found = await fetchKeyring({ secret: PASSPHRASE, idb })
     expect(found?.clientKeys?.userKey).toBeUndefined()
     expect(found?.clientKeys?.pending).toMatchObject({
       ceremony: 'recovery-spend',

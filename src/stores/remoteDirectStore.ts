@@ -45,8 +45,10 @@ import { cidFrom, errorStatus } from '@interop/was-client/sync'
 import { compareContactRevisionsNewestFirst } from '@/lib/contactRevisions'
 import type { Json } from '@/lib/sync'
 import { isEncryptedEnvelope, type DocCipher } from '@interop/was-client/edv'
-import { isUnknownEpochError } from '@interop/wallet-core/sync'
-import { isKeyUnwrapError } from '@interop/wallet-core/descriptors'
+import {
+  classifyDecryptFailure,
+  type DecryptFailure
+} from '@/lib/decryptFailure'
 import { uuidv7 } from 'uuidv7'
 import type { StoredCredential } from '@/types/credential'
 import type { StoredContact } from '@/types/contact'
@@ -305,7 +307,8 @@ export class RemoteDirectStore implements SyncedCollectionStore {
       const { id: resourceId } = resources[position]
       const { vc, fromEnvelope, err } = decrypted[position]
       if (err) {
-        if (isUnknownEpochError(err)) {
+        const failure = classifyDecryptFailure(err)
+        if (failure === 'unknown-epoch') {
           // Possibly-fresh data behind a stale descriptor: skip it so a descriptor
           // refresh can pick it up, never purge it.
           log.warn('Skipping unknown-epoch remote resource', {
@@ -314,7 +317,7 @@ export class RemoteDirectStore implements SyncedCollectionStore {
             err
           })
           unknownEpoch += 1
-        } else if (isKeyUnwrapError(err)) {
+        } else if (failure === 'no-epoch-key') {
           // This wallet is not a recipient of the resource's key epoch: skip it,
           // but never purge it -- a purge here would delete it from the server.
           log.warn(
@@ -662,11 +665,12 @@ export class RemoteDirectStore implements SyncedCollectionStore {
       const { id: resourceId } = resources[position]
       const { activity, err } = decrypted[position]
       if (err) {
-        if (isUnknownEpochError(err)) {
+        const failure = classifyDecryptFailure(err)
+        if (failure === 'unknown-epoch') {
           unknownEpoch += 1
           continue
         }
-        if (isKeyUnwrapError(err)) {
+        if (failure === 'no-epoch-key') {
           // Not a recipient of this resource's key epoch: skip it, and keep it
           // out of the refresh signal -- a descriptor refresh cannot help.
           log.warn(
@@ -767,19 +771,20 @@ export class RemoteDirectStore implements SyncedCollectionStore {
   /**
    * Decrypts one remote `contacts` row body to its head payload, mirroring
    * the local store's per-row tolerance: a plaintext (legacy) body passes
-   * through, an unknown-epoch row is reported apart (a descriptor refresh may
-   * pick it up), and any other decrypt failure -- a no-epoch-key row
-   * included -- is reported as unreadable. Every readable head passes through
-   * the idempotent `upgradeContactHeadPayload` read-side upgrade.
+   * through, and a decrypt failure is reported with its bucket, so an
+   * unknown-epoch row (which a descriptor refresh may pick up) and a
+   * no-epoch-key row (which no refresh can reach) stay apart from a row that
+   * is genuinely unreadable. Every readable head passes through the idempotent
+   * `upgradeContactHeadPayload` read-side upgrade.
    *
    * @param options {object}
    * @param options.data {Json | undefined}   the raw stored body
-   * @returns {Promise<{ head?: ContactHeadPayload; unknownEpoch?: boolean;
+   * @returns {Promise<{ head?: ContactHeadPayload; failure?: DecryptFailure;
    *   err?: unknown }>}
    */
   async #decryptContactHead({ data }: { data: Json | undefined }): Promise<{
     head?: ContactHeadPayload
-    unknownEpoch?: boolean
+    failure?: DecryptFailure
     err?: unknown
   }> {
     if (data === undefined) {
@@ -797,10 +802,7 @@ export class RemoteDirectStore implements SyncedCollectionStore {
         head: upgradeContactHeadPayload(raw as unknown as ContactHeadPayload)
       }
     } catch (err) {
-      if (isUnknownEpochError(err)) {
-        return { unknownEpoch: true, err }
-      }
-      return { err }
+      return { failure: classifyDecryptFailure(err), err }
     }
   }
 
@@ -832,13 +834,21 @@ export class RemoteDirectStore implements SyncedCollectionStore {
     let unknownEpoch = 0
     for (let position = 0; position < resources.length; position++) {
       const { id: rowId } = resources[position]
-      const { head, unknownEpoch: isUnknownEpoch, err } = decrypted[position]
+      const { head, failure, err } = decrypted[position]
       if (err) {
-        if (isUnknownEpoch) {
+        if (failure === 'unknown-epoch') {
           // Possibly-fresh data behind a stale descriptor: skip it so a
           // descriptor refresh can pick it up.
           log.warn('Skipping unknown-epoch remote contacts row', { rowId, err })
           unknownEpoch += 1
+        } else if (failure === 'no-epoch-key') {
+          // Not a recipient of this row's key epoch: skip it, and keep it out
+          // of the refresh signal -- a descriptor refresh cannot grant a key.
+          log.warn(
+            'Skipping remote contacts row: this wallet is not a recipient ' +
+              'of its key epoch',
+            { rowId, err }
+          )
         } else {
           log.warn('Skipping unreadable remote contacts row', { rowId, err })
         }
@@ -1186,10 +1196,28 @@ export class RemoteDirectStore implements SyncedCollectionStore {
       const { id: resourceId } = resources[position]
       const { raw, err } = decrypted[position]
       if (err) {
-        log.warn('Skipping unreadable remote contacts-history row', {
-          resourceId,
-          err
-        })
+        const failure = classifyDecryptFailure(err)
+        if (failure === 'unknown-epoch') {
+          // Possibly-fresh data behind a stale descriptor: skip it so a later
+          // read, past a descriptor refresh, can pick it up.
+          log.warn('Skipping unknown-epoch remote contacts-history row', {
+            resourceId,
+            err
+          })
+        } else if (failure === 'no-epoch-key') {
+          // Not a recipient of this row's key epoch: skip it, and keep it out
+          // of the refresh signal -- a descriptor refresh cannot grant a key.
+          log.warn(
+            'Skipping remote contacts-history row: this wallet is not a ' +
+              'recipient of its key epoch',
+            { resourceId, err }
+          )
+        } else {
+          log.warn('Skipping unreadable remote contacts-history row', {
+            resourceId,
+            err
+          })
+        }
         continue
       }
       if (raw === undefined) {

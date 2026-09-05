@@ -173,9 +173,6 @@ function seedLocalStorage(backing: Map<string, string>): void {
     '{}'
   )
   backing.set('freewallet:collection-encryption:other-space:contacts', '{}')
-  backing.set(`freewallet:plaintext-migrated:${DB_PREFIX}`, '2026')
-  backing.set(`freewallet:public-cids-migrated:${DB_PREFIX}`, '2026')
-  backing.set('freewallet:plaintext-migrated:other-prefix', '2026')
   backing.set('freewallet:writerId', 'writer-1')
   backing.set('fw-theme', 'dark')
 }
@@ -241,7 +238,6 @@ describe('the shared wipe enumeration', () => {
       expect([...localStorageBacking.keys()].sort()).toEqual(
         [
           'freewallet:collection-encryption:other-space:contacts',
-          'freewallet:plaintext-migrated:other-prefix',
           'fw-theme'
         ].sort()
       )
@@ -316,8 +312,8 @@ describe('the shared wipe enumeration', () => {
       idb
     })
     localStorageBacking.set(
-      `freewallet:plaintext-migrated:${deriveSpaceId(ACCOUNT_CONTROLLER)}`,
-      '2026'
+      `freewallet:collection-encryption:local:${ACCOUNT_CONTROLLER}:contacts`,
+      '{}'
     )
     const session = sessionFixture({
       clientDid: VISIT_DID,
@@ -337,7 +333,7 @@ describe('the shared wipe enumeration', () => {
     expect(sessionStore.has(`passkey-safety/${ACCOUNT_CONTROLLER}`)).toBe(false)
     expect(
       localStorageBacking.has(
-        `freewallet:plaintext-migrated:${deriveSpaceId(ACCOUNT_CONTROLLER)}`
+        `freewallet:collection-encryption:local:${ACCOUNT_CONTROLLER}:contacts`
       )
     ).toBe(false)
   })
@@ -361,8 +357,8 @@ describe('the shared wipe enumeration', () => {
       idb
     })
     localStorageBacking.set(
-      `freewallet:plaintext-migrated:${deriveSpaceId(siblingDid)}`,
-      '2026'
+      `freewallet:collection-encryption:local:${siblingDid}:contacts`,
+      '{}'
     )
     const session = sessionFixture({
       clientDid: VISIT_DID,
@@ -387,7 +383,7 @@ describe('the shared wipe enumeration', () => {
     expect(sessionStore.has(`passkey-safety/${siblingDid}`)).toBe(false)
     expect(
       localStorageBacking.has(
-        `freewallet:plaintext-migrated:${deriveSpaceId(siblingDid)}`
+        `freewallet:collection-encryption:local:${siblingDid}:contacts`
       )
     ).toBe(false)
   })
@@ -442,11 +438,13 @@ describe('the shared wipe enumeration', () => {
       false
     )
     expect(
-      localStorageBacking.has(`freewallet:plaintext-migrated:${DB_PREFIX}`)
+      localStorageBacking.has(
+        `freewallet:collection-encryption:local:${CLIENT_DID}:private-credentials`
+      )
     ).toBe(false)
   })
 
-  it('wipes guest state: replica, markers, local-mode caches; no session rows', async () => {
+  it('wipes guest state: replica and local-mode caches; no session rows', async () => {
     const { idb, databaseNames } = createFakeSessionIdb()
     vi.stubGlobal('indexedDB', idb)
     const wipeLocalStorage = vi.fn(async () => {})
@@ -461,7 +459,9 @@ describe('the shared wipe enumeration', () => {
     // create-nothing guard leaves the session database uncreated.
     expect(databaseNames.has('freewallet-session')).toBe(false)
     expect(
-      localStorageBacking.has(`freewallet:plaintext-migrated:${DB_PREFIX}`)
+      localStorageBacking.has(
+        `freewallet:collection-encryption:local:${CLIENT_DID}:private-credentials`
+      )
     ).toBe(false)
     expect(localStorageBacking.get('freewallet:writerId')).toBe('writer-1')
     expect(localStorageBacking.get('fw-theme')).toBe('dark')

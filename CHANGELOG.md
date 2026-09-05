@@ -25,6 +25,49 @@
   transient login on another credential. The annex-family login refusal
   comment no longer describes a mend that has since landed.
 
+- Registry reads and writes (`getUnlockMethods`, `updateUnlockMethods`)
+  default their invocation capability to the session's own
+  (`profile.invocationCapability`), so callers no longer thread it by hand.
+  `ceremonyRides`, `registryRides`, and `visitCapability` are gone.
+- The login-time registry chain is assembled once (`src/session/registryPasses.ts`):
+  `chainRegistryStage` appends a stage to `session.registryReady`, and
+  `runSharedRegistryPasses` runs the four passes both login compositions
+  share, in their documented order.
+- Shared helpers replace copies: `classifyDecryptFailure`
+  (`src/lib/decryptFailure.ts`) at every envelope-decrypt fold,
+  `isPreconditionFailed` in `src/lib/storageErrors.ts`, `zcapExpires` in
+  `src/lib/zcap.ts`, `isResourceLogContinuityError` in `verifiedLog.ts`,
+  `documentListsVmId` from `keyring.ts`, wallet-core's `documentLoader` in
+  `composeVP.ts`, and a `projectionStore` getter on the ladder ceremony
+  context. `rewrapUnlockMethodsRecord` rides `casUpdateRegistryRecord`;
+  `bindRemoteUnlockRecord` is gone in favor of
+  `bindCredentialAnchoredUnlockSecret`.
+- `ResolvedTarget` keeps `targetClass` as its one discriminator; the derived
+  `satisfiable`, `wholeSpace`, `isPublic`, and `isShare` members are gone
+  (`isSatisfiable` covers the first). The four history credential writers
+  collapsed into `addHistoryCredentialActivity({ verb })`. `SyncController`
+  has `restart()` alone. `ConnectedApp.appUrl` is required and the
+  pre-`appUrl` Login join is gone. `fetchKeyring`'s `passphrase` alias,
+  `Session.expires`, and `LadderCeremonyContext`'s `ladderSeed` and
+  `delegationSigner` members are removed.
+- Fewer round trips: a remembered login reuses the forgotten-browser
+  detector's verified account log for the roster read, the Applications page
+  reads the activity collection once, an App Connect popup no longer lists
+  every private credential, a share or unshare rebuilds one cipher instead of
+  six, app revocation fans out per collection and no longer re-POSTs the same
+  revocations per recipient, and the Storage page no longer refetches on a
+  language switch. `CredentialCard` is memoized and the verification cache
+  keys on the `cid`.
+- The two one-time local data migrations are gone, along with the
+  `#runOnce` marker gate, `migrationMarkerKeys`, and the
+  `migration-markers` wipe stage: `migrateLocalPlaintextDocs` re-keyed
+  plaintext rows written before encrypted sync landed, and
+  `migratePublicCredentialCids` re-keyed public rows written under the
+  pre-fix CID formula. The synced-doc RxDB schema is back to `version: 0`
+  and carries no migration strategies, so the migration-schema plugin is no
+  longer registered. A local replica written under the old schema is dropped
+  and re-pulled from the WAS Space rather than migrated.
+
 ### Fixed
 
 - The recovery tails delete a retired credential's unlock Space only once
@@ -68,6 +111,14 @@
   retired. Recovery-code revocation gained the post-ceremony adoption it never
   made, and the login-time sweep refreshes its descriptors whenever it adopted
   a rotated key.
+- Renaming a passkey from a transient session rode the root capability and
+  failed with "no unlock-methods registry"; it now rides the visit's
+  generation delegation like every other registry write. The same default
+  covers `refreshStandingDelegationFields` and `dropBarePasskeyEntry`, which
+  never took one.
+- The remote-direct contacts and contact-revision scans now distinguish a row
+  this wallet holds no epoch key for from an undecryptable one, matching the
+  other encrypted readers.
 
 ## 0.49.0 - TBD
 

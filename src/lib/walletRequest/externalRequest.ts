@@ -283,8 +283,7 @@ export function precheckExternalRequest({
 export function barredGrants(grants: ResolvedGrant[]): ResolvedGrant[] {
   return grants.filter(
     ({ target }) =>
-      target.satisfiable &&
-      !!target.targetClass &&
+      target.targetClass !== undefined &&
       !ALLOWED_TARGET_CLASSES.includes(target.targetClass)
   )
 }

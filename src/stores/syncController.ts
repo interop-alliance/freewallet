@@ -56,17 +56,16 @@ interface CollectionReplication {
 
 /**
  * Singleton controlling replication for the current session. Constructed once
- * and shared; `start()`/`stop()` bracket a login/logout.
+ * and shared; `restart()`/`stop()` bracket a login/logout.
  */
 class SyncController {
   #replications: CollectionReplication[] = []
   #onlineHandler?: () => void
   #pollTimer?: ReturnType<typeof setInterval>
-  #started = false
-  // Serializes every lifecycle transition (start / stop / restart) onto a
-  // single chain so overlapping login / logout calls can never interleave and
-  // leave dangling replications or a stale `_started` flag. A start racing a
-  // stop is thereby impossible: each runs to completion before the next begins.
+  // Serializes every lifecycle transition (restart / stop) onto a single chain
+  // so overlapping login / logout calls can never interleave and leave
+  // dangling replications. A start racing a stop is thereby impossible: each
+  // runs to completion before the next begins.
   #queue: Promise<void> = Promise.resolve()
 
   /**
@@ -85,25 +84,11 @@ class SyncController {
   }
 
   /**
-   * Starts background replication for a logged-in session, serialized after any
-   * in-flight lifecycle transition. A no-op for guests, when no remote WAS
-   * replica is configured, or when already running.
-   *
-   * @param options {object}
-   * @param options.session {Session}
-   * @returns {Promise<void>}
-   */
-  start({ session }: { session: Session }): Promise<void> {
-    return this.#enqueue(() => this.#start({ session }))
-  }
-
-  /**
    * Stops any running replication, then starts it fresh for `session`,
-   * serialized as a single atomic transition. This is the login path's entry
-   * point: it guarantees a controller left running by a previous (restored or
-   * other-account) session is torn down before the new one starts, closing the
-   * `_started`-guard hole where a re-login would otherwise silently never
-   * replicate.
+   * serialized as a single atomic transition. The one entry point for
+   * starting: it guarantees a controller left running by a previous (restored
+   * or other-account) session is torn down before the new one starts, so a
+   * re-login can never silently fail to replicate.
    *
    * @param options {object}
    * @param options.session {Session}
@@ -128,19 +113,16 @@ class SyncController {
 
   /**
    * Starts background replication for a logged-in session. A no-op for guests,
-   * or when no remote WAS replica is configured, or when already running.
-   * Expects the session storage's local collections to be initialized
-   * (`ensureUserCollections()` runs before login). Runs inside the serialized
-   * queue; callers use `start()` / `restart()`.
+   * or when no remote WAS replica is configured. Expects the session storage's
+   * local collections to be initialized (`ensureUserCollections()` runs before
+   * login). Runs inside the serialized queue, always behind a stop; callers
+   * use `restart()`.
    *
    * @param options {object}
    * @param options.session {Session}
    * @returns {Promise<void>}
    */
   async #start({ session }: { session: Session }): Promise<void> {
-    if (this.#started) {
-      return
-    }
     // Guests never sync; a missing client/space means no remote replica.
     // A replica-less session (the transient session's remote-direct storage)
     // has no local end for replication to drive: every synced-collection
@@ -156,7 +138,6 @@ class SyncController {
     ) {
       return
     }
-    this.#started = true
 
     const setStatus = useSyncStatusStore.getState().setStatus
 
@@ -271,7 +252,6 @@ class SyncController {
     }
     this.#replications = []
     useSyncStatusStore.getState().reset()
-    this.#started = false
   }
 }
 

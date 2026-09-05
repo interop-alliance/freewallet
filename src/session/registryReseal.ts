@@ -35,10 +35,7 @@ import {
   rewrapUnlockMethodsRecord,
   UnlockRegistryStaleSealError
 } from '@/session/unlockMethods'
-import {
-  ceremonyRides,
-  type AccountCeremonyContext
-} from '@/session/accountCeremonyContext'
+import { type AccountCeremonyContext } from '@/session/accountCeremonyContext'
 import { createLogger } from '@/lib/log'
 
 const log = createLogger('fw:session:reseal')
@@ -99,7 +96,6 @@ export async function repairStaleUnlockRegistrySeal({
     context?.kind === 'ladder'
       ? context.standingKeyAgreementKey
       : session.profile.clientKeyAgreementKey
-  const rides = ceremonyRides({ context })
   if (
     !WAS_SERVER_URL ||
     !context ||
@@ -112,7 +108,7 @@ export async function repairStaleUnlockRegistrySeal({
     return 'ok'
   }
   try {
-    await getUnlockMethods({ session, ...rides() })
+    await getUnlockMethods({ session })
     return 'ok'
   } catch (err) {
     if (!(err instanceof UnlockRegistryStaleSealError)) {
@@ -120,18 +116,22 @@ export async function repairStaleUnlockRegistrySeal({
     }
   }
 
+  // The visit's own authority every request rides: a transient session holds
+  // nothing but its generation delegation over the account Space, and an
+  // enrolled session holds none and root-invokes.
+  const capability = session.profile.invocationCapability
   const repaired = await resealRegistryFromEscrow({
     zcapClient: session.profile.zcapClient,
     spaceId,
     userKey,
     descriptor: rosterRead.descriptor,
     unwrapKey,
-    ...rides()
+    ...(capability ? { capability } : {})
   })
   if (repaired === 'repaired') {
     // Refresh the local cache from the record as served, the way an ordinary
     // read does.
-    await getUnlockMethods({ session, ...rides() })
+    await getUnlockMethods({ session })
   }
   return repaired
 }

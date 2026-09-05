@@ -115,6 +115,7 @@ import {
   type StandingUnlockFields
 } from '@/session/unlockMethods'
 import { createLogger } from '@/lib/log'
+import { zcapExpires } from '@/lib/zcap'
 
 const log = createLogger('fw:session:unlock')
 
@@ -485,12 +486,12 @@ export async function establishStandingUnlock({
   }
 
   const delegationKeyId = delegationProofKeyId(delegation)
-  const delegationExpires = (delegation as { expires?: string }).expires
+  const delegationExpires = zcapExpires(delegation)
   const delegatedClientsKeyId = delegatedClients
     ? delegationProofKeyId(delegatedClients)
     : undefined
   const delegatedClientsExpires = delegatedClients
-    ? (delegatedClients as { expires?: string }).expires
+    ? zcapExpires(delegatedClients)
     : undefined
   return {
     unlockSpaceId: bound.unlockSpaceId,
@@ -669,10 +670,9 @@ export async function establishClientAnnexGeneration({
     unlockSpaceId: found.unlockSpaceId,
     keyAgreementKeyMultibase: found.standingClient.keyAgreementKeyMultibase,
     ...(delegatedClientsKeyId ? { delegatedClientsKeyId } : {}),
-    ...((delegatedClients as { expires?: string }).expires
+    ...(zcapExpires(delegatedClients)
       ? {
-          delegatedClientsExpires: (delegatedClients as { expires?: string })
-            .expires
+          delegatedClientsExpires: zcapExpires(delegatedClients)
         }
       : {})
   })
@@ -934,14 +934,12 @@ export async function standingFieldsOfKeyringHit({
   const delegationKeyId = delegation
     ? delegationProofKeyId(delegation)
     : undefined
-  const delegationExpires = delegation
-    ? (delegation as { expires?: string }).expires
-    : undefined
+  const delegationExpires = delegation ? zcapExpires(delegation) : undefined
   const delegatedClientsKeyId = delegatedClients
     ? delegationProofKeyId(delegatedClients)
     : undefined
   const delegatedClientsExpires = delegatedClients
-    ? (delegatedClients as { expires?: string }).expires
+    ? zcapExpires(delegatedClients)
     : undefined
   return {
     ...(standingClient

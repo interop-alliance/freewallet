@@ -17,6 +17,7 @@ import {
   PendingResumeLogUnavailableError
 } from '@/session/pendingEnrollment'
 import { SelfEnrollmentSkewError } from '@/session/standingUnlock'
+import { isResourceLogContinuityError } from '@/session/verifiedLog'
 import { isStorageUnreachable } from '@/lib/storageErrors'
 import { createLogger } from '@/lib/log'
 
@@ -102,7 +103,7 @@ export function loginErrorKey({
   // The account-log continuity refusal: the served did:webvh log is a
   // rollback, a fork, or an identity switch against the chain head this
   // browser has pinned.
-  if (errorName(err) === 'ResourceLogContinuityError') {
+  if (isResourceLogContinuityError(err)) {
     log.error('Login refused: account log continuity violation', {
       label,
       err

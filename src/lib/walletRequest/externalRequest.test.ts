@@ -302,13 +302,11 @@ describe('precheckExternalRequest', () => {
 })
 
 describe('barredGrants', () => {
-  function grant(
-    targetClass: string | undefined,
-    satisfiable = true
-  ): ResolvedGrant {
+  // An absent `targetClass` is what makes a target unsatisfiable.
+  function grant(targetClass: string | undefined): ResolvedGrant {
     return {
       descriptor: { referenceId: targetClass ?? 'none' },
-      target: { satisfiable, targetClass },
+      target: { targetClass },
       allowedActions: ['GET'],
       write: false
     } as unknown as ResolvedGrant
@@ -335,9 +333,7 @@ describe('barredGrants', () => {
   })
 
   it('ignores unsatisfiable grants, which delegate nothing', () => {
-    expect(
-      barredGrants([grant(undefined, false), grant('share', false)])
-    ).toEqual([])
+    expect(barredGrants([grant(undefined)])).toEqual([])
   })
 })
 

@@ -840,6 +840,10 @@ describe('the annex strike-or-swap stage', () => {
      * @returns {AccountCeremonyContext}
      */
     function ladderContext({ sibling }: { sibling?: object } = {}) {
+      let projection: unknown
+      const invoker: { zcapClient: unknown; capability?: unknown } = {
+        zcapClient: { isPerVisitAnnexClient: true }
+      }
       return {
         kind: 'ladder',
         remoteStore: { webvhIdStore: vi.fn(() => ({ isWebvhIdStore: true })) },
@@ -849,7 +853,16 @@ describe('the annex strike-or-swap stage', () => {
         ladderSeed: SURVIVING_SEED,
         idStore: { isWebvhIdStore: true },
         rosterStore: { rosterStore: true },
-        invoker: { zcapClient: { isPerVisitAnnexClient: true } },
+        invoker,
+        // Built on first read and aimed at a thunk over the live invoker,
+        // exactly as the real context builds it.
+        get projectionStore() {
+          return (projection ??= didWebProjectionStore({
+            host: POINTER.host,
+            spaceId: POINTER.spaceId,
+            invoker: (() => invoker) as never
+          }))
+        },
         standingKeyAgreementKey: { id: 'did:key:z6LSStandingKak' },
         ...(sibling ? { sibling } : {})
       } as unknown as AccountCeremonyContext

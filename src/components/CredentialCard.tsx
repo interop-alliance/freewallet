@@ -1,3 +1,4 @@
+import { memo, useMemo } from 'react'
 import Box from '@mui/material/Box'
 import Card from '@mui/material/Card'
 import CardActionArea from '@mui/material/CardActionArea'
@@ -13,7 +14,12 @@ import { useVerification } from '@/hooks/useVerification'
 import { VerificationStatusBadge } from '@/components/credentialDetails/VerificationPanel'
 import { useTranslation } from 'react-i18next'
 
-export function CredentialCard({
+/**
+ * One credential's dashboard card. Memoized on its props: the dashboard
+ * re-renders the whole list on every search keystroke, and the display-field
+ * mapping below is not free.
+ */
+export const CredentialCard = memo(function CredentialCard({
   cid,
   credential
 }: {
@@ -21,9 +27,13 @@ export function CredentialCard({
   credential: IVerifiableCredential
 }) {
   const { t } = useTranslation()
-  const { credentialDescription } = getDisplayFields(credential)
+  const { credentialDescription } = useMemo(
+    () => getDisplayFields(credential),
+    [credential]
+  )
   const description = credentialDescription ?? t('common.noDescription')
-  const { result, loading, error } = useVerification(credential)
+  const title = useMemo(() => credentialTitle(credential), [credential])
+  const { result, loading, error } = useVerification(credential, { cid })
 
   return (
     <Card variant="outlined">
@@ -38,7 +48,7 @@ export function CredentialCard({
             gutterBottom
             sx={credentialCardStyles.title}
           >
-            {credentialTitle(credential)}
+            {title}
           </Typography>
           <Typography
             variant="body2"
@@ -61,4 +71,4 @@ export function CredentialCard({
       </CardActionArea>
     </Card>
   )
-}
+})

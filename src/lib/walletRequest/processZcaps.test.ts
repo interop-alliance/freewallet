@@ -1,6 +1,10 @@
 // @vitest-environment node
 import { describe, it, expect } from 'vitest'
-import { existingCollectionsFrom, resolveGrant } from './processZcaps'
+import {
+  existingCollectionsFrom,
+  isSatisfiable,
+  resolveGrant
+} from './processZcaps'
 import type { ICapabilityQueryDetail } from './types'
 
 const SPACE_URL = 'https://was.example/space/abc'
@@ -21,7 +25,7 @@ describe('resolveGrant recipient presence', () => {
       spaceUrl: SPACE_URL,
       collections: existingCollectionsFrom([])
     })
-    expect(target.satisfiable).toBe(true)
+    expect(isSatisfiable(target)).toBe(true)
   })
 
   it('refuses a descriptor that names no controller as unsatisfiable', () => {
@@ -34,7 +38,7 @@ describe('resolveGrant recipient presence', () => {
       spaceUrl: SPACE_URL,
       collections: existingCollectionsFrom([])
     })
-    expect(target.satisfiable).toBe(false)
+    expect(target.targetClass).toBeUndefined()
   })
 
   it('allows an empty controller for the App Connect consent preview', () => {
@@ -47,6 +51,6 @@ describe('resolveGrant recipient presence', () => {
       collections: existingCollectionsFrom([]),
       allowMissingController: true
     })
-    expect(target.satisfiable).toBe(true)
+    expect(isSatisfiable(target)).toBe(true)
   })
 })

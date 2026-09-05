@@ -1,11 +1,12 @@
 // @vitest-environment node
 /**
  * `loadUnlockRegistry` takes one path on both storage tiers: the backfill,
- * which lazily creates or repairs the passphrase entry. What varies is the
- * authority its requests ride -- a transient session's ride the visit's
- * generation delegation (`profile.invocationCapability`), since an
- * annex-signed root invocation would be refused under the current-key-set
- * rule, while a browser-local session root-invokes and rides none.
+ * which lazily creates or repairs the passphrase entry, falling back to a
+ * plain read. It names no authority: the registry entries resolve the visit's
+ * own (a transient session's generation delegation, since an annex-signed
+ * root invocation would be refused under the current-key-set rule; nothing on
+ * a browser-local session, which root-invokes), so this caller passes no
+ * capability on either tier.
  */
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import type { Session } from '@/types/auth'
@@ -50,11 +51,10 @@ function fakeSession({
 }
 
 describe('loadUnlockRegistry (the authority the registry read rides)', () => {
-  it('rides the generation delegation on a transient session', async () => {
-    const invocationCapability = { id: 'urn:zcap:delegated:generation' }
+  it('names no capability on a transient session: the entry resolves it', async () => {
     const session = fakeSession({
       storage: STORAGE_IN_MEMORY,
-      invocationCapability
+      invocationCapability: { id: 'urn:zcap:delegated:generation' }
     })
     const record = { methods: [] }
     vi.mocked(backfillPassphraseUnlockMethod).mockResolvedValue(record as never)
@@ -64,17 +64,15 @@ describe('loadUnlockRegistry (the authority the registry read rides)', () => {
     expect(result).toBe(record)
     expect(vi.mocked(backfillPassphraseUnlockMethod)).toHaveBeenCalledWith({
       session,
-      createIfMissing: true,
-      capability: invocationCapability
+      createIfMissing: true
     })
     expect(vi.mocked(getUnlockMethods)).not.toHaveBeenCalled()
   })
 
-  it('falls back to a plain read under the same authority', async () => {
-    const invocationCapability = { id: 'urn:zcap:delegated:generation' }
+  it('falls back to a plain read, naming no capability there either', async () => {
     const session = fakeSession({
       storage: STORAGE_IN_MEMORY,
-      invocationCapability
+      invocationCapability: { id: 'urn:zcap:delegated:generation' }
     })
     const record = { methods: [] }
     const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
@@ -86,14 +84,11 @@ describe('loadUnlockRegistry (the authority the registry read rides)', () => {
     const result = await loadUnlockRegistry({ session })
 
     expect(result).toBe(record)
-    expect(vi.mocked(getUnlockMethods)).toHaveBeenCalledWith({
-      session,
-      capability: invocationCapability
-    })
+    expect(vi.mocked(getUnlockMethods)).toHaveBeenCalledWith({ session })
     warn.mockRestore()
   })
 
-  it('backfills with createIfMissing and no capability on a browser-local session', async () => {
+  it('backfills with createIfMissing on a browser-local session', async () => {
     const session = fakeSession({ storage: STORAGE_INDEXEDDB })
     const record = { methods: [] }
     vi.mocked(backfillPassphraseUnlockMethod).mockResolvedValue(record as never)

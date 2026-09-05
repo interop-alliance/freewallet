@@ -400,7 +400,7 @@ describe('the remembered spend reorder -- the persist hook', () => {
     expect(state.recordPutSpaceIds.length).toBeGreaterThanOrEqual(2)
     // The pending client-key record is browser-local and PENDING (no user
     // key, the carrier present) until the confirm-gated completion runs.
-    const found = await fetchKeyring({ passphrase: NEW_PASSPHRASE, idb })
+    const found = await fetchKeyring({ secret: NEW_PASSPHRASE, idb })
     expect(found?.clientKeys?.userKey).toBeUndefined()
     expect(found?.clientKeys?.pending).toMatchObject({
       ceremony: 'recovery-spend',
@@ -429,7 +429,7 @@ describe('the remembered spend reorder -- the persist hook', () => {
 
     await outcome.completeRecovery!()
 
-    const found = await fetchKeyring({ passphrase: NEW_PASSPHRASE, idb })
+    const found = await fetchKeyring({ secret: NEW_PASSPHRASE, idb })
     expect(found?.clientKeys?.userKey).toBeDefined()
     expect(found?.clientKeys?.pending).toBeUndefined()
     expect(found?.clientKeys?.pointerDid).toBe(POINTER.did)
@@ -536,7 +536,7 @@ describe('the remembered spend reorder -- the persist hook', () => {
       })
     ).rejects.toThrow(RecoverySpendSkewError)
 
-    const found = await fetchKeyring({ passphrase: NEW_PASSPHRASE, idb })
+    const found = await fetchKeyring({ secret: NEW_PASSPHRASE, idb })
     expect(found?.clientKeys?.pending?.ceremony).toBe('recovery-spend')
   })
 
@@ -713,7 +713,7 @@ describe('the standing-establishment success gate', () => {
     // A later resume (the pending record still stands -- the completion was
     // never confirmed) finishes the establishment from durable state and
     // upgrades the bare entry with the now-real standing configuration.
-    const found = await fetchKeyring({ passphrase: NEW_PASSPHRASE, idb })
+    const found = await fetchKeyring({ secret: NEW_PASSPHRASE, idb })
     expect(found?.clientKeys?.pending?.ceremony).toBe('recovery-spend')
     state.rosterRecipients = ['everyone-already-escrowed']
 

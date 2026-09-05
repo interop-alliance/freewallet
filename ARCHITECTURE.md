@@ -814,7 +814,7 @@ from the live session before anything is deleted. What it enumerates:
   record behind a wipe that reads clean.
 - The Space-to-DID mapping, keyed by the account Space id.
 - The per-account localStorage families: the descriptor and meta caches
-  under both scope schemes, and the migration markers.
+  under both scope schemes.
 
 No continuity pin is enumerated, because none is stored (see "Log continuity
 within a session"). Cross-tab teardown precedes the replica delete, a

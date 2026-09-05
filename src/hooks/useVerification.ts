@@ -38,29 +38,52 @@ interface VerificationCacheEntry {
 
 /**
  * Module-level, process-lifetime cache of verification results. Keyed by the
- * canonicalized credential plus the active language (checklist messages are
- * localized), so distinct credentials and languages never collide. Only
+ * credential's content identity plus the active language (checklist messages
+ * are localized), so distinct credentials and languages never collide. Only
  * successful mappings are stored -- transient failures fall through and are
  * retried on the next mount.
  */
 const verificationCache = new Map<string, VerificationCacheEntry>()
 
-function verificationCacheKey(
-  credential: IVerifiableCredential,
+/**
+ * The cache key for one credential in one language. The content identity is
+ * the caller's `cid` when it has one -- itself a hash of the canonicalized
+ * credential JSON, so it names exactly what canonicalizing would -- and the
+ * canonicalization otherwise. A cid is base64url and a canonicalization
+ * always starts with `{`, so the two forms cannot collide.
+ *
+ * @param options {object}
+ * @param options.credential {IVerifiableCredential}
+ * @param options.language {string}
+ * @param [options.cid] {string}
+ * @returns {string}
+ */
+function verificationCacheKey({
+  credential,
+  language,
+  cid
+}: {
+  credential: IVerifiableCredential
   language: string
-): string {
-  return `${language}::${jcsCanonicalize(credential as object)}`
+  cid?: string
+}): string {
+  return `${language}::${cid ?? jcsCanonicalize(credential as object)}`
 }
 
 /**
  * Synchronously read a still-fresh cache entry, or `null` on miss/expiry.
  */
-function readVerificationCache(
-  credential: IVerifiableCredential,
+function readVerificationCache({
+  credential,
+  language,
+  cid
+}: {
+  credential: IVerifiableCredential
   language: string
-): VerificationCacheEntry | null {
+  cid?: string
+}): VerificationCacheEntry | null {
   const cached = verificationCache.get(
-    verificationCacheKey(credential, language)
+    verificationCacheKey({ credential, language, cid })
   )
   if (cached && Date.now() - cached.checkedAt < VERIFICATION_CACHE_TTL_MS) {
     return cached
@@ -92,11 +115,13 @@ async function verifyAndMap(
 async function verifyAndStore({
   credential,
   t,
-  language
+  language,
+  cid
 }: {
   credential: IVerifiableCredential
   t: TFunction
   language: string
+  cid?: string
 }): Promise<VerificationCacheEntry> {
   const mapped = await verifyAndMap(credential, t)
   const entry: VerificationCacheEntry = {
@@ -104,15 +129,18 @@ async function verifyAndStore({
     result: mapped.result,
     issuerRegistry: mapped.issuerRegistry
   }
-  verificationCache.set(verificationCacheKey(credential, language), entry)
+  verificationCache.set(
+    verificationCacheKey({ credential, language, cid }),
+    entry
+  )
   return entry
 }
 
 export function useVerification(
   credential: IVerifiableCredential | null | undefined,
-  options: { runOnMount?: boolean } = { runOnMount: true }
+  options: { runOnMount?: boolean; cid?: string } = { runOnMount: true }
 ): UseVerificationReturn {
-  const { runOnMount = true } = options
+  const { runOnMount = true, cid } = options
   const { t, i18n } = useTranslation()
   const [result, setResult] = useState<VerificationResult | null>(null)
   const [loading, setLoading] = useState(false)
@@ -139,7 +167,12 @@ export function useVerification(
       setLoading(true)
       setError(null)
       try {
-        const entry = await verifyAndStore({ credential: subject, t, language })
+        const entry = await verifyAndStore({
+          credential: subject,
+          t,
+          language,
+          cid
+        })
         if (isStale?.()) {
           return
         }
@@ -161,7 +194,7 @@ export function useVerification(
         }
       }
     },
-    [t]
+    [t, cid]
   )
 
   const verify = useCallback(async () => {
@@ -185,7 +218,11 @@ export function useVerification(
       // A fresh cached result skips the whole verification pass. It is applied
       // before the first await (so before paint), avoiding the "verifying"
       // flicker on remount.
-      const cached = readVerificationCache(credential!, language)
+      const cached = readVerificationCache({
+        credential: credential!,
+        language,
+        cid
+      })
       if (cached) {
         setResult(cached.result)
         setIssuerRegistry(cached.issuerRegistry)
@@ -200,7 +237,7 @@ export function useVerification(
     return () => {
       cancelled = true
     }
-  }, [runOnMount, credential, i18n.language, runVerification])
+  }, [runOnMount, credential, cid, i18n.language, runVerification])
 
   return { result, loading, error, verify, lastCheckedAt, issuerRegistry }
 }

@@ -315,3 +315,22 @@ export async function reprimeVerifiedAccountLog({
     // The memo simply stays cold; the next reader fetches and reports.
   }
 }
+
+/**
+ * Whether the given error is the account-log chain-head continuity refusal:
+ * a rollback, a fork, or an SCID or method switch against the head this visit
+ * has pinned.
+ *
+ * Matched on `name` rather than `instanceof`: the refusal is raised inside
+ * app-injected seams, and the copy of the raising package can differ from the
+ * one this module imports (a linked checkout, or a duplicate through the
+ * dependency tree), so an `instanceof` check would silently miss it.
+ *
+ * @param err {unknown}   the caught error
+ * @returns {boolean}
+ */
+export function isResourceLogContinuityError(err: unknown): boolean {
+  return (
+    (err as { name?: unknown } | null)?.name === 'ResourceLogContinuityError'
+  )
+}

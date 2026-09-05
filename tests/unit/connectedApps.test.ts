@@ -20,11 +20,12 @@ import {
 } from '@/lib/connectedApps'
 
 const APP_DID = 'did:key:zApp'
+const APP_URL = 'https://app.example/editor'
 
 /**
  * A self-issued app-key StoredCredential carrying the `AppKeyCredential`
- * marker type, bound to an origin and (unless it is a legacy pre-`appUrl` key)
- * to an `appUrl` within it.
+ * marker type, bound to an origin and to an `appUrl` within it. Omitting the
+ * `appUrl` produces a row the listing cannot attribute to an app.
  */
 function appKeyCredential({
   cid,
@@ -81,8 +82,8 @@ function unmarkedRow(cid: string): StoredCredential {
 }
 
 /**
- * An App Connect Login activity row. Omitting `appUrl` produces a row in the
- * shape written before activities recorded one.
+ * An App Connect Login activity row. Omitting `appUrl` produces a row the
+ * listing cannot join to any app key.
  */
 function loginActivity({
   origin,
@@ -158,16 +159,18 @@ describe('listConnectedApps', () => {
     const storage = fakeStorage({
       appKeys: [
         unmarkedRow('c-plain'),
-        appKeyCredential({ cid: 'c-app', origin })
+        appKeyCredential({ cid: 'c-app', origin, appUrl: APP_URL })
       ],
       history: [
         loginActivity({
           origin,
+          appUrl: APP_URL,
           name: 'Old Name',
           created: '2026-07-01T00:00:00Z'
         }),
         loginActivity({
           origin,
+          appUrl: APP_URL,
           name: 'Example App',
           created: '2026-07-05T00:00:00Z',
           grants: [
@@ -261,14 +264,18 @@ describe('listConnectedApps', () => {
     expect(reader?.grants.map(grant => grant.id)).toEqual(['urn:zcap:reader'])
   })
 
-  it('joins an appUrl-scoped key to an older row that recorded no appUrl', async () => {
+  it('never joins a Login activity that recorded no appUrl', async () => {
+    // The `appUrl` is the whole join. A Login row carrying none names no
+    // application, so it cannot lend its grants to a key that shares only the
+    // origin.
     const origin = 'https://app.example'
     const storage = fakeStorage({
       appKeys: [
         appKeyCredential({
           cid: 'c-app',
           origin,
-          appUrl: 'https://app.example/editor'
+          appUrl: APP_URL,
+          name: 'Example App app key'
         })
       ],
       history: [
@@ -278,7 +285,7 @@ describe('listConnectedApps', () => {
           created: '2026-07-05T00:00:00Z',
           grants: [
             {
-              id: 'urn:zcap:legacy',
+              id: 'urn:zcap:unscoped',
               target: 'https://was.example/space/x/private-credentials',
               allowedActions: ['GET'],
               expires: '2027-08-01T00:00:00Z'
@@ -291,8 +298,8 @@ describe('listConnectedApps', () => {
     const [app] = await listConnectedApps({ storage })
 
     expect(app.name).toBe('Example App')
-    expect(app.lastConnectedAt).toBe('2026-07-05T00:00:00Z')
-    expect(app.grants.map(grant => grant.id)).toEqual(['urn:zcap:legacy'])
+    expect(app.grants).toEqual([])
+    expect(app.lastConnectedAt).toBeUndefined()
   })
 
   it("never lends another app's appUrl-scoped row to a sibling app", async () => {
@@ -337,6 +344,7 @@ describe('listConnectedApps', () => {
         appKeyCredential({
           cid: 'c-app',
           origin: 'https://app.example',
+          appUrl: APP_URL,
           name: 'Solo App app key'
         })
       ],
@@ -351,16 +359,21 @@ describe('listConnectedApps', () => {
     expect(apps[0].lastConnectedAt).toBeUndefined()
   })
 
-  it('ignores rows without the marker, and marked rows missing an origin', async () => {
+  it('ignores rows without the marker, an origin, or an appUrl', async () => {
     // The collection holds app keys only, so the row check is the marker type
-    // plus the two members the listing reads (subject DID and origin).
-    const marked = appKeyCredential({
+    // plus the three members the listing reads (subject DID, origin, appUrl).
+    const originless = appKeyCredential({
       cid: 'c-originless',
+      origin: 'https://app.example',
+      appUrl: APP_URL
+    })
+    delete (originless.vc.credentialSubject as { origin?: unknown }).origin
+    const urlless = appKeyCredential({
+      cid: 'c-urlless',
       origin: 'https://app.example'
     })
-    delete (marked.vc.credentialSubject as { origin?: unknown }).origin
     const storage = fakeStorage({
-      appKeys: [unmarkedRow('c-plain'), marked],
+      appKeys: [unmarkedRow('c-plain'), originless, urlless],
       history: []
     })
 
@@ -370,10 +383,11 @@ describe('listConnectedApps', () => {
   it('extracts the delegation signer from a recorded full zcap', async () => {
     const origin = 'https://app.example'
     const storage = fakeStorage({
-      appKeys: [appKeyCredential({ cid: 'c-app', origin })],
+      appKeys: [appKeyCredential({ cid: 'c-app', origin, appUrl: APP_URL })],
       history: [
         loginActivity({
           origin,
+          appUrl: APP_URL,
           name: 'Example App',
           created: '2026-07-05T00:00:00Z',
           grants: [
@@ -415,6 +429,7 @@ describe('deriveAppGrantsState', () => {
       cid: 'c-app',
       name: 'Example App',
       origin: 'https://app.example',
+      appUrl: 'https://app.example/editor',
       subjectDid: APP_DID,
       grants: signers.map((signerKeyId, index) => ({
         id: `urn:zcap:${index}`,
@@ -475,6 +490,7 @@ describe('revokeAppAccess', () => {
     cid: 'c-app',
     name: 'Example App',
     origin: 'https://app.example',
+    appUrl: 'https://app.example/editor',
     subjectDid: APP_DID,
     grants: []
   }

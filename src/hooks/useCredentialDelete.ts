@@ -54,10 +54,11 @@ export function useCredentialDelete({
       setDeleting(true)
       try {
         await session.storage.deleteCredential({ cid, keepPublicCopy })
-        await session.storage.addHistoryCredentialDeleted({
+        await session.storage.addHistoryCredentialActivity({
           cid,
           title: title ?? cid,
-          user: session.user
+          user: session.user,
+          verb: 'deleted'
         })
       } catch (err) {
         log.error('Error deleting credential', { err })

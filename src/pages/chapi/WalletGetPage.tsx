@@ -53,6 +53,7 @@ import type { Session } from '@/types/auth'
 import type { StoredCredential } from '@/types/credential'
 import {
   appConnectZcapRequests,
+  appKeyMintRefused,
   classifyRequest,
   composeAndDeliverResponse,
   credentialQueriesOf,
@@ -64,6 +65,7 @@ import {
   hasTypedExample,
   hasZcapStorage,
   isDidAuthOnly,
+  isSatisfiable,
   queriesOf,
   requestsCredentialType,
   resolveGrants,
@@ -401,10 +403,14 @@ export function WalletGetPage() {
       // concurrent read can surface an error here -- an accepted trade-off.
       // The background chain (on `session.registryReady`, just the user-key
       // sweep fold in remote-direct mode) is deliberately not waited on.
+      // The credential list feeds the generic-VC selection only. An App
+      // Connect request never reads it -- it matches over the dedicated
+      // `app-connections` collection below -- so listing and decrypting every
+      // private credential is skipped there.
       await loggedIn.storage.ready()
       const [, stored] = await Promise.all([
         loggedIn.storageReady,
-        loggedIn.storage.listCredentials()
+        profile.appConnect ? [] : loggedIn.storage.listCredentials()
       ])
 
       // A zcap request needs a remote Space to delegate against; a guest or a
@@ -452,13 +458,9 @@ export function WalletGetPage() {
         // The scan skipped rows this session cannot read and nothing matched,
         // so approval would refuse rather than mint (`AppKeysUnreadableError`).
         // Block here instead of showing first-run "Connect {app}?" copy the
-        // user would only see fail after clicking.
-        if (
-          !existing &&
-          (skipped.unknownEpoch > 0 ||
-            skipped.noEpochKey > 0 ||
-            skipped.undecryptable > 0)
-        ) {
+        // user would only see fail after clicking. The predicate is the
+        // approved path's own, so the two cannot drift apart.
+        if (appKeyMintRefused({ matched: !!existing, skipped })) {
           setSession(loggedIn)
           setBlockReason('appKeysUnreadable')
           setPageState('blocked')
@@ -625,7 +627,7 @@ export function WalletGetPage() {
     !appConnect &&
     !profile.didAuth &&
     selectedCids.size === 0 &&
-    !resolvedGrants.some(({ target }) => target.satisfiable)
+    !resolvedGrants.some(({ target }) => isSatisfiable(target))
   const title = appConnect
     ? t('chapi.get.appConnect.title', { appName })
     : profile.zcapRequests.length > 0

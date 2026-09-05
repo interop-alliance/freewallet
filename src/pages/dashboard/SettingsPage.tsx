@@ -382,12 +382,8 @@ export function SettingsPage() {
     if (!session) {
       return
     }
-    const { invocationCapability } = session.profile
     try {
-      const record = await getUnlockMethods({
-        session,
-        ...(invocationCapability ? { capability: invocationCapability } : {})
-      })
+      const record = await getUnlockMethods({ session })
       setUnlockRegistry(record)
       setRegistryLoaded(true)
       setRegistryLoadError(false)

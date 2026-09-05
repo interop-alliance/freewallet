@@ -713,77 +713,6 @@ describe('BrowserStore (encrypted collections)', () => {
       expect(items.map(({ doc }) => doc.summary)).toEqual(['one'])
     })
   })
-
-  describe('migrateLocalPlaintextDocs', () => {
-    it('re-keys never-synced plaintext rows into envelopes, preserving updatedAt', async () => {
-      const { localStore } = await initLocalStore({
-        ciphers: encryptedCiphers()
-      })
-      const credential = makeCredential('Alice')
-      const cid = await cidFrom({ doc: credential })
-      const originalUpdatedAt = '2026-01-02T03:04:05.000Z'
-      await localStore.rxCollection('privateCredentials').insert({
-        id: cid,
-        updatedAt: originalUpdatedAt,
-        version: 0,
-        data: credential as unknown as Json
-      })
-
-      await localStore.migrateLocalPlaintextDocs()
-
-      const rows = await localStore
-        .rxCollection('privateCredentials')
-        .find()
-        .exec()
-      expect(rows).toHaveLength(1)
-      const row = rows[0].toMutableJSON()
-      expect(row.id).not.toBe(cid)
-      expect(row.updatedAt).toBe(originalUpdatedAt)
-      expect((row.data as { jwe?: unknown }).jwe).toBeDefined()
-
-      // The credential survives the re-key intact.
-      expect(await localStore.loadCredential({ cid })).toEqual(credential)
-    })
-
-    it('leaves already-synced rows (server revision) untouched', async () => {
-      const { localStore } = await initLocalStore({
-        ciphers: encryptedCiphers()
-      })
-      await localStore.rxCollection('walletActivity').insert({
-        id: 'legacy-activity',
-        updatedAt: new Date().toISOString(),
-        version: 2,
-        data: { id: 'legacy-activity', summary: 'legacy' } as Json
-      })
-
-      await localStore.migrateLocalPlaintextDocs()
-
-      const rows = await localStore.rxCollection('walletActivity').find().exec()
-      expect(rows).toHaveLength(1)
-      const row = rows[0].toMutableJSON()
-      expect(row.id).toBe('legacy-activity')
-      expect((row.data as { jwe?: unknown }).jwe).toBeUndefined()
-    })
-
-    it('is a no-op on an already-migrated store', async () => {
-      const { localStore } = await initLocalStore({
-        ciphers: encryptedCiphers()
-      })
-      const credential = makeCredential('Alice')
-      const cid = await cidFrom({ doc: credential })
-      await localStore.addCredential({ cid, credential })
-
-      await localStore.migrateLocalPlaintextDocs()
-      await localStore.migrateLocalPlaintextDocs()
-
-      const rows = await localStore
-        .rxCollection('privateCredentials')
-        .find()
-        .exec()
-      expect(rows).toHaveLength(1)
-      expect(await localStore.listCredentials()).toHaveLength(1)
-    })
-  })
 })
 
 /**
@@ -1158,142 +1087,6 @@ describe('BrowserStore (contacts encryption)', () => {
   })
 })
 
-describe('migratePublicCredentialCids', () => {
-  it('re-keys a row stored under the pre-fix cid, preserving updatedAt', async () => {
-    const { localStore } = await initLocalStore()
-    const credential = makeCredential('Alice')
-    const cid = await cidFrom({ doc: credential })
-    const wrongCid = 'z6PreFixWrongCid'
-    const originalUpdatedAt = '2026-01-02T03:04:05.000Z'
-    // Seed a public row under a wrong id, as the pre-fix formula would have.
-    await localStore.rxCollection('publicCredentials').insert({
-      id: wrongCid,
-      updatedAt: originalUpdatedAt,
-      version: 0,
-      data: credential as unknown as Json
-    })
-
-    await localStore.migratePublicCredentialCids()
-
-    // The row now lives under the correct cid; the old id is soft-deleted.
-    expect(await localStore.hasPublicCredential({ cid })).toBe(true)
-    expect(await localStore.hasPublicCredential({ cid: wrongCid })).toBe(false)
-    const doc = await localStore
-      .rxCollection('publicCredentials')
-      .findOne(cid)
-      .exec()
-    expect(doc).not.toBeNull()
-    const row = doc!.toMutableJSON()
-    expect(row.updatedAt).toBe(originalUpdatedAt)
-    expect(row.data).toEqual(credential)
-  })
-
-  it('re-keys a pulled row (any version), not just never-synced rows', async () => {
-    const { localStore } = await initLocalStore()
-    const credential = makeCredential('Alice')
-    const cid = await cidFrom({ doc: credential })
-    await localStore.rxCollection('publicCredentials').insert({
-      id: 'z6PreFixWrongCid',
-      updatedAt: new Date().toISOString(),
-      version: 4,
-      data: credential as unknown as Json
-    })
-
-    await localStore.migratePublicCredentialCids()
-
-    expect(await localStore.hasPublicCredential({ cid })).toBe(true)
-    expect(
-      await localStore.hasPublicCredential({ cid: 'z6PreFixWrongCid' })
-    ).toBe(false)
-  })
-
-  it('leaves a correctly-keyed row untouched (no churn)', async () => {
-    const { localStore } = await initLocalStore()
-    const credential = makeCredential('Alice')
-    const cid = await cidFrom({ doc: credential })
-    await localStore.addPublicCredential({ cid, credential })
-    const before = (await localStore
-      .rxCollection('publicCredentials')
-      .findOne(cid)
-      .exec())!.toMutableJSON()
-
-    await localStore.migratePublicCredentialCids()
-
-    const rows = await localStore
-      .rxCollection('publicCredentials')
-      .find()
-      .exec()
-    expect(rows).toHaveLength(1)
-    expect(rows[0].toMutableJSON()).toEqual(before)
-  })
-
-  it('is a no-op on a second run', async () => {
-    const { localStore } = await initLocalStore()
-    const credential = makeCredential('Alice')
-    const cid = await cidFrom({ doc: credential })
-    await localStore.rxCollection('publicCredentials').insert({
-      id: 'z6PreFixWrongCid',
-      updatedAt: new Date().toISOString(),
-      version: 0,
-      data: credential as unknown as Json
-    })
-
-    await localStore.migratePublicCredentialCids()
-    await localStore.migratePublicCredentialCids()
-
-    expect(await localStore.hasPublicCredential({ cid })).toBe(true)
-    // Only the re-keyed row remains live (the wrong-id row is tombstoned).
-    const rows = await localStore
-      .rxCollection('publicCredentials')
-      .find()
-      .exec()
-    expect(rows).toHaveLength(1)
-    expect(rows[0].toMutableJSON().id).toBe(cid)
-  })
-
-  it('short-circuits on a later login via the per-dbPrefix marker', async () => {
-    // Install a minimal localStorage (absent in the node test env) so the gate
-    // is exercised, then restore it after.
-    const backing = new Map<string, string>()
-    const fakeLocalStorage = {
-      getItem: (key: string) => backing.get(key) ?? null,
-      setItem: (key: string, value: string) => backing.set(key, value)
-    }
-    const globalObject = globalThis as { localStorage?: unknown }
-    const previous = globalObject.localStorage
-    globalObject.localStorage = fakeLocalStorage
-    try {
-      const { localStore } = await initLocalStore()
-      // First run sets the marker.
-      await localStore.migratePublicCredentialCids()
-
-      // A mis-keyed row inserted after the marker is set is NOT re-keyed: the
-      // gate short-circuits the scan, exactly like migrateLocalPlaintextDocs.
-      const credential = makeCredential('Alice')
-      const cid = await cidFrom({ doc: credential })
-      await localStore.rxCollection('publicCredentials').insert({
-        id: 'z6PreFixWrongCid',
-        updatedAt: new Date().toISOString(),
-        version: 0,
-        data: credential as unknown as Json
-      })
-
-      await localStore.migratePublicCredentialCids()
-
-      expect(await localStore.hasPublicCredential({ cid })).toBe(false)
-      expect(
-        await localStore.hasPublicCredential({ cid: 'z6PreFixWrongCid' })
-      ).toBe(true)
-    } finally {
-      if (previous === undefined) {
-        delete globalObject.localStorage
-      } else {
-        globalObject.localStorage = previous
-      }
-    }
-  })
-})
-
 describe('StorageManager (local-first facade)', () => {
   /**
    * Builds a StorageManager over a fresh local store, optionally with a fake
@@ -1334,10 +1127,11 @@ describe('StorageManager (local-first facade)', () => {
 
     await storage.addHistoryNewAccount({ user })
     await storage.addHistorySpaceCreated({ user })
-    await storage.addHistoryCredentialCreated({
+    await storage.addHistoryCredentialActivity({
       cid: 'abc',
       title: 'Test Credential',
-      user
+      user,
+      verb: 'created'
     })
 
     const items = await storage.listHistoryItems()

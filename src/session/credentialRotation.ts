@@ -54,12 +54,10 @@ import type { ZcapClient } from '@interop/ezcap'
 import type { Session } from '@/types/auth'
 import {
   clientAnnexReachFor,
-  didWebProjectionStore,
   standingClientAnnexReachFor
 } from '@/session/annexReach'
 import {
   accountCeremonyContext,
-  ceremonyRides,
   type AccountCeremonyContext
 } from '@/session/accountCeremonyContext'
 import { remintRecoveryDelegations } from '@/session/recovery'
@@ -251,7 +249,6 @@ export async function rotateOffUnlockCredential({
             ? { capability: context.invoker.capability }
             : {})
         })
-  const rides = ceremonyRides({ context })
   // Which client identity and sibling delegation the annex strike reaches the
   // generation's log through, on the ladder branch: the surviving
   // credential's when the caller named one (a passphrase change, whose strike
@@ -281,13 +278,7 @@ export async function rotateOffUnlockCredential({
     // call time: the branch replaces its generation delegation before the
     // strike lands.
     ...(context.kind === 'ladder'
-      ? {
-          projectionStore: didWebProjectionStore({
-            host: pointer.host,
-            spaceId: pointer.spaceId,
-            invoker: () => context.invoker
-          })
-        }
+      ? { projectionStore: context.projectionStore }
       : {}),
     ...(ladders.retiredLadderSeed
       ? { ladderSeed: ladders.retiredLadderSeed }
@@ -340,8 +331,7 @@ export async function rotateOffUnlockCredential({
         accountDid: pointer.did,
         userKey,
         latestEpochId,
-        descriptor,
-        ...rides()
+        descriptor
       }),
     collections: cascadeCollections({ remoteStore }),
     retireClientAnnexInventory: async ({ document }) => {

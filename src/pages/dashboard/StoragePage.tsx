@@ -60,7 +60,13 @@ export const StoragePage = () => {
   const navigate = useNavigate()
   const session = useAuthStore(state => state.session)
   const [collections, setCollections] = useState<Array<StorageCollection>>([])
-  const [collectionsError, setCollectionsError] = useState<string | null>(null)
+  // The collection listing's failure copy, held as an i18n KEY and translated
+  // at render: keeping the translated string here would put `t` in the load
+  // effect's dependencies, so a language switch would refetch the whole
+  // listing.
+  const [collectionsErrorKey, setCollectionsErrorKey] = useState<string | null>(
+    null
+  )
   const [isLoadingCollections, setIsLoadingCollections] = useState(false)
   const [isExporting, setIsExporting] = useState(false)
   const [isImporting, setIsImporting] = useState(false)
@@ -143,7 +149,7 @@ export const StoragePage = () => {
       } catch (error) {
         log.error('Failed to list storage collections', { err: error })
         if (!cancelled) {
-          setCollectionsError(t('storage.collectionsLoadError'))
+          setCollectionsErrorKey('storage.collectionsLoadError')
           setCollections([])
         }
       } finally {
@@ -160,14 +166,14 @@ export const StoragePage = () => {
       }
 
       setIsLoadingCollections(true)
-      setCollectionsError(null)
+      setCollectionsErrorKey(null)
       await Promise.all([loadQuota(), loadCollections()])
     })()
 
     return () => {
       cancelled = true
     }
-  }, [hasRemoteStorage, session, t, collectionsRefreshKey, loadQuota])
+  }, [hasRemoteStorage, session, collectionsRefreshKey, loadQuota])
 
   // The reader rosters behind each collection row's "Shared" chip. A failure
   // is non-blocking: the chips simply do not appear, and the storage listing
@@ -382,8 +388,10 @@ export const StoragePage = () => {
             ))}
           </Stack>
         )}
-        {collectionsError && <Alert severity="error">{collectionsError}</Alert>}
-        {hasRemoteStorage && !isLoadingCollections && !collectionsError && (
+        {collectionsErrorKey && (
+          <Alert severity="error">{t(collectionsErrorKey)}</Alert>
+        )}
+        {hasRemoteStorage && !isLoadingCollections && !collectionsErrorKey && (
           <CollectionsOverview
             collections={collections}
             usageByCollection={

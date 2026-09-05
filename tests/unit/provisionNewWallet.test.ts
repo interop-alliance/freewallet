@@ -102,17 +102,17 @@ describe('provisionNewWallet', () => {
     // created-history entry, so provisionNewWallet must not call any
     // addHistoryCredential* itself.
     ;(
-      storage as unknown as { addHistoryCredentialCreated?: unknown }
-    ).addHistoryCredentialCreated = vi.fn()
+      storage as unknown as { addHistoryCredentialActivity?: unknown }
+    ).addHistoryCredentialActivity = vi.fn()
 
     await provisionNewWallet({ session })
 
     expect(
       (
         storage as unknown as {
-          addHistoryCredentialCreated: ReturnType<typeof vi.fn>
+          addHistoryCredentialActivity: ReturnType<typeof vi.fn>
         }
-      ).addHistoryCredentialCreated
+      ).addHistoryCredentialActivity
     ).not.toHaveBeenCalled()
   })
 

@@ -4,10 +4,7 @@
  * {@link WasSyncPort}; nothing here imports React or `@interop/was-client`.
  */
 export { createWasReplication } from './wasReplication.js'
-export {
-  syncedDocSchema,
-  syncedDocMigrationStrategies
-} from './syncedDocSchema.js'
+export { syncedDocSchema } from './syncedDocSchema.js'
 export {
   type Json,
   type SyncCheckpoint,

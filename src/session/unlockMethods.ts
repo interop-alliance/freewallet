@@ -35,6 +35,8 @@ import type {
 } from '@interop/data-integrity-core'
 import type { ZcapClient } from '@interop/ezcap'
 import { PreconditionFailedError } from '@interop/was-client'
+import { isPreconditionFailed } from '@/lib/storageErrors'
+import { zcapExpires } from '@/lib/zcap'
 import { base64urlnopad } from '@scure/base'
 import {
   DATE_FMT,
@@ -389,9 +391,10 @@ export function emptyUnlockMethodsRegistry(): UnlockMethodsRecord {
  *
  * @param options {object}
  * @param options.session {Session}
- * @param [options.capability] {IZcap}   an invocation capability the record
- *   GET rides (a transient session's generation delegation, which is the only
- *   authority that session has); the root capability is invoked otherwise
+ * @param [options.capability] {IZcap}   an invocation capability override;
+ *   the visit's own generation delegation is ridden by default (a transient
+ *   session's only authority over the account Space), and an enrolled
+ *   session root-invokes
  * @returns {Promise<UnlockMethodsRecord | null>}
  * @throws {UnlockRegistryStaleSealError}
  */
@@ -428,7 +431,7 @@ export async function getUnlockMethods({
     storageServerUrl: WAS_SERVER_URL,
     zcapClient: session.profile.zcapClient,
     spaceId: requireSpaceId(session),
-    ...(capability ? { capability } : {})
+    ...registryRides({ session, capability })
   })
   if (!stored) {
     await unlockMethodsCache.delete({ controller })
@@ -458,20 +461,28 @@ export async function getUnlockMethods({
 const MAX_CAS_ATTEMPTS = 3
 
 /**
- * Whether `err` is the compare-and-swap conflict a conditional registry PUT
- * raises (`PreconditionFailedError`, 412). Matched by `name` as well as
- * `instanceof`: in a dependency tree that resolves was-client twice the class
- * object differs, and an `instanceof`-only check would turn every lost race
- * into a hard failure instead of a rebase.
+ * The invocation capability a registry request rides: whatever the caller
+ * named, else the visit's own. A transient session holds nothing but its
+ * generation delegation over the account Space, so every registry read and
+ * write of one must ride it; an enrolled session carries none and
+ * root-invokes. Resolved at each call rather than snapshotted by the caller,
+ * so a ceremony that renewed its delegation mid-run rides the replacement
+ * rather than the one its first stage opened with.
  *
- * @param err {unknown}
- * @returns {boolean}
+ * @param options {object}
+ * @param options.session {Session}
+ * @param [options.capability] {IZcap}   an explicit override
+ * @returns {{ capability?: IZcap }}   spread into the request options
  */
-function isPreconditionFailed(err: unknown): boolean {
-  return (
-    err instanceof PreconditionFailedError ||
-    (err instanceof Error && err.name === 'PreconditionFailedError')
-  )
+function registryRides({
+  session,
+  capability
+}: {
+  session: Session
+  capability?: IZcap
+}): { capability?: IZcap } {
+  const rides = capability ?? session.profile.invocationCapability
+  return rides ? { capability: rides } : {}
 }
 
 /**
@@ -496,6 +507,8 @@ function isPreconditionFailed(err: unknown): boolean {
  *   (or null) when mutate declined the write
  * @param [options.onWritten] {Function}   called with the wrapped envelope
  *   after a landed write
+ * @param [options.action] {string}   how the exhaustion message names this
+ *   write (`'write'` by default, `'re-seal'` for the rotation bridge)
  * @returns {Promise<UnlockMethodsRecord | null>}   the written record, or the
  *   current one when mutate declined (null when none exists)
  */
@@ -506,7 +519,8 @@ async function casUpdateRegistryRecord({
   wrap,
   mutate,
   onUnchanged,
-  onWritten
+  onWritten,
+  action = 'write'
 }: {
   read: () => Promise<{ record: unknown; etag?: string } | null>
   write: (
@@ -520,6 +534,7 @@ async function casUpdateRegistryRecord({
   ) => UnlockMethodsRecord | null | Promise<UnlockMethodsRecord | null>
   onUnchanged?: (stored: { record: unknown } | null) => Promise<void>
   onWritten?: (wrapped: object) => Promise<void>
+  action?: string
 }): Promise<UnlockMethodsRecord | null> {
   let lastError: unknown
   for (let attempt = 0; attempt < MAX_CAS_ATTEMPTS; attempt++) {
@@ -555,7 +570,7 @@ async function casUpdateRegistryRecord({
     return next
   }
   throw new PreconditionFailedError(
-    'The unlock-methods registry write lost the compare-and-swap race ' +
+    `The unlock-methods registry ${action} lost the compare-and-swap race ` +
       `after ${MAX_CAS_ATTEMPTS} attempts (another writer kept updating ` +
       'the record). Retry the operation.',
     { cause: lastError as Error }
@@ -583,9 +598,10 @@ async function casUpdateRegistryRecord({
  * @param options.session {Session}
  * @param options.mutate {Function}   fresh record (or null) to the next
  *   record, or null for "no write needed"
- * @param [options.capability] {IZcap}   an invocation capability every request
- *   rides (a transient session's generation delegation); the root capability
- *   is invoked otherwise
+ * @param [options.capability] {IZcap}   an invocation capability override;
+ *   the visit's own generation delegation is ridden by default (a transient
+ *   session's only authority over the account Space), and an enrolled
+ *   session root-invokes
  * @returns {Promise<UnlockMethodsRecord | null>}   the written record, or the
  *   current one when mutate declined (null when none exists)
  * @throws {UnlockRegistryStaleSealError}
@@ -644,7 +660,7 @@ export async function updateUnlockMethods({
         storageServerUrl,
         zcapClient,
         spaceId,
-        ...(capability ? { capability } : {})
+        ...registryRides({ session, capability })
       }),
     unwrap: async stored => {
       try {
@@ -667,7 +683,7 @@ export async function updateUnlockMethods({
         zcapClient,
         spaceId,
         record,
-        ...(capability ? { capability } : {}),
+        ...registryRides({ session, capability }),
         ...precondition
       })
     },
@@ -869,58 +885,45 @@ export async function rewrapUnlockMethodsRecord({
   to: { keyAgreementKey: IKeyAgreementKey; keyResolver: IKeyResolver }
   capability?: IZcap
 }): Promise<void> {
-  let lastError: unknown
-  for (let attempt = 0; attempt < MAX_CAS_ATTEMPTS; attempt++) {
-    const stored = await getUnlockMethodsRecord({
-      storageServerUrl,
-      zcapClient,
-      spaceId,
-      ...(capability ? { capability } : {})
-    })
-    if (!stored) {
-      return
-    }
-    if (stored.etag === undefined) {
-      throw new Error(
-        'The unlock-methods registry read carried no ETag; refusing an ' +
-          'unconditional overwrite.'
-      )
-    }
-    const record = await unwrapRecord({
-      record: stored.record,
-      keyAgreementKey: from.keyAgreementKey,
-      keyResolver: from.keyResolver
-    })
-    const wrapped = await wrapRecord({
-      record,
-      keyAgreementKey: to.keyAgreementKey,
-      keyResolver: to.keyResolver
-    })
-    try {
+  await casUpdateRegistryRecord({
+    action: 're-seal',
+    read: () =>
+      getUnlockMethodsRecord({
+        storageServerUrl,
+        zcapClient,
+        spaceId,
+        ...(capability ? { capability } : {})
+      }),
+    // The decrypt refusal a base no longer sealed to `from` raises stays
+    // `RecordEnvelopeDecryptError`: callers read it as "not sealed to these
+    // keys" rather than as the read path's stale-seal state.
+    unwrap: record =>
+      unwrapRecord({
+        record,
+        keyAgreementKey: from.keyAgreementKey,
+        keyResolver: from.keyResolver
+      }),
+    wrap: record =>
+      wrapRecord({
+        record,
+        keyAgreementKey: to.keyAgreementKey,
+        keyResolver: to.keyResolver
+      }),
+    // An identity mutate: the record's content is unchanged and only its
+    // envelope is re-keyed. A registry that does not exist yet reads as
+    // `null`, which declines the write.
+    mutate: current => current,
+    write: async (record, precondition) => {
       await putUnlockMethodsRecord({
         storageServerUrl,
         zcapClient,
         spaceId,
-        record: wrapped,
+        record,
         ...(capability ? { capability } : {}),
-        ifMatch: stored.etag
+        ...precondition
       })
-      return
-    } catch (err) {
-      if (isPreconditionFailed(err)) {
-        // Another writer landed first: re-read and re-seal the fresh base.
-        lastError = err
-        continue
-      }
-      throw err
     }
-  }
-  throw new PreconditionFailedError(
-    'The unlock-methods registry re-seal lost the compare-and-swap race ' +
-      `after ${MAX_CAS_ATTEMPTS} attempts (another writer kept updating ` +
-      'the record). Retry the operation.',
-    { cause: lastError as Error }
-  )
+  })
 }
 
 /**
@@ -1841,7 +1844,7 @@ function shouldAdoptFreshCapability({
   label: string
 }): boolean {
   const expiring = zcapExpiring({
-    expires: (stored as { expires?: string }).expires
+    expires: zcapExpires(stored)
   })
   const covers = capabilityCoversStored({ stored, fresh })
   const retargeted =
@@ -1908,9 +1911,10 @@ function shouldAdoptFreshCapability({
  * @param options.session {Session}
  * @param [options.createIfMissing] {boolean}   mint the registry when absent;
  *   default false
- * @param [options.capability] {IZcap}   an invocation capability every request
- *   rides (a transient session's generation delegation); the root capability
- *   is invoked otherwise
+ * @param [options.capability] {IZcap}   an invocation capability override;
+ *   the visit's own generation delegation is ridden by default (a transient
+ *   session's only authority over the account Space), and an enrolled
+ *   session root-invokes
  * @returns {Promise<UnlockMethodsRecord | null>}
  */
 export async function backfillPassphraseUnlockMethod({

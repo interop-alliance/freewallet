@@ -20,11 +20,13 @@
 import type { CollectionEncryption } from '@interop/was-client'
 import type { IKeyAgreementKey, IZcap } from '@interop/data-integrity-core'
 import type { ZcapClient } from '@interop/ezcap'
+import type { DIDLog } from '@interop/did-method-webvh'
 import { agentsFromSeed } from '@interop/wallet-core/identity'
 import { memoryResourceLogPinStore } from '@interop/vh-resource-log'
 import type { ControllerProfile, Session, User } from '@/types/auth'
 import { KMS_SERVER_URL, PASSKEY_KDF, WAS_SERVER_URL } from '@/app.config'
 import { ensureKeystore } from '@/lib/kms'
+import { zcapExpires } from '@/lib/zcap'
 import { assertPasskeyPrf } from '@/lib/passkey'
 import {
   delegationKeyInDocument,
@@ -100,16 +102,11 @@ import {
   ensureGenerationDelegation,
   pointedClientAnnexReach
 } from '@/session/annexReach'
+import { refreshStandingDelegationFields } from '@/session/unlockMethods'
 import {
-  backfillPassphraseUnlockMethod,
-  refreshStandingDelegationFields
-} from '@/session/unlockMethods'
-import { accountCeremonyContext } from '@/session/accountCeremonyContext'
-import { repairStaleUnlockRegistrySeal } from '@/session/registryReseal'
-import {
-  rebuildBarePasskeyEntry,
-  repairTornPassphraseRetirement
-} from '@/session/pendingRetirement'
+  chainRegistryStage,
+  runSharedRegistryPasses
+} from '@/session/registryPasses'
 import {
   primeVerifiedAccountLog,
   verifiedAccountLog
@@ -229,6 +226,10 @@ export async function initGuestSession() {
  * @param [options.idb] {IDBFactory}   first-party IndexedDB for the
  *   `freewallet-session` database (CHAPI popups thread the Storage Access
  *   API handle here)
+ * @param [options.accountLog] {DIDLog}   the account log this login already
+ *   verified for the same pointer (the forgotten-browser detector's read),
+ *   handed to the login-time roster read in place of a second fetch and
+ *   verification of the same `did.jsonl`
  * @param [options.persistence] {SessionPersistence}   the typed persistence
  *   strategy for this session; defaults to the browser-local variant built
  *   over `idb` (with cache persistence off for guests). A transient login
@@ -256,6 +257,7 @@ export async function initSessionFromSeed({
   popup = false,
   provisionStorage = true,
   idb,
+  accountLog,
   persistence: suppliedPersistence
 }: {
   seed: Uint8Array
@@ -268,6 +270,7 @@ export async function initSessionFromSeed({
   popup?: boolean
   provisionStorage?: boolean
   idb?: IDBFactory
+  accountLog?: DIDLog
   persistence?: SessionPersistence
 }) {
   // A popup's localStorage cache pair is suppressed -- but only where the
@@ -368,7 +371,8 @@ export async function initSessionFromSeed({
       pointer: { ...accountPointer, did: accountPointer.did },
       userKey,
       clientKeyAgreementKey: keyAgreementKey,
-      persistence
+      persistence,
+      ...(accountLog ? { log: accountLog } : {})
     })
     rosterRead = rosterCheck
     if (rosterRead?.rotated) {
@@ -679,6 +683,9 @@ async function convergeRosterToDocument({
  * @param options.persistence {SessionPersistence}   the session's persistence
  *   strategy: both continuity pins (the chain-head pin and the epoch pin)
  *   ride it, in memory on either variant, and both guard this visit alone
+ * @param [options.log] {DIDLog}   the account log this login already verified
+ *   for the same pointer, resolving the store's controller view with no
+ *   second fetch
  * @returns {Promise<UserKeyRosterReadResult | null>}   the roster read, or
  *   null
  */
@@ -688,7 +695,8 @@ async function checkUserKeyRosterAtLogin({
   pointer,
   userKey,
   clientKeyAgreementKey,
-  persistence
+  persistence,
+  log: accountLog
 }: {
   zcapClient: ZcapClient
   keyAgent: ICapabilityAgent
@@ -696,6 +704,7 @@ async function checkUserKeyRosterAtLogin({
   userKey: UserKey
   clientKeyAgreementKey: IKeyAgreementKey
   persistence: SessionPersistence
+  log?: DIDLog
 }): Promise<UserKeyRosterReadResult | null> {
   const accountDid = pointer.did
   return await sharedCheckUserKeyRosterAtLogin({
@@ -707,7 +716,8 @@ async function checkUserKeyRosterAtLogin({
         spaceId: pointer.spaceId,
         host: pointer.host
       },
-      pinStore: persistence.logPins
+      pinStore: persistence.logPins,
+      ...(accountLog ? { log: accountLog } : {})
     }),
     userKey,
     clientKeyAgreementKey,
@@ -956,7 +966,7 @@ export async function loginWithPassphrase({
     derived = routed.credential ?? derived
 
     let found = await fetchKeyring({
-      passphrase,
+      secret: passphrase,
       idb,
       mintManageCapability: true,
       ...(derived ? { credential: derived } : {})
@@ -1169,7 +1179,12 @@ async function sessionFromKeyringHit({
     email: email ?? found.email,
     popup,
     provisionStorage,
-    idb
+    idb,
+    // The detector above verified this account's log for the same pointer,
+    // moments ago and freshest in this sequence: the login-time roster read
+    // resolves its controller view from that head rather than fetching and
+    // verifying the same `did.jsonl` again.
+    ...(detectorLog ? { accountLog: detectorLog.log } : {})
   })
   // The detector above already verified this account's log; seed the memo
   // with it so the tails below read it instead of verifying it again.
@@ -1268,93 +1283,29 @@ async function sessionFromKeyringHit({
     )
   }
 
-  // The re-seal repair: an unlock-methods registry left sealed to a
-  // superseded user key generation (a rotation whose in-band re-seal was
-  // lost) is re-opened from this login's roster escrow and re-sealed to the
-  // current key. First in the chain, because every registry writer below
-  // reads the record: a stale seal would make each of them warn and skip on
-  // a registry this same login can mend. Gated on the login's roster read
-  // having succeeded -- that read is where the superseded generations come
-  // from. Best-effort behind provisioning.
-  if (session.registryReady && !popup && rosterRead) {
-    const loginRosterRead = rosterRead
-    session.registryReady = session.registryReady.then(async () => {
-      try {
-        await repairStaleUnlockRegistrySeal({
-          session,
-          rosterRead: loginRosterRead,
-          context: await accountCeremonyContext({ session })
-        })
-      } catch (err) {
-        log.warn(
-          'Could not repair the unlock-methods registry seal; the next login retries',
-          { err }
-        )
-      }
-    })
-  }
-
-  // The torn-retirement repair: a passphrase change whose retirement
-  // failed at its document edit leaves the registry's passphrase entry
-  // naming the OLD credential's standing configuration under the new unlock Space, and
-  // nothing else can find that credential (the roster sweep only rotates
-  // away recipients the document does not back). This login retires it and
-  // records its own standing configuration. Ordered ahead of the ladder-rung refresh below,
-  // which would otherwise overwrite the entry's recorded rung -- the very
-  // anchor the retirement attributes by. Best-effort behind provisioning.
-  if (session.registryReady && !popup) {
-    session.registryReady = session.registryReady.then(async () => {
-      try {
-        await repairTornPassphraseRetirement({
-          session,
-          found,
-          ...(loginCredential ? { credential: loginCredential } : {})
-        })
-      } catch (err) {
-        log.warn(
-          'Could not finish the pending passphrase retirement; the next login retries',
-          { err }
-        )
-      }
-    })
-  }
-
-  // The passkey half of the bare-entry rebuild, in the same slot and for the
-  // same reason: it settles a registry entry's standing identity, which the
-  // backfill's refresh write must not run ahead of. A passkey login is the
-  // only thing that can mend its own entry -- the torn-retirement repair
-  // above is a passphrase's. Best-effort behind provisioning.
-  if (session.registryReady && !popup) {
-    session.registryReady = session.registryReady.then(async () => {
-      try {
-        await rebuildBarePasskeyEntry({ session, found })
-      } catch (err) {
-        log.warn(
-          'Could not rebuild the bare passkey unlock-method entry; the next login retries',
-          { err }
-        )
-      }
-    })
-  }
-
-  // The registry backfill: the passphrase entry's unlock Space and
-  // management zcap, recorded from this full session without a second
-  // passphrase prompt. It covers the passkey login too (the shared tail),
-  // and runs after the two repairs above, whose writes settle which
-  // credential the entry names -- the backfill only refreshes fields on it.
-  // An existing registry not yet materialized stays that way (no
-  // `createIfMissing`). The remote-direct popup is excluded, as it always
-  // was. A transient login runs its own backfill, on the registry chain it
-  // builds in `transientLogin.ts`; this site is the remembered path's.
-  if (session.registryReady && !popup) {
-    session.registryReady = session.registryReady.then(async () => {
-      try {
-        await backfillPassphraseUnlockMethod({ session })
-      } catch (err) {
-        log.warn('Could not backfill the unlock-methods registry', { err })
-      }
-    })
-  }
+  // The four passes both compositions share, in the one order they depend
+  // on: the re-seal repair (a registry left sealed to a superseded user key
+  // generation, re-opened from this login's roster escrow -- first, because
+  // every writer after it reads the record), the torn-retirement repair and
+  // the bare-passkey rebuild (each settles which credential an entry names),
+  // and the registry backfill (which only refreshes fields on whatever they
+  // left standing). The stale-seal pass is skipped when the login's roster
+  // read did not succeed: that read is where the superseded generations come
+  // from. The remote-direct popup is excluded, as it always was. A transient
+  // login runs the same four on the chain it builds in `transientLogin.ts`;
+  // this site is the remembered path's.
+  chainRegistryStage({
+    session,
+    when: !popup,
+    warn: 'Could not run the login-time registry passes; the next login retries',
+    run: () =>
+      runSharedRegistryPasses({
+        session,
+        found,
+        ...(rosterRead ? { rosterRead } : {}),
+        ...(loginCredential ? { credential: loginCredential } : {})
+      })
+  })
   // The standing-delegation self-refresh: a standing credential's own login
   // re-mints its bridge delegation -- and the annex-Space sibling, where
   // the record carries one -- when either is stale on either axis: expired
@@ -1373,27 +1324,29 @@ async function sessionFromKeyringHit({
   // write below matches the entry on beside its unlock Space id.
   const standingKeyAgreementKeyMultibase =
     found.standingClient?.keyAgreementKeyMultibase
-  if (
-    session.registryReady &&
-    rebindStandingRecord &&
-    standingDelegation &&
-    standingClientDid
-  ) {
+  {
     const unlockSpaceId = found.unlockSpaceId
-    session.registryReady = session.registryReady.then(async () => {
-      try {
+    chainRegistryStage({
+      session,
+      warn: 'Could not refresh the expiring standing delegations; the next login retries',
+      run: async () => {
         const pointer = session.profile.accountPointer
-        if (!pointer || !isWebvhDid(pointer.did)) {
+        if (
+          !rebindStandingRecord ||
+          !standingDelegation ||
+          !standingClientDid ||
+          !pointer ||
+          !isWebvhDid(pointer.did)
+        ) {
           return
         }
         const expiring =
           zcapExpiring({
-            expires: (standingDelegation as { expires?: string }).expires
+            expires: zcapExpires(standingDelegation)
           }) ||
           (!!standingDelegatedClients &&
             zcapExpiring({
-              expires: (standingDelegatedClients as { expires?: string })
-                .expires
+              expires: zcapExpires(standingDelegatedClients)
             }))
         if (!expiring) {
           const { doc } = await verifiedAccountLog({
@@ -1458,21 +1411,14 @@ async function sessionFromKeyringHit({
               }
             : {}),
           delegationKeyId: delegationProofKeyId(delegation),
-          delegationExpires: (delegation as { expires?: string }).expires,
+          delegationExpires: zcapExpires(delegation),
           ...(delegatedClients
             ? {
                 delegatedClientsKeyId: delegationProofKeyId(delegatedClients),
-                delegatedClientsExpires: (
-                  delegatedClients as { expires?: string }
-                ).expires
+                delegatedClientsExpires: zcapExpires(delegatedClients)
               }
             : {})
         })
-      } catch (err) {
-        log.warn(
-          'Could not refresh the expiring standing delegations; the next login retries',
-          { err }
-        )
       }
     })
   }
@@ -1489,12 +1435,14 @@ async function sessionFromKeyringHit({
   // a stale rung only makes that attribution fail closed later, never
   // silently misattribute.
   const enrolledLadderSeed = enrolled ? ladderSeed : undefined
-  if (session.registryReady && enrolledLadderSeed) {
+  {
     const unlockSpaceId = found.unlockSpaceId
-    session.registryReady = session.registryReady.then(async () => {
-      try {
+    chainRegistryStage({
+      session,
+      warn: 'Could not refresh the recorded ladder rung after self-enrolling; a later disconnect attribution fails closed instead',
+      run: async () => {
         const pointer = session.profile.accountPointer
-        if (!pointer || !isWebvhDid(pointer.did)) {
+        if (!enrolledLadderSeed || !pointer || !isWebvhDid(pointer.did)) {
           return
         }
         const published = await verifiedAccountLog({
@@ -1517,11 +1465,6 @@ async function sessionFromKeyringHit({
             updateKeyMultibase: rung.keyMultibase
           })
         }
-      } catch (err) {
-        log.warn(
-          'Could not refresh the recorded ladder rung after self-enrolling; a later disconnect attribution fails closed instead',
-          { err }
-        )
       }
     })
   }
@@ -1536,30 +1479,29 @@ async function sessionFromKeyringHit({
   // refused forever. Best-effort like the signup original: a failed heal
   // warns and the next login retries from durable state.
   const persistAccountPointer = found.persistAccountPointer
-  if (
-    session.registryReady &&
-    persistAccountPointer &&
-    found.pointer &&
-    !isWebvhDid(found.pointer.did)
-  ) {
+  {
     const staleServerPointer = found.pointer
-    session.registryReady = session.registryReady.then(async () => {
-      const did = session.profile.didWebvh?.did
-      if (!did || !isWebvhDid(did)) {
-        return
-      }
-      const fullPointer = { ...staleServerPointer, did }
-      try {
+    chainRegistryStage({
+      session,
+      warn: 'Could not backfill the did:webvh pointer and promote the controller; the next login retries',
+      run: async () => {
+        if (
+          !persistAccountPointer ||
+          !staleServerPointer ||
+          isWebvhDid(staleServerPointer.did)
+        ) {
+          return
+        }
+        const did = session.profile.didWebvh?.did
+        if (!did || !isWebvhDid(did)) {
+          return
+        }
+        const fullPointer = { ...staleServerPointer, did }
         await persistAccountPointer(fullPointer)
         session.profile.accountPointer = fullPointer
         await session.storage.ensurePromotedController({
           profile: session.profile
         })
-      } catch (err) {
-        log.warn(
-          'Could not backfill the did:webvh pointer and promote the controller; the next login retries',
-          { err }
-        )
       }
     })
   }
@@ -1573,18 +1515,21 @@ async function sessionFromKeyringHit({
   // annex rung 0; a healthy delegation is one no-op read. Best-effort: a
   // rung the generation does not commit (a credential bound mid-generation)
   // skips quietly, everything else warns and the next login retries.
-  if (session.registryReady && !popup && ladderSeed) {
-    session.registryReady = session.registryReady.then(async () => {
+  chainRegistryStage({
+    session,
+    when: !popup,
+    warn: 'Could not heal the generation delegation; the next login retries',
+    run: async () => {
+      const pointer = session.profile.accountPointer
+      if (!ladderSeed || !pointer || !isWebvhDid(pointer.did)) {
+        return
+      }
+      const reach = await pointedClientAnnexReach({ session, pointer })
+      if (reach === null) {
+        return
+      }
+      const logPins = session.profile.persistence?.logPins
       try {
-        const pointer = session.profile.accountPointer
-        if (!pointer || !isWebvhDid(pointer.did)) {
-          return
-        }
-        const reach = await pointedClientAnnexReach({ session, pointer })
-        if (reach === null) {
-          return
-        }
-        const logPins = session.profile.persistence?.logPins
         await ensureGenerationDelegation({
           session,
           pointer,
@@ -1594,18 +1539,17 @@ async function sessionFromKeyringHit({
           ...(logPins ? { pin: { pinStore: logPins, logId: reach.logId } } : {})
         })
       } catch (err) {
+        // A rung the generation does not commit (a credential bound
+        // mid-generation) skips quietly; everything else rides the stage's
+        // own warn.
         if (
-          (err as { name?: string }).name === 'ClientAnnexRungUncommittedError'
+          (err as { name?: string }).name !== 'ClientAnnexRungUncommittedError'
         ) {
-          return
+          throw err
         }
-        log.warn(
-          'Could not heal the generation delegation; the next login retries',
-          { err }
-        )
       }
-    })
-  }
+    }
+  })
 
   // The annex GC sweep: the quarterly generation swap (when due and the
   // pointed generation is GC-quiet) plus the collect fan-out over every

@@ -43,6 +43,7 @@ import {
   existingCollectionsFrom,
   grantTtlDays,
   hasZcapStorage,
+  isSatisfiable,
   resolveGrants,
   WalletResponseFailure,
   type IVPRDetails,
@@ -493,7 +494,7 @@ export function ExternalRequestPage() {
                 variant="contained"
                 onClick={approve}
                 disabled={
-                  !resolvedGrants.some(({ target }) => target.satisfiable)
+                  !resolvedGrants.some(({ target }) => isSatisfiable(target))
                 }
               >
                 {t('externalRequest.approve')}

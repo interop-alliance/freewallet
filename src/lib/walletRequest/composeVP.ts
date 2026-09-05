@@ -8,13 +8,15 @@
  *
  * The shared `composeVp` appends the hosted App Connect context URL
  * (`https://w3id.org/byoe/app-connect/v1`) when grants or the App Connect
- * marker are embedded; the loader below resolves it from the bundled
- * `byoe-context` document, so no fetch happens at signing time.
+ * marker are embedded; the shared document loader re-exported below resolves
+ * it from the bundled `byoe-context` document, so no fetch happens at signing
+ * time.
  */
 import {
   composeVp,
   DEFAULT_PRESENTABLE_DID_METHODS,
-  didAuthMethodSupported
+  didAuthMethodSupported,
+  documentLoader
 } from '@interop/wallet-core/request'
 import type {
   IVPRQuery,
@@ -26,8 +28,6 @@ import {
   multibaseOf,
   relationIds
 } from '@interop/wallet-core/webvh'
-import { securityLoader } from '@interop/security-document-loader'
-import { contexts as byoeContexts } from 'byoe-context'
 import type { Session } from '@/types/auth'
 import { didWebFromSpace } from '@/lib/didWeb'
 import { kmsAuthenticationSigner } from '@/lib/kms'
@@ -39,18 +39,14 @@ import type {
 } from './types'
 
 /**
- * Freewallet's JSON-LD document loader for presentation and credential
- * signing: the standard security contexts plus the BYOE App Connect context,
- * registered here (not bundled in the security loader) so BYOE vocabulary
- * additions ship with a `byoe-context` bump alone. Exported so single-VC
- * issuance (`src/lib/loginCredential.ts`) reuses the same context resolution
- * the VP compose path uses.
+ * The shared JSON-LD document loader (`@interop/wallet-core/request`): the
+ * standard security contexts plus the BYOE App Connect context, resolved from
+ * the bundled `byoe-context` document so nothing is fetched at signing time.
+ * Re-exported here so single-VC issuance (`src/lib/loginCredential.ts`) and
+ * the VP compose path below reach the same context resolution the shared
+ * `composeVp` uses.
  */
-const loader = securityLoader({ fetchRemoteContexts: true })
-for (const [url, context] of byoeContexts) {
-  loader.addStatic(url, context)
-}
-export const documentLoader = loader.build()
+export { documentLoader }
 
 /**
  * The bare DID method name of the wallet's own did:key holder -- the one

@@ -26,6 +26,7 @@ import type {
   WebvhIdStore
 } from '@interop/wallet-core/webvh'
 import { createLogger } from '@/lib/log'
+import { isPreconditionFailed } from '@/lib/storageErrors'
 import type { ICapabilityAgent, Session } from '@/types/auth'
 
 const log = createLogger('fw:kms')
@@ -567,7 +568,7 @@ export async function ensureKmsAuthentication({
     // won the create: adopt what it wrote, after the same listing check. The
     // key minted just above is then orphaned in the account's own keystore,
     // in no document and usable by nothing.
-    if ((err as { name?: string } | null)?.name !== 'PreconditionFailedError') {
+    if (!isPreconditionFailed(err)) {
       throw err
     }
     return { keys: await adopt(await remoteStore.getKeyMap()) }

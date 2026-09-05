@@ -122,6 +122,7 @@ import {
   type ResourceLogPinStore
 } from '@interop/vh-resource-log'
 import { isStorageUnreachable } from '@/lib/storageErrors'
+import { isResourceLogContinuityError } from '@/session/verifiedLog'
 import {
   unwrapRecordEnvelope,
   wrapRecordEnvelope
@@ -849,7 +850,7 @@ async function settlePendingRecordProof({
     if (isStorageUnreachable(err)) {
       throw err
     }
-    if ((err as Error | null)?.name === 'ResourceLogContinuityError') {
+    if (isResourceLogContinuityError(err)) {
       throw err
     }
     throw new KeyringRecordForgedError({ cause: err })
@@ -973,9 +974,8 @@ async function readCachedRecord({
  * unlock-methods registry.
  *
  * @param options {object}
- * @param [options.secret] {string | Uint8Array}   the unlock secret
- * @param [options.passphrase] {string}   compat alias for `secret` (existing
- *   passphrase call sites); one of the two is required
+ * @param [options.secret] {string | Uint8Array}   the unlock secret, required
+ *   unless an already-derived `credential` is supplied
  * @param [options.idb] {IDBFactory}
  * @param [options.kdf] {UnlockKdf}   the unlock method's KDF parameters
  * @param [options.mintManageCapability] {boolean}   also delegate the unlock
@@ -987,27 +987,24 @@ async function readCachedRecord({
  */
 export async function fetchKeyring({
   secret,
-  passphrase,
   idb,
   kdf = KEYRING_KDF,
   mintManageCapability = false,
   credential: derived
 }: {
   secret?: string | Uint8Array
-  passphrase?: string
   idb?: IDBFactory
   kdf?: UnlockKdf
   mintManageCapability?: boolean
   credential?: UnlockCredential
 }): Promise<KeyringFetchResult | null> {
-  const unlockSecret = secret ?? passphrase
-  if (!derived && unlockSecret === undefined) {
+  if (!derived && secret === undefined) {
     throw new TypeError('An unlock secret is required.')
   }
   const credential =
     derived ??
     (await deriveUnlockCredential({
-      secret: unlockSecret as string | Uint8Array,
+      secret: secret as string | Uint8Array,
       kdf
     }))
   const { unlock } = credential
@@ -1484,16 +1481,17 @@ function unlockRecordCollisionReason({
 
 /**
  * Whether the account document lists a verification-method id, checking both
- * the `verificationMethod` entries and the `keyAgreement` relation's string
- * references -- the membership test behind the transient probe's
- * inert-residue license.
+ * the `verificationMethod` entries and the `keyAgreement` relation, whose
+ * members may be ids or embedded methods -- the membership test behind the
+ * transient probe's inert-residue license, and behind the torn-retirement
+ * repair's credential check.
  *
  * @param options {object}
  * @param options.doc {unknown}   the locally verified account document
  * @param options.vmId {string}
  * @returns {boolean}
  */
-function documentListsVmId({
+export function documentListsVmId({
   doc,
   vmId
 }: {
@@ -1661,129 +1659,11 @@ export async function probeUnlockSpaceCollision({
 }
 
 /**
- * The remote-only unlock-record binder: everything {@link bindUnlockSecret}
- * writes to the storage host, and nothing it writes to this browser. A
- * ladder-anchored ceremony binds a NEW credential's record through this --
- * the visit holds no client seed and no user key to cache, and a transient
- * session must leave no local residue.
- *
- * The record it writes is the standing layout: the account pointer, the
- * credential's own ladder seed, and the bridge and sibling delegations the
- * caller minted under that credential's OWN ladder VM. It is inert until the
- * ceremony's bind entry publishes that VM.
- *
- * @param options {object}
- * @param options.credential {UnlockCredential}   the derived credential the
- *   record is sealed to
- * @param options.controller {string}   the account controller the record
- *   restates
- * @param options.pointer {AccountPointer}   the account pointer the record
- *   carries
- * @param options.delegation {IZcap}   the bridge delegation
- * @param [options.delegatedClients] {IZcap}   the annex-Space sibling
- * @param options.ladderSeed {Uint8Array}   the credential's update-key ladder
- *   seed
- * @param [options.email] {string}   the account email
- * @param [options.delegateManagementTo] {string}   an account DID to delegate
- *   the unlock Space management zcap to
- * @param [options.refuseCollidingRecord] {boolean | object}   the read-first
- *   collision refusal and served-stamp advance
- * @returns {Promise<{ unlockSpaceId: string, manageCapability?: IZcap,
- *   unlockKeyAgreementKeyId?: string, unlockKeyAgreementKeyMultibase?: string }>}
+ * The remote-only binder's type, as the ceremony context carries it: the
+ * credential-anchored bind, which writes the standing-layout record and its
+ * unlock Space and nothing at all to this browser.
  */
-export async function bindRemoteUnlockRecord({
-  credential,
-  controller,
-  pointer,
-  delegation,
-  delegatedClients,
-  ladderSeed,
-  email,
-  delegateManagementTo,
-  refuseCollidingRecord = false
-}: {
-  credential: UnlockCredential
-  controller: string
-  pointer: AccountPointer
-  delegation: IZcap
-  delegatedClients?: IZcap
-  ladderSeed: Uint8Array
-  email?: string
-  delegateManagementTo?: string
-  refuseCollidingRecord?: boolean | { accountDoc?: unknown }
-}): Promise<{
-  unlockSpaceId: string
-  manageCapability?: IZcap
-  unlockKeyAgreementKeyId?: string
-  unlockKeyAgreementKeyMultibase?: string
-}> {
-  if (!WAS_SERVER_URL) {
-    throw new TypeError(
-      'The remote unlock-record bind requires a configured WAS server.'
-    )
-  }
-  const { unlock, standing } = credential
-  let servedCreatedAt: string | undefined
-  if (refuseCollidingRecord) {
-    const guard =
-      typeof refuseCollidingRecord === 'object' ? refuseCollidingRecord : {}
-    // No local record is read: this visit holds none, and a probe that read
-    // one would consult another credential's browser-local state.
-    const probed = await probeUnlockSpaceCollision({
-      credential,
-      controller,
-      pointer,
-      ...(guard.accountDoc !== undefined
-        ? { accountDoc: guard.accountDoc }
-        : {}),
-      readLocalRecord: false
-    })
-    servedCreatedAt = probed.servedCreatedAt
-  }
-  const record = await wrapUnlockRecord({
-    controller,
-    email,
-    pointer,
-    delegation,
-    ...(delegatedClients ? { delegatedClients } : {}),
-    ladderSeed,
-    keyAgreementKey: unlock.keyAgreementKey as IKeyAgreementKey,
-    signer: unlock.recordSigner,
-    bindingMacKey: standing.bindingMacKey,
-    createdAt: nextRecordCreatedAt({ advancePast: [servedCreatedAt] })
-  })
-  await ensureUnlockSpace({
-    storageServerUrl: WAS_SERVER_URL,
-    zcapClient: unlock.zcapClient,
-    spaceId: unlock.spaceId,
-    controller: unlock.agent.id
-  })
-  await putUnlockKeyring({
-    storageServerUrl: WAS_SERVER_URL,
-    zcapClient: unlock.zcapClient,
-    spaceId: unlock.spaceId,
-    record
-  })
-  let manageCapability: IZcap | undefined
-  if (delegateManagementTo) {
-    manageCapability = await delegateUnlockManagement({
-      zcapClient: unlock.zcapClient,
-      spaceId: unlock.spaceId,
-      controller: delegateManagementTo,
-      allowedActions: ['GET', 'PUT', 'DELETE']
-    })
-  }
-  return {
-    unlockSpaceId: unlock.spaceId,
-    ...(manageCapability ? { manageCapability } : {}),
-    ...unlockKeyAgreementMembers({ unlock })
-  }
-}
-
-/**
- * The remote-only binder's type, as the ceremony context carries it.
- */
-export type RemoteUnlockRecordBind = typeof bindRemoteUnlockRecord
+export type RemoteUnlockRecordBind = typeof bindCredentialAnchoredUnlockSecret
 
 /**
  * Binds an unlock secret to this client's key set and the account it belongs

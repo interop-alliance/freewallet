@@ -30,9 +30,7 @@ export interface CredentialActivityInfo {
  * past-tense verb) out of a single-credential activity record, or `null`
  * when `doc` isn't one (a collection share, a login, a revoke, ...).
  *
- * `object` carries `{ cid, title }` for records written after the title
- * field was introduced, and a bare cid string for older records -- both
- * shapes are handled so old history entries keep rendering.
+ * A single-credential record's `object` carries `{ cid, title }`.
  *
  * @param doc {WalletActivity}
  * @returns {CredentialActivityInfo | null}
@@ -48,9 +46,6 @@ export function credentialActivityInfo(
   }
   const verb = CREDENTIAL_ACTIVITY_VERBS[verbType]
   const object = doc.object
-  if (typeof object === 'string') {
-    return { cid: object, verb }
-  }
   if (object && typeof object === 'object' && 'cid' in object) {
     const { cid, title } = object as { cid: string; title?: string }
     return { cid, title, verb }

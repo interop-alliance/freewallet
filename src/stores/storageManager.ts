@@ -1,27 +1,30 @@
 /**
  * Storage layer for the wallet. StorageManager is the single facade used by
- * all pages. The local BrowserStore (RxDB/IndexedDB) is always the ACTIVE
- * replica: every credential, public-link, and history read/write targets it
- * unconditionally, online or offline, guest or not. When VITE_WAS_SERVER_URL
- * is set (and the session is not a guest), a WASRemoteStore is also attached --
- * not as a primary store, but as a remote replica: the sync controller
- * replicates the local collections to it in the background, and the storage
- * browser / export / import / quota pages read through it directly.
+ * all pages. Every credential, public-link, and history read/write goes
+ * through one `SyncedCollectionStore` backend, chosen ONCE at session
+ * construction. A session that has a local replica (a remembered login, a
+ * guest, a no-WAS session) serves them from the local `BrowserStore`
+ * (RxDB/IndexedDB), online or offline. A session that has none -- the
+ * replica-less transient session, the default -- serves them remote-direct
+ * over the remote WAS collections, and so does a CHAPI popup session. When
+ * VITE_WAS_SERVER_URL is set (and the session is not a guest), a
+ * WASRemoteStore is attached as well: the sync controller replicates a local
+ * replica's collections to it in the background, and the storage browser /
+ * export / import / quota pages read through it directly.
  *
- * Every synced-collection read/write goes through one `SyncedCollectionStore`
- * backend chosen ONCE at construction (`src/stores/remoteDirectStore.ts`): the
- * local `BrowserStore` in the normal case, or a `RemoteDirectStore` for the
- * CHAPI popup. A popup runs in a third-party partitioned iframe: its local
- * BrowserStore binds a partitioned IndexedDB no sync controller drives, so a
- * credential stored there would be stranded and a credential list would always
- * come back empty. The remote-direct backend therefore reads and writes the
- * standard synced collections straight over the remote WAS collections,
- * reproducing verbatim what background replication would have pushed (the raw
- * EDV envelope under its content-derived id, `Key-Epoch` stamped) so the
- * main app pulls popup writes cleanly. Both backends share the session's
- * per-collection ciphers, so the envelope/id/epoch logic lives once. The
- * remote-direct backend is selected only when a remote store is configured; a
- * guest / no-WAS session always uses the local BrowserStore.
+ * The remote-direct backend is `src/stores/remoteDirectStore.ts`. A popup
+ * runs in a third-party partitioned iframe: its local BrowserStore binds a
+ * partitioned IndexedDB no sync controller drives, so a credential stored
+ * there would be stranded and a credential list would always come back empty.
+ * A transient session constructs no BrowserStore at all. Either way the
+ * backend reads and writes the standard synced collections straight over the
+ * remote WAS collections, reproducing verbatim what background replication
+ * would have pushed (the raw EDV envelope under its content-derived id,
+ * `Key-Epoch` stamped) so the main app pulls those writes cleanly. Both
+ * backends share the session's per-collection ciphers, so the envelope / id /
+ * epoch logic lives once. The remote-direct backend is selected only when a
+ * remote store is configured; a guest / no-WAS session always uses the local
+ * BrowserStore.
  */
 import type {
   IKeyAgreementKey,
@@ -47,7 +50,7 @@ import {
 import { ensureIndexedFirstEpoch } from '@interop/wallet-core/keys'
 import type { ControllerProfile, User } from '@/types/auth'
 import { cidFrom } from '@interop/was-client/sync'
-import { isUnknownEpochError } from '@interop/wallet-core/sync'
+import { classifyDecryptFailure } from '@/lib/decryptFailure'
 import {
   ENCRYPTED_STANDARD_COLLECTIONS,
   RP_ZCAP_TTL_MS,
@@ -78,7 +81,6 @@ import {
   acquireDescriptor,
   acquireDescriptors,
   DescriptorRefreshPolicy,
-  isKeyUnwrapError,
   type EncryptionDescriptorCache
 } from '@interop/wallet-core/descriptors'
 import {
@@ -112,6 +114,7 @@ import {
   type SyncedCollectionStore
 } from '@/stores/remoteDirectStore'
 import { EXTERNAL_REQUEST_ORIGIN } from '@/lib/walletRequest/externalRequest'
+import type { CredentialActivityVerb } from '@/lib/historyActivity'
 import { uuidv7 } from 'uuidv7'
 import {
   ACTIVITY_TYPE,
@@ -199,10 +202,11 @@ async function decryptEnvelope({
   try {
     return { value: await cipher.decrypt({ envelope }), unknownEpoch: false }
   } catch (err) {
-    if (isUnknownEpochError(err)) {
+    const failure = classifyDecryptFailure(err)
+    if (failure === 'unknown-epoch') {
       return { value: undefined, unknownEpoch: true }
     }
-    if (isKeyUnwrapError(err)) {
+    if (failure === 'no-epoch-key') {
       log.warn(
         'This wallet is not a recipient of the key epoch of a resource',
         {
@@ -215,6 +219,24 @@ async function decryptEnvelope({
     log.warn('Could not decrypt resource envelope', { source, err })
     return { value: undefined, unknownEpoch: false }
   }
+}
+
+// The `wallet-activity` builder each single-credential activity verb records
+// through. One entry per `CredentialActivityVerb`, so the History page's
+// reader vocabulary and the writer's are the same set.
+const CREDENTIAL_ACTIVITY_BUILDERS: Record<
+  CredentialActivityVerb,
+  (options: {
+    cid: string
+    title: string
+    user: User
+    id: string
+  }) => WalletActivity
+> = {
+  created: buildHistoryCredentialCreated,
+  deleted: buildHistoryCredentialDeleted,
+  shared: buildHistoryCredentialShared,
+  unshared: buildHistoryCredentialUnshared
 }
 
 // The WAS collection ids of the encrypted standard collections -- the set
@@ -634,39 +656,77 @@ export class StorageManager {
     metas?: Record<string, { custom?: unknown }>
   }) {
     const cipherEntries = await Promise.all(
-      ENCRYPTED_STANDARD_COLLECTIONS.map(async ({ key, id, idDerivation }) => {
-        const encryption = descriptors?.[id]
-        // Every encrypted collection carries its key epochs from
-        // provisioning, so a missing (or epoch-less) descriptor -- an
-        // unprovisioned or torn collection, or an offline session with
-        // nothing cached -- gets a fail-closed cipher rather than none: an
-        // absent cipher would fall through to the store's cipher-less
-        // plaintext path, silently storing (and pushing) plaintext into an
-        // encrypted collection, and an epoch-less descriptor would make the
-        // whole rebuild throw, taking the healthy collections down with it.
-        if (!encryption?.epochs?.length) {
-          return [key, StorageManager.#refusingCipher({ collectionId: id })]
-        }
-        const cipher = await createEdvDocCipher({
+      ENCRYPTED_STANDARD_COLLECTIONS.map(collection =>
+        StorageManager.#buildCipher({
+          collection,
           keyAgreementKey,
           keyResolver,
-          collectionId: id,
-          // The collection spec's id mint ('random' for the mutable
-          // contacts head, 'content' for the content-addressed
-          // collections), so a minted id follows the spec and can key
-          // the row.
-          idDerivation,
-          encryption
+          descriptor: descriptors?.[collection.id],
+          meta: metas?.[collection.id]
         })
-        await StorageManager.#installIndexSchema({
-          cipher,
-          collectionId: id,
-          meta: metas?.[id]
-        })
-        return [key, cipher]
-      })
+      )
     )
     return Object.fromEntries(cipherEntries)
+  }
+
+  /**
+   * Builds one standard encrypted collection's cipher, as the logical-key /
+   * cipher pair the cipher map is keyed by. The per-collection half of
+   * {@link StorageManager.#buildCiphers}, so the whole-map rebuild and the
+   * single-collection one cannot drift.
+   *
+   * @param options {object}
+   * @param options.collection {object}   the collection's spec entry
+   * @param options.collection.key {string}   its logical key
+   * @param options.collection.id {string}   its WAS collection id
+   * @param options.collection.idDerivation {IdDerivation}   its id mint
+   * @param options.keyAgreementKey {IKeyAgreementKey}
+   * @param options.keyResolver {IKeyResolver}
+   * @param [options.descriptor] {CollectionEncryption}
+   * @param [options.meta] {object}   the collection's stored `/meta` value
+   * @returns {Promise<[string, DocCipher]>}
+   */
+  static async #buildCipher({
+    collection: { key, id, idDerivation },
+    keyAgreementKey,
+    keyResolver,
+    descriptor,
+    meta
+  }: {
+    collection: (typeof ENCRYPTED_STANDARD_COLLECTIONS)[number]
+    keyAgreementKey: IKeyAgreementKey
+    keyResolver: IKeyResolver
+    descriptor?: CollectionEncryption
+    meta?: { custom?: unknown }
+  }): Promise<[string, DocCipher]> {
+    // Every encrypted collection carries its key epochs from
+    // provisioning, so a missing (or epoch-less) descriptor -- an
+    // unprovisioned or torn collection, or an offline session with
+    // nothing cached -- gets a fail-closed cipher rather than none: an
+    // absent cipher would fall through to the store's cipher-less
+    // plaintext path, silently storing (and pushing) plaintext into an
+    // encrypted collection, and an epoch-less descriptor would make the
+    // whole rebuild throw, taking the healthy collections down with it.
+    if (!descriptor?.epochs?.length) {
+      return [key, StorageManager.#refusingCipher({ collectionId: id })]
+    }
+    const cipher = await createEdvDocCipher({
+      keyAgreementKey,
+      keyResolver,
+      collectionId: id,
+      // The collection spec's id mint ('random' for the mutable
+      // contacts head, 'content' for the content-addressed
+      // collections), so a minted id follows the spec and can key
+      // the row.
+      idDerivation,
+      encryption: descriptor
+    })
+    await StorageManager.#installIndexSchema({
+      cipher,
+      collectionId: id,
+      meta
+    })
+    return [key, cipher]
   }
 
   /**
@@ -758,6 +818,44 @@ export class StorageManager {
     // remote-direct backend in the popup); both honor `setCiphers` for the
     // descriptor-refresh path.
     this.#store.setCiphers(ciphers)
+  }
+
+  /**
+   * Rebuilds ONE standard encrypted collection's cipher from its current
+   * descriptor and swaps the refreshed map into the backend -- what a share
+   * or an unshare needs, each of which rotates a single collection. The
+   * whole-map rebuild above stays the descriptor-refresh path's, which moves
+   * every collection at once. A collection id that is not a standard
+   * encrypted collection (an app-provisioned one, whose cipher is built
+   * lazily per read) is a no-op, as is a session holding no vault keys.
+   *
+   * @param options {object}
+   * @param options.collectionId {string}   the WAS collection id
+   * @returns {Promise<void>}
+   */
+  async #rebuildCipherFor({
+    collectionId
+  }: {
+    collectionId: string
+  }): Promise<void> {
+    if (!this.#vaultKeys) {
+      return
+    }
+    const collection = ENCRYPTED_STANDARD_COLLECTIONS.find(
+      ({ id }) => id === collectionId
+    )
+    if (!collection) {
+      return
+    }
+    const [key, cipher] = await StorageManager.#buildCipher({
+      collection,
+      keyAgreementKey: this.#vaultKeys.keyAgreementKey,
+      keyResolver: this.#vaultKeys.keyResolver,
+      descriptor: this.#descriptors[collectionId],
+      meta: this.#metas[collectionId]
+    })
+    this.#ciphers = { ...this.#ciphers, [key]: cipher }
+    this.#store.setCiphers(this.#ciphers)
   }
 
   /**
@@ -1181,10 +1279,11 @@ export class StorageManager {
       // line beats reporting the whole store as failed (in remote-direct
       // mode the history entry is its own remote write and can fail alone).
       try {
-        await this.addHistoryCredentialCreated({
+        await this.addHistoryCredentialActivity({
           cid,
           title: credentialTitle(credential),
-          user
+          user,
+          verb: 'created'
         })
       } catch (err) {
         log.warn('Could not record the credential-created activity', { err })
@@ -2040,16 +2139,6 @@ export class StorageManager {
       )
     }
     await localStore.ensureUserCollections({ user })
-    // Re-key any plaintext rows a pre-encryption version of the app left in
-    // the (now encrypted) local collections. Runs before login completes --
-    // and so before background replication starts -- because the remote
-    // collections reject plaintext pushes once their encryption descriptor is set.
-    await localStore.migrateLocalPlaintextDocs()
-    // Re-key any `public-credentials` rows left under the pre-fix CID formula.
-    // Runs regardless of vault state -- public rows are plaintext -- and before
-    // replication so the tombstone and the re-keyed row reach the remote
-    // collection.
-    await localStore.migratePublicCredentialCids()
     if (this.#remoteStore) {
       // A pointer-promoted session signs with the did:webvh keyId from the
       // start; confirm the server agrees before any signed upsert runs, and
@@ -2432,137 +2521,32 @@ export class StorageManager {
   }
 
   /**
-   * Records (in the `wallet-activity` collection) a credential activity,
+   * Records (in the `wallet-activity` collection) one credential activity,
    * carrying the credential's display title into the shared builder so the
    * History page can render a title link without re-deriving it from the
    * (possibly already-deleted) credential.
    *
    * @param options {object}
-   * @param options.cid {string} - CID of the credential (used as history object id).
-   * @param options.title {string} - Display title of the credential at the time of the event.
-   * @param options.user {User} - Session user object (used to record history object actor).
-   * @param options.buildActivity {function} - The `@interop/wallet-core` builder for this event.
+   * @param options.cid {string}   CID of the credential (the history object id)
+   * @param options.title {string}   display title of the credential at the
+   *   time of the event (captured before deletion, for a delete)
+   * @param options.user {User}   session user (recorded as the object actor)
+   * @param options.verb {CredentialActivityVerb}   which activity to record
    * @returns {Promise<void>}
    */
-  async #recordCredentialActivity({
+  async addHistoryCredentialActivity({
     cid,
     title,
     user,
-    buildActivity
+    verb
   }: {
     cid: string
     title: string
     user: User
-    buildActivity: (options: {
-      cid: string
-      title: string
-      user: User
-      id: string
-    }) => WalletActivity
+    verb: CredentialActivityVerb
   }) {
+    const buildActivity = CREDENTIAL_ACTIVITY_BUILDERS[verb]
     await this.#recordActivity(id => buildActivity({ cid, title, user, id }))
-  }
-
-  /**
-   * Records (in the `wallet-activity` collection) the Create activity for
-   * a credential.
-   *
-   * @param cid {string} - CID of the credential (used as history object id).
-   * @param title {string} - Display title of the credential.
-   * @param user {User} - Session user object (used to record history object actor).
-   * @returns {Promise<void>}
-   */
-  async addHistoryCredentialCreated({
-    cid,
-    title,
-    user
-  }: {
-    cid: string
-    title: string
-    user: User
-  }) {
-    await this.#recordCredentialActivity({
-      cid,
-      title,
-      user,
-      buildActivity: buildHistoryCredentialCreated
-    })
-  }
-
-  /**
-   * Records (in the `wallet-activity` collection) the Delete activity for
-   * a credential.
-   *
-   * @param cid {string} - CID of the credential (used as history object id).
-   * @param title {string} - Display title of the credential (captured before deletion).
-   * @param user {User} - Session user object (used to record history object actor).
-   * @returns {Promise<void>}
-   */
-  async addHistoryCredentialDeleted({
-    cid,
-    title,
-    user
-  }: {
-    cid: string
-    title: string
-    user: User
-  }) {
-    await this.#recordCredentialActivity({
-      cid,
-      title,
-      user,
-      buildActivity: buildHistoryCredentialDeleted
-    })
-  }
-
-  /**
-   * Records (in the `wallet-activity` collection) the Share activity for a credential.
-   *
-   * @param cid {string} - CID of the credential (used as history object id).
-   * @param title {string} - Display title of the credential.
-   * @param user {User} - Session user object (used to record history object actor).
-   * @returns {Promise<void>}
-   */
-  async addHistoryCredentialShared({
-    cid,
-    title,
-    user
-  }: {
-    cid: string
-    title: string
-    user: User
-  }) {
-    await this.#recordCredentialActivity({
-      cid,
-      title,
-      user,
-      buildActivity: buildHistoryCredentialShared
-    })
-  }
-
-  /**
-   * Records (in the `wallet-activity` collection) the Unshare activity for a credential.
-   *
-   * @param cid {string} - CID of the credential (used as history object id).
-   * @param title {string} - Display title of the credential.
-   * @param user {User} - Session user object (used to record history object actor).
-   * @returns {Promise<void>}
-   */
-  async addHistoryCredentialUnshared({
-    cid,
-    title,
-    user
-  }: {
-    cid: string
-    title: string
-    user: User
-  }) {
-    await this.#recordCredentialActivity({
-      cid,
-      title,
-      user,
-      buildActivity: buildHistoryCredentialUnshared
-    })
   }
 
   /**
@@ -2814,11 +2798,13 @@ export class StorageManager {
 
   /**
    * Revokes a set of recorded capabilities on the WAS server, one POST each.
-   * A capability the server no longer considers revocable (already revoked,
-   * expired, or foreign) counts into `skipped` rather than failing the run;
-   * anything else propagates. `revokedIds` names the capabilities whose
-   * revocation actually went through, which is what an agent revocation
-   * records as its audit trail.
+   * The POSTs are independent, so they run together and the results are
+   * folded in the order the capabilities were given. A capability the server
+   * no longer considers revocable (already revoked, expired, or foreign)
+   * counts into `skipped` rather than failing the run; anything else
+   * propagates. `revokedIds` names the capabilities whose revocation actually
+   * went through, which is what an agent revocation records as its audit
+   * trail.
    *
    * @param options {object}
    * @param options.zcaps {IDelegatedZcap[]}
@@ -2834,19 +2820,27 @@ export class StorageManager {
       return { revoked: 0, skipped: 0, revokedIds: [] }
     }
     const space = remote.spaceHandle()
+    const outcomes = await Promise.all(
+      zcaps.map(async zcap => {
+        try {
+          await space.revoke(zcap)
+          return { id: zcap.id }
+        } catch (err) {
+          if (err instanceof ValidationError) {
+            // Already revoked, expired, or foreign -- treat as a no-op.
+            return { skipped: true }
+          }
+          throw err
+        }
+      })
+    )
     const revokedIds: string[] = []
     let skipped = 0
-    for (const zcap of zcaps) {
-      try {
-        await space.revoke(zcap)
-        revokedIds.push(zcap.id)
-      } catch (err) {
-        if (err instanceof ValidationError) {
-          // Already revoked, expired, or foreign -- treat as a no-op.
-          skipped += 1
-          continue
-        }
-        throw err
+    for (const { id, skipped: wasSkipped } of outcomes) {
+      if (wasSkipped) {
+        skipped += 1
+      } else if (id !== undefined) {
+        revokedIds.push(id)
       }
     }
     return { revoked: revokedIds.length, skipped, revokedIds }
@@ -2934,19 +2928,23 @@ export class StorageManager {
    * The key-rotation half of revoking a connected app's access: for each
    * app-provisioned encrypted collection the app was granted, removes every
    * non-owner recipient entry from the current epoch via was-client's
-   * `removeRecipient` (which rotates the epoch FIRST, then revokes the passed
-   * pull-axis zcaps -- indivisible), so a revoked app cannot decrypt future
-   * writes. The owner (the vault KAK) stays recipient zero; for these
-   * collections every non-owner entry is the app's, and removal needs no seed
-   * (the roster kid is in the descriptor), so it works even for an orphaned state.
+   * `removeRecipient` (which rotates the epoch FIRST, then runs the pull axis
+   * -- indivisible), so a revoked app cannot decrypt future writes. The
+   * collection's pull-axis zcaps are revoked once, on the first removal; a
+   * further non-owner entry rotates under a no-op pull rather than re-POSTing
+   * the same revocations. The owner (the vault KAK) stays recipient zero; for
+   * these collections every non-owner entry is the app's, and removal needs no
+   * seed (the roster kid is in the descriptor), so it works even for an
+   * orphaned state.
    *
    * The candidate collections come from the recorded grant zcaps'
    * `invocationTarget`s (standard / protected collections and whole-Space grants
    * excluded); only those whose current-epoch roster still carries a non-owner
-   * entry are rotated. Best-effort per collection: a failure is logged and the
-   * rest proceed, so one stuck collection does not strand the whole revocation.
-   * A no-op (zero counts) without a remote store or vault keys. The honest
-   * ceiling stands: ciphertext the app already fetched stays readable to it.
+   * entry are rotated, and the collections rotate in parallel. Best-effort per
+   * collection: a failure is logged and the rest proceed, so one stuck
+   * collection does not strand the whole revocation. A no-op (zero counts)
+   * without a remote store or vault keys. The honest limitation stands:
+   * ciphertext the app already fetched stays readable to it.
    *
    * @param options {object}
    * @param options.origin {string}   the connected app's origin
@@ -2998,45 +2996,56 @@ export class StorageManager {
       }
     }
 
-    let rotated = 0
-    let failed = 0
-    for (const [collectionId, revoke] of byCollection) {
-      try {
-        const descriptor = await remote.collectionEncryption({ collectionId })
-        if (!descriptor?.epochs?.length || !descriptor.currentEpoch) {
-          continue
-        }
-        const nonOwner = currentEpochRecipientKids({ descriptor, ownerKid })
-        if (nonOwner.length === 0) {
-          continue
-        }
-        for (const recipientId of nonOwner) {
-          const newDescriptor = await removeRecipient({
-            collection: remote.collectionHandle({ collectionId }),
-            space: remote.spaceHandle(),
-            recipientId,
-            revoke
-          })
-          await this.#descriptorCache?.writeDescriptor({
-            collectionId,
-            descriptor: newDescriptor
-          })
-          this.#appDescriptors[collectionId] = newDescriptor
-          delete this.#appCiphers[collectionId]
-          this.#refreshPolicy.reset({ collectionId })
-        }
-        rotated += 1
-      } catch (err) {
-        log.warn(
-          'Could not rotate the epoch for app collection during revocation',
-          {
-            collectionId,
-            err
+    // Each collection's rotation is independent of the others, so they run
+    // together; the outcomes are folded below into the same counts a
+    // sequential pass produced.
+    const outcomes = await Promise.all(
+      [...byCollection].map(async ([collectionId, revoke]) => {
+        try {
+          const descriptor = await remote.collectionEncryption({ collectionId })
+          if (!descriptor?.epochs?.length || !descriptor.currentEpoch) {
+            return 'skipped' as const
           }
-        )
-        failed += 1
-      }
-    }
+          const nonOwner = currentEpochRecipientKids({ descriptor, ownerKid })
+          if (nonOwner.length === 0) {
+            return 'skipped' as const
+          }
+          // Each removal rotates the current epoch, so they run in order
+          // against this collection's descriptor. The pull axis is spent
+          // once: the first removal carries the collection's grants, and the
+          // rest pass a no-op pull, so k non-owner recipients no longer mean
+          // k POSTs of the same capabilities.
+          for (const [position, recipientId] of nonOwner.entries()) {
+            const newDescriptor = await removeRecipient({
+              collection: remote.collectionHandle({ collectionId }),
+              ...(position === 0
+                ? { space: remote.spaceHandle(), revoke }
+                : { pull: async () => {} }),
+              recipientId
+            })
+            await this.#descriptorCache?.writeDescriptor({
+              collectionId,
+              descriptor: newDescriptor
+            })
+            this.#appDescriptors[collectionId] = newDescriptor
+            delete this.#appCiphers[collectionId]
+            this.#refreshPolicy.reset({ collectionId })
+          }
+          return 'rotated' as const
+        } catch (err) {
+          log.warn(
+            'Could not rotate the epoch for app collection during revocation',
+            {
+              collectionId,
+              err
+            }
+          )
+          return 'failed' as const
+        }
+      })
+    )
+    const rotated = outcomes.filter(outcome => outcome === 'rotated').length
+    const failed = outcomes.filter(outcome => outcome === 'failed').length
     return { collections: byCollection.size, rotated, failed }
   }
 
@@ -3393,8 +3402,10 @@ export class StorageManager {
   /**
    * Adopts a freshly rotated collection descriptor into this session: cached,
    * swapped into the in-memory descriptor map, the refresh policy reset, and
-   * the ciphers rebuilt under the given vault keys. The shared tail of
-   * `shareCollection` and `unshareCollection`.
+   * this one collection's cipher rebuilt under the given vault keys. The
+   * shared tail of `shareCollection` and `unshareCollection`, each of which
+   * rotates exactly one collection, so the other five ciphers are left
+   * standing rather than rebuilt from the descriptors they already hold.
    *
    * @param options {object}
    * @param options.collectionId {string}
@@ -3417,7 +3428,7 @@ export class StorageManager {
     this.#descriptors = { ...this.#descriptors, [collectionId]: descriptor }
     this.#refreshPolicy.reset()
     this.#vaultKeys = vaultKeys
-    await this.#rebuildCiphers()
+    await this.#rebuildCipherFor({ collectionId })
   }
 
   /**

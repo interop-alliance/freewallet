@@ -67,10 +67,11 @@ export function useCredentialPublicLink({
     try {
       await session.storage.createPublicLink({ credential })
       setIsShared(true)
-      await session.storage.addHistoryCredentialShared({
+      await session.storage.addHistoryCredentialActivity({
         cid,
         title: credentialTitle(credential),
-        user: session.user
+        user: session.user,
+        verb: 'shared'
       })
       showToast({ message: t('credential.publicLinkCreated') })
     } catch (err) {
@@ -90,10 +91,11 @@ export function useCredentialPublicLink({
     try {
       await session.storage.removePublicLink({ cid })
       setIsShared(false)
-      await session.storage.addHistoryCredentialUnshared({
+      await session.storage.addHistoryCredentialActivity({
         cid,
         title: credentialTitle(credential),
-        user: session.user
+        user: session.user,
+        verb: 'unshared'
       })
       showToast({ message: t('credential.publicLinkRemoved') })
     } catch (err) {

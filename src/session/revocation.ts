@@ -48,7 +48,6 @@ import type { GenerationDelegationRemint } from '@interop/wallet-core/clients'
 import type { Session } from '@/types/auth'
 import {
   clientAnnexReachFor,
-  didWebProjectionStore,
   ensureGenerationDelegation,
   renewTransientGenerationDelegation
 } from '@/session/annexReach'
@@ -56,7 +55,6 @@ import { getUnlockMethods } from '@/session/unlockMethods'
 import type { UnlockMethodsRecord } from '@/session/unlockMethods'
 import {
   accountCeremonyContext,
-  ceremonyRides,
   type AccountCeremonyContext
 } from '@/session/accountCeremonyContext'
 import {
@@ -167,7 +165,6 @@ export async function revokeEnrolledClient({
   }
   const { remoteStore, pointer } = context
   const ladder = context.kind === 'ladder'
-  const rides = ceremonyRides({ context })
   // One registry read for the whole cascade: the latent commitment hashes the
   // document edit needs, and the entries the delegation re-mint walks. It is
   // independent of the epoch pin read, so the two round trips run together.
@@ -178,7 +175,7 @@ export async function revokeEnrolledClient({
   const { epochPins } = session.profile.persistence
   const [registryRecord, pinnedEpochId] = await Promise.all([
     ladder
-      ? getUnlockMethods({ session, ...rides() }).catch((err: unknown) => {
+      ? getUnlockMethods({ session }).catch((err: unknown) => {
           throw new Error(
             'Could not read the unlock-methods registry, which disconnecting ' +
               'from this session needs in order to check the account is safe ' +
@@ -265,14 +262,8 @@ export async function revokeEnrolledClient({
     // authorization reads the log and never the projection. The store is
     // aimed at the capability held at call time, since the renewal above may
     // have replaced it.
-    ...(ladder
-      ? {
-          projectionStore: didWebProjectionStore({
-            host: pointer.host,
-            spaceId: pointer.spaceId,
-            invoker: () => context.invoker
-          })
-        }
+    ...(context.kind === 'ladder'
+      ? { projectionStore: context.projectionStore }
       : {}),
     // The cascade's own did.jsonl read must resolve to the account the
     // session's pointer names.
@@ -321,8 +312,7 @@ export async function revokeEnrolledClient({
         accountDid: pointer.did,
         userKey,
         latestEpochId,
-        descriptor,
-        ...rides()
+        descriptor
       }),
     collections: cascadeCollections({ remoteStore }),
     // Neither re-mint stage runs on the ladder branch. Every unlock record's
@@ -359,8 +349,7 @@ export async function revokeEnrolledClient({
       await adoptRotatedUserKey({
         session,
         spaceId: pointer.spaceId,
-        userKey,
-        ...rides()
+        userKey
       })
   }).finally(() => invalidateVerifiedLog({ profile: session.profile }))
 

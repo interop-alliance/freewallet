@@ -111,7 +111,7 @@ import { deriveSpaceId } from '@interop/was-client/sync'
 import type { VerifiedAccountLog } from '@interop/wallet-core/clients'
 import { SESSION_DB_NAME } from '@/lib/sessionKey'
 import { clearWriterId } from '@/lib/writerId'
-import { BrowserStore, migrationMarkerKeys } from '@/stores/browserStore'
+import { BrowserStore } from '@/stores/browserStore'
 import {
   assertBrowserLocalSession,
   deleteAllLocalCacheFamilies,
@@ -142,6 +142,7 @@ import {
 import { adoptRotatedUserKeyInBand } from '@/session/userKeyAdoption'
 import { cascadeCollections } from '@/session/userKeyCascade'
 import { createLogger } from '@/lib/log'
+import { zcapExpires } from '@/lib/zcap'
 
 const log = createLogger('fw:session:forget')
 import {
@@ -689,12 +690,11 @@ async function rebindLoginCredentialRecord({
     unlockSpaceId: standing.unlockSpaceId,
     keyAgreementKeyMultibase: standing.standingClient.keyAgreementKeyMultibase,
     delegationKeyId: delegationProofKeyId(delegation),
-    delegationExpires: (delegation as { expires?: string }).expires,
+    delegationExpires: zcapExpires(delegation),
     ...(delegatedClients
       ? {
           delegatedClientsKeyId: delegationProofKeyId(delegatedClients),
-          delegatedClientsExpires: (delegatedClients as { expires?: string })
-            .expires
+          delegatedClientsExpires: zcapExpires(delegatedClients)
         }
       : {})
   })
@@ -1073,21 +1073,8 @@ export async function forgetBrowserWalletData(): Promise<{
     }
   }
 
-  // The per-account localStorage families, wholesale by prefix scan; the
-  // marker prefixes come from the shared key builders with an empty scope.
+  // The per-account localStorage families, wholesale by prefix scan.
   try {
-    if (typeof localStorage !== 'undefined') {
-      const emptyMarkers = migrationMarkerKeys('')
-      const markerPrefixes = [emptyMarkers.plaintext, emptyMarkers.publicCids]
-      const keys: string[] = []
-      for (let index = 0; index < localStorage.length; index++) {
-        const key = localStorage.key(index)
-        if (key && markerPrefixes.some(prefix => key.startsWith(prefix))) {
-          keys.push(key)
-        }
-      }
-      keys.forEach(key => localStorage.removeItem(key))
-    }
     deleteAllLocalCacheFamilies()
   } catch (err) {
     failed.push('cache-families')
@@ -1104,15 +1091,13 @@ export async function forgetBrowserWalletData(): Promise<{
 
 /**
  * The replica database prefixes this browser can name without enumerating
- * IndexedDB, recovered from the localStorage traces a replica leaves: the
- * per-`dbPrefix` migration markers
- * (`freewallet:<name>-migrated:<dbPrefix>`, written the first time a
- * replica's collections open) carry the prefix verbatim, and a local-mode
- * descriptor or meta cache key (`<family>:local:<clientDid>:<collectionId>`)
- * carries the client did:key the prefix is derived from. Nothing else on
- * this browser names a replica: the remote-mode cache scope is an account
- * Space id, and the unlock-methods cache lives inside the session database.
- * Must be called before the localStorage families are deleted.
+ * IndexedDB, recovered from the one localStorage trace a replica leaves: a
+ * local-mode descriptor or meta cache key
+ * (`<family>:local:<clientDid>:<collectionId>`) carries the client did:key
+ * the prefix is derived from. Nothing else on this browser names a replica:
+ * the remote-mode cache scope is an account Space id, and the
+ * unlock-methods cache lives inside the session database. Must be called
+ * before the localStorage families are deleted.
  *
  * @returns {Set<string>}
  */
@@ -1121,8 +1106,6 @@ function derivableReplicaPrefixes(): Set<string> {
   if (typeof localStorage === 'undefined') {
     return prefixes
   }
-  const emptyMarkers = migrationMarkerKeys('')
-  const markerPrefixes = [emptyMarkers.plaintext, emptyMarkers.publicCids]
   const localScopePrefixes = LOCAL_CACHE_FAMILY_PREFIXES.map(
     prefix => `${prefix}:local:`
   )
@@ -1130,14 +1113,6 @@ function derivableReplicaPrefixes(): Set<string> {
     const key = localStorage.key(index)
     if (!key) {
       continue
-    }
-    for (const marker of markerPrefixes) {
-      if (key.startsWith(marker)) {
-        const prefix = key.slice(marker.length)
-        if (prefix) {
-          prefixes.add(prefix)
-        }
-      }
     }
     for (const scoped of localScopePrefixes) {
       if (!key.startsWith(scoped)) {

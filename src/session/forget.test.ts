@@ -283,8 +283,6 @@ describe('forgetBrowserWalletData (the no-unlock-material grade)', () => {
       entries: {
         'freewallet:collection-encryption:scope-a:col': 'x',
         'freewallet:collection-meta:scope-b:col': 'x',
-        'freewallet:plaintext-migrated:abc-123': 'x',
-        'freewallet:public-cids-migrated:abc-123': 'x',
         'freewallet:writerId': 'w1',
         'fw-theme': 'dark'
       }
@@ -329,27 +327,30 @@ describe('forgetBrowserWalletData (the no-unlock-material grade)', () => {
         wiped.push(this.dbPrefix)
         return { verified: false }
       })
+    const { deriveSpaceId } = await import('@interop/was-client/sync')
+    const clientDid = 'did:key:z6MkLocalModeCacheScopeClientKey'
+    const dbPrefix = deriveSpaceId(clientDid)
     const { keys } = stubLocalStorage({
       entries: {
-        'freewallet:plaintext-migrated:abc-123': 'x',
+        [`freewallet:collection-encryption:local:${clientDid}:col`]: 'x',
         'freewallet:collection-encryption:scope-a:col': 'x',
         'fw-theme': 'dark'
       }
     })
     const { failed, unverified } = await forgetBrowserWalletData()
     wipeStorage.mockRestore()
-    // The replica prefix came from the migration marker, the one
+    // The replica prefix came from the local-mode cache key, the one
     // localStorage trace that names a replica without any enumeration.
-    expect(wiped).toEqual(['abc-123'])
+    expect(wiped).toEqual([dbPrefix])
     // The known-name delete runs whatever the engine reports.
     expect(deleted).toContain('freewallet-session')
     expect(failed).toEqual([])
     // The session database's delete could not be re-probed, the replica
-    // whose prefix the migration marker named could not be either, and no
+    // whose prefix the cache key named could not be either, and no
     // enumeration means other replicas may not have been discovered at all.
     expect(unverified).toContain('session-db')
     expect(unverified).toContain('replica-discovery')
-    expect(unverified).toContain('replica:abc-123')
+    expect(unverified).toContain(`replica:${dbPrefix}`)
     expect(keys()).toEqual(['fw-theme'])
   })
 

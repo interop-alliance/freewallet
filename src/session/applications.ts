@@ -30,6 +30,10 @@ const log = createLogger('fw:session:applications')
  * log that cannot be fetched right now) degrades to listing the rows without
  * an orphaned marker (`signingKeys: undefined`), never to failing the page.
  *
+ * Both listings join over the activity history, so it is read and decrypted
+ * once here and passed through to each -- on a replica-less session that read
+ * is a remote fan-out, and running it twice per page load doubles it.
+ *
  * @param options {object}
  * @param options.session {Session}
  * @returns {Promise<{ apps: ConnectedApp[], agents: ConnectedAgent[],
@@ -44,9 +48,14 @@ export async function listApplicationsView({
   agents: ConnectedAgent[]
   signingKeys?: Set<string>
 }> {
+  const history = session.storage.listHistoryItems()
   const [apps, agents, signingKeys] = await Promise.all([
-    listConnectedApps({ storage: session.storage }),
-    listConnectedAgents({ storage: session.storage }),
+    history.then(items =>
+      listConnectedApps({ storage: session.storage, items })
+    ),
+    history.then(items =>
+      listConnectedAgents({ storage: session.storage, items })
+    ),
     (async () => {
       try {
         return await currentAccountSigningKeys({ session })

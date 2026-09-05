@@ -38,41 +38,17 @@ import { uuidv7 } from 'uuidv7'
 import type { User } from '@/types/auth'
 import { WALLET_STANDARD_COLLECTIONS } from '@/app.config'
 import { cidFrom, deriveSpaceId } from '@interop/was-client/sync'
-import {
-  syncedDocMigrationStrategies,
-  syncedDocSchema,
-  type Json,
-  type SyncedDoc
-} from '@/lib/sync'
+import { syncedDocSchema, type Json, type SyncedDoc } from '@/lib/sync'
 import { createContactsConflictHandler } from '@/stores/contactsConflictHandler'
 import { compareContactRevisionsNewestFirst } from '@/lib/contactRevisions'
 import { isEncryptedEnvelope, type DocCipher } from '@interop/was-client/edv'
-import { isUnknownEpochError } from '@interop/wallet-core/sync'
-import { isKeyUnwrapError } from '@interop/wallet-core/descriptors'
+import { classifyDecryptFailure } from '@/lib/decryptFailure'
 import type { StoredCredential } from '@/types/credential'
 import type { StoredContact } from '@/types/contact'
 import type { WalletActivity } from '@/stores/storageManager'
 import { createLogger } from '@/lib/log'
 
 const log = createLogger('fw:storage:browser')
-
-/**
- * The per-`dbPrefix` localStorage marker keys of the one-time local
- * migrations. Exported for the shared wipe enumeration, which is the only
- * path that ever deletes them.
- *
- * @param dbPrefix {string}
- * @returns {{ plaintext: string, publicCids: string }}
- */
-export function migrationMarkerKeys(dbPrefix: string): {
-  plaintext: string
-  publicCids: string
-} {
-  return {
-    plaintext: `freewallet:plaintext-migrated:${dbPrefix}`,
-    publicCids: `freewallet:public-cids-migrated:${dbPrefix}`
-  }
-}
 
 /**
  * The BroadcastChannel a wipe uses to ask sibling tabs to drop their open
@@ -292,7 +268,6 @@ export class BrowserStore {
         key,
         {
           schema: syncedDocSchema(),
-          migrationStrategies: syncedDocMigrationStrategies(),
           ...(key === 'contacts' && {
             conflictHandler: createContactsConflictHandler({
               getCipher: () => this.#ciphers?.contacts
@@ -557,12 +532,13 @@ export class BrowserStore {
     )
     for (const { id, plaintext, fromEnvelope, err } of rows) {
       if (err) {
-        if (isUnknownEpochError(err)) {
+        const failure = classifyDecryptFailure(err)
+        if (failure === 'unknown-epoch') {
           // Possibly-fresh data behind a stale descriptor: skip it (uncached) so a
           // descriptor refresh can pick it up, never purge it.
           log.warn('Skipping unknown-epoch row', { logicalKey, id, err })
           unknownEpochRowIds.push(id)
-        } else if (isKeyUnwrapError(err)) {
+        } else if (failure === 'no-epoch-key') {
           // This wallet is not a recipient of the row's key epoch. Real data,
           // permanently unreadable here: skip it (uncached) but never purge it,
           // and keep it out of the refresh signal -- a descriptor refresh cannot
@@ -1718,11 +1694,12 @@ export class BrowserStore {
         continue
       }
       if (err) {
-        if (isUnknownEpochError(err)) {
+        const failure = classifyDecryptFailure(err)
+        if (failure === 'unknown-epoch') {
           // Possibly-fresh data behind a stale descriptor: skip it uncached and
           // unindexed so a descriptor refresh can pick it up on a later read.
           log.warn('Skipping unknown-epoch contactsHistory row', { id, err })
-        } else if (isKeyUnwrapError(err)) {
+        } else if (failure === 'no-epoch-key') {
           // Not a recipient of this row's key epoch: skip it uncached and
           // unindexed, so a later key grant can still surface it.
           log.warn(
@@ -1753,135 +1730,6 @@ export class BrowserStore {
     await Promise.all(backfill.map(entry => this.#indexContactRevision(entry)))
     revisions.sort(compareContactRevisionsNewestFirst)
     return revisions
-  }
-
-  /**
-   * Runs a one-time local migration at most once per user: a persistent
-   * per-`dbPrefix` marker (localStorage, guarded for the non-browser test/SSR
-   * environments) short-circuits the full-collection scan on every later
-   * login, and is stamped only once the pass completes.
-   *
-   * @param markerKey {string}   the localStorage marker key
-   * @param migrate {() => Promise<void>}   the migration pass
-   * @returns {Promise<void>}
-   */
-  async #runOnce(markerKey: string, migrate: () => Promise<void>) {
-    const hasLocalStorage = typeof localStorage !== 'undefined'
-    if (hasLocalStorage && localStorage.getItem(markerKey)) {
-      return
-    }
-    await migrate()
-    if (hasLocalStorage) {
-      localStorage.setItem(markerKey, new Date().toISOString())
-    }
-  }
-
-  /**
-   * One-time local migration for the encrypted collections: re-keys plaintext
-   * rows written before encrypted sync landed (when
-   * `private-credentials` / `wallet-activity` were local-active but not yet
-   * replicating) into EDV envelopes under their content-derived ids. Runs at
-   * login before replication starts -- required, not just tidy: once a remote
-   * collection carries its encryption descriptor, the server rejects a plaintext
-   * content push (422), which would wedge the push cycle in retry.
-   *
-   * Only never-synced rows are touched (`version === 0`, the local
-   * placeholder; a pulled row carries the server revision, >= 1) -- a legacy
-   * plaintext row replicated down from a pre-descriptor remote collection is left
-   * as-is and handled by the tolerant read paths. The re-keyed original is
-   * soft-deleted; its pushed tombstone targets a resource that never existed
-   * remotely, which the server treats as an idempotent no-op. The original's
-   * `updatedAt` is preserved so log/list ordering survives the re-key.
-   *
-   * Runs at most once per user: after the first pass no never-synced plaintext
-   * row can remain, so a persistent per-`dbPrefix` marker (localStorage, guarded
-   * for the non-browser test/SSR environments) short-circuits the full-collection
-   * scan that would otherwise materialize every encrypted row on every later
-   * login.
-   *
-   * @returns {Promise<void>}
-   */
-  async migrateLocalPlaintextDocs() {
-    await this.#runOnce(
-      migrationMarkerKeys(this.dbPrefix).plaintext,
-      async () => {
-        for (const [logicalKey, cipher] of Object.entries(
-          this.#ciphers ?? {}
-        )) {
-          const collection = this.rxCollection(logicalKey)
-          const docs = await collection.find().exec()
-          for (const doc of docs) {
-            const { updatedAt, version, data } = doc.toMutableJSON()
-            if (
-              version !== 0 ||
-              data === undefined ||
-              isEncryptedEnvelope(data)
-            ) {
-              continue
-            }
-            const { id, envelope, epoch } = await cipher.encrypt({ data })
-            await collection.insertIfNotExists({
-              id,
-              updatedAt,
-              version: 0,
-              ...(epoch !== undefined && { epoch }),
-              data: envelope
-            })
-            await doc.remove()
-          }
-        }
-      }
-    )
-  }
-
-  /**
-   * One-time re-key of the `public-credentials` collection after the CID
-   * formula fix. The pre-fix formula hashed the JSON-escaped canonical string
-   * rather than the canonical JCS bytes, so a public credential's row id no
-   * longer matches `cidFrom` of its body. Each mis-keyed row is re-inserted
-   * under the recomputed cid (with its `updatedAt` preserved and `version` 0 so
-   * it pushes as a create) and the old row is soft-deleted.
-   *
-   * Runs at login before replication starts, so the tombstone and the new row
-   * both propagate to the remote collection. Unlike the plaintext migration
-   * there is no `version` gate: pulled rows must be re-keyed too, so the remote
-   * old-cid resource gets tombstoned. Idempotent by construction (a correctly
-   * keyed row is skipped). Note that any public link already shared to an
-   * old-cid resource stops resolving once its remote row is tombstoned.
-   *
-   * Runs at most once per user: after the first pass no mis-keyed row can remain
-   * (the pre-fix formula is retired), so a persistent per-`dbPrefix` marker
-   * (localStorage, guarded for the non-browser test/SSR environments)
-   * short-circuits the full-collection `cidFrom` recompute that would otherwise
-   * run on every later login.
-   *
-   * @returns {Promise<void>}
-   */
-  async migratePublicCredentialCids() {
-    await this.#runOnce(
-      migrationMarkerKeys(this.dbPrefix).publicCids,
-      async () => {
-        const collection = this.rxCollection('publicCredentials')
-        const docs = await collection.find().exec()
-        for (const doc of docs) {
-          const { id, updatedAt, data } = doc.toMutableJSON()
-          if (data === undefined) {
-            continue
-          }
-          const cid = await cidFrom({ doc: data as object })
-          if (cid === id) {
-            continue
-          }
-          await collection.insertIfNotExists({
-            id: cid,
-            updatedAt,
-            version: 0,
-            data
-          })
-          await doc.remove()
-        }
-      }
-    )
   }
 
   /**

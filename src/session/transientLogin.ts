@@ -53,7 +53,8 @@ import {
   readUserKeyRoster,
   userKeyRosterDescriptorStore,
   userKeyRosterLogSigner,
-  type SealableEncryptionDescriptorStore
+  type SealableEncryptionDescriptorStore,
+  type UserKeyRosterReadResult
 } from '@interop/wallet-core/keys'
 import {
   didKeyZcapClient,
@@ -85,16 +86,11 @@ import {
   type TransientKeyringFetchResult,
   type UnlockCredential
 } from '@/session/keyring'
+import { refreshTransientManageCapability } from '@/session/unlockMethods'
 import {
-  backfillPassphraseUnlockMethod,
-  refreshTransientManageCapability
-} from '@/session/unlockMethods'
-import { accountCeremonyContext } from '@/session/accountCeremonyContext'
-import { repairStaleUnlockRegistrySeal } from '@/session/registryReseal'
-import {
-  rebuildBarePasskeyEntry,
-  repairTornPassphraseRetirement
-} from '@/session/pendingRetirement'
+  chainRegistryStage,
+  runSharedRegistryPasses
+} from '@/session/registryPasses'
 import { primeVerifiedAccountLog } from '@/session/verifiedLog'
 import { refreshDidWebProjection } from '@/session/annexReach'
 import type { Session } from '@/types/auth'
@@ -1101,55 +1097,33 @@ export async function transientSessionFromKeyringHit({
   // The user key sweep and the annex GC stay remembered-only: neither has a
   // ladder-anchored branch yet.
   if (!popup) {
-    session.registryReady = (async () => {
-      const context = await accountCeremonyContext({ session })
-      try {
-        await repairStaleUnlockRegistrySeal({
-          session,
-          rosterRead,
-          context
-        })
-      } catch (err) {
-        log.warn(
-          'Could not repair the unlock-methods registry seal; the next login retries',
-          { err }
-        )
-      }
-      try {
-        await repairTornPassphraseRetirement({
+    // Typed once here rather than at each closure below: the declaration is
+    // an evolving `let` the arms above assign, and the chain's stages read it
+    // after every one of them has run.
+    const loginRosterRead: UserKeyRosterReadResult = rosterRead
+    session.registryReady = Promise.resolve()
+    chainRegistryStage({
+      session,
+      warn: 'Could not run the login-time registry passes; the next login retries',
+      run: () =>
+        runSharedRegistryPasses({
           session,
           found,
+          rosterRead: loginRosterRead,
           ...(credential ? { credential: { derived: credential } } : {})
         })
-      } catch (err) {
-        log.warn(
-          'Could not finish the pending passphrase retirement; the next login retries',
-          { err }
-        )
-      }
-      try {
-        await rebuildBarePasskeyEntry({ session, found })
-      } catch (err) {
-        log.warn(
-          'Could not rebuild the bare passkey unlock-method entry; the next login retries',
-          { err }
-        )
-      }
-      try {
-        await backfillPassphraseUnlockMethod({
-          session,
-          ...(context?.invoker.capability
-            ? { capability: context.invoker.capability }
-            : {})
-        })
-      } catch (err) {
-        log.warn('Could not backfill the unlock-methods registry', { err })
-      }
-      if (found.manageCapability) {
+    })
+    chainRegistryStage({
+      session,
+      warn: "Could not refresh the acting credential's management zcap; the next login retries",
+      run: async () => {
+        if (!found.manageCapability) {
+          return
+        }
         await refreshTransientManageCapability({
           zcapClient: transientZcapClient,
           spaceId: accountSpaceId,
-          userKey: rosterRead.userKey,
+          userKey: loginRosterRead.userKey,
           // The capability the visit rides now, not the one it started on:
           // a stage above may have renewed the generation delegation.
           capability:
@@ -1164,7 +1138,7 @@ export async function transientSessionFromKeyringHit({
             : {})
         })
       }
-    })().catch(() => {})
+    })
   }
   return { session, userExists }
 }

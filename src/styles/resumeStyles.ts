@@ -1,4 +1,3 @@
-import type { SxProps, Theme } from '@mui/material/styles'
 import { credentialDetailCardStyles } from '@/styles/credentialStyles'
 
 const markdownBase = credentialDetailCardStyles.markdownBody
@@ -13,36 +12,7 @@ const markdownBase = credentialDetailCardStyles.markdownBody
 const RESUME_FONT = 'Arial, sans-serif'
 const RESUME_LINK_COLOR = '#007bff'
 
-export type ResumeStylesMap = {
-  page: SxProps<Theme>
-  header: SxProps<Theme>
-  headerInner: SxProps<Theme>
-  headerNameRow: SxProps<Theme>
-  fullName: SxProps<Theme>
-  city: SxProps<Theme>
-  contactRow: SxProps<Theme>
-  contactLink: SxProps<Theme>
-  contactSeparator: SxProps<Theme>
-  body: SxProps<Theme>
-  sectionBlock: SxProps<Theme>
-  sectionTitle: SxProps<Theme>
-  summaryMarkdown: SxProps<Theme>
-  itemBlock: SxProps<Theme>
-  experienceTitle: SxProps<Theme>
-  experienceMeta: SxProps<Theme>
-  experienceDuration: SxProps<Theme>
-  experienceMarkdown: SxProps<Theme>
-  educationTitle: SxProps<Theme>
-  educationDates: SxProps<Theme>
-  educationMarkdown: SxProps<Theme>
-  skillsList: SxProps<Theme>
-  skillItem: SxProps<Theme>
-  affiliationsSection: SxProps<Theme>
-  affiliationTitle: SxProps<Theme>
-  affiliationDuration: SxProps<Theme>
-}
-
-export const resumeStyles: ResumeStylesMap = {
+export const resumeStyles = {
   page: {
     width: '100%',
     mx: 'auto',

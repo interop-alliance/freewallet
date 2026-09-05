@@ -63,7 +63,9 @@ vi.mock('@/session/annexReach', () => ({
 }))
 
 vi.mock('@/session/keyring', () => ({
-  bindRemoteUnlockRecord: vi.fn(async () => ({ unlockSpaceId: 'unlock-space' }))
+  bindCredentialAnchoredUnlockSecret: vi.fn(async () => ({
+    unlockSpaceId: 'unlock-space'
+  }))
 }))
 
 import {
@@ -226,10 +228,12 @@ describe("the ladder kind's authorities", () => {
     if (context?.kind !== 'ladder') {
       throw new Error('expected the ladder kind')
     }
-    expect(context.delegationSigner).toEqual({ isLadderVmZcapClient: true })
-    // The single-verb child's delegatee and invoker: the ladder VM's own bare
-    // did:key, which resolves from its own bytes and so outlives the Space.
-    expect(context.ladderDeleter.zcapClient).toBe(context.delegationSigner)
+    // The branch's one delegation signer, and the single-verb child's
+    // delegatee and invoker: the ladder VM's own bare did:key, which resolves
+    // from its own bytes and so outlives the Space.
+    expect(context.ladderDeleter.zcapClient).toEqual({
+      isLadderVmZcapClient: true
+    })
     expect(context.ladderDeleter.controller).toBe(
       `did:key:z6MkLadderVm${LADDER_SEED[0]}`
     )

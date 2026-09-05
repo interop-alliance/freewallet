@@ -11,9 +11,9 @@
  * credential: the credential supplies the origin, subject DID, and connected
  * date; the latest matching Login activity supplies the raw display name, the
  * grant summaries, and the last-connected timestamp. The join is on the
- * credential's `appUrl` where both sides carry one, so several apps sharing an
- * origin get their own attribution, and on the origin alone for rows written
- * before activities recorded an `appUrl`. `deriveAppGrantsState`
+ * credential's `appUrl`, which every mint and every connect records, so
+ * several apps sharing an origin get their own attribution.
+ * `deriveAppGrantsState`
  * then reads each recorded grant's delegation signer against the account
  * document's current key set: a grant signed by a since-disconnected wallet
  * client is already dead (the current-key-set rule), so its app lists as
@@ -96,12 +96,11 @@ export interface ConnectedApp {
    */
   origin: string
   /**
-   * The application URL the app key is scoped to within that origin, when the
-   * credential carries one (absent on a legacy, pre-`appUrl` key). Two
+   * The application URL the app key is scoped to within that origin. Two
    * applications sharing an origin are distinct connected apps and are told
    * apart by this value.
    */
-  appUrl?: string
+  appUrl: string
   /**
    * The app-key credential's subject (self-issued) did:key.
    */
@@ -166,8 +165,8 @@ function loginAppName(object: unknown): string | undefined {
 
 /**
  * The `appUrl` an App Connect Login activity recorded
- * (`object.appConnect.appUrl`), when present. Rows written before app keys
- * were scoped to an `appUrl` carry none.
+ * (`object.appConnect.appUrl`). Every connect writes one; a record carrying
+ * none is not a row this listing can attribute to an app.
  *
  * @param object {unknown}   the activity's `object` member
  * @returns {string | undefined}
@@ -342,53 +341,43 @@ function isAppConnectLoginFor({
  *
  * @param options {object}
  * @param options.storage {StorageManager}
+ * @param [options.items] {Awaited<ReturnType<StorageManager['listHistoryItems']>>}
+ *   the activity history, when the caller has already read it (the sibling
+ *   agent listing scans the same collection)
  * @returns {Promise<ConnectedApp[]>}   sorted latest-connected first
  */
 export async function listConnectedApps({
-  storage
+  storage,
+  items
 }: {
   storage: StorageManager
+  items?: Awaited<ReturnType<StorageManager['listHistoryItems']>>
 }): Promise<ConnectedApp[]> {
   const [{ appKeys: credentials }, history] = await Promise.all([
     storage.listAppKeys(),
-    storage.listHistoryItems()
+    items ?? storage.listHistoryItems()
   ])
 
-  // One pass over the history, into three indexes, so the per-credential loop
-  // below is a lookup rather than a filter-and-sort each:
-  //
-  // - by `appUrl`, for rows that recorded one -- the precise join, which tells
-  //   two apps sharing an origin apart;
-  // - by origin over rows WITHOUT an `appUrl`, the fallback for a credential
-  //   whose app has not reconnected since rows started carrying one (a row
-  //   carrying a different app's `appUrl` must never stand in here);
-  // - by origin over every row, the pre-`appUrl` behavior, kept for a legacy
-  //   app-key credential that carries no `appUrl` of its own to join on.
+  // One pass over the history, into an index by `appUrl`, so the
+  // per-credential loop below is a lookup rather than a filter-and-sort each.
+  // The `appUrl` is the join on both sides: every mint writes
+  // `credentialSubject.appUrl` and every connect records
+  // `object.appConnect.appUrl`, and it is what tells two apps sharing an
+  // origin apart.
   type HistoryItem = (typeof history)[number]
   const latestLoginByAppUrl = new Map<string, HistoryItem>()
-  const latestLoginByOrigin = new Map<string, HistoryItem>()
-  const latestUnscopedLoginByOrigin = new Map<string, HistoryItem>()
-  function keepLatest(
-    index: Map<string, HistoryItem>,
-    key: string,
-    item: HistoryItem
-  ): void {
-    const current = index.get(key)
-    if (!current || (current.doc.created ?? '') < (item.doc.created ?? '')) {
-      index.set(key, item)
-    }
-  }
   for (const item of history) {
     const origin = loginOrigin(item.doc.object)
     if (!origin || !isAppConnectLoginFor({ doc: item.doc, origin })) {
       continue
     }
-    keepLatest(latestLoginByOrigin, origin, item)
     const appUrl = loginAppUrl(item.doc.object)
-    if (appUrl !== undefined) {
-      keepLatest(latestLoginByAppUrl, appUrl, item)
-    } else {
-      keepLatest(latestUnscopedLoginByOrigin, origin, item)
+    if (appUrl === undefined) {
+      continue
+    }
+    const current = latestLoginByAppUrl.get(appUrl)
+    if (!current || (current.doc.created ?? '') < (item.doc.created ?? '')) {
+      latestLoginByAppUrl.set(appUrl, item)
     }
   }
 
@@ -396,25 +385,18 @@ export async function listConnectedApps({
   for (const { cid, vc: credential } of credentials) {
     const subject = subjectId(credential)
     const origin = appKeyOrigin(credential)
+    const appUrl = appKeyAppUrl(credential)
     // The collection holds app keys only, so the row check is the marker type
-    // plus the two members this listing reads: anything else in there (an
+    // plus the three members this listing reads: anything else in there (an
     // opaque row planted server-side through a space import, say) is not
     // something the page can render or revoke.
-    if (!presentsAsAppKey(credential) || !subject || !origin) {
+    if (!presentsAsAppKey(credential) || !subject || !origin || !appUrl) {
       continue
     }
 
     // The latest matching App Connect Login supplies the raw display name, the
-    // grants, and the last-connected timestamp. Matching prefers this app's
-    // own `appUrl` and falls back to the origin for activities an older wallet
-    // recorded before the `appUrl` claim existed. The origin-only branch is
-    // the same fallback for a key carrying no `appUrl` of its own.
-    const appUrl = appKeyAppUrl(credential)
-    const latestLogin =
-      appUrl !== undefined
-        ? (latestLoginByAppUrl.get(appUrl) ??
-          latestUnscopedLoginByOrigin.get(origin))
-        : latestLoginByOrigin.get(origin)
+    // grants, and the last-connected timestamp.
+    const latestLogin = latestLoginByAppUrl.get(appUrl)
 
     const vcName = (credential as { name?: unknown }).name
     const strippedName =
@@ -432,7 +414,7 @@ export async function listConnectedApps({
       cid,
       name,
       origin,
-      ...(appUrl !== undefined && { appUrl }),
+      appUrl,
       subjectDid: subject,
       connectedAt: typeof issuanceDate === 'string' ? issuanceDate : undefined,
       grants: latestLogin ? loginGrants(latestLogin.doc.object) : [],
@@ -731,14 +713,19 @@ function revokeHidesLogin({
  *
  * @param options {object}
  * @param options.storage {StorageManager}
+ * @param [options.items] {Awaited<ReturnType<StorageManager['listHistoryItems']>>}
+ *   the activity history, when the caller has already read it (the sibling
+ *   app listing scans the same collection)
  * @returns {Promise<ConnectedAgent[]>}   sorted latest-granted first
  */
 export async function listConnectedAgents({
-  storage
+  storage,
+  items
 }: {
   storage: StorageManager
+  items?: Awaited<ReturnType<StorageManager['listHistoryItems']>>
 }): Promise<ConnectedAgent[]> {
-  const history = await storage.listHistoryItems()
+  const history = items ?? (await storage.listHistoryItems())
   type HistoryItem = (typeof history)[number]
 
   const loginsByController = new Map<string, HistoryItem[]>()

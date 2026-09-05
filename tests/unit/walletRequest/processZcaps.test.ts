@@ -8,6 +8,7 @@ import type { ICapabilityQueryDetail, IZcap } from '@/lib/walletRequest'
 import { x25519RecipientFromDidKey } from '@interop/was-client/edv'
 import {
   existingCollectionsFrom,
+  isSatisfiable,
   resolveInvocationTarget,
   resolveGrant,
   resolveGrants,
@@ -315,9 +316,7 @@ describe('resolveInvocationTarget', () => {
       collections: NO_COLLECTIONS
     })
     expect(target).toMatchObject({
-      satisfiable: true,
       invocationTarget: `${SPACE_URL}/example-app-data/doc1`,
-      wholeSpace: false,
       needsProvisioning: false,
       targetClass: 'collection'
     })
@@ -330,8 +329,6 @@ describe('resolveInvocationTarget', () => {
       collections: NO_COLLECTIONS
     })
     expect(target).toMatchObject({
-      satisfiable: true,
-      wholeSpace: true,
       targetClass: 'space'
     })
     expect(target.collectionId).toBeUndefined()
@@ -345,9 +342,7 @@ describe('resolveInvocationTarget', () => {
     })
     // The trailing slash is normalized off the delegated target.
     expect(target).toMatchObject({
-      satisfiable: true,
       invocationTarget: SPACE_URL,
-      wholeSpace: true,
       targetClass: 'space'
     })
     expect(target.collectionId).toBeUndefined()
@@ -359,7 +354,7 @@ describe('resolveInvocationTarget', () => {
       spaceUrl: SPACE_URL,
       collections: NO_COLLECTIONS
     })
-    expect(target.satisfiable).toBe(false)
+    expect(target.targetClass).toBeUndefined()
     expect(target.targetClass).toBeUndefined()
   })
 
@@ -380,7 +375,7 @@ describe('resolveInvocationTarget', () => {
         spaceUrl: SPACE_URL,
         collections: NO_COLLECTIONS
       })
-      expect(target.satisfiable).toBe(false)
+      expect(target.targetClass).toBeUndefined()
       expect(target.targetClass).toBeUndefined()
     }
   })
@@ -396,7 +391,7 @@ describe('resolveInvocationTarget', () => {
         spaceUrl: SPACE_URL,
         collections: NO_COLLECTIONS
       })
-      expect(target.satisfiable).toBe(false)
+      expect(target.targetClass).toBeUndefined()
       expect(target.targetClass).toBeUndefined()
     }
   })
@@ -413,7 +408,7 @@ describe('resolveInvocationTarget', () => {
         spaceUrl: SPACE_URL,
         collections: NO_COLLECTIONS
       })
-      expect(target.satisfiable).toBe(false)
+      expect(target.targetClass).toBeUndefined()
       expect(target.targetClass).toBeUndefined()
     }
   })
@@ -430,7 +425,7 @@ describe('resolveInvocationTarget', () => {
         spaceUrl: SPACE_URL,
         collections: NO_COLLECTIONS
       })
-      expect(target.satisfiable).toBe(false)
+      expect(target.targetClass).toBeUndefined()
       expect(target.targetClass).toBeUndefined()
     }
   })
@@ -447,7 +442,6 @@ describe('resolveInvocationTarget', () => {
       collections: NO_COLLECTIONS
     })
     expect(withSlash).toMatchObject({
-      satisfiable: true,
       invocationTarget: `${SPACE_URL}/example-app-data`,
       collectionId: 'example-app-data',
       targetClass: 'collection'
@@ -464,9 +458,7 @@ describe('resolveInvocationTarget', () => {
         collections: NO_COLLECTIONS
       })
     ).toMatchObject({
-      satisfiable: true,
       invocationTarget: url,
-      wholeSpace: false,
       collectionId: 'private-credentials',
       encrypted: true,
       targetClass: 'protected-collection'
@@ -483,7 +475,6 @@ describe('resolveInvocationTarget', () => {
       collections: NO_COLLECTIONS
     })
     expect(target).toMatchObject({
-      satisfiable: true,
       invocationTarget: `${SPACE_URL}/example-app-data`,
       needsProvisioning: true,
       collectionId: 'example-app-data',
@@ -536,7 +527,6 @@ describe('resolveInvocationTarget', () => {
           collections: NO_COLLECTIONS
         })
       ).toMatchObject({
-        satisfiable: true,
         needsProvisioning: false,
         encrypted: false,
         targetClass: 'protected-collection'
@@ -553,8 +543,8 @@ describe('resolveInvocationTarget', () => {
         },
         spaceUrl: SPACE_URL,
         collections: NO_COLLECTIONS
-      }).satisfiable
-    ).toBe(false)
+      }).targetClass
+    ).toBeUndefined()
   })
 
   it('resolves the whole Space', () => {
@@ -565,9 +555,7 @@ describe('resolveInvocationTarget', () => {
         collections: NO_COLLECTIONS
       })
     ).toMatchObject({
-      satisfiable: true,
       invocationTarget: SPACE_URL,
-      wholeSpace: true,
       targetClass: 'space'
     })
   })
@@ -578,7 +566,7 @@ describe('resolveInvocationTarget', () => {
       spaceUrl: SPACE_URL,
       collections: NO_COLLECTIONS
     })
-    expect(target.satisfiable).toBe(false)
+    expect(target.targetClass).toBeUndefined()
     expect(target.targetClass).toBeUndefined()
   })
 
@@ -592,12 +580,10 @@ describe('resolveInvocationTarget', () => {
       collections: NO_COLLECTIONS
     })
     expect(target).toMatchObject({
-      satisfiable: true,
       invocationTarget: `${SPACE_URL}/example-app-public`,
       needsProvisioning: true,
       collectionId: 'example-app-public',
       encrypted: false,
-      isPublic: true,
       targetClass: 'public-collection'
     })
   })
@@ -615,16 +601,16 @@ describe('resolveInvocationTarget', () => {
           descriptor,
           spaceUrl: SPACE_URL,
           collections: NO_COLLECTIONS
-        }).isPublic
-      ).toBe(false)
+        }).targetClass
+      ).not.toBe('public-collection')
     }
     expect(
       resolveInvocationTarget({
         descriptor: `${SPACE_URL}/example-app-data`,
         spaceUrl: SPACE_URL,
         collections: NO_COLLECTIONS
-      }).isPublic
-    ).toBe(false)
+      }).targetClass
+    ).not.toBe('public-collection')
   })
 
   it('refuses a public grant on protected wallet collections', () => {
@@ -641,8 +627,8 @@ describe('resolveInvocationTarget', () => {
           descriptor: { type: 'https://w3id.org/byoe#public-collection', name },
           spaceUrl: SPACE_URL,
           collections: NO_COLLECTIONS
-        }).satisfiable
-      ).toBe(false)
+        }).targetClass
+      ).toBeUndefined()
     }
   })
 
@@ -656,13 +642,10 @@ describe('resolveInvocationTarget', () => {
       collections: NO_COLLECTIONS
     })
     expect(target).toMatchObject({
-      satisfiable: true,
       invocationTarget: `${SPACE_URL}/private-credentials`,
       needsProvisioning: false,
       collectionId: 'private-credentials',
       encrypted: true,
-      isPublic: false,
-      isShare: true,
       targetClass: 'share'
     })
   })
@@ -680,7 +663,7 @@ describe('resolveInvocationTarget', () => {
           spaceUrl: SPACE_URL,
           collections: NO_COLLECTIONS
         })
-      ).toMatchObject({ satisfiable: true, isShare: true, encrypted: true })
+      ).toMatchObject({ targetClass: 'share', encrypted: true })
     }
   })
 
@@ -707,8 +690,8 @@ describe('resolveInvocationTarget', () => {
           },
           spaceUrl: SPACE_URL,
           collections: NO_COLLECTIONS
-        }).satisfiable
-      ).toBe(false)
+        }).targetClass
+      ).toBeUndefined()
     }
   })
 
@@ -738,7 +721,7 @@ describe('resolveInvocationTarget', () => {
         spaceUrl: SPACE_URL,
         collections: NO_COLLECTIONS
       })
-      expect(target.satisfiable).toBe(false)
+      expect(target.targetClass).toBeUndefined()
       expect(target.targetClass).toBeUndefined()
     }
   })
@@ -760,16 +743,16 @@ describe('resolveInvocationTarget', () => {
           descriptor,
           spaceUrl: SPACE_URL,
           collections: NO_COLLECTIONS
-        }).isShare
-      ).toBe(false)
+        }).targetClass
+      ).not.toBe('share')
     }
     expect(
       resolveInvocationTarget({
         descriptor: `${SPACE_URL}/private-credentials`,
         spaceUrl: SPACE_URL,
         collections: NO_COLLECTIONS
-      }).isShare
-    ).toBe(false)
+      }).targetClass
+    ).not.toBe('share')
   })
 
   it('rejects an invalid public-collection name', () => {
@@ -781,15 +764,15 @@ describe('resolveInvocationTarget', () => {
         },
         spaceUrl: SPACE_URL,
         collections: NO_COLLECTIONS
-      }).satisfiable
-    ).toBe(false)
+      }).targetClass
+    ).toBeUndefined()
     expect(
       resolveInvocationTarget({
         descriptor: { type: 'https://w3id.org/byoe#public-collection' },
         spaceUrl: SPACE_URL,
         collections: NO_COLLECTIONS
-      }).satisfiable
-    ).toBe(false)
+      }).targetClass
+    ).toBeUndefined()
   })
 })
 
@@ -814,7 +797,7 @@ describe('existing-collection state (create-only public collections)', () => {
       spaceUrl: SPACE_URL,
       collections: EXISTING
     })
-    expect(target.satisfiable).toBe(false)
+    expect(target.targetClass).toBeUndefined()
     expect(target.targetClass).toBeUndefined()
   })
 
@@ -830,10 +813,8 @@ describe('existing-collection state (create-only public collections)', () => {
     // Satisfiable, but with nothing to provision: the policy is never
     // re-applied to an existing collection.
     expect(target).toMatchObject({
-      satisfiable: true,
       needsProvisioning: false,
       collectionId: 'example-app-public',
-      isPublic: true,
       targetClass: 'public-collection'
     })
   })
@@ -853,7 +834,7 @@ describe('existing-collection state (create-only public collections)', () => {
         collections: EXISTING
       })
       expect(grant.target.targetClass).toBe('public-collection')
-      expect(grant.target.isPublic).toBe(true)
+      expect(grant.target.targetClass).toBe('public-collection')
       expect(grant.allowedActions).toEqual([
         'GET',
         'HEAD',
@@ -880,7 +861,7 @@ describe('existing-collection state (create-only public collections)', () => {
       collections: EXISTING
     })
     expect(grant.target.targetClass).toBe('public-collection')
-    expect(grant.target.isPublic).toBe(true)
+    expect(grant.target.targetClass).toBe('public-collection')
     // Nothing to provision either: the `#collection` spelling of an existing
     // public collection is the idempotent public re-grant, so the public
     // policy is never re-applied and no recipient roster is ever set up on a
@@ -1051,7 +1032,7 @@ describe('resolveGrant action handling', () => {
       spaceUrl: SPACE_URL,
       collections: NO_COLLECTIONS
     })
-    expect(grant.target.satisfiable).toBe(false)
+    expect(grant.target.targetClass).toBeUndefined()
     expect(grant.allowedActions).toEqual([])
     expect(grant.write).toBe(false)
   })
@@ -1074,7 +1055,7 @@ describe('resolveGrant action handling', () => {
       spaceUrl: SPACE_URL,
       collections: NO_COLLECTIONS
     })
-    expect(grant.target.isPublic).toBe(true)
+    expect(grant.target.targetClass).toBe('public-collection')
     expect(grant.allowedActions).toEqual([
       'GET',
       'HEAD',
@@ -1146,7 +1127,7 @@ describe('resolveGrant action vocabulary', () => {
       spaceUrl: SPACE_URL,
       collections: NO_COLLECTIONS
     })
-    expect(grant.target.satisfiable).toBe(false)
+    expect(grant.target.targetClass).toBeUndefined()
     expect(grant.target.invocationTarget).toBeUndefined()
     expect(grant.allowedActions).toEqual([])
     expect(grant.write).toBe(false)
@@ -1162,7 +1143,7 @@ describe('resolveGrant action vocabulary', () => {
       spaceUrl: SPACE_URL,
       collections: NO_COLLECTIONS
     })
-    expect(grant.target.satisfiable).toBe(false)
+    expect(grant.target.targetClass).toBeUndefined()
     expect(grant.allowedActions).toEqual([])
   })
 
@@ -1172,7 +1153,7 @@ describe('resolveGrant action vocabulary', () => {
       spaceUrl: SPACE_URL,
       collections: NO_COLLECTIONS
     })
-    expect(grant.target.satisfiable).toBe(false)
+    expect(grant.target.targetClass).toBeUndefined()
     expect(grant.allowedActions).toEqual([])
   })
 
@@ -1192,7 +1173,7 @@ describe('resolveGrant action vocabulary', () => {
       collections: NO_COLLECTIONS
     })
     for (const grant of grants) {
-      if (grant.target.satisfiable) {
+      if (isSatisfiable(grant.target)) {
         expect(grant.allowedActions.length).toBeGreaterThan(0)
       } else {
         expect(grant.allowedActions).toEqual([])
@@ -1213,7 +1194,7 @@ describe('whole-Space grants under a generation delegation', () => {
       collections: NO_COLLECTIONS,
       generationDelegationParent: true
     })
-    expect(grant.target.satisfiable).toBe(false)
+    expect(grant.target.targetClass).toBeUndefined()
     expect(grant.target.unsatisfiableReason).toBe('whole-space-transient')
     expect(grant.target.invocationTarget).toBeUndefined()
   })
@@ -1229,7 +1210,7 @@ describe('whole-Space grants under a generation delegation', () => {
       collections: NO_COLLECTIONS,
       generationDelegationParent: true
     })
-    expect(grant.target.satisfiable).toBe(false)
+    expect(grant.target.targetClass).toBeUndefined()
     expect(grant.target.unsatisfiableReason).toBe('whole-space-transient')
   })
 
@@ -1239,7 +1220,7 @@ describe('whole-Space grants under a generation delegation', () => {
       spaceUrl: SPACE_URL,
       collections: NO_COLLECTIONS
     })
-    expect(grant.target.satisfiable).toBe(true)
+    expect(isSatisfiable(grant.target)).toBe(true)
     expect(grant.target.unsatisfiableReason).toBeUndefined()
     expect(grant.allowedActions).toEqual(['GET', 'HEAD'])
   })
@@ -1251,7 +1232,7 @@ describe('whole-Space grants under a generation delegation', () => {
       collections: NO_COLLECTIONS,
       generationDelegationParent: true
     })
-    expect(grants.map(grant => grant.target.satisfiable)).toEqual([
+    expect(grants.map(grant => isSatisfiable(grant.target))).toEqual([
       true,
       false,
       true
@@ -1268,7 +1249,7 @@ describe('whole-Space grants under a generation delegation', () => {
       collections: NO_COLLECTIONS,
       generationDelegationParent: true
     })
-    expect(grant.target.satisfiable).toBe(false)
+    expect(grant.target.targetClass).toBeUndefined()
     expect(grant.target.unsatisfiableReason).toBeUndefined()
   })
 })
@@ -1726,8 +1707,8 @@ describe('processZcaps', () => {
         descriptor,
         spaceUrl: SPACE_URL,
         collections: NO_COLLECTIONS
-      }).target
-    ).toEqual(expect.objectContaining({ satisfiable: false }))
+      }).target.targetClass
+    ).toBeUndefined()
     const zcaps = await processZcaps({ zcapRequests: [descriptor], session })
     expect(zcaps).toHaveLength(0)
     expect(shareCalls).toHaveLength(0)
@@ -1743,8 +1724,8 @@ describe('processZcaps', () => {
         descriptor,
         spaceUrl: SPACE_URL,
         collections: NO_COLLECTIONS
-      }).target
-    ).toEqual(expect.objectContaining({ satisfiable: false }))
+      }).target.targetClass
+    ).toBeUndefined()
     const zcaps = await processZcaps({ zcapRequests: [descriptor], session })
     expect(zcaps).toHaveLength(0)
     expect(shareCalls).toHaveLength(0)

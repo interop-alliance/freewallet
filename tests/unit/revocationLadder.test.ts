@@ -66,14 +66,23 @@ vi.mock('@interop/wallet-core/keys', async importOriginal => ({
 }))
 
 vi.mock('@/session/unlockMethods', () => ({
-  getUnlockMethods: vi.fn(async ({ capability }: { capability?: unknown }) => {
-    state.calls.push('getUnlockMethods')
-    state.registryCapabilities.push(capability)
-    if (state.registryFails) {
-      throw new Error('registry unreadable')
+  // The registry entries resolve the visit's authority themselves, off the
+  // live profile stamp, so what is recorded here is the stamp the read was
+  // made under rather than an argument the caller threaded.
+  getUnlockMethods: vi.fn(
+    async ({
+      session
+    }: {
+      session: { profile: { invocationCapability?: unknown } }
+    }) => {
+      state.calls.push('getUnlockMethods')
+      state.registryCapabilities.push(session.profile.invocationCapability)
+      if (state.registryFails) {
+        throw new Error('registry unreadable')
+      }
+      return state.registry
     }
-    return state.registry
-  }),
+  ),
   rewrapUnlockMethodsRecord: vi.fn(async () => {
     state.calls.push('rewrapUnlockMethodsRecord')
   })
@@ -133,16 +142,26 @@ vi.mock('@/session/annexReach', () => ({
 }))
 
 vi.mock('@/session/userKeyAdoption', () => ({
+  // Both adoptions resolve the visit's authority off the live profile stamp,
+  // so the recorded value is that stamp at the moment each ran.
   adoptRotatedUserKey: vi.fn(
-    async ({ capability }: { capability?: unknown }) => {
+    async ({
+      session
+    }: {
+      session: { profile: { invocationCapability?: unknown } }
+    }) => {
       state.calls.push('adoptRotatedUserKey')
-      state.adoptedCapabilities.push(capability)
+      state.adoptedCapabilities.push(session.profile.invocationCapability)
     }
   ),
   adoptRotatedUserKeyInBand: vi.fn(
-    async ({ capability }: { capability?: unknown }) => {
+    async ({
+      session
+    }: {
+      session: { profile: { invocationCapability?: unknown } }
+    }) => {
       state.calls.push('adoptRotatedUserKeyInBand')
-      state.adoptedCapabilities.push(capability)
+      state.adoptedCapabilities.push(session.profile.invocationCapability)
     }
   )
 }))
@@ -171,14 +190,6 @@ vi.mock('@/session/verifiedLog', () => ({
 }))
 
 vi.mock('@/session/accountCeremonyContext', () => ({
-  // The live-rides thunk: the ceremonies read the invocation capability off
-  // the context each time they spread it, so the mock must expose it too.
-  ceremonyRides:
-    ({ context }: { context: { invoker?: { capability?: unknown } } | null }) =>
-    () =>
-      context?.invoker?.capability
-        ? { capability: context.invoker.capability }
-        : {},
   accountCeremonyContext: vi.fn(async () => ladderContext())
 }))
 
@@ -248,24 +259,33 @@ const POST_STRIKE_WEB_DOC = { id: 'did:web:doc', verificationMethod: [] }
  * @returns {object}
  */
 function ladderContext(): object {
+  // Live, as the real context is: a mid-ceremony renewal replaces the
+  // session's stamp, and every stage past it must read the replacement.
+  const invokerNow = () => ({
+    zcapClient: { isAnnexVmZcapClient: true },
+    capability: state.invocationCapability
+  })
+  let projection: unknown
   return {
     kind: 'ladder',
     remoteStore: { webvhIdStore: vi.fn(() => ({ isWebvhIdStore: true })) },
     pointer: POINTER,
     controller: 'did:key:z6MkAccountController',
     signer: { kind: 'ladder', ladderSeed: LADDER_SEED },
-    ladderSeed: LADDER_SEED,
     idStore: BRIDGE_ID_STORE,
     rosterStore: LADDER_ROSTER_STORE,
-    // Live, as the real context is: a mid-ceremony renewal replaces the
-    // session's stamp, and every stage past it must read the replacement.
     get invoker() {
-      return {
-        zcapClient: { isAnnexVmZcapClient: true },
-        capability: state.invocationCapability
-      }
+      return invokerNow()
     },
-    delegationSigner: LADDER_DELETER.zcapClient,
+    // Built on first read and aimed at the invoker thunk, exactly as the real
+    // context builds it.
+    get projectionStore() {
+      return (projection ??= didWebProjectionStore({
+        host: POINTER.host,
+        spaceId: POINTER.spaceId,
+        invoker: invokerNow as never
+      }))
+    },
     ladderDeleter: LADDER_DELETER,
     bindRecord: async () => ({}),
     sibling: { id: 'urn:zcap:delegated-clients' },
@@ -355,7 +375,11 @@ function transientSession(): Session {
       zcapClient: { isAnnexVmZcapClient: true },
       keyAgent: { id: 'did:key:z6MkVisitKey' },
       ladderSeed: LADDER_SEED,
-      invocationCapability: GENERATION_DELEGATION,
+      // Live, as the real session's stamp is: the renewal replaces it in
+      // place, and every stage past it reads the replacement.
+      get invocationCapability() {
+        return state.invocationCapability
+      },
       userKey: OLD_USER_KEY,
       keyAgreementKey: { id: `${OLD_USER_KEY.id}#kak` },
       keyResolver: async () => ({}),

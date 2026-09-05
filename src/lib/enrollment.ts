@@ -188,7 +188,7 @@ export async function completeEnrollment({
     secret: passphrase,
     kdf: KEYRING_KDF
   })
-  const found = await fetchKeyring({ passphrase, credential, idb })
+  const found = await fetchKeyring({ secret: passphrase, credential, idb })
   if (!found) {
     throw new Error('No account was found for this passphrase.')
   }

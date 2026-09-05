@@ -41,7 +41,7 @@ import Chip from '@mui/material/Chip'
 import Stack from '@mui/material/Stack'
 import Typography from '@mui/material/Typography'
 import { useTranslation } from 'react-i18next'
-import type { ResolvedGrant } from '@/lib/walletRequest'
+import { isSatisfiable, type ResolvedGrant } from '@/lib/walletRequest'
 import { SiteProvidedText } from './SiteProvidedText'
 
 /**
@@ -54,7 +54,7 @@ function targetLabel(
   t: (key: string, opts?: Record<string, unknown>) => string
 ) {
   const { target } = grant
-  if (target.wholeSpace) {
+  if (target.targetClass === 'space') {
     return t('chapi.get.zcapTarget.space')
   }
   if (target.collectionId) {
@@ -115,10 +115,13 @@ export function ZcapGrantsPanel({
       </Typography>
       {grants.map((grant, index) => {
         const { target, allowedActions, descriptor, write } = grant
-        const satisfiable = target.satisfiable
-        const share = satisfiable && target.isShare
+        const satisfiable = isSatisfiable(target)
+        const share = target.targetClass === 'share'
         // Warning border for whole-Space, public-collection, and write grants.
-        const highlight = target.wholeSpace || target.isPublic || write
+        const highlight =
+          target.targetClass === 'space' ||
+          target.targetClass === 'public-collection' ||
+          write
         return (
           <Box
             key={descriptor.referenceId ?? index}
@@ -189,7 +192,7 @@ export function ZcapGrantsPanel({
                   ))}
                 </Stack>
 
-                {target.wholeSpace && (
+                {target.targetClass === 'space' && (
                   <Typography
                     variant="caption"
                     color="warning.main"
@@ -200,7 +203,7 @@ export function ZcapGrantsPanel({
                   </Typography>
                 )}
 
-                {target.isPublic && (
+                {target.targetClass === 'public-collection' && (
                   <Typography
                     variant="caption"
                     color="warning.main"

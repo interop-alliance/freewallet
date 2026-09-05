@@ -27,7 +27,7 @@ const state = vi.hoisted(() => ({
   // collection listing.
   registry: null as unknown,
   registryFails: false,
-  // Every capability the registry read rode, in order.
+  // The visit's authority stamp at each registry read, in order.
   registryCapabilities: [] as unknown[],
   accountDoc: { id: 'did:webvh:account' } as unknown,
   accountLogFails: false,
@@ -529,8 +529,15 @@ vi.mock('@/session/unlockMethods', async importOriginal => {
     ),
     managementZcapClient: vi.fn(() => zcapStub('management-client')),
     getUnlockMethods: vi.fn(
-      async ({ capability }: { capability?: unknown }) => {
-        state.registryCapabilities.push(capability)
+      async ({
+        session
+      }: {
+        session: { profile: { invocationCapability?: unknown } }
+      }) => {
+        // The registry entries resolve the visit's authority themselves, off
+        // the live profile stamp, so what is recorded is the stamp the read
+        // was made under rather than a threaded argument.
+        state.registryCapabilities.push(session.profile.invocationCapability)
         if (state.registryFails) {
           throw new Error('registry unreadable')
         }
@@ -849,14 +856,12 @@ vi.mock('@/session/accountCeremonyContext', () => ({
             webvhIdStore: vi.fn(() => ({ isWebvhIdStore: true }))
           },
           signer: { kind: 'ladder', ladderSeed: LADDER_SEED },
-          ladderSeed: LADDER_SEED,
           idStore: { isUnlockLogStore: true },
           rosterStore: { read: vi.fn(async () => state.rosterRead) },
           invoker: {
             zcapClient: { isAnnexVmZcapClient: true },
             capability: GENERATION_DELEGATION
           },
-          delegationSigner: { isLadderVmZcapClient: true },
           ladderDeleter: {
             zcapClient: { isLadderVmZcapClient: true },
             invoker: { isDidKeyZcapClient: true },

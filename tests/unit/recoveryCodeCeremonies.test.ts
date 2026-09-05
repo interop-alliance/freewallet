@@ -222,12 +222,15 @@ vi.mock('@/session/unlockMethods', async importOriginal => ({
   updateUnlockMethods: vi.fn(
     async ({
       mutate,
-      capability
+      session
     }: {
       mutate: (current: never) => never | null | Promise<never | null>
-      capability?: unknown
+      session: { profile: { invocationCapability?: unknown } }
     }) => {
-      account.registryCapabilities.push(capability)
+      // The registry entry resolves the visit's authority itself, off the
+      // live profile stamp, so what is recorded is the stamp the write was
+      // made under rather than a threaded argument.
+      account.registryCapabilities.push(session.profile.invocationCapability)
       account.trace.push('registry')
       const next = await mutate(account.registry as never)
       if (next !== null) {
@@ -254,6 +257,7 @@ import {
   remintEntriesOf,
   revokeRecoveryCode
 } from '@/session/recovery'
+import { didWebProjectionStore } from '@/session/annexReach'
 import type { AccountCeremonyContext } from '@/session/accountCeremonyContext'
 import type { RecoveryCodeUnlockMethod } from '@/session/unlockMethods'
 import type { Session } from '@/types/auth'
@@ -309,13 +313,19 @@ async function ceremonyContext(): Promise<AccountCeremonyContext> {
     ...shared,
     kind: 'ladder',
     signer: { kind: 'ladder', ladderSeed: ACTING_LADDER_SEED },
-    ladderSeed: ACTING_LADDER_SEED,
-    delegationSigner: {},
     ladderDeleter: { zcapClient: {}, invoker: {}, controller: agent.id },
     bindRecord: async () => ({ unlockSpaceId: 'unlock-1' }),
     unlockSpaceId: 'acting-unlock-space',
     standingKeyAgreementKey: agents.keyAgreementKey,
     invoker: { zcapClient: {}, capability: GENERATION_DELEGATION },
+    projectionStore: didWebProjectionStore({
+      host: POINTER.host,
+      spaceId: POINTER.spaceId,
+      invoker: () => ({
+        zcapClient: {} as never,
+        capability: GENERATION_DELEGATION as never
+      })
+    }),
     renew: async () => null
   } as unknown as AccountCeremonyContext
 }

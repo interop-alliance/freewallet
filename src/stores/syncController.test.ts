@@ -99,7 +99,7 @@ afterEach(async () => {
 
 describe('SyncController background pull poll', () => {
   it('reSyncs every replication once per poll interval while online', async () => {
-    await syncController.start({ session: fakeSession() })
+    await syncController.restart({ session: fakeSession() })
     expect(replications.created).toHaveLength(2)
 
     await vi.advanceTimersByTimeAsync(POLL_MS)
@@ -115,7 +115,7 @@ describe('SyncController background pull poll', () => {
 
   it('skips ticks while offline and resumes once back online', async () => {
     onLine = false
-    await syncController.start({ session: fakeSession() })
+    await syncController.restart({ session: fakeSession() })
 
     await vi.advanceTimersByTimeAsync(POLL_MS * 3)
     expect(totalReSyncCalls()).toBe(0)
@@ -129,14 +129,14 @@ describe('SyncController background pull poll', () => {
 
   it('installs no timer when the poll interval is zero', async () => {
     config.pollMs = 0
-    await syncController.start({ session: fakeSession() })
+    await syncController.restart({ session: fakeSession() })
 
     await vi.advanceTimersByTimeAsync(POLL_MS * 10)
     expect(totalReSyncCalls()).toBe(0)
   })
 
   it('clears the timer on stop', async () => {
-    await syncController.start({ session: fakeSession() })
+    await syncController.restart({ session: fakeSession() })
     await vi.advanceTimersByTimeAsync(POLL_MS)
     expect(totalReSyncCalls()).toBe(2)
 
@@ -146,11 +146,11 @@ describe('SyncController background pull poll', () => {
   })
 
   it('leaves exactly one timer running across start/stop cycles', async () => {
-    await syncController.start({ session: fakeSession() })
+    await syncController.restart({ session: fakeSession() })
     await syncController.stop()
 
     replications.created = []
-    await syncController.start({ session: fakeSession() })
+    await syncController.restart({ session: fakeSession() })
     expect(replications.created).toHaveLength(2)
 
     await vi.advanceTimersByTimeAsync(POLL_MS)

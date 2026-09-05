@@ -292,6 +292,5 @@ export interface Session {
     // over by the resume's captured key.
     complete: (options?: { currentUserKey?: UserKey }) => Promise<void>
   }
-  expires?: string // ISO date string, matches Auth.js convention
   isGuest: boolean
 }

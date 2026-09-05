@@ -33,7 +33,7 @@ import {
   sessionDatabaseExists
 } from '@/lib/sessionKey'
 import { clearWriterId } from '@/lib/writerId'
-import { BrowserStore, migrationMarkerKeys } from '@/stores/browserStore'
+import { BrowserStore } from '@/stores/browserStore'
 import { deleteLocalCacheFamilies } from '@/session/persistence'
 import type { UnlockMethodsRecord } from '@/session/unlockMethods'
 import type { Session } from '@/types/auth'
@@ -52,9 +52,9 @@ const log = createLogger('fw:session:wipe')
 export interface WipeTargets {
   /**
    * This browser's client did:key (`session.user.id`). Also the source of
-   * the replica-database and migration-marker prefix,
-   * `deriveSpaceId(clientDid)` (the `BrowserStore.initClient` derivation),
-   * re-derived where needed rather than carried as a separate field.
+   * the replica-database prefix, `deriveSpaceId(clientDid)` (the
+   * `BrowserStore.initClient` derivation), re-derived where needed rather
+   * than carried as a separate field.
    */
   clientDid: string
   /**
@@ -71,8 +71,8 @@ export interface WipeTargets {
    * because a transient visit's `clientDid` is a per-visit annex key that
    * names none of the state an enrolled client of the same account left here:
    * its unlock-methods cache, its passkey-safety notice, its local-mode cache
-   * scope, its migration markers, and -- the one that holds real credential
-   * data -- its replica database, whose prefix is `deriveSpaceId(did:key)`.
+   * scope, and -- the one that holds real credential data -- its replica
+   * database, whose prefix is `deriveSpaceId(did:key)`.
    * Enumerating a superset costs a no-op delete per absent key.
    */
   accountDids: string[]
@@ -284,22 +284,12 @@ export async function executeLocalWipe({
     }
   }
 
-  // The per-account localStorage families, last (markers after state).
+  // The per-account localStorage families, last.
   for (const scope of targets.cacheScopes) {
     await stage(`cache-families:${scope}`, () => {
       deleteLocalCacheFamilies({ scope })
     })
   }
-  await stage('migration-markers', () => {
-    if (typeof localStorage === 'undefined') {
-      return
-    }
-    for (const did of [targets.clientDid, ...targets.accountDids]) {
-      const markers = migrationMarkerKeys(deriveSpaceId(did))
-      localStorage.removeItem(markers.plaintext)
-      localStorage.removeItem(markers.publicCids)
-    }
-  })
   if (clearWriter) {
     await stage('writer-id', () => {
       clearWriterId()
@@ -310,9 +300,8 @@ export async function executeLocalWipe({
 
 /**
  * The guest-wipe consumer: a guest session's whole browser-local residue is
- * its replica databases, the migration markers, and (in principle)
- * local-mode cache families, all derived from the guest's random client
- * did:key. The guest holds no keyring and no registry, so those families
+ * its replica databases and (in principle) local-mode cache families, all
+ * derived from the guest's random client did:key. The guest holds no keyring and no registry, so those families
  * enumerate empty by construction.
  *
  * @param options {object}

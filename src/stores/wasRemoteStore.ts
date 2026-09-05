@@ -958,16 +958,41 @@ export class WASRemoteStore {
     logicalKey: string
     resourceId: string
   }): Promise<Json | undefined> {
+    const response = await this.#requestSyncedResource({
+      logicalKey,
+      resourceId
+    })
+    return response ? (response.data as Json) : undefined
+  }
+
+  /**
+   * The GET both synced-resource reads share: the raw `was.request()` escape
+   * hatch aimed at one resource of a standard synced collection, resolving to
+   * the response, or to `undefined` on the 404 WAS conflates for
+   * missing/unauthorized. The two public reads differ only in how much of the
+   * response they surface.
+   *
+   * @param options {object}
+   * @param options.logicalKey {string}
+   * @param options.resourceId {string}
+   * @returns {Promise<Awaited<ReturnType<WasClient['request']>> | undefined>}
+   */
+  async #requestSyncedResource({
+    logicalKey,
+    resourceId
+  }: {
+    logicalKey: string
+    resourceId: string
+  }): Promise<Awaited<ReturnType<WasClient['request']>> | undefined> {
     const collectionId = this.#collectionId(logicalKey)
     try {
-      const response = await this.was.request({
+      return await this.was.request({
         path: `/space/${this.spaceId}/${collectionId}/${encodeURIComponent(
           resourceId
         )}`,
         method: 'GET',
         capability: this.#capability
       })
-      return response.data as Json
     } catch (err) {
       if (errorStatus(err) === 404) {
         return undefined
@@ -995,24 +1020,16 @@ export class WASRemoteStore {
     logicalKey: string
     resourceId: string
   }): Promise<{ data: Json; etag?: string } | undefined> {
-    const collectionId = this.#collectionId(logicalKey)
-    try {
-      const response = await this.was.request({
-        path: `/space/${this.spaceId}/${collectionId}/${encodeURIComponent(
-          resourceId
-        )}`,
-        method: 'GET',
-        capability: this.#capability
-      })
-      const etag = readEtag(response)
-      const data = response.data as Json
-      return etag !== undefined ? { data, etag } : { data }
-    } catch (err) {
-      if (errorStatus(err) === 404) {
-        return undefined
-      }
-      throw err
+    const response = await this.#requestSyncedResource({
+      logicalKey,
+      resourceId
+    })
+    if (!response) {
+      return undefined
     }
+    const etag = readEtag(response)
+    const data = response.data as Json
+    return etag !== undefined ? { data, etag } : { data }
   }
 
   /**

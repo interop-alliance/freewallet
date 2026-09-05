@@ -194,7 +194,7 @@ export function IssuerDetailPage() {
   const [vc, setVc] = useState<IVerifiableCredential | null>(null)
   const [isNotFound, setIsNotFound] = useState(false)
   const [loadError, setLoadError] = useState(false)
-  const verification = useVerification(vc, { runOnMount: !skipVerify })
+  const verification = useVerification(vc, { runOnMount: !skipVerify, cid })
   const issuerRegistry = skipVerify
     ? cachedRegistry
     : verification.issuerRegistry

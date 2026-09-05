@@ -61,6 +61,36 @@ export class AppKeysUnreadableError extends Error {
 }
 
 /**
+ * Whether a match scan that found nothing must refuse rather than mint: the
+ * scan skipped rows this session could not read, so "no match" does not mean
+ * "this app has never connected", and minting would hand the app a second
+ * seed and DID. The consent preview and the approved path share this
+ * predicate so the popup blocks on exactly what approval would refuse.
+ *
+ * @param options {object}
+ * @param options.matched {boolean}   whether a stored app key matched
+ * @param options.skipped {object}   the scan's skipped counts
+ * @param options.skipped.unknownEpoch {number}
+ * @param options.skipped.noEpochKey {number}
+ * @param options.skipped.undecryptable {number}
+ * @returns {boolean}
+ */
+export function appKeyMintRefused({
+  matched,
+  skipped
+}: {
+  matched: boolean
+  skipped: { unknownEpoch: number; noEpochKey: number; undecryptable: number }
+}): boolean {
+  return (
+    !matched &&
+    (skipped.unknownEpoch > 0 ||
+      skipped.noEpochKey > 0 ||
+      skipped.undecryptable > 0)
+  )
+}
+
+/**
  * Fills the `controller` an App Connect capability query leaves open with the
  * app-key subject DID, yielding the standard capability-query details that
  * `resolveGrants` / `processZcaps` operate on. Used with the real subject DID
@@ -151,12 +181,7 @@ export async function processAppConnect({
   // mean "this app has never connected", and minting would hand the app a
   // second seed and DID, permanently orphaning whatever it encrypted under
   // the first.
-  if (
-    !existing &&
-    (skipped.unknownEpoch > 0 ||
-      skipped.noEpochKey > 0 ||
-      skipped.undecryptable > 0)
-  ) {
+  if (appKeyMintRefused({ matched: !!existing, skipped })) {
     throw new AppKeysUnreadableError(skipped)
   }
 

@@ -266,14 +266,14 @@ export function existingCollectionsFrom(
  * ceiling parity holds whichever way the target arrives: protected wallet
  * collections first (their read-only ceiling is the strictest), then a
  * collection the Space already serves world-readable (the public-collection
- * class -- the same full-vocabulary ceiling, but flagged `isPublic` for the
- * consent warning and never re-provisioned, however the request spelled the
- * target), and only then the full RP-collection class.
+ * class -- the same full-vocabulary ceiling, but named so the consent warning
+ * fires and the collection is never re-provisioned, however the request
+ * spelled the target), and only then the full RP-collection class.
  *
  * @param options {object}
  * @param options.collectionId {string}
  * @param options.collections {ExistingCollections}
- * @returns {{ targetClass: TargetClass, isPublic: boolean }}
+ * @returns {TargetClass}
  */
 function collectionClassFor({
   collectionId,
@@ -281,14 +281,14 @@ function collectionClassFor({
 }: {
   collectionId: string
   collections: ExistingCollections
-}): { targetClass: TargetClass; isPublic: boolean } {
+}): TargetClass {
   if (isProtectedCollection(collectionId)) {
-    return { targetClass: 'protected-collection', isPublic: false }
+    return 'protected-collection'
   }
   if (collections.get(collectionId)?.isPublic) {
-    return { targetClass: 'public-collection', isPublic: true }
+    return 'public-collection'
   }
-  return { targetClass: 'collection', isPublic: false }
+  return 'collection'
 }
 
 /**
@@ -301,35 +301,41 @@ export type UnsatisfiableReason = 'whole-space-transient'
 
 /**
  * A requested capability's `invocationTarget` resolved against the user's own
- * Space. `satisfiable: false` means the descriptor cannot be fulfilled (a
+ * Space. An absent `targetClass` means the descriptor cannot be fulfilled (a
  * foreign URL, an invalid collection name, or an unknown descriptor type); it
  * is skipped at delegation time and shown as "cannot fulfill" on consent.
+ *
+ * The class is the one discriminator: a whole-Space grant is `'space'`, a
+ * share `'share'`, a world-readable collection `'public-collection'`. Only
+ * `encrypted` and `needsProvisioning` vary independently of it.
  */
 interface ResolvedTarget {
-  satisfiable: boolean
+  // Which action ceiling applies (`ACTION_CEILINGS`), and which kind of target
+  // this is. Absent only when the target is unsatisfiable, i.e. when no grant
+  // will be made at all.
+  targetClass?: TargetClass
   // The concrete WAS URL to delegate against (absent when unsatisfiable).
   invocationTarget?: string
-  // The grant targets the whole Space (capped to read-only).
-  wholeSpace: boolean
   // A named RP collection that does not exist yet and must be provisioned.
   needsProvisioning: boolean
   // The WAS collection id, when the target is a (standard or RP) collection.
   collectionId?: string
   // A standard EDV-encrypted collection: the RP will only see ciphertext.
   encrypted: boolean
-  // A `https://w3id.org/byoe#public-collection` grant: provisioned plaintext with a
-  // collection-level PublicCanRead policy, so anyone on the web can read it.
-  isPublic: boolean
-  // A `https://w3id.org/byoe#shared-wallet-collection` grant: the grantee joins the collection's
-  // key-epoch roster and can DECRYPT it, not merely fetch ciphertext. Always an
-  // encrypted standard collection, always read-only.
-  isShare: boolean
-  // Which action ceiling applies (`ACTION_CEILINGS`). Absent only when the
-  // target is unsatisfiable, i.e. when no grant will be made at all.
-  targetClass?: TargetClass
   // Why an unsatisfiable target was refused, when the refusal has consent copy
   // of its own. Absent on every generic refusal.
   unsatisfiableReason?: UnsatisfiableReason
+}
+
+/**
+ * Whether a resolved target can be delegated at all -- it resolved onto a
+ * class, so it has a ceiling and a URL.
+ *
+ * @param target {ResolvedTarget}
+ * @returns {boolean}
+ */
+export function isSatisfiable(target: ResolvedTarget): boolean {
+  return target.targetClass !== undefined
 }
 
 /**
@@ -495,12 +501,8 @@ export function grantTtlDays({
 }
 
 const UNSATISFIABLE: ResolvedTarget = Object.freeze({
-  satisfiable: false,
-  wholeSpace: false,
   needsProvisioning: false,
-  encrypted: false,
-  isPublic: false,
-  isShare: false
+  encrypted: false
 })
 
 // The same refusal, carrying the one reason the consent screen words for
@@ -512,14 +514,14 @@ const UNSATISFIABLE_WHOLE_SPACE_TRANSIENT: ResolvedTarget = Object.freeze({
 
 // The satisfiable counterpart: the flags every resolved target states, spread
 // into each literal below so only the members that differ are written out.
-const SATISFIABLE_DEFAULTS: ResolvedTarget = Object.freeze({
-  satisfiable: true,
-  wholeSpace: false,
-  needsProvisioning: false,
-  encrypted: false,
-  isPublic: false,
-  isShare: false
-})
+// Each literal supplies its own `targetClass`, which is what makes it
+// satisfiable.
+const SATISFIABLE_DEFAULTS: Omit<ResolvedTarget, 'targetClass'> = Object.freeze(
+  {
+    needsProvisioning: false,
+    encrypted: false
+  }
+)
 
 /**
  * The standard-collection entry a name refers to, when it is one.
@@ -618,7 +620,7 @@ function parseSpaceUrl({
  *   nothing to provision, exactly as if it had been asked for as a
  *   `https://w3id.org/byoe#public-collection` re-grant;
  * - `{ type: 'https://w3id.org/byoe#public-collection', name }` -- like `https://w3id.org/byoe#private-collection`
- *   but flagged `isPublic`: provisioned plaintext with a world-readable
+ *   but classed public-collection: provisioned plaintext with a world-readable
  *   (PublicCanRead) policy. Unsatisfiable on a protected wallet collection --
  *   an RP must never be able to flip the user's own collections public -- and
  *   unsatisfiable on any existing collection that is not already public: a
@@ -626,13 +628,13 @@ function parseSpaceUrl({
  *   idempotent re-grant on an already-public collection stays satisfiable,
  *   with nothing to provision;
  * - `{ type: 'https://w3id.org/byoe#shared-wallet-collection', name }` -- like `https://w3id.org/byoe#private-collection`
- *   but flagged `isShare`: the grantee also joins the collection's key-epoch
+ *   but classed share: the grantee also joins the collection's key-epoch
  *   roster, so it can decrypt what it fetches. `name` must be one of the
  *   SHAREABLE standard collections; anything else (a plaintext collection, an
  *   RP collection, the whole Space, `app-connections`) is unsatisfiable -- a
  *   share is only meaningful where an epoch roster exists, and `app-connections`
  *   holds the connected apps' private seeds;
- * - `{ type: 'https://w3id.org/byoe#space' }` -- `spaceUrl`, flagged `wholeSpace`;
+ * - `{ type: 'https://w3id.org/byoe#space' }` -- `spaceUrl`, classed space;
  * - anything else -- unsatisfiable.
  *
  * @param options {object}
@@ -663,7 +665,6 @@ export function resolveInvocationTarget({
       return {
         ...SATISFIABLE_DEFAULTS,
         invocationTarget: url,
-        wholeSpace: true,
         targetClass: 'space'
       }
     }
@@ -685,7 +686,7 @@ export function resolveInvocationTarget({
       invocationTarget: url,
       collectionId: segment,
       encrypted: !!standardCollection(segment)?.encryption,
-      ...collectionClassFor({ collectionId: segment, collections })
+      targetClass: collectionClassFor({ collectionId: segment, collections })
     }
   }
 
@@ -693,7 +694,6 @@ export function resolveInvocationTarget({
     return {
       ...SATISFIABLE_DEFAULTS,
       invocationTarget: spaceUrl,
-      wholeSpace: true,
       targetClass: 'space'
     }
   }
@@ -725,10 +725,10 @@ export function resolveInvocationTarget({
       // public-policy setup on a live collection -- or, on App Connect, set
       // up a recipient roster on a world-readable plaintext collection.
       needsProvisioning:
-        !isProtectedCollection(name) && !collectionClass.isPublic,
+        !isProtectedCollection(name) && collectionClass !== 'public-collection',
       collectionId: name,
       encrypted: !!standard?.encryption,
-      ...collectionClass
+      targetClass: collectionClass
     }
   }
 
@@ -762,7 +762,6 @@ export function resolveInvocationTarget({
       invocationTarget: `${spaceUrl}/${name}`,
       needsProvisioning: !existing,
       collectionId: name,
-      isPublic: true,
       targetClass: 'public-collection'
     }
   }
@@ -788,7 +787,6 @@ export function resolveInvocationTarget({
       invocationTarget: `${spaceUrl}/${name}`,
       collectionId: name,
       encrypted: true,
-      isShare: true,
       targetClass: 'share'
     }
   }
@@ -909,7 +907,7 @@ export function resolveGrant({
   // applied last, so a generic refusal below cannot overwrite the reason with
   // the wordless one.
   const wholeSpaceUnderGeneration =
-    target.wholeSpace && generationDelegationParent
+    target.targetClass === 'space' && generationDelegationParent
   // A grant with no recipient cannot be delegated: the wire type requires a
   // `controller` but an actual request body can omit it, which would render a
   // consent row with no recipient and delegate to nobody. Refuse it visibly
@@ -928,7 +926,7 @@ export function resolveGrant({
   // grants in the same request had already been delegated. An absent
   // controller was already handled above (unsatisfiable, or the App Connect
   // preview's opt-out).
-  if (target.isShare && descriptor.controller) {
+  if (target.targetClass === 'share' && descriptor.controller) {
     try {
       x25519RecipientFromDidKey({ did: descriptor.controller })
     } catch {
@@ -943,7 +941,7 @@ export function resolveGrant({
   // class forbids (or only for tokens outside the WAS vocabulary). Refuse the
   // grant visibly instead of delegating an empty `allowedAction` array, which
   // means "every action" in the zcap model.
-  if (target.satisfiable && allowedActions.length === 0) {
+  if (isSatisfiable(target) && allowedActions.length === 0) {
     target = UNSATISFIABLE
   }
   if (wholeSpaceUnderGeneration) {
@@ -1201,10 +1199,10 @@ export async function processZcaps({
       collections,
       generationDelegationParent: !!invocationCapability
     })
-    if (!target.satisfiable || !target.invocationTarget) {
+    if (!isSatisfiable(target) || !target.invocationTarget) {
       continue
     }
-    if (target.isShare && target.collectionId) {
+    if (target.targetClass === 'share' && target.collectionId) {
       // A share leaves the plain delegation loop: `shareCollection` grants the
       // pull axis (a read-only zcap) and the read axis (an epoch roster entry)
       // in one call, so the two can never come apart.
@@ -1225,14 +1223,15 @@ export async function processZcaps({
       continue
     }
     if (target.needsProvisioning && target.collectionId) {
+      const isPublic = target.targetClass === 'public-collection'
       await provisionFor({
         collectionId: target.collectionId,
-        isPublic: target.isPublic,
+        isPublic,
         controller: descriptor.controller
       })
       // Record the provisioned collection so the rest of this request's
       // descriptors resolve against it as an existing collection.
-      collections.set(target.collectionId, { isPublic: target.isPublic })
+      collections.set(target.collectionId, { isPublic })
     }
     // Write grants live for the shorter write TTL; read-only grants for the
     // longer read TTL.

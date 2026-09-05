@@ -99,8 +99,8 @@ import { deleteUnlockLocalState } from '@/lib/sessionKey'
 import { syncController } from '@/stores/syncController'
 import {
   accountCeremonyContext,
-  ceremonyRides,
-  type AccountCeremonyContext
+  type AccountCeremonyContext,
+  type LadderDeleter
 } from '@/session/accountCeremonyContext'
 import { documentListsCredential } from '@/session/pendingRetirement'
 import { executeLocalWipe, snapshotWipeTargets } from '@/session/wipe'
@@ -160,18 +160,14 @@ export async function loadUnlockRegistry({
 }: {
   session: Session
 }): Promise<UnlockMethodsRecord | null> {
-  const { invocationCapability } = session.profile
-  const rides = () =>
-    invocationCapability ? { capability: invocationCapability } : {}
   try {
     return await backfillPassphraseUnlockMethod({
       session,
-      createIfMissing: true,
-      ...rides()
+      createIfMissing: true
     })
   } catch (err) {
     log.warn('Could not backfill the unlock methods; reading', { err })
-    return await getUnlockMethods({ session, ...rides() })
+    return await getUnlockMethods({ session })
   }
 }
 
@@ -303,7 +299,6 @@ export async function changeAccountPassphrase({
   // authority below -- the account-log signer, the roster store, the HTTP
   // invoker, the delegation signer -- comes from it.
   const context = await accountCeremonyContext({ session })
-  const rides = ceremonyRides({ context })
   // The OLD credential's standing configuration, captured before the change
   // replaces the registry entry with the new passphrase's -- the retirement
   // must hold the old multibases before the upsert destroys them. A session
@@ -315,7 +310,7 @@ export async function changeAccountPassphrase({
     registryAbsent,
     entry: oldEntry
   } = context
-    ? await standingConfiguration({ session, ...rides() })
+    ? await standingConfiguration({ session })
     : {
         fields: {} as StandingUnlockFields,
         registryAbsent: false,
@@ -622,8 +617,7 @@ export async function changeAccountPassphrase({
         await adoptRotatedUserKey({
           session,
           spaceId: rotationSpaceId({ session }),
-          userKey: outcome.userKey,
-          ...rides()
+          userKey: outcome.userKey
         })
       }
     } catch (err) {
@@ -718,7 +712,6 @@ export async function changeAccountPassphrase({
   // the revocation cascade can re-PUT this credential's record.
   const registry = await recordPassphraseEntry({
     session,
-    ...rides(),
     unlockSpaceId,
     manageCapability: established?.manageCapability ?? manageCapability,
     standing,
@@ -807,17 +800,13 @@ export class PendingPassphraseRetirementError extends Error {
  *
  * @param options {object}
  * @param options.session {Session}
- * @param [options.capability] {IZcap}   the invocation capability the read
- *   rides (the ladder branch's generation delegation)
  * @returns {Promise<{ fields: StandingUnlockFields, registryAbsent: boolean }>}
  * @throws {Error}   the registry could not be read
  */
 async function standingConfiguration({
-  session,
-  capability
+  session
 }: {
   session: Session
-  capability?: IZcap
 }): Promise<{
   fields: StandingUnlockFields
   registryAbsent: boolean
@@ -825,10 +814,7 @@ async function standingConfiguration({
 }> {
   let record: UnlockMethodsRecord | null
   try {
-    record = await getUnlockMethods({
-      session,
-      ...(capability ? { capability } : {})
-    })
+    record = await getUnlockMethods({ session })
   } catch (err) {
     throw new Error(
       'Could not read the passphrase standing configuration to retire; the passphrase was ' +
@@ -979,14 +965,12 @@ function rotationSpaceId({ session }: { session: Session }): string {
  */
 async function recordPassphraseEntry({
   session,
-  capability,
   unlockSpaceId,
   manageCapability,
   standing,
   createIfMissing = false
 }: {
   session: Session
-  capability?: IZcap
   unlockSpaceId: string
   manageCapability?: IZcap
   standing?: StandingUnlockFields
@@ -995,7 +979,6 @@ async function recordPassphraseEntry({
   try {
     return await updateUnlockMethods({
       session,
-      ...(capability ? { capability } : {}),
       mutate: current => {
         const base =
           current ?? (createIfMissing ? emptyUnlockMethodsRegistry() : null)
@@ -1106,12 +1089,10 @@ export async function addAccountPasskey({
   // read-modify-writes; on a settled session the chain resolved long ago.
   await session.registryReady
   const context = await accountCeremonyContext({ session })
-  const rides = ceremonyRides({ context })
   // 1. The fresh registry read, before anything touches the authenticator: a
   // refused read fails here, with no residue anywhere.
   const base =
-    (await getUnlockMethods({ session, ...rides() })) ??
-    emptyUnlockMethodsRegistry()
+    (await getUnlockMethods({ session })) ?? emptyUnlockMethodsRegistry()
   const excludeCredentialIds = base.methods
     .filter(
       (method): method is PasskeyUnlockMethod => method.type === 'passkey'
@@ -1146,7 +1127,6 @@ export async function addAccountPasskey({
   try {
     await updateUnlockMethods({
       session,
-      ...rides(),
       mutate: fresh =>
         upsertPasskeyUnlockMethod({ record: fresh ?? base, entry })
     })
@@ -1190,7 +1170,6 @@ export async function addAccountPasskey({
   // 4. The completion write.
   return await completePasskeyEntry({
     session,
-    ...rides(),
     base,
     entry: {
       ...entry,
@@ -1220,12 +1199,10 @@ export async function addAccountPasskey({
  */
 async function completePasskeyEntry({
   session,
-  capability,
   base,
   entry
 }: {
   session: Session
-  capability?: IZcap
   base: UnlockMethodsRecord
   entry: PasskeyUnlockMethod
 }): Promise<{ record: UnlockMethodsRecord; recorded: boolean }> {
@@ -1237,7 +1214,6 @@ async function completePasskeyEntry({
     record =
       (await updateUnlockMethods({
         session,
-        ...(capability ? { capability } : {}),
         mutate: fresh =>
           upsertPasskeyUnlockMethod({ record: fresh ?? base, entry })
       })) ?? record
@@ -1315,7 +1291,6 @@ async function recoverFailedPasskeyEstablishment({
   entry: PasskeyUnlockMethod
   base: UnlockMethodsRecord
 }): Promise<{ record: UnlockMethodsRecord; recorded: boolean } | null> {
-  const rides = ceremonyRides({ context })
   let found: KeyringFetchResult | null
   try {
     found = await fetchKeyring({
@@ -1342,7 +1317,6 @@ async function recoverFailedPasskeyEstablishment({
     const standing = await standingFieldsOfKeyringHit({ found })
     return await completePasskeyEntry({
       session,
-      ...rides(),
       base,
       entry: {
         ...entry,
@@ -1377,8 +1351,7 @@ async function recoverFailedPasskeyEstablishment({
         await adoptRotatedUserKey({
           session,
           spaceId: rotationSpaceId({ session }),
-          userKey: rotation.userKey,
-          ...rides()
+          userKey: rotation.userKey
         })
       }
     }
@@ -1420,7 +1393,6 @@ async function recoverFailedPasskeyEstablishment({
   }
   await dropBarePasskeyEntry({
     session,
-    ...rides(),
     credentialId: entry.credentialId
   })
   return null
@@ -1612,7 +1584,6 @@ export async function removeAccountPasskey({
   await session.registryReady
   const verb = 'removing a passkey'
   const context = await accountCeremonyContext({ session })
-  const rides = ceremonyRides({ context })
   // The acting-credential refusal. On the ladder branch every stage acts
   // through the credential this session entered on: the strike entry is
   // signed by its rung, the licensed roster append by its ladder VM, and the
@@ -1670,8 +1641,7 @@ export async function removeAccountPasskey({
     await adoptRotatedUserKey({
       session,
       spaceId: rotationSpaceId({ session }),
-      userKey: outcome.userKey,
-      ...rides()
+      userKey: outcome.userKey
     })
   }
 }
@@ -1725,7 +1695,6 @@ export async function addAccountPassphrase({
   // read-modify-writes; on a settled session the chain resolved long ago.
   await session.registryReady
   const context = await accountCeremonyContext({ session })
-  const rides = ceremonyRides({ context })
   // The bind runs as the full standing-configuration ceremony (roster wrap,
   // commitment document entry, bridge delegation, standing-layout record)
   // under the ACCOUNT controller, with management delegated to the account
@@ -1748,7 +1717,6 @@ export async function addAccountPassphrase({
   // duplicate one naming a different credential.
   const record = (await updateUnlockMethods({
     session,
-    ...rides(),
     mutate: current =>
       upsertPassphraseUnlockMethod({
         record: current ?? emptyUnlockMethodsRegistry(),
@@ -1969,19 +1937,6 @@ export interface AccountDeletionOutcome {
 }
 
 /**
- * The single-verb capability mints the walk needs, plus the identity that
- * invokes them. A remembered session holds none of this: it root-invokes.
- */
-interface LadderDeleter {
-  /** the delegating signer: the ladder VM under `<accountDid>#<multibase>` */
-  zcapClient: ZcapClient
-  /** the delegatee and invoker: the ladder VM's own bare did:key */
-  invoker: ZcapClient
-  /** the delegatee DID */
-  controller: string
-}
-
-/**
  * Probes one Space for existence, so the 404 rule has a basis. A Space
  * Description read comes back `null` for a 404 (absent OR unauthorized, the
  * server masks the two), and every other failure propagates: a transport or
@@ -2192,10 +2147,6 @@ export async function deleteAccount({
   // unpartitioned factory here, so every session-database delete below lands
   // in the first-party bucket the records actually live in.
   const idb = browserLocal ? persistence.idb : undefined
-  // Read at each use rather than captured: (a2)'s renewal REPLACES
-  // `profile.invocationCapability` in place, and every read after it must
-  // ride the renewed delegation rather than the one the walk opened with.
-  const visitCapability = (): IZcap | undefined => profile.invocationCapability
   const spaces: SpaceDeletionReport[] = []
   const unnamed: UnnamedUnlockSpace[] = []
   const done = (result: AccountDeletionResult): AccountDeletionOutcome => ({
@@ -2250,25 +2201,16 @@ export async function deleteAccount({
     // server's masked 404, which the registry read maps to `null`.
     await renewVisitDelegation()
     try {
-      registry = await getUnlockMethods({
-        session,
-        ...(visitCapability() ? { capability: visitCapability() } : {})
-      })
+      registry = await getUnlockMethods({ session })
     } catch (err) {
       if (!(err instanceof UnlockRegistryStaleSealError)) {
         throw err
       }
-      const repaired = await repairRegistrySealForDeletion({
-        session,
-        ...(visitCapability() ? { capability: visitCapability() } : {})
-      })
+      const repaired = await repairRegistrySealForDeletion({ session })
       if (repaired !== 'repaired') {
         throw new UnlockRegistryStaleSealError({ cause: err })
       }
-      registry = await getUnlockMethods({
-        session,
-        ...(visitCapability() ? { capability: visitCapability() } : {})
-      })
+      registry = await getUnlockMethods({ session })
     }
     // The 404 rule, applied to the registry. `getUnlockMethods` maps the
     // server's masked 404 to `null`, so on an account that MUST carry a
@@ -3108,17 +3050,17 @@ function targetHost({ target }: { target?: string }): string | undefined {
  *
  * @param options {object}
  * @param options.session {Session}
- * @param [options.capability] {IZcap}
  * @returns {Promise<'repaired' | 'unrepaired' | 'reseal-failed'>}
  */
 async function repairRegistrySealForDeletion({
-  session,
-  capability
+  session
 }: {
   session: Session
-  capability?: IZcap
 }): Promise<'repaired' | 'unrepaired' | 'reseal-failed'> {
   const { profile } = session
+  // The visit's own authority, read here rather than threaded in: a renewal
+  // earlier in the walk replaced it in place on the profile.
+  const capability = profile.invocationCapability
   const spaceId = session.storage.spaceId
   const { userKey } = profile
   const unwrapKey =

@@ -163,7 +163,6 @@ import {
   type PersistableClientKeys
 } from '@/session/keyring'
 import { KEYRING_KDF } from '@interop/wallet-core/keyring'
-import { didWebProjectionStore } from '@/session/annexReach'
 import { findRetiredCredentialEntries } from '@/session/credentialCoverage'
 import { transientSessionStores } from '@/session/persistence'
 import {
@@ -190,6 +189,7 @@ import {
 } from '@/session/accountCeremonyContext'
 import {
   invalidateVerifiedLog,
+  isResourceLogContinuityError,
   verifiedAccountLog
 } from '@/session/verifiedLog'
 import {
@@ -201,6 +201,7 @@ import { deleteUnlockLocalState } from '@/lib/sessionKey'
 import { isStorageUnreachable } from '@/lib/storageErrors'
 import { mintSpaceId, WASRemoteStore } from '@/stores/wasRemoteStore'
 import { createLogger } from '@/lib/log'
+import { zcapExpires } from '@/lib/zcap'
 
 const log = createLogger('fw:session:recovery')
 
@@ -392,7 +393,7 @@ function recoveryRegistryEntry({
   unlockKeyAgreementKeyMultibase?: string
 }): RecoveryCodeUnlockMethod {
   const delegationKeyId = delegationProofKeyId(delegation)
-  const delegationExpires = (delegation as { expires?: string }).expires
+  const delegationExpires = zcapExpires(delegation)
   return {
     type: 'recovery-code',
     label,
@@ -457,9 +458,6 @@ export async function recordRecoveryMethod({
   const dropped = new Set([entry.recoveryKid, ...dropKids])
   await updateUnlockMethods({
     session,
-    // A transient session's writes ride the visit's generation delegation,
-    // inside the registry's own compare-and-swap.
-    ...registryRides({ session }),
     mutate: existing => {
       const record = existing ?? emptyUnlockMethodsRegistry()
       const methods = [
@@ -491,23 +489,6 @@ export function canIssueRecoveryCode({
   session: Session
 }): boolean {
   return canRunAccountCeremonies({ session }) && !!session.profile.userKey
-}
-
-/**
- * The invocation capability every registry read and write of this session
- * rides: a transient session's generation delegation, the only authority it
- * holds over the account Space. An enrolled session root-invokes and rides
- * nothing.
- *
- * @param options {object}
- * @param options.session {Session}
- * @returns {{ capability?: IZcap }}
- */
-function registryRides({ session }: { session: Session }): {
-  capability?: IZcap
-} {
-  const capability = session.profile.invocationCapability
-  return capability ? { capability } : {}
 }
 
 /**
@@ -787,19 +768,6 @@ async function readRecoveryRecord({ code }: { code: string }) {
     bindingMacKey: client.bindingMacKey
   })
   return { client, unlock, record, contents, proofState }
-}
-
-/**
- * Whether the given error is the account-log chain-head continuity refusal
- * (a rollback, a fork, or an SCID/method switch against the pinned head).
- * Matched on `name`, never `instanceof`: the shared wallet-core package may
- * be linked rather than resolved, so its class identity can be duplicated.
- *
- * @param err {unknown}
- * @returns {boolean}
- */
-function isResourceLogContinuityError(err: unknown): boolean {
-  return (err as Error | null)?.name === 'ResourceLogContinuityError'
 }
 
 /**
@@ -1634,20 +1602,17 @@ export async function recoverAccountWithCode({
                   updateKeyMultibase: newRung0.keyMultibase,
                   unlockClientDid: newCredential.standing.clientDid,
                   ...(bridgeKeyId ? { delegationKeyId: bridgeKeyId } : {}),
-                  ...((newBridge as { expires?: string }).expires
+                  ...(zcapExpires(newBridge)
                     ? {
-                        delegationExpires: (newBridge as { expires?: string })
-                          .expires
+                        delegationExpires: zcapExpires(newBridge)
                       }
                     : {}),
                   ...(siblingKeyId
                     ? { delegatedClientsKeyId: siblingKeyId }
                     : {}),
-                  ...(sibling && (sibling as { expires?: string }).expires
+                  ...(sibling && zcapExpires(sibling)
                     ? {
-                        delegatedClientsExpires: (
-                          sibling as { expires?: string }
-                        ).expires
+                        delegatedClientsExpires: zcapExpires(sibling)
                       }
                     : {}),
                   ...(recordBind.unlockKeyAgreementKeyId
@@ -2833,14 +2798,13 @@ async function recoverAccountTransient({
             updateKeyMultibase: rung0.keyMultibase,
             unlockClientDid: standing.clientDid,
             ...(bridgeKeyId ? { delegationKeyId: bridgeKeyId } : {}),
-            ...((bridge as { expires?: string }).expires
-              ? { delegationExpires: (bridge as { expires?: string }).expires }
+            ...(zcapExpires(bridge)
+              ? { delegationExpires: zcapExpires(bridge) }
               : {}),
             ...(siblingKeyId ? { delegatedClientsKeyId: siblingKeyId } : {}),
-            ...((sibling as { expires?: string }).expires
+            ...(zcapExpires(sibling)
               ? {
-                  delegatedClientsExpires: (sibling as { expires?: string })
-                    .expires
+                  delegatedClientsExpires: zcapExpires(sibling)
                 }
               : {}),
             ...(recordBind.unlockKeyAgreementKeyId
@@ -2919,7 +2883,7 @@ export async function listRecoveryCodeEntries({
 }): Promise<RecoveryCodeUnlockMethod[]> {
   try {
     return recoveryEntriesOf({
-      record: await getUnlockMethods({ session, ...registryRides({ session }) })
+      record: await getUnlockMethods({ session })
     })
   } catch (err) {
     log.warn('Could not load the recovery-code entries', { err })
@@ -3049,11 +3013,7 @@ export async function revokeRecoveryCode({
     // it.
     ...(context.kind === 'ladder'
       ? {
-          projectionStore: didWebProjectionStore({
-            host: pointer.host,
-            spaceId: pointer.spaceId,
-            invoker: () => context.invoker
-          })
+          projectionStore: context.projectionStore
         }
       : {}),
     expectedDid: pointer.did,
@@ -3079,7 +3039,6 @@ export async function revokeRecoveryCode({
     clientKeyAgreementKey: unwrapKey,
     pinnedEpochId: await epochPins.load({ accountDid: pointer.did })
   })
-  const rides = registryRides({ session })
   if (read) {
     if (read.rotated) {
       // The in-band adoption: the registry is re-sealed to the rotated key
@@ -3096,8 +3055,7 @@ export async function revokeRecoveryCode({
         accountDid: pointer.did,
         userKey: read.userKey,
         latestEpochId: read.latestEpochId,
-        descriptor: read.descriptor,
-        ...rides
+        descriptor: read.descriptor
       })
       await cascadeCollectionsToUserKey({
         remoteStore,
@@ -3114,8 +3072,7 @@ export async function revokeRecoveryCode({
       await adoptRotatedUserKey({
         session,
         spaceId: pointer.spaceId,
-        userKey: read.userKey,
-        ...rides
+        userKey: read.userKey
       })
     } else {
       await epochPins.saveFromDescriptor({
@@ -3137,7 +3094,6 @@ export async function revokeRecoveryCode({
   await deleteUnlockLocalState({ spaceId: entry.unlockSpaceId, idb })
   await updateUnlockMethods({
     session,
-    ...rides,
     mutate: current => {
       if (!current) {
         return null
@@ -3412,7 +3368,7 @@ export async function checkRecoveryHealth({
   const entries =
     prefetched ??
     recoveryEntriesOf({
-      record: await getUnlockMethods({ session, ...registryRides({ session }) })
+      record: await getUnlockMethods({ session })
     })
   if (entries.length === 0) {
     return []

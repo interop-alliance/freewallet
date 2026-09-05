@@ -3,7 +3,11 @@
  * can distinguish "the storage server could not be reached" from ordinary
  * application errors and show an appropriate on-screen message.
  */
-import { WasError, WasServerError } from '@interop/was-client'
+import {
+  PreconditionFailedError,
+  WasError,
+  WasServerError
+} from '@interop/was-client'
 
 /**
  * Returns true when the given error indicates the remote WAS storage server
@@ -41,4 +45,21 @@ export function isStorageUnreachable(err: unknown): boolean {
     current = current instanceof Error ? current.cause : undefined
   }
   return false
+}
+
+/**
+ * Whether `err` is the compare-and-swap conflict a conditional PUT raises
+ * (`PreconditionFailedError`, 412). Matched by `name` as well as
+ * `instanceof`: in a dependency tree that resolves was-client twice the class
+ * object differs, and an `instanceof`-only check would turn every lost race
+ * into a hard failure instead of a rebase.
+ *
+ * @param err {unknown}   the caught error
+ * @returns {boolean}
+ */
+export function isPreconditionFailed(err: unknown): boolean {
+  return (
+    err instanceof PreconditionFailedError ||
+    (err instanceof Error && err.name === 'PreconditionFailedError')
+  )
 }

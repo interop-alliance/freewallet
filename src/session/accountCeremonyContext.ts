@@ -37,7 +37,10 @@ import {
   type ClientWebvhUpdateKeys,
   type WebvhIdStore
 } from '@interop/wallet-core/webvh'
-import type { AccountLogSigner } from '@interop/wallet-core/webvh'
+import type {
+  AccountLogSigner,
+  DelegatedWebvhLogStore
+} from '@interop/wallet-core/webvh'
 import {
   ladderVmAgent,
   ladderVmZcapClient
@@ -48,9 +51,12 @@ import type { ICapabilityAgent, Session } from '@/types/auth'
 import type { WASRemoteStore } from '@/stores/wasRemoteStore'
 import { sessionRosterStore } from '@/session/rosterStore'
 import { unlockLogStore } from '@/session/standingUnlock'
-import { renewTransientGenerationDelegation } from '@/session/annexReach'
 import {
-  bindRemoteUnlockRecord,
+  didWebProjectionStore,
+  renewTransientGenerationDelegation
+} from '@/session/annexReach'
+import {
+  bindCredentialAnchoredUnlockSecret,
   type RemoteUnlockRecordBind
 } from '@/session/keyring'
 
@@ -120,14 +126,22 @@ export interface EnrolledCeremonyContext extends CeremonyContextBase {
 export interface LadderCeremonyContext extends CeremonyContextBase {
   kind: 'ladder'
   signer: { kind: 'ladder'; ladderSeed: Uint8Array }
-  /** the credential's ladder seed, restated for the stages that name it */
-  ladderSeed: Uint8Array
-  /** the ladder VM's zcap signer: every delegation this branch mints */
-  delegationSigner: ZcapClient
-  /** the DELETE-only / GET-only child mint and its invoker */
+  /**
+   * The DELETE-only / GET-only child mint and its invoker. Its `zcapClient`
+   * is also the branch's one delegation signer -- the ladder VM, which every
+   * delegation this branch mints is signed by, since the annex VM stands in
+   * no account document.
+   */
   ladderDeleter: LadderDeleter
   /** the remote-only unlock-record binder: nothing lands on this browser */
   bindRecord: RemoteUnlockRecordBind
+  /**
+   * The account Space's `id` collection as a did:web projection store, built
+   * on first read. A ladder-signed entry writes `did.jsonl` alone, so every
+   * ceremony that strikes an inventory PUTs the post-strike projection
+   * through this immediately before its own entry.
+   */
+  readonly projectionStore: DelegatedWebvhLogStore
   /** the record's `delegatedClients` sibling: the one path into the annex */
   sibling?: IZcap
   /** the acting credential's unlock-Space management zcap */
@@ -291,29 +305,6 @@ export function requireEnrolledCeremonyContext({
 }
 
 /**
- * The invocation capability a ceremony's requests ride, as a THUNK rather
- * than a value: absent on the enrolled kind (which root-invokes), the
- * visit's generation delegation on the ladder kind. Spread at each call site
- * (`...rides()`) so the two kinds share one call site and every stage picks
- * up a capability a mid-ceremony renewal replaced. A ceremony that captured
- * the value once would invoke a delegation its own pivot has struck.
- *
- * @param options {object}
- * @param options.context {AccountCeremonyContext | null}
- * @returns {Function}   `() => { capability?: IZcap }`
- */
-export function ceremonyRides({
-  context
-}: {
-  context: AccountCeremonyContext | null
-}): () => { capability?: IZcap } {
-  return () =>
-    context?.invoker.capability
-      ? { capability: context.invoker.capability }
-      : {}
-}
-
-/**
  * Whether this session can run the account ceremonies at all -- the
  * synchronous predicate behind every Settings gate, true for both kinds.
  * It resolves the same preconditions {@link accountCeremonyContext} does,
@@ -373,11 +364,20 @@ export async function accountCeremonyContext({
   let ladderIdStore: WebvhIdStore | undefined
   let ladderRosterStore: SealableEncryptionDescriptorStore | undefined
   let ladderRosterCapability: IZcap | undefined
+  let ladderProjectionStore: DelegatedWebvhLogStore | undefined
+  // The live authority, read off the profile on every call rather than
+  // snapshotted here: a ceremony that renews or replaces its generation
+  // delegation mid-run must have every later request ride the replacement.
+  const invokerNow = (): CeremonyInvoker => ({
+    zcapClient: profile.zcapClient,
+    ...(profile.invocationCapability
+      ? { capability: profile.invocationCapability }
+      : {})
+  })
   return {
     kind: 'ladder',
     ...reach,
     signer: { kind: 'ladder', ladderSeed },
-    ladderSeed,
     // The bridge store: public fetches for the world-readable `did.jsonl`,
     // and the record's PUT-on-`did.jsonl` bridge for the write.
     get idStore() {
@@ -408,20 +408,23 @@ export async function accountCeremonyContext({
       return ladderRosterStore
     },
     get invoker() {
-      return {
-        zcapClient: profile.zcapClient,
-        ...(profile.invocationCapability
-          ? { capability: profile.invocationCapability }
-          : {})
-      }
+      return invokerNow()
     },
-    delegationSigner,
+    // Memoized once: the store resolves the invoker on every call of its own,
+    // so it never holds a delegation the ceremony's pivot has struck.
+    get projectionStore() {
+      return (ladderProjectionStore ??= didWebProjectionStore({
+        host: reach.pointer.host,
+        spaceId: reach.pointer.spaceId,
+        invoker: invokerNow
+      }))
+    },
     ladderDeleter: {
       zcapClient: delegationSigner,
       invoker: didKeyZcapClient({ keyAgent: agent }),
       controller: agent.id
     },
-    bindRecord: bindRemoteUnlockRecord,
+    bindRecord: bindCredentialAnchoredUnlockSecret,
     ...(standingUnlock.delegatedClients
       ? { sibling: standingUnlock.delegatedClients }
       : {}),
