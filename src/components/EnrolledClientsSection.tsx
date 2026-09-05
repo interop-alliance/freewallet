@@ -123,11 +123,6 @@ export function EnrolledClientsSection({ session }: { session: Session }) {
   const [forgetOpen, setForgetOpen] = useState(false)
   const [forgetting, setForgetting] = useState(false)
   const [forgetErrorKey, setForgetErrorKey] = useState<string | null>(null)
-  // Interpolation values for the forget error copy (the unreachable sign-in
-  // methods' labels when a record re-mint refused the removal).
-  const [forgetErrorValues, setForgetErrorValues] = useState<
-    Record<string, string>
-  >({})
   // Which forget the open dialog confirms: the ordinary ceremony, or the
   // last-client transition (set from the listing when the dialog opens, and
   // flipped by the ceremony's own refusal when the listing was stale).
@@ -282,17 +277,8 @@ export function EnrolledClientsSection({ session }: { session: Session }) {
    * (`PendingRetirementForgetError`), when a passphrase change on the
    * account was torn before its retirement landed: only a remembered login
    * can finish that change, and the transition ends remembered logins
-   * forever. Its
-   * sibling refusal (`UnrecordedCredentialForgetError`) fires when the
-   * account document publishes a sign-in method the unlock-methods registry
-   * does not name: every walk after the transition is registry-driven, so
-   * that method's bridge would rot unrepaired. The copy asks for a login
-   * with that method from a connected browser, which records it again.
-   * The transition's other name-stable refusal, `RecordRemintFailedError`,
-   * is a retryable stop, not a failure: another sign-in method's record
-   * could not be re-sealed, so the removal entry was withheld and this
-   * browser is still connected. The copy names those methods, and a re-click
-   * resumes at the re-mint.
+   * forever. It re-seals no other sign-in method's record: every record is
+   * signed by its own credential, so the transition rots none of them.
    */
   const handleForget = async () => {
     if (forgetting) {
@@ -300,7 +286,6 @@ export function EnrolledClientsSection({ session }: { session: Session }) {
     }
     setForgetting(true)
     setForgetErrorKey(null)
-    setForgetErrorValues({})
     try {
       const outcome = await forgetThisBrowser({
         session,
@@ -321,21 +306,6 @@ export function EnrolledClientsSection({ session }: { session: Session }) {
           wipeUnverified: outcome.wipeUnverified
         })
       }
-      if (outcome.lastClient && outcome.ceremony.unlockMethods) {
-        // The other sign-in methods' record re-mint report: a `failed`
-        // outcome never reaches here (it refuses the removal), so what is
-        // left to note is an entry predating the re-mint fields, which the
-        // pass skips and the recovery health check keeps flagging.
-        const skipped = outcome.ceremony.unlockMethods.outcomes.filter(
-          entry => entry.outcome === 'incomplete-entry'
-        )
-        if (skipped.length > 0) {
-          log.warn(
-            'The last-client forget skipped sign-in records predating the re-mint fields',
-            { labels: skipped.map(entry => entry.label) }
-          )
-        }
-      }
       // A hard reload, not a router navigate: the wipe just deleted the
       // storage this tab's in-memory handles point at (the guest-wipe logout
       // takes the same exit).
@@ -348,19 +318,6 @@ export function EnrolledClientsSection({ session }: { session: Session }) {
       } else if (name === 'PendingRetirementForgetError') {
         log.warn('The last-client forget refused a pending change', { err })
         setForgetErrorKey('settings.forget.pendingRetirement')
-      } else if (name === 'UnrecordedCredentialForgetError') {
-        log.warn(
-          'The last-client forget refused an unrecorded sign-in method',
-          { err }
-        )
-        setForgetErrorKey('settings.forget.unrecordedCredential')
-      } else if (name === 'RecordRemintFailedError') {
-        log.warn('The last-client forget withheld the removal', { err })
-        const failed = (err as { failed?: Array<{ label: string }> }).failed
-        setForgetErrorValues({
-          methods: (failed ?? []).map(outcome => outcome.label).join(', ')
-        })
-        setForgetErrorKey('settings.forget.recordsUnreachable')
       } else {
         log.error('Could not forget this browser', { err })
         setForgetErrorKey('settings.forget.failed')
@@ -861,7 +818,7 @@ export function EnrolledClientsSection({ session }: { session: Session }) {
               }
               sx={{ mt: 2 }}
             >
-              {t(forgetErrorKey, forgetErrorValues)}
+              {t(forgetErrorKey)}
             </Alert>
           )}
         </DialogContent>

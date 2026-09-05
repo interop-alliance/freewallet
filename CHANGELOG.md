@@ -4,6 +4,18 @@
 
 ### Fixed
 
+- No ceremony re-seals another credential's unlock record any more, so a
+  sibling sign-in method is no longer locked out of its own account. Three
+  stages did: the credential retirement's dependent-record re-mint, the
+  revocation cascade's recovery-delegation re-PUTs, and the last-client
+  transition's pass over the other unlock methods. Each wrote the sibling's
+  record with the ACTING session's key as its frame signer, and a frame
+  proof is checked before decryption, so once a later ceremony struck that
+  key the sibling's next login refused its own record
+  (`KeyringRecordForgedError`). Every record's frame proof, bridge, and
+  `delegatedClients` sibling delegation are signed by its own credential, and
+  that credential's own login refreshes its bridge on the expiry,
+  renewal-window, and signer-gone axes.
 - A recovery spend now drops the registry entry, and deletes the unlock
   Space, of every credential its add-and-retire entry struck, unspent
   recovery codes included. The three registry mutations (both continuations'
@@ -21,6 +33,18 @@
   and retired credentials at info, and each unclaimed credential at warn.
 - The recovery page's new-passphrase copy says recovery retires the other
   recovery codes too, in `en` and `es`.
+
+### Removed
+
+- The last-client transition's `RecordRemintFailedError` and
+  `UnrecordedCredentialForgetError` refusals, both of which existed only to
+  protect the removed record re-mint pass, with their settings copy and the
+  ladder-branch disconnect's registry-coverage check. `remintEntriesOf`,
+  `recordRemintedEntry`, and `remintRecoveryDelegations` are gone from
+  `src/session/recovery.ts`, and `RevocationOutcome` no longer carries a
+  `recovery` member. A recovery code issued before the own-signature rule
+  keeps its foreign-signed bridge, and the login-time health check's nudge to
+  re-issue it is that record's whole remedy.
 
 ### Changed
 

@@ -1,17 +1,17 @@
 /**
  * Client revocation: disconnecting an enrolled wallet client from the
  * account. The cascade itself -- document edit, user key rotation, collection
- * fan-out, recovery re-mints, the generation-delegation re-mint, in that
- * dependency order, with its convergence story -- is `revokeAccountClient` in
+ * fan-out, the generation-delegation re-mint, in that dependency order, with
+ * its convergence story -- is `revokeAccountClient` in
  * `@interop/wallet-core/clients`, run once for every wallet. This module
  * supplies the freewallet-shaped stages around it: the session
  * preconditions, the recovery registry's latent commitment hashes, the
  * collections source (the standard encrypted set plus the remotely listed
- * app-provisioned ones), the recovery-delegation re-mint, the
- * generation-delegation re-mint (an annex entry replacing the embedded
- * delegation when the revoked client's key signed it), the adoption side
- * effects (epoch pin, client-key record, unlock-methods re-wrap, live vault
- * keys and storage ciphers), and the audit record.
+ * app-provisioned ones), the generation-delegation re-mint (an annex entry
+ * replacing the embedded delegation when the revoked client's key signed
+ * it), the adoption side effects (epoch pin, client-key record,
+ * unlock-methods re-wrap, live vault keys and storage ciphers), and the
+ * audit record.
  *
  * It runs on both account-ceremony kinds. On the ENROLLED kind the removal
  * entry is signed by this client's own did:webvh update keys and every
@@ -24,13 +24,12 @@
  * refuse: the account simply lands ladder-anchored, the shape a
  * credential-anchored signup produces.
  *
- * Three refusals run before the ladder branch writes anything, all of them
- * the last-client transition's: a registry this session cannot read, a
- * pending-shaped passphrase entry, and a standing credential the registry
- * does not name. Each names a state in which the removal entry would rot a
- * bridge delegation nothing left could replace. The branch adds no fourth
- * refusal and carries no record re-mint stage: every unlock record's bridge
- * and sibling delegation is signed by its own credential's ladder VM, which
+ * Two refusals run before the ladder branch writes anything, both of them
+ * the last-client transition's: a registry this session cannot read, and a
+ * pending-shaped passphrase entry. The second is what the first exists for,
+ * since the check is computed from the registry. Neither branch re-seals an
+ * unlock record: every record's frame proof, bridge, and sibling delegation
+ * are signed by its own credential's unlock identity and ladder VM, which
  * this entry does not strike.
  *
  * The honest limitation is unchanged: ciphertext the revoked client already
@@ -57,18 +56,12 @@ import {
   accountCeremonyContext,
   type AccountCeremonyContext
 } from '@/session/accountCeremonyContext'
-import {
-  assertNoPendingPassphraseEntry,
-  assertRegistryCoversStandingCredentials
-} from '@/session/forget'
+import { assertNoPendingPassphraseEntry } from '@/session/forget'
 import {
   adoptRotatedUserKey,
   adoptRotatedUserKeyInBand
 } from '@/session/userKeyAdoption'
-import {
-  recoveryEntriesOf,
-  remintRecoveryDelegations
-} from '@/session/recovery'
+import { recoveryEntriesOf } from '@/session/recovery'
 import {
   cascadeCollections,
   type UserKeyCascadeResult
@@ -86,22 +79,21 @@ export type { RevokedClientKeys } from '@interop/wallet-core/webvh'
 /**
  * What a completed revocation cascade reports: whether the roster actually
  * rotated on this run (a naive re-run of an already-complete revocation
- * reports `false` everywhere), the per-collection outcomes, and the recovery
- * re-mint counts.
+ * reports `false` everywhere), the per-collection outcomes, and the
+ * generation-delegation re-mint.
  */
 export interface RevocationOutcome {
   rotated: boolean
   collections: UserKeyCascadeResult
-  recovery: { reminted: number; skipped: number }
   generation: GenerationDelegationRemint
 }
 
 /**
  * The account's unlock-methods registry, read once for the whole cascade
- * (the document edit's latent commitments, then the delegation re-mint), on
- * the ENROLLED kind. Best-effort there: an unreadable registry degrades both
- * stages rather than failing the revocation. The ladder kind reads it as a
- * precondition instead, since its pre-pivot refusals are computed from it.
+ * (the document edit's latent commitments), on the ENROLLED kind.
+ * Best-effort there: an unreadable registry degrades the edit's attribution
+ * rather than failing the revocation. The ladder kind reads it as a
+ * precondition instead, since its pre-pivot refusal is computed from it.
  *
  * @param options {object}
  * @param options.session {Session}
@@ -166,12 +158,11 @@ export async function revokeEnrolledClient({
   const { remoteStore, pointer } = context
   const ladder = context.kind === 'ladder'
   // One registry read for the whole cascade: the latent commitment hashes the
-  // document edit needs, and the entries the delegation re-mint walks. It is
-  // independent of the epoch pin read, so the two round trips run together.
-  // On the ladder branch the read is a precondition rather than a
-  // convenience: the pre-pivot refusals below are computed from it, and a
-  // walk over a registry this session could not read would miss exactly the
-  // states that make the removal entry unsafe.
+  // document edit needs. It is independent of the epoch pin read, so the two
+  // round trips run together. On the ladder branch the read is a
+  // precondition rather than a convenience: the pre-pivot refusal below is
+  // computed from it, and a walk over a registry this session could not read
+  // would miss exactly the state that makes the removal entry unsafe.
   const { epochPins } = session.profile.persistence
   const [registryRecord, pinnedEpochId] = await Promise.all([
     ladder
@@ -187,23 +178,17 @@ export async function revokeEnrolledClient({
     epochPins.load({ accountDid: pointer.did })
   ])
   if (ladder) {
-    // The last-client transition's pre-pivot refusals, run on every
+    // The last-client transition's pre-pivot refusal, run on every
     // ladder-branch disconnect. A pending-shaped passphrase entry is the
-    // residue of a change torn before its retirement landed, and running the
-    // re-seal below over it would rewrite a half-retired entry; a standing
-    // credential the registry does not name keeps a bridge delegation this
-    // removal entry could rot with no replacement. Each is mended by that
-    // credential's own next login rather than by anything here.
+    // residue of a change torn before its retirement landed, and the in-band
+    // registry re-seal at the tail would rewrite that half-retired entry.
+    // It is mended by the torn-retirement repair at that credential's own
+    // next login rather than by anything here.
     await assertNoPendingPassphraseEntry({
       session,
       pointer,
       registry: registryRecord,
       signer: context.ladderDeleter
-    })
-    await assertRegistryCoversStandingCredentials({
-      session,
-      pointer,
-      registry: registryRecord
     })
   }
   const entries = recoveryEntriesOf({ record: registryRecord })
@@ -315,24 +300,14 @@ export async function revokeEnrolledClient({
         descriptor
       }),
     collections: cascadeCollections({ remoteStore }),
-    // Neither re-mint stage runs on the ladder branch. Every unlock record's
-    // bridge and sibling delegation is signed by its OWN credential's ladder
-    // VM, which this entry does not strike, and the generation delegation's
-    // replacement already ran above, before the entry rather than after it.
+    // No unlock record is re-sealed on either branch: every record's frame
+    // proof, bridge, and sibling delegation are signed by its OWN
+    // credential's unlock identity and ladder VM, which this entry does not
+    // strike. Only the generation delegation is re-minted, and only on the
+    // enrolled branch; the ladder branch replaced it above, before the entry
+    // rather than after it.
     ...(context.kind === 'enrolled'
       ? {
-          remintRecoveryDelegations: async ({
-            document
-          }: {
-            document: PublishedKeyDocument
-          }) =>
-            await remintRecoveryDelegations({
-              session,
-              doc: document as Parameters<
-                typeof remintRecoveryDelegations
-              >[0]['doc'],
-              registryRecord
-            }),
           remintGenerationDelegation: async ({
             document
           }: {
@@ -378,7 +353,6 @@ export async function revokeEnrolledClient({
   return {
     rotated: result.rotated,
     collections: result.collections,
-    recovery: result.recovery ?? { reminted: 0, skipped: 0 },
     generation: result.generation ?? { renewed: false, skipped: 'no-pointer' }
   }
 }

@@ -269,9 +269,9 @@ already holds the verification key -- no bootstrap window.
 A standing record's account core (controller, pointer, ladder seed) is also
 MAC'd under a credential-derived key the host never holds (the recovery
 record's construction), verified before the pointer is trusted. That closes
-the redirect a re-mint-signed record would otherwise reopen; a cascade
-re-mint signs with an enrolled client's account key, settled against the
-account document at login.
+the redirect a record signed by anything but its own credential would
+otherwise reopen. No ceremony writes a sibling credential's record any more,
+so the case is a residue of records bound before that rule.
 
 was-client's paths helpers build the unlock Space's request paths on both
 the delegation and invocation side (the record fetch and rewrite, and the
@@ -894,11 +894,14 @@ The ceremony needs the standing members the login stamped on the profile
 (`profile.standingUnlock` beside `profile.ladderSeed`). It re-seals the
 unlock-methods registry to the rotated user key while this client still
 invokes, since surviving readers would otherwise find it sealed to a retired
-generation. It writes no re-mint stages, because a replacement signed by a
-key that dies at the removal entry would rot moments later. The standing
-self-heals are what mend them, with the reach limit stated under "Ceremony
-inventory". It refuses the account's last enrolled client with wallet-core's
-name-stable `LastEnrolledClientForgetError`.
+generation. It writes no unlock record. Every record's frame proof, bridge,
+and sibling delegation are signed by its own credential's unlock identity
+and ladder VM, which this removal entry does not strike, so it rots none of
+them. A record bound before that rule, carrying a signature from the client
+this entry removes, is mended by that credential's own login, with the reach
+limit stated under "Ceremony inventory". It refuses the account's last
+enrolled client with wallet-core's name-stable
+`LastEnrolledClientForgetError`.
 
 That refusal routes to the **last-client transition**: the same
 `forgetThisBrowser` entry with `lastClient: true`, chosen from the listing
@@ -926,39 +929,30 @@ amendment). Its stages, in order:
    ladder-signed one, and the revocation, through this client's `WasClient`,
    of every still-unexpired ladder-signed delegation the annex history
    embedded.
-5. The OTHER unlock methods' records (the standing passphrase and passkey
-   credentials, the recovery codes) through the ceremony's `unlockMethods`
-   reach (`unlockMethodsRemintReach`). The cascade's re-mint pass
-   (`remintEntriesOf`, shared with the cascade) walks every registry entry
-   but the login credential's, signs each bridge and sibling with the ladder
-   VM, re-seals each record through its management zcap (invoked under this
-   still-standing client), and writes the refreshed fields back.
-6. The login credential's own record (`rebindLoginCredentialRecord`, the
-   ceremony's required `onBeforeRemoval` seam, the one stage that reaches
-   it): its bridge delegation and `delegatedClients` sibling re-signed by
-   the ladder VM, the record re-sealed through the keyring hit's re-bind
-   closure (stamped on `profile.standingUnlock` at login beside the
-   credential's unlock Space id), and the registry pair refreshed in this
-   client's last window of registry authority.
-7. The removal entry. The post-removal did:web projection is PUT through
+5. The login credential's own record (`rebindLoginCredentialRecord`, the
+   ceremony's required `onBeforeRemoval` seam): its bridge delegation and
+   `delegatedClients` sibling re-signed by the ladder VM, the record
+   re-sealed through the keyring hit's re-bind closure (stamped on
+   `profile.standingUnlock` at login beside the credential's unlock Space
+   id), and the registry pair refreshed in this client's last window of
+   registry authority. It is the only unlock record the transition writes.
+   Every other credential's record is signed by its own credential's unlock
+   identity and ladder VM, which this ceremony does not strike, so it rots
+   none of them.
+6. The removal entry. The post-removal did:web projection is PUT through
    this client's root-authority `id` store immediately before it publishes,
    in the same last window of authority.
-8. The local wipe.
+7. The local wipe.
 
-Stages 2 through 6 precede the removal entry because the removed client's
+Stages 2 through 5 precede the removal entry because the removed client's
 signatures rot there, and on a client-less account no remembered login's
 refresh block will ever heal them.
 
 The transition's refusals:
 
-- A record the re-mint pass cannot re-seal, or an entry it skips as
-  pending-shaped (whose bridge the removal would rot just as surely),
-  withholds the removal entry with wallet-core's name-stable
-  `RecordRemintFailedError`. The settings dialog renders a retryable stop
-  naming the methods: the browser stays connected and a re-click resumes at
-  the re-mint.
-- A registry the transition cannot read refuses up front for the same
-  reason, as does a session whose hit carried no re-bind closure.
+- A registry the transition cannot read refuses up front, since the pending
+  check below is computed from it, as does a session whose hit carried no
+  re-bind closure.
 - A pending-shaped passphrase entry refuses up front with
   `PendingRetirementForgetError`: one recording an unlock key-agreement key
   that is not the credential the record at its unlock Space is sealed to,
@@ -969,19 +963,12 @@ The transition's refusals:
   transient login too, so the next login with a different standing
   credential clears it -- reachable even though the transition leaves the
   account client-less, where no remembered login runs.
-- A registry that does not name every standing credential the account
-  document publishes refuses with `UnrecordedCredentialForgetError`. Each
-  document `keyAgreement` entry carrying no enrolled-client controller
-  marker is compared against the registry entries' recorded key-agreement
-  multibase, in both published forms: the verbatim id a passkey or recovery
-  code publishes, and the commitment id a passphrase publishes. Every walk
-  is registry-driven, so an unnamed credential would keep a bridge
-  delegation the removal entry rots with no replacement.
 
-Readers settle a re-minted record's proof against
-`currentAccountRecordSigners` (the enrolled clients' signing keys plus the
-ladder VMs the document lists), since on a client-less account the ladder VM
-is the only record signer left.
+Readers settle a record's proof against `currentAccountRecordSigners` (the
+enrolled clients' signing keys plus the ladder VMs the document lists). That
+mixed settlement now covers pre-rule records alone: a record bound from here
+on is signed by its own credential's unlock identity key, which a reader
+holds from the typed secret.
 
 From the login page's authenticity and continuity refusals (reachable from
 passkey failures with no typed passphrase, reset between attempts) it is the
@@ -1785,27 +1772,28 @@ mint the account-deletion walk's DELETE-only child, which a code's holder
 reaches anyway by spending the code, and one licensed roster append that
 wraps only to recipients the verified document already lists.
 
-The record splits into a code-authenticated core and a re-mintable shell.
-The core is the account binding `{ controller, pointer }`, MAC'd at issuance
-under a code-derived key the host never holds. The tag rides the frame in
-the clear, and recovery verifies it BEFORE trusting the pointer. That closes
-the host-forgery redirect. The record's JWE recipient is the code's unlock
-KAK, whose public half sits in the stored frame, so a malicious host could
-otherwise seal its own record naming an attacker-controlled account and sign
-it with that account's genuinely enrolled key. Every signature-side check
-passes on it; only the binding, which needs the code bytes, refuses.
+The record splits into a code-authenticated core and a shell the binding does
+not cover. The core is the account binding `{ controller, pointer }`, MAC'd
+at issuance under a code-derived key the host never holds. The tag rides the
+frame in the clear, and recovery verifies it BEFORE trusting the pointer.
+That closes the host-forgery redirect. The record's JWE recipient is the
+code's unlock KAK, whose public half sits in the stored frame, so a malicious
+host could otherwise seal its own record naming an attacker-controlled
+account and sign it with that account's genuinely enrolled key. Every
+signature-side check passes on it; only the binding, which needs the code
+bytes, refuses.
 
 The shell is the plaintext frame (controller, pointer, timestamp) plus the
 sealed `bridge` member under the frame proof. Issuance signs the proof with
 the code-derived unlock key, verified before decrypt, and the bridge inside
-it is signed by the code's own ladder VM. No ceremony re-mints a code's
-bridge any more: a strike of another credential's inventory cannot rot a
-delegation that credential did not sign, so the revocation cascade's
-re-mint pass walks the standing passphrase and passkey entries alone. A code
-issued before that rule keeps its foreign-signed bridge, and the login-time
-health check's delegation-rot flag is its whole remedy, since re-issuing the
-code is what brings it onto the rule. The binding tag covers the pointer's
-host, so codes need re-issuing when the account migrates hosts.
+it is signed by the code's own ladder VM. No ceremony re-mints any unlock
+record's bridge: a strike of another credential's inventory cannot rot a
+delegation that credential did not sign, so there is no re-seal debt to pay
+and no pass that walks a sibling's record. A code issued before that rule
+keeps its foreign-signed bridge, and the login-time health check's
+delegation-rot flag is its whole remedy, since re-issuing the code is what
+brings it onto the rule. The binding tag covers the pointer's host, so codes
+need re-issuing when the account migrates hosts.
 
 The record carries no email and the locate step shows none: a self-declared
 display string is the deception payload a forged record could show as "this
@@ -2012,17 +2000,14 @@ verification method leaves the document, bricking recovery when it is
 needed. Its TTL is one year (NIST SP 800-57 cryptoperiod guidance), so the
 registry entry records its `expires`, and a delegation expired or inside the
 30-day renewal window is flagged the same way. The check nudges
-regeneration; a client revocation re-mints the standing passphrase and
-passkey credentials' delegations in its cascade, and the same expiry
-predicate refreshes a near-lapse delegation too. A code's bridge is never
-re-minted, so for a code carrying one signed by anything but its own ladder
-VM this check is the whole remedy. The passes skip a pending-shaped entry (one whose record is sealed to a
-credential other than the one its identity members name, the residue of a
-passphrase change torn before its retirement) rather than sealing a fresh
-bridge into a half-retired credential's record. The re-mint core (staleness
-checks, skip policy, binding-carried-forward re-wrap) and the delegation
-builder live in `@interop/wallet-core/recovery`; `src/session/recovery.ts`
-binds them to the session's signers, the storage URL, and the registry.
+regeneration. No ceremony re-mints a bridge on another credential's behalf,
+so for a recovery code this check is the whole remedy: the code is re-issued
+and its replacement's bridge is signed by that code's own ladder VM. A
+standing passphrase or passkey refreshes its own bridge at its own login,
+on the same three staleness axes. The shared predicates
+(`delegationKeyInDocument`, `zcapExpiring`) and the delegation builder live
+in `@interop/wallet-core/recovery`; `src/session/recovery.ts` binds them to
+the session's signers, the storage URL, and the registry.
 
 Two standing boundary rules. First, the hash-commitment rule: **a
 low-entropy-derived public key is never published in the world-readable
@@ -2033,12 +2018,10 @@ oracle argument is in "Session & auth flow"). A high-entropy credential's
 key (a passkey PRF output, a recovery code) may publish verbatim. Second,
 the unlock-methods registry's additive `method` enum is the explicit seam
 for a later quorum recovery method, rejected for v1 as presupposing a
-contact roster most accounts lack. The re-mint machinery above also covers
-the standing passphrase and passkey credentials' bridge delegations: the
-cascade walks every registry entry recording one, and a standing
-credential's own login refreshes its bridge inside the renewal window or
-when its signing key has left the account document (the signer-rot axis a
-credential retirement's ladder-VM strike produces).
+contact roster most accounts lack. A standing passphrase or passkey keeps
+its own bridge current: its own login refreshes it inside the renewal
+window, at expiry, or when its signing key has left the account document
+(the signer-rot axis a credential retirement's ladder-VM strike produces).
 
 ## Client revocation and the epoch cascade
 
@@ -2046,11 +2029,12 @@ Disconnecting an enrolled wallet client from the account. The cascade is
 `revokeAccountClient` in `@interop/wallet-core/clients`, one orchestrator
 for every wallet; `revokeEnrolledClient` in `src/session/revocation.ts`
 supplies the freewallet-shaped stages around it (session preconditions, the
-collections source, the recovery re-mint, the adoption side effects). The
-Settings "Connected wallets" panel drives it (see "The Settings clients
-surface" below). It runs synchronously, in the session that disconnects, in
-dependency order. The stages below are the enrolled kind's; "The ladder
-branch" after them states what differs when a standing credential signs:
+collections source, the generation-delegation re-mint, the adoption side
+effects). The Settings "Connected wallets" panel drives it (see "The Settings
+clients surface" below). It runs synchronously, in the session that
+disconnects, in dependency order. The stages below are the enrolled kind's;
+"The ladder branch" after them states what differs when a standing credential
+signs:
 
 1. **The document edit** (`revokeWebvhClient` in
    `@interop/wallet-core/webvh`): one log entry removes the revoked client's
@@ -2091,10 +2075,7 @@ branch" after them states what differs when a standing credential signs:
    fail-closed, matching the roster read's integrity refusal. Failures
    collect per collection into the fan-out's `failed` report; the rest still
    rotate.
-4. **The recovery re-PUTs** (`remintRecoveryDelegations`): recovery
-   delegations the revoked client had signed stopped chaining at step 1, so
-   the revoking client re-mints them and re-PUTs the unlock records.
-5. **The generation-delegation re-mint** (the `remintGenerationDelegation`
+4. **The generation-delegation re-mint** (the `remintGenerationDelegation`
    closure, module-level in `src/session/revocation.ts`): an embedded
    generation delegation the revoked client had signed also stopped chaining
    at step 1. The closure runs `ensureGenerationDelegationCurrent` against
@@ -2162,7 +2143,7 @@ adoption runs on the rotation's own verified result.
 Recovery-code spend and revocation drive stages 2 and 3 of the same cascade,
 which closes the "writes still land under readable epochs" residue in both
 flows. Their document edits are their own, and a spent code's replacement
-delegation is minted by its own ceremony rather than the re-mint stage.
+delegation is minted by its own ceremony.
 
 **The ladder branch.** A transient session on a standing unlock credential
 runs the same cascade with the credential's ladder in the enrolled client's
@@ -2175,14 +2156,12 @@ removable, since the account lands ladder-anchored rather than stranded --
 the shape a credential-anchored signup produces, still reached by the
 standing credentials through transient logins.
 
-Three refusals run first, the last-client transition's set, before anything
-is written. A registry this session cannot read is one, since every check
-below is registry-driven. A pending-shaped passphrase entry is another: the
+Two refusals run first, the last-client transition's set, before anything is
+written. A registry this session cannot read is one, since the check below
+is computed from it. A pending-shaped passphrase entry is the other: the
 torn-retirement repair is its only mender, and the in-band registry re-seal
-at the tail would otherwise rewrite a half-retired entry. So is a standing
-credential the registry does not name, whose bridge this removal entry could
-rot with no replacement for records bound before every record carried its own
-credential's signature. Each refusal names the method and its mender.
+at the tail would otherwise rewrite a half-retired entry. The refusal names
+the method and its mender.
 
 The rule for a struck signer runs next, before the pivot. On an account whose
 annex generation was minted by the client being removed, that client's
@@ -2192,12 +2171,14 @@ the acting credential's ladder VM, which stands throughout, installed in
 place through the credential's sibling delegation and adopted into the live
 session before the entry lands.
 
-No re-mint stage follows the entry. Every unlock record's bridge and sibling
-delegation is signed by its OWN credential's ladder VM, which this entry does
-not strike, so no sibling record's signer is ever consulted. The
-generation-delegation re-mint already ran, before the pivot rather than after
-it. The post-removal did:web projection is PUT immediately BEFORE the removal
-entry, through the account Space's `id` collection under the visit's
+No unlock record is written on either branch. Every record's frame proof,
+bridge, and sibling delegation are signed by its OWN credential's unlock
+identity and ladder VM, which this entry does not strike, so no sibling
+record is ever read for its signer or re-sealed. The generation-delegation
+re-mint is the one re-mint left, and on this branch it already ran, before
+the pivot rather than after it. The post-removal did:web projection is PUT
+immediately BEFORE the removal entry, through the account Space's `id`
+collection under the visit's
 generation delegation: a ladder-signed entry writes `did.jsonl` alone, so
 without it the served `id/did.json` would keep publishing the removed
 client's verification methods. The store resolves that delegation at each
@@ -3011,7 +2992,7 @@ account that may never run one is an open gap instead, listed below.
 | Recovery-code revocation                  | Settings > Recovery codes, any session type                     | `src/session/recovery.ts`                                         | `/recovery`                 | re-run; the cascade-completion sweep                                                                                                                      |
 | Unlock-credential rotation                | Settings (passphrase change, passkey removal), any session type | `src/session/credentialRotation.ts`                               | `/unlock`                   | torn-retirement repair at the next passphrase login (transient or remembered); remembered-login sweep; re-seal repair                                     |
 | Forget ceremony                           | Settings > Connected wallets, own row, browser-local only       | `src/session/forget.ts`                                           | `/clientAnnex`              | re-run (wipe last); forgotten-browser detector at the next remembered login                                                                               |
-| Last-client transition                    | same row, `lastClient` confirm, browser-local only              | `src/session/forget.ts`                                           | `/clientAnnex`              | re-run; the re-mint refusal is a retryable stop                                                                                                           |
+| Last-client transition                    | same row, `lastClient` confirm, browser-local only              | `src/session/forget.ts`                                           | `/clientAnnex`              | re-run                                                                                                                                                    |
 | Update-key rotation                       | Settings, browser-local only                                    | `src/session/accountSettings.ts`                                  | `/webvh`                    | re-run (persist-before-publish)                                                                                                                           |
 | Account genesis (plain)                   | a no-WAS deployment's signup only; healed at every login        | `src/session/signup.ts`                                           | `/genesis`                  | re-run (every stage an ensure)                                                                                                                            |
 | Account deletion                          | Settings, any session type                                      | `src/session/accountSettings.ts` + `wipe.ts`                      | app-side phase order        | re-run; an in-run retry for the acting credential's own unlock Space; otherwise the next login with that credential offering to remove it (not yet built) |
@@ -3023,7 +3004,7 @@ branch also mends a remembered signup torn before its self-enrollment, and
 that signup's own resume entry triggers the self-enrollment resume. A
 passphrase change whose establishment fails leaves the old credential intact
 (establish-first), mended by a retry. The last-client transition refuses
-outright on a pending passphrase entry or an unrecorded standing credential.
+outright on a pending passphrase entry.
 
 The open gaps come in two classes: a stated residue with no mender built,
 and one whose only mender is a remembered login.

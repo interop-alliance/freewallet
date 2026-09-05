@@ -74,14 +74,6 @@ vi.mock('@/session/unlockMethods', () => ({
   })
 }))
 
-vi.mock('@/session/recovery', async importOriginal => ({
-  ...(await importOriginal<typeof import('@/session/recovery')>()),
-  remintRecoveryDelegations: vi.fn(async () => {
-    state.calls.push('remintRecoveryDelegations')
-    return { reminted: 0, skipped: 0 }
-  })
-}))
-
 vi.mock('@/session/userKeyCascade', () => ({
   cascadeCollections: vi.fn(() => ({
     collectionIds: async () => ['private-credentials'],
@@ -103,7 +95,6 @@ import {
   getUnlockMethods,
   rewrapUnlockMethodsRecord
 } from '@/session/unlockMethods'
-import { remintRecoveryDelegations } from '@/session/recovery'
 import { cascadeCollections } from '@/session/userKeyCascade'
 import {
   revokeEnrolledClient,
@@ -186,9 +177,6 @@ function orchestratorDriving({
       })
     }
     state.calls.push('cascadeCollections')
-    const recovery = await options.remintRecoveryDelegations?.({
-      document: document as never
-    })
     const generation = await options.remintGenerationDelegation?.({
       document: document as never
     })
@@ -209,7 +197,6 @@ function orchestratorDriving({
       },
       document,
       userKey,
-      ...(recovery ? { recovery } : {}),
       ...(generation ? { generation } : {})
     } as never
   }
@@ -311,10 +298,6 @@ beforeEach(() => {
   state.renewError = null
   vi.clearAllMocks()
   vi.mocked(revokeAccountClient).mockImplementation(orchestratorDriving())
-  vi.mocked(remintRecoveryDelegations).mockImplementation(async () => {
-    state.calls.push('remintRecoveryDelegations')
-    return { reminted: 2, skipped: 1 }
-  })
 })
 
 describe('the preconditions gate', () => {
@@ -429,7 +412,6 @@ describe('the cascade, rotated path', () => {
       // after the fan-out, on the post-ceremony adoption below.
       'holdRotatedVaultKeys',
       'cascadeCollections',
-      'remintRecoveryDelegations',
       'adoptRotatedVaultKeys',
       'addHistoryClientRevoked'
     ])
@@ -442,7 +424,6 @@ describe('the cascade, rotated path', () => {
         },
         failed: []
       },
-      recovery: { reminted: 2, skipped: 1 },
       generation: { renewed: false, skipped: 'no-pointer' }
     })
   })
@@ -549,7 +530,6 @@ describe('the cascade, rotated path', () => {
     expect(outcome).toEqual({
       rotated: false,
       collections: { outcomes: {}, failed: [] },
-      recovery: { reminted: 0, skipped: 0 },
       generation: { renewed: false, skipped: 'no-pointer' }
     })
     expect(session.storage.addHistoryClientRevoked).toHaveBeenCalledOnce()
@@ -586,7 +566,7 @@ describe('the knownLatentHashes hand-off', () => {
 })
 
 describe('re-run convergence and best-effort stages', () => {
-  it('still re-mints on an already-rotated roster without re-adopting', async () => {
+  it('reports an already-rotated roster without re-adopting', async () => {
     vi.mocked(revokeAccountClient).mockImplementation(
       orchestratorDriving({ rotated: false })
     )
@@ -594,7 +574,6 @@ describe('re-run convergence and best-effort stages', () => {
     const outcome = await revokeEnrolledClient({ session, client: REVOKED })
 
     expect(outcome.rotated).toBe(false)
-    expect(vi.mocked(remintRecoveryDelegations)).toHaveBeenCalledOnce()
     expect(session.storage.addHistoryClientRevoked).toHaveBeenCalledOnce()
     // Nothing re-persists or re-adopts: the session already holds this user key.
     expect(session.profile.persistClientKeys).not.toHaveBeenCalled()

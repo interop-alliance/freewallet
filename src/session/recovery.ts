@@ -41,12 +41,13 @@
  * - `checkRecoveryHealth` -- the login-time delegation staleness check: a
  *   stored delegation chains only while its signing client's verification
  *   method is in the current document (rot), lapses at its one-year expiry,
- *   and either way bricks recovery exactly when it is needed. Client
- *   revocation re-mints the standing credentials' stale delegations
- *   (`remintRecoveryDelegations`); a code's bridge is signed by the code's
- *   own ladder VM and is never re-minted, so for a code issued before that
- *   rule this check is the whole remedy -- its nudge to re-issue the code is
- *   what brings it onto the rule.
+ *   and either way bricks recovery exactly when it is needed. No ceremony
+ *   re-mints an unlock record's bridge: each is signed by its own
+ *   credential's ladder VM, which no other credential's strike reaches, and
+ *   a standing passphrase or passkey refreshes its own at its own login. So
+ *   for a code issued before that rule, whose bridge carries a foreign
+ *   signer, this check is the whole remedy -- its nudge to re-issue the code
+ *   is what brings it onto the rule.
  */
 import { deriveNextKeyHash } from '@interop/did-method-webvh'
 import type { ZcapClient } from '@interop/ezcap'
@@ -68,7 +69,6 @@ import {
   ensureUnlockSpace,
   getUnlockKeyring,
   putUnlockKeyring,
-  recordSignerFromAgent,
   verifyRecordProof,
   type AccountPointer
 } from '@interop/wallet-core/keyring'
@@ -102,7 +102,6 @@ import {
   clientAnnexLogPinId,
   delegatedClientsPointer,
   clientAnnexLogStore,
-  delegatedClientsDelegationMinter,
   embeddedGenerationDelegation,
   enrollClientAnnexTransientClient,
   ensureGenerationDelegationCurrent,
@@ -131,13 +130,11 @@ import {
   recoveryClientFromCode,
   recoverySpendRetirementFromLog,
   RECOVERY_KDF,
-  remintRecoveryDelegations as remintDelegationsCore,
   removeRecoveryKey,
   unwrapUnlockRecord,
   wrapUnlockRecord,
   zcapExpiring,
   type RecoveryClient,
-  type RecoveryDelegationEntry,
   type RecoveryLogStore,
   type RecoverySpendRetirement,
   type UnlockRecordProofState
@@ -172,13 +169,9 @@ import {
   emptyUnlockMethodsRegistry,
   getUnlockMethods,
   getUnlockMethodsWithClient,
-  managementZcapClient,
-  refreshStandingDelegationFields,
   updateUnlockMethods,
   updateUnlockMethodsWithClient,
   upsertPassphraseUnlockMethod,
-  type PassphraseUnlockMethod,
-  type PasskeyUnlockMethod,
   type RecoveryCodeUnlockMethod,
   type UnlockMethod,
   type UnlockMethodsRecord
@@ -3296,167 +3289,6 @@ async function deleteRevokedCodeSpace({
 }
 
 /**
- * One registry entry shaped for the shared re-mint pass: wallet-core's
- * `RecoveryDelegationEntry` plus the registry entry it was built from, so
- * the record-back seam can write the refreshed fields to the right place.
- */
-export type RemintEntry = RecoveryDelegationEntry & { source: UnlockMethod }
-
-/**
- * The unlock-methods registry entries a re-mint pass walks: the standing
- * passphrase and passkey credentials whose records predate the self-signed
- * bridge, whose `unlockClientDid` fills the delegation-grantee slot the
- * shared pass calls `recoveryClientDid`.
- *
- * Recovery codes are deliberately absent. A code's bridge is signed by the
- * code's OWN ladder VM, so no other credential's strike can rot it and no
- * ceremony owes it a re-seal; re-signing it with the acting client's key
- * would move it back onto a foreign signer. A code issued before that rule
- * keeps whatever key signed it, and the login-time health check's
- * delegation-rot half is what nudges re-issuing it -- the one remedy that
- * brings such a code onto the rule.
- *
- * @param options {object}
- * @param options.record {UnlockMethodsRecord | null}   the registry
- * @param [options.excludeUnlockSpaceIds] {string[]}   entries to leave out
- *   (the last-client forget re-binds the login credential's own record
- *   through the keyring hit's closure instead)
- * @returns {RemintEntry[]}
- */
-export function remintEntriesOf({
-  record,
-  excludeUnlockSpaceIds = []
-}: {
-  record: UnlockMethodsRecord | null
-  excludeUnlockSpaceIds?: string[]
-}): RemintEntry[] {
-  const standingSources = (record?.methods ?? []).filter(
-    (method): method is PassphraseUnlockMethod | PasskeyUnlockMethod =>
-      (method.type === 'passphrase' || method.type === 'passkey') &&
-      !!method.unlockClientDid
-  )
-  const mapped: RemintEntry[] = [
-    ...standingSources.map(method => ({
-      label: method.type,
-      unlockSpaceId: method.unlockSpaceId,
-      manageCapability: method.manageCapability,
-      delegationKeyId: method.delegationKeyId,
-      delegationExpires: method.delegationExpires,
-      delegatedClientsKeyId: method.delegatedClientsKeyId,
-      delegatedClientsExpires: method.delegatedClientsExpires,
-      recoveryClientDid: method.unlockClientDid,
-      unlockKeyAgreementKeyId: method.unlockKeyAgreementKeyId,
-      unlockKeyAgreementKeyMultibase: method.unlockKeyAgreementKeyMultibase,
-      source: method as UnlockMethod
-    }))
-  ]
-  return mapped.filter(
-    entry => !excludeUnlockSpaceIds.includes(entry.unlockSpaceId)
-  )
-}
-
-/**
- * The re-mint pass's record-back seam: writes a re-minted entry's refreshed
- * delegation fields to the unlock-methods registry, by the entry's kind.
- *
- * @param options {object}
- * @param options.session {Session}
- * @param options.entry {RemintEntry}
- * @returns {Promise<void>}
- */
-export async function recordRemintedEntry({
-  session,
-  entry
-}: {
-  session: Session
-  entry: RemintEntry
-}): Promise<void> {
-  await refreshStandingDelegationFields({
-    session,
-    unlockSpaceId: entry.unlockSpaceId,
-    delegationKeyId: entry.delegationKeyId,
-    delegationExpires: entry.delegationExpires,
-    delegatedClientsKeyId: entry.delegatedClientsKeyId,
-    delegatedClientsExpires: entry.delegatedClientsExpires
-  })
-}
-
-/**
- * Re-mints the unlock-record bridge delegations the current document no
- * longer backs -- the delta riding the revocation cascade, for the standing
- * passphrase and passkey credentials whose records predate the self-signed
- * bridge ({@link remintEntriesOf} states why recovery codes are absent). The
- * mechanism, the skip policy, and the binding-carried-forward re-wrap all
- * live in `@interop/wallet-core/recovery`; this binding supplies the app
- * seams: the storage server URL, the session's delegating signer and account
- * record signer, the management-zcap client factory, and the unlock-methods
- * registry read/record halves (`remintEntriesOf` / `recordRemintedEntry`,
- * shared with the last-client forget's ladder-signed pass).
- *
- * @param options {object}
- * @param options.session {Session}
- * @param options.doc {PublishedKeyDocument}   the locally verified
- *   did:webvh document, AFTER the revocation edit
- * @param [options.registryRecord] {UnlockMethodsRecord | null}   the
- *   unlock-methods registry, when the caller already read it (the revocation
- *   cascade reads it once for its document edit and this stage)
- * @param [options.retiringKeyMultibases] {string[]}   keys the document
- *   still lists whose authority is about to end (a credential retirement
- *   names the ladder VM its strike entry removes), so every delegation they
- *   signed is re-minted while they still stand
- * @param [options.excludeUnlockSpaceIds] {string[]}   registry entries to
- *   leave out -- the retiring credential's own, whose record dies with its
- *   unlock Space
- * @returns {Promise<{ reminted: number; skipped: number }>}
- */
-export async function remintRecoveryDelegations({
-  session,
-  doc,
-  registryRecord: prefetched,
-  retiringKeyMultibases = [],
-  excludeUnlockSpaceIds = []
-}: {
-  session: Session
-  doc: Parameters<typeof remintDelegationsCore>[0]['doc']
-  registryRecord?: UnlockMethodsRecord | null
-  retiringKeyMultibases?: string[]
-  excludeUnlockSpaceIds?: string[]
-}): Promise<{ reminted: number; skipped: number }> {
-  const pointer = session.profile.accountPointer
-  const keyAgent = session.profile.keyAgent
-  if (!WAS_SERVER_URL || !pointer || !keyAgent) {
-    return { reminted: 0, skipped: 0 }
-  }
-  const record =
-    prefetched !== undefined ? prefetched : await getUnlockMethods({ session })
-  const remintEntries = remintEntriesOf({ record, excludeUnlockSpaceIds })
-  if (remintEntries.length === 0) {
-    return { reminted: 0, skipped: 0 }
-  }
-  return remintDelegationsCore({
-    doc,
-    entries: remintEntries,
-    pointer,
-    storageServerUrl: WAS_SERVER_URL,
-    zcapClient: session.profile.zcapClient,
-    retiringKeyMultibases,
-    mintDelegatedClientsDelegation: delegatedClientsDelegationMinter({
-      doc,
-      zcapClient: session.profile.zcapClient,
-      wasServerUrl: pointer.host
-    }),
-    // The re-mint holds the credential's KAK public half but not its signing
-    // key, so every record it re-PUTs is signed with this client's own
-    // account key -- the mixed-signer case a reader settles against the
-    // verified document.
-    recordSigner: recordSignerFromAgent({ keyAgent }),
-    managementZcapClient: ({ capability }) =>
-      managementZcapClient({ session, capability }),
-    recordEntry: async ({ entry }) => recordRemintedEntry({ session, entry })
-  })
-}
-
-/**
  * One flagged registry entry from the login-time recovery health check, with
  * the reasons it is flagged.
  */
@@ -3476,15 +3308,14 @@ export interface RecoveryHealthFlag {
  * renewal window (the one-year TTL lapses within a code's expected
  * lifetime), and that the code's inventory (its `keyAgreement` VM and
  * committed update-key hash) still stands. A stale delegation bricks
- * recovery exactly when it is needed. The revocation cascade re-mints stale
- * delegations automatically (`remintRecoveryDelegations`); this check is
- * the backstop for entries that predate the re-mint fields -- whose flag
- * nudges the user to regenerate the code -- and for expiry between
- * revocations. Both stages ask the same shared predicates
- * (`delegationKeyInDocument`, `zcapExpiring`), so an entry
- * recording no delegation key or expiry at all -- uncheckable, and
- * therefore not assumed healthy -- is flagged here
- * rather than being simultaneously "fine" and "needs re-minting".
+ * recovery exactly when it is needed. No ceremony re-mints a code's bridge:
+ * it is signed by the code's own ladder VM, which no other credential's
+ * strike reaches. So this check's nudge to regenerate the code is the whole
+ * remedy for a code issued before that rule, whose bridge carries a foreign
+ * signer, and for expiry. The predicates are the shared ones
+ * (`delegationKeyInDocument`, `zcapExpiring`), so an entry recording no
+ * delegation key or expiry at all -- uncheckable, and therefore not assumed
+ * healthy -- is flagged here.
  * Returns only the flagged entries; resolves `[]` when there is nothing to
  * check or the account has no recovery codes.
  *

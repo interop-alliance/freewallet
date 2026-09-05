@@ -21,30 +21,19 @@
  *   VM's install entry, the ladder-signed roster rotation anchored there and
  *   the fan-out under this client's still-standing authority, the forced
  *   ladder-signed generation-delegation replacement and the revocation of
- *   every ladder-signed delegation the annex history embedded, the OTHER
- *   unlock methods' record re-mint (every other standing credential's and
- *   recovery code's bridge and sibling re-signed by the ladder VM and its
- *   record re-sealed through the entry's management zcap -- the revocation
- *   cascade's re-mint pass over the registry, this client's last window of
- *   registry authority, since on a client-less account no remembered login's
- *   refresh block will ever heal them), the login credential's record
- *   re-bind (bridge and sibling re-signed by the ladder VM through the hit's
- *   re-bind closure, the registry pair refreshed), then the removal entry.
- *   The ordinary ceremony's `LastEnrolledClientForgetError` (name-stable) is
- *   the routing signal when the caller's view was stale.
- *   The transition's own name-stable refusal, `RecordRemintFailedError`
- *   (another sign-in method's record could not be re-sealed, so the
- *   removal entry was withheld), propagates before the wipe: this browser
- *   is still connected, and a re-run resumes at the re-mint. Before any of
- *   it runs, the transition refuses on a pending-shaped passphrase registry
- *   entry (`PendingRetirementForgetError`): a passphrase change torn before
- *   its retirement landed is mended only by the torn-retirement repair,
- *   which needs a remembered login -- the very thing this ceremony ends
- *   forever. It refuses just as early when the registry does not cover
- *   every standing credential the account document publishes
- *   (`UnrecordedCredentialForgetError`): the re-mint pass walks the
- *   registry, so an unrecorded credential's bridge would rot at the removal
- *   entry with no login left to heal it.
+ *   every ladder-signed delegation the annex history embedded, the login
+ *   credential's record re-bind (bridge and sibling re-signed by the ladder
+ *   VM through the hit's re-bind closure, the registry pair refreshed), then
+ *   the removal entry. That re-bind is the only unlock record this ceremony
+ *   writes: every OTHER credential's record is signed by its own
+ *   credential's unlock identity and ladder VM, which this ceremony does not
+ *   strike. The ordinary ceremony's `LastEnrolledClientForgetError`
+ *   (name-stable) is the routing signal when the caller's view was stale.
+ *   Before any of it runs, the transition refuses on a pending-shaped
+ *   passphrase registry entry (`PendingRetirementForgetError`): a passphrase
+ *   change torn before its retirement landed is mended only by the
+ *   torn-retirement repair, which needs a remembered login -- the very thing
+ *   this ceremony ends forever.
  *
  * - **The no-unlock-material grade** (`forgetBrowserWalletData`, run from
  *   the login page's refusal states): nothing can be derived or signed, so
@@ -105,7 +94,6 @@ import {
 } from '@interop/wallet-core/webvh'
 import type { RevokedClientKeys } from '@interop/wallet-core/webvh'
 import { memoryResourceLogPinStore } from '@interop/vh-resource-log'
-import { WAS_SERVER_URL } from '@/app.config'
 import type { Session, User } from '@/types/auth'
 import { deriveSpaceId } from '@interop/was-client/sync'
 import type { VerifiedAccountLog } from '@interop/wallet-core/clients'
@@ -122,20 +110,12 @@ import {
   type LadderDeleter
 } from '@/session/accountCeremonyContext'
 import type { KeyringFetchResult } from '@/session/keyring'
-import {
-  recordRemintedEntry,
-  recoveryEntriesOf,
-  remintEntriesOf
-} from '@/session/recovery'
-import {
-  findPendingPassphraseEntries,
-  findUnrecordedCredentials
-} from '@/session/credentialCoverage'
+import { recoveryEntriesOf } from '@/session/recovery'
+import { findPendingPassphraseEntries } from '@/session/credentialCoverage'
 import { sessionRosterStore } from '@/session/rosterStore'
 import { unlockLogStore } from '@/session/standingUnlock'
 import {
   getUnlockMethods,
-  managementZcapClient,
   refreshStandingDelegationFields,
   unlockEntryReaderFor
 } from '@/session/unlockMethods'
@@ -145,10 +125,7 @@ import { createLogger } from '@/lib/log'
 import { zcapExpires } from '@/lib/zcap'
 
 const log = createLogger('fw:session:forget')
-import {
-  invalidateVerifiedLog,
-  verifiedAccountLog
-} from '@/session/verifiedLog'
+import { invalidateVerifiedLog } from '@/session/verifiedLog'
 import {
   executeLocalWipe,
   snapshotWipeTargets,
@@ -207,30 +184,6 @@ export class PendingRetirementForgetError extends Error {
 }
 
 /**
- * Thrown by the last-client transition when the account document publishes a
- * standing credential's `keyAgreement` entry that no unlock-methods registry
- * entry names. Every walk the transition and the client-less account after
- * it perform is registry-driven -- the other methods' record re-mint, the
- * removal entry's latent-hash vouching, the recovery health sweep -- so an
- * unrecorded credential's bridge delegation would rot un-re-minted at the
- * removal entry and its self-enrollment would brick silently, on an account
- * no remembered login will ever heal again. Matched on `name` by the settings
- * surface.
- */
-export class UnrecordedCredentialForgetError extends Error {
-  unrecorded: number
-  constructor({ unrecorded }: { unrecorded: number }) {
-    super(
-      `This browser cannot be forgotten yet: ${unrecorded} sign-in ` +
-        "method(s) on this account are not recorded in the wallet's " +
-        'sign-in registry.'
-    )
-    this.name = 'UnrecordedCredentialForgetError'
-    this.unrecorded = unrecorded
-  }
-}
-
-/**
  * What a completed forget reports: which ceremony ran (`lastClient: false`
  * is the ordinary forget, `true` the last-client transition) with that
  * ceremony's own result, plus the local wipe's failed-stage names and the
@@ -261,16 +214,10 @@ export type ForgetOutcome = ForgetCeremonyOutcome & {
  * caller's listing was stale -- refuses with wallet-core's name-stable
  * `LastEnrolledClientForgetError` before any write, so the caller can
  * re-confirm against the transition copy; a `true` run on an account with
- * another enrolled client refuses from the ceremony's pre-install read, and
- * one that could not re-seal another sign-in method's record refuses with
- * the name-stable `RecordRemintFailedError` before its removal entry (the
- * local wipe never runs on a refusal, so the browser stays connected and
- * the next run resumes).
+ * another enrolled client refuses from the ceremony's pre-install read.
  *
  * Refusals before anything runs: a pending-shaped passphrase registry entry
- * on the transition (`PendingRetirementForgetError`), a registry on the
- * transition that does not name every standing credential the account
- * document publishes (`UnrecordedCredentialForgetError`), a session that is
+ * on the transition (`PendingRetirementForgetError`), a session that is
  * not browser-local (`BrowserLocalSessionRequiredError`: this ceremony's
  * subject is this browser) and a session whose login did not carry the
  * credential's standing members (the bridge delegation and ladder seed; the
@@ -383,11 +330,6 @@ export async function forgetThisBrowser({
   // remembered logins on this account forever.
   if (lastClient) {
     await assertNoPendingPassphraseEntry({ session, pointer, registry })
-    await assertRegistryCoversStandingCredentials({
-      session,
-      pointer,
-      registry
-    })
   }
 
   // Snapshot-first: every wipe target derives from the live session BEFORE
@@ -501,12 +443,6 @@ export async function forgetThisBrowser({
           keyAgent: await ladderVmAgent({ ladderSeed })
         }),
         annex: annexCeremonyReach({ session, pointer }),
-        unlockMethods: unlockMethodsRemintReach({
-          session,
-          pointer,
-          registry,
-          loginUnlockSpaceId: standing.unlockSpaceId
-        }),
         onBeforeRemoval: async ({ did }) =>
           rebindLoginCredentialRecord({
             session,
@@ -570,54 +506,6 @@ function annexCeremonyReach({
     wasServerUrl: pointer.host,
     accountSpaceId: pointer.spaceId,
     pinStore: session.profile.persistence.logPins
-  }
-}
-
-/**
- * The transition's reach into the OTHER unlock methods' records (the
- * ceremony's `unlockMethods` stage): every registry entry but the login
- * credential's own (re-bound through the hit's closure in the
- * `onBeforeRemoval` seam instead), in the revocation cascade's re-mint shape,
- * with the management zcaps invoked under this still-standing client and the
- * refreshed fields written back to the registry while this client can still
- * write it. An unreachable record refuses the removal entry inside the
- * ceremony (`RecordRemintFailedError`), so nothing here is best-effort.
- *
- * @param options {object}
- * @param options.session {Session}
- * @param options.pointer {AccountPointer}
- * @param options.registry {UnlockMethodsRecord | null}
- * @param options.loginUnlockSpaceId {string}   the login credential's
- *   unlock Space, whose entry is left out
- * @returns {UnlockMethodsRemintReach}
- */
-function unlockMethodsRemintReach({
-  session,
-  pointer,
-  registry,
-  loginUnlockSpaceId
-}: {
-  session: Session
-  pointer: Parameters<typeof delegateLogWrite>[0]['pointer']
-  registry: Parameters<typeof remintEntriesOf>[0]['record']
-  loginUnlockSpaceId: string
-}): NonNullable<
-  Parameters<typeof forgetLastEnrolledClient>[0]['unlockMethods']
-> {
-  return {
-    entries: remintEntriesOf({
-      record: registry,
-      excludeUnlockSpaceIds: [loginUnlockSpaceId]
-    }),
-    pointer,
-    storageServerUrl: WAS_SERVER_URL ?? pointer.host,
-    managementZcapClient: ({ capability }) =>
-      managementZcapClient({ session, capability }),
-    recordEntry: async ({ entry }) =>
-      recordRemintedEntry({
-        session,
-        entry: entry as Parameters<typeof recordRemintedEntry>[0]['entry']
-      })
   }
 }
 
@@ -1178,67 +1066,5 @@ export async function assertNoPendingPassphraseEntry({
   })
   if (pending.length > 0) {
     throw new PendingRetirementForgetError()
-  }
-}
-
-/**
- * Refuses the last-client transition when the unlock-methods registry does
- * not cover every standing credential the account document publishes
- * ({@link UnrecordedCredentialForgetError}).
- *
- * A credential's `keyAgreement` entry is the document's whole record of it.
- * Every walk from here on is registry-driven: the other methods' record
- * re-mint, the removal entry's latent-hash vouching, and the recovery health
- * sweep all read the registry, so a credential no entry names keeps a bridge
- * delegation the removal entry rots and gets no replacement -- and on the
- * client-less account this ceremony produces, no remembered login will run
- * the repairs that would notice.
- *
- * The credential entries are the `keyAgreement` methods that carry no client
- * controller marker: an enrolled client's method is published under
- * `controller: did:key:<its signing multibase>`, so filtering by the markers
- * the document's `capabilityInvocation` relation implies leaves exactly the
- * unlock credentials' entries (a ladder VM holds no key-agreement relation,
- * and the KMS convenience key is published under `authentication` alone).
- * Coverage is computed per registry entry from its recorded key-agreement
- * multibase, in BOTH published forms -- the verbatim id a passkey or
- * recovery code publishes under, and the commitment id a passphrase
- * publishes under -- since either form covers the entry it belongs to.
- *
- * A registry that read as absent covers nothing, so a document publishing
- * any credential entry refuses here.
- *
- * @param options {object}
- * @param options.session {Session}
- * @param options.pointer {AccountPointer}
- * @param options.registry {UnlockMethodsRecord | null}
- * @returns {Promise<void>}
- */
-export async function assertRegistryCoversStandingCredentials({
-  session,
-  pointer,
-  registry
-}: {
-  session: Session
-  pointer: { did: string; spaceId: string; host: string }
-  registry: { methods?: unknown[] } | null
-}): Promise<void> {
-  const { doc } = await verifiedAccountLog({
-    profile: session.profile,
-    pointer
-  })
-  const unrecorded = await findUnrecordedCredentials({
-    doc,
-    did: pointer.did,
-    registry
-  })
-  if (unrecorded.length > 0) {
-    log.warn(
-      'The last-client forget refused: the unlock-methods registry does not name these credential key-agreement methods',
-      { unrecorded }
-    )
-    throw new UnrecordedCredentialForgetError({
-      unrecorded: unrecorded.length
-    })
   }
 }

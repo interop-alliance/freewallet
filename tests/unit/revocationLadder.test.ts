@@ -26,9 +26,8 @@ const state = vi.hoisted(() => ({
   registryFails: false,
   /** every capability the registry read rode, in order */
   registryCapabilities: [] as unknown[],
-  /** whether each pre-pivot detector refuses */
+  /** whether the pre-pivot detector refuses */
   pendingEntry: false,
-  unrecordedCredentials: 0,
   /** whether the generation-delegation replacement fails */
   renewFails: false,
   /**
@@ -94,19 +93,10 @@ vi.mock('@/session/forget', async importOriginal => {
     // The refusal classes are matched by name at the settings surface, so
     // the real ones are thrown here.
     PendingRetirementForgetError: actual.PendingRetirementForgetError,
-    UnrecordedCredentialForgetError: actual.UnrecordedCredentialForgetError,
     assertNoPendingPassphraseEntry: vi.fn(async () => {
       state.calls.push('assertNoPendingPassphraseEntry')
       if (state.pendingEntry) {
         throw new actual.PendingRetirementForgetError()
-      }
-    }),
-    assertRegistryCoversStandingCredentials: vi.fn(async () => {
-      state.calls.push('assertRegistryCoversStandingCredentials')
-      if (state.unrecordedCredentials > 0) {
-        throw new actual.UnrecordedCredentialForgetError({
-          unrecorded: state.unrecordedCredentials
-        })
       }
     })
   }
@@ -166,14 +156,6 @@ vi.mock('@/session/userKeyAdoption', () => ({
   )
 }))
 
-vi.mock('@/session/recovery', async importOriginal => ({
-  ...(await importOriginal<typeof import('@/session/recovery')>()),
-  remintRecoveryDelegations: vi.fn(async () => {
-    state.calls.push('remintRecoveryDelegations')
-    return { reminted: 0, skipped: 0 }
-  })
-}))
-
 vi.mock('@/session/userKeyCascade', () => ({
   cascadeCollections: vi.fn(() => ({
     collectionIds: async () => ['private-credentials'],
@@ -199,11 +181,7 @@ import {
   didWebProjectionStore,
   renewTransientGenerationDelegation
 } from '@/session/annexReach'
-import {
-  assertNoPendingPassphraseEntry,
-  assertRegistryCoversStandingCredentials
-} from '@/session/forget'
-import { remintRecoveryDelegations } from '@/session/recovery'
+import { assertNoPendingPassphraseEntry } from '@/session/forget'
 import { reprimeVerifiedAccountLog } from '@/session/verifiedLog'
 import {
   revokeEnrolledClient,
@@ -323,9 +301,6 @@ function orchestratorDriving({ rotated = true }: { rotated?: boolean } = {}) {
         descriptor: ROSTER_DESCRIPTOR as never
       })
     }
-    const recovery = await options.remintRecoveryDelegations?.({
-      document: DOCUMENT as never
-    })
     const generation = await options.remintGenerationDelegation?.({
       document: DOCUMENT as never
     })
@@ -340,7 +315,6 @@ function orchestratorDriving({ rotated = true }: { rotated?: boolean } = {}) {
       },
       document: DOCUMENT,
       userKey,
-      ...(recovery ? { recovery } : {}),
       ...(generation ? { generation } : {})
     } as never
   }
@@ -432,7 +406,6 @@ beforeEach(() => {
   state.registryFails = false
   state.registryCapabilities = []
   state.pendingEntry = false
-  state.unrecordedCredentials = 0
   state.renewFails = false
   state.renewSwaps = false
   state.invocationCapability = GENERATION_DELEGATION
@@ -444,7 +417,7 @@ beforeEach(() => {
 })
 
 describe('the pre-pivot stage order', () => {
-  it('reads the registry, runs both refusals, then replaces the delegation', async () => {
+  it('reads the registry, runs the refusal, then replaces the delegation', async () => {
     await revokeEnrolledClient({
       session: transientSession(),
       client: REVOKED
@@ -454,7 +427,6 @@ describe('the pre-pivot stage order', () => {
       'getUnlockMethods',
       'loadUserKeyEpochPin',
       'assertNoPendingPassphraseEntry',
-      'assertRegistryCoversStandingCredentials',
       // The rule for a struck signer: the replacement is minted and adopted
       // BEFORE the removal entry takes the revoked client's key out of the
       // document, since that key may be what signed the standing one.
@@ -530,19 +502,7 @@ describe('the three pre-pivot refusals', () => {
     expect(vi.mocked(renewTransientGenerationDelegation)).not.toHaveBeenCalled()
   })
 
-  it('refuses a standing credential the registry does not name', async () => {
-    state.unrecordedCredentials = 2
-    const thrown = await revokeEnrolledClient({
-      session: transientSession(),
-      client: REVOKED
-    }).catch((err: Error) => err)
-
-    expect((thrown as Error).name).toBe('UnrecordedCredentialForgetError')
-    expect((thrown as { unrecorded?: number }).unrecorded).toBe(2)
-    expect(vi.mocked(revokeAccountClient)).not.toHaveBeenCalled()
-  })
-
-  it('hands both detectors the one registry the branch already read', async () => {
+  it('hands the detector the one registry the branch already read', async () => {
     state.registry = registryWithSiblings()
     await revokeEnrolledClient({
       session: transientSession(),
@@ -556,11 +516,6 @@ describe('the three pre-pivot refusals', () => {
         // the ladder VM mints and invokes as its own bare did:key.
         signer: LADDER_DELETER
       })
-    )
-    expect(
-      vi.mocked(assertRegistryCoversStandingCredentials)
-    ).toHaveBeenCalledWith(
-      expect.objectContaining({ pointer: POINTER, registry: state.registry })
     )
   })
 })
@@ -586,7 +541,7 @@ describe('the options the ladder branch hands over, and the ones it withholds', 
     )
   })
 
-  it('withholds the self refusal and both re-mint stages', async () => {
+  it('withholds the self refusal and the re-mint stage', async () => {
     await revokeEnrolledClient({
       session: transientSession(),
       client: REVOKED
@@ -598,10 +553,7 @@ describe('the options the ladder branch hands over, and the ones it withholds', 
     // Every unlock record's bridge is signed by its OWN credential's ladder
     // VM, which this entry does not strike, and the generation delegation's
     // replacement already ran before the entry.
-    expect(options).not.toHaveProperty('remintRecoveryDelegations')
     expect(options).not.toHaveProperty('remintGenerationDelegation')
-    expect(vi.mocked(remintRecoveryDelegations)).not.toHaveBeenCalled()
-    expect(state.calls).not.toContain('remintRecoveryDelegations')
   })
 
   it("passes the standing credentials' committed rungs as latent hashes", async () => {
@@ -621,10 +573,10 @@ describe('the options the ladder branch hands over, and the ones it withholds', 
   })
 
   it("consults no sibling record's signer on a registry full of them", async () => {
-    // The whole point of withholding the re-mint stages: a disconnect from a
-    // transient session completes on an account carrying a sibling
-    // passphrase and an unspent recovery code without reading, re-sealing,
-    // or re-signing either credential's unlock record.
+    // The whole point of the rule: a disconnect from a transient session
+    // completes on an account carrying a sibling passphrase and an unspent
+    // recovery code without reading, re-sealing, or re-signing either
+    // credential's unlock record.
     state.registry = registryWithSiblings()
     const outcome = await revokeEnrolledClient({
       session: transientSession(),
@@ -632,12 +584,10 @@ describe('the options the ladder branch hands over, and the ones it withholds', 
     })
 
     expect(outcome.rotated).toBe(true)
-    expect(outcome.recovery).toEqual({ reminted: 0, skipped: 0 })
     expect(outcome.generation).toEqual({
       renewed: false,
       skipped: 'no-pointer'
     })
-    expect(vi.mocked(remintRecoveryDelegations)).not.toHaveBeenCalled()
   })
 })
 

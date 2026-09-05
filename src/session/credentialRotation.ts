@@ -60,7 +60,6 @@ import {
   accountCeremonyContext,
   type AccountCeremonyContext
 } from '@/session/accountCeremonyContext'
-import { remintRecoveryDelegations } from '@/session/recovery'
 import { sessionRosterStore } from '@/session/rosterStore'
 import { adoptRotatedUserKeyInBand } from '@/session/userKeyAdoption'
 import {
@@ -289,36 +288,12 @@ export async function rotateOffUnlockCredential({
     ...(session.profile.userKey ? { userKey: session.profile.userKey } : {}),
     clientKeyAgreementKey: unwrapKey,
     pinnedEpochId,
-    // Stage 0, the enrolled branch's alone: the other standing credentials'
-    // records and bridges, re-signed under this client's account key BEFORE
-    // the strike entry removes the retired credential's ladder VM (the
-    // last-client transition signs sibling records with one). The ceremony
-    // names the doomed VM ids; the retiring credential's own entry is left
-    // out, since its record dies with the unlock Space the caller deletes.
-    // On the ladder branch every record is signed by its own credential's
-    // ladder VM, so the strike rots no sibling and the ceremony skips the
-    // stage itself.
-    ...(context.kind === 'enrolled'
-      ? {
-          remintDependentRecords: async ({
-            document,
-            retiringKeyMultibases
-          }: {
-            document: object
-            retiringKeyMultibases: string[]
-          }) =>
-            await remintRecoveryDelegations({
-              session,
-              doc: document as Parameters<
-                typeof remintRecoveryDelegations
-              >[0]['doc'],
-              retiringKeyMultibases,
-              ...(method.unlockSpaceId
-                ? { excludeUnlockSpaceIds: [method.unlockSpaceId] }
-                : {})
-            })
-        }
-      : {}),
+    // No sibling record is written here, on either branch. Every unlock
+    // record's frame proof, bridge, and sibling delegation are signed by its
+    // OWN credential's unlock identity and ladder VM, and this strike reaches
+    // only the retired credential's ladder VM, so it rots no sibling record.
+    // A sibling's bridge is refreshed by that credential's own login, on the
+    // expiry, renewal-window, and signer-gone axes.
     onUserKeyAdopted: async ({ userKey, latestEpochId, descriptor }) =>
       // The in-band adoption: the registry is re-sealed to the rotated key
       // BEFORE this browser's stored copy of the old one dies, so a tab

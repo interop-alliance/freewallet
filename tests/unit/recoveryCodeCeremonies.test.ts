@@ -252,11 +252,7 @@ import {
 } from '@interop/wallet-core/recovery'
 import { ladderVmAgent } from '@interop/wallet-core/clientAnnex'
 import { agentsFromSeed } from '@interop/wallet-core/identity'
-import {
-  issueRecoveryCode,
-  remintEntriesOf,
-  revokeRecoveryCode
-} from '@/session/recovery'
+import { issueRecoveryCode, revokeRecoveryCode } from '@/session/recovery'
 import { didWebProjectionStore } from '@/session/annexReach'
 import type { AccountCeremonyContext } from '@/session/accountCeremonyContext'
 import type { RecoveryCodeUnlockMethod } from '@/session/unlockMethods'
@@ -589,36 +585,7 @@ describe('recovery-code revocation on the ladder branch', () => {
   })
 })
 
-describe('the re-mint pass and a sibling record', () => {
-  it("never walks a recovery code's record, so no sibling signer is consulted", () => {
-    const record = {
-      version: 1 as const,
-      webAuthnUserId: 'user-1',
-      methods: [
-        {
-          type: 'recovery-code',
-          label: 'Code',
-          createdAt: new Date().toISOString(),
-          unlockSpaceId: 'code-space',
-          recoveryKid: 'kid-1',
-          keyAgreementKeyMultibase: 'z6LSCode',
-          updateKeyMultibase: 'z6MkRung0',
-          recoveryClientDid: 'did:key:z6MkCode'
-        },
-        {
-          type: 'passphrase',
-          label: 'Passphrase',
-          createdAt: new Date().toISOString(),
-          unlockSpaceId: 'passphrase-space',
-          unlockClientDid: 'did:key:z6MkPassphrase'
-        }
-      ]
-    }
-    const entries = remintEntriesOf({ record: record as never })
-    expect(entries).toHaveLength(1)
-    expect(entries[0]!.unlockSpaceId).toBe('passphrase-space')
-  })
-
+describe('a sibling record in the registry', () => {
   it('completes both ceremonies with a sibling record present in the registry', async () => {
     const session = sessionFixture()
     const { entry } = await issueRecoveryCode({

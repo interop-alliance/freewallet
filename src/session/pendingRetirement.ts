@@ -393,9 +393,8 @@ async function rebuildBareEntry({
  * Rebuilds a BARE passkey registry entry -- one carrying no identity members
  * -- from the passkey logging in, once the account document publishes that
  * credential's `keyAgreement` key. The passkey twin of the bare-entry rebuild
- * above, and the reason a passkey account is not left with an entry the
- * last-client transition refuses over
- * (`assertRegistryCoversStandingCredentials`) and no login can mend.
+ * above, and what keeps a passkey account's registry naming every standing
+ * credential the account document publishes.
  *
  * A passkey's PRF-derived key is high entropy, so the document publishes it
  * VERBATIM rather than as a commitment; that is the form checked here.

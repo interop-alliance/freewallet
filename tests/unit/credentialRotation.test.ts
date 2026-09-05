@@ -1000,6 +1000,31 @@ describe('the annex strike-or-swap stage', () => {
       )
     })
 
+    it('writes no sibling credential record on either kind', async () => {
+      // The regression: a passphrase change strikes only the retired
+      // credential's own ladder VM, so a sibling credential's record keeps
+      // verifying. Re-sealing it here would stamp the acting session's key
+      // as that record's frame signer, and the frame proof is checked before
+      // decryption, so the sibling's next login would refuse its own record.
+      await retireOnLadder({
+        context: ladderContext({ sibling: ACTING_SIBLING }),
+        standingUnlock: {
+          standingClient: { agents: { zcapClient: ACTING_ZCAP_CLIENT } }
+        }
+      })
+      const onLadder = vi.mocked(retireUnlockCredential).mock.calls[0]![0]
+      expect(onLadder).not.toHaveProperty('remintDependentRecords')
+
+      vi.mocked(retireUnlockCredential).mockImplementation(ceremonyDriving())
+      await rotateOffUnlockCredential({
+        session: sessionWith(),
+        method: PASSPHRASE_METHOD,
+        verb: 'changing the passphrase'
+      })
+      const enrolled = vi.mocked(retireUnlockCredential).mock.calls[1]![0]
+      expect(enrolled).not.toHaveProperty('remintDependentRecords')
+    })
+
     it('skips rather than root-invoking with no sibling to reach through', async () => {
       const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
       const outcome = await retireOnLadder({ context: ladderContext() })
