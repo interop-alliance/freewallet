@@ -2,6 +2,26 @@
 
 ## 0.49.1 - TBD
 
+### Fixed
+
+- A recovery spend now drops the registry entry, and deletes the unlock
+  Space, of every credential its add-and-retire entry struck, unspent
+  recovery codes included. The three registry mutations (both continuations'
+  tails and the spend resume) key on the continuation's own
+  `retiredCredentialVmIds` through one shared prologue, in place of a
+  document-membership test that skipped `recovery-code` entries and so left
+  a struck code listed in Settings with its Space standing. A credential on
+  `unclaimedCredentialVmIds` keeps its entry and is warned about by name,
+  since its committed rung hash is still live. The resume reads the same
+  report back off the log through wallet-core's
+  `recoverySpendRetirementFromLog`. `findRetiredCredentialEntries` is
+  replaced by `registryEntriesForCredentialVmIds`, which matches each entry
+  in the form its type publishes under.
+- Both recovery continuations' outcomes are logged: the struck rung hashes
+  and retired credentials at info, and each unclaimed credential at warn.
+- The recovery page's new-passphrase copy says recovery retires the other
+  recovery codes too, in `en` and `es`.
+
 ### Changed
 
 - Revoking a connected app rotates each app-provisioned collection once,

@@ -9,10 +9,10 @@
  * - an UNRECORDED standing credential -- a `keyAgreement` entry in the
  *   document carrying no enrolled-client controller marker that no registry
  *   entry records, in either published form;
- * - a RETIRED credential's entry -- the mirror of the unrecorded case: a
- *   registry entry whose credential the document no longer publishes, which
- *   is what a recovery spend leaves behind for every pre-recovery passphrase
- *   and passkey.
+ * - the entries NAMING a given set of credentials -- what a recovery spend
+ *   drops and deletes unlock Spaces for, keyed on the continuation's own
+ *   report of what its add-and-retire entry retired rather than on a
+ *   document-membership test repeated here.
  *
  * The first two name an unlock Space a registry-driven walk cannot reach. Two
  * ceremonies read them and grade them differently: the last-client transition
@@ -230,57 +230,62 @@ export async function findUnrecordedCredentials({
 }
 
 /**
- * The registry's passphrase and passkey entries naming a credential the
- * account document no longer publishes -- the residue a recovery spend
- * leaves, its add-and-retire entry having struck every pre-recovery standing
- * credential's `keyAgreement` member, ladder VM and committed rung hashes.
+ * The registry entries recording one of the given credentials: every
+ * passphrase, passkey, and recovery-code entry whose recorded key-agreement
+ * multibase maps to one of the verification-method ids, each compared in the
+ * form its type publishes under -- the commitment id for a passphrase (the
+ * hash-commitment rule), the verbatim id for a passkey or a recovery code. A
+ * bare entry, recording no multibase, names nothing to compare and is left
+ * out.
  *
- * The comparison is {@link findUnrecordedCredentials}'s, run the other way
- * round: an entry's recorded key-agreement multibase maps to both published
- * forms -- the verbatim id a passkey publishes under and the commitment id a
- * passphrase publishes under -- and the entry is retired when the document
- * carries neither. An entry recording no multibase (a bare entry) names
- * nothing to compare and is left alone, as are recovery codes, whose own
- * ceremonies drop them.
+ * The ids come from a ceremony's own report of what it did -- a recovery
+ * continuation's `retiredCredentialVmIds` (what the spend drops and deletes
+ * unlock Spaces for) or its `unclaimedCredentialVmIds` (what it warns about
+ * and keeps) -- so no document-membership test is repeated app-side, and an
+ * unspent recovery code the entry struck is found beside the passphrases
+ * and passkeys.
  *
  * @param options {object}
- * @param options.doc {object}   the verified post-entry account document
  * @param options.did {string}   the account's did:webvh
  * @param options.registry {{ methods?: unknown[] } | null}
- * @returns {Promise<UnlockMethod[]>}   the retired entries
+ * @param options.vmIds {string[]}   the credentials' `keyAgreement`
+ *   verification-method ids
+ * @returns {Promise<UnlockMethod[]>}   the entries recording them, in
+ *   registry order
  */
-export async function findRetiredCredentialEntries({
-  doc,
+export async function registryEntriesForCredentialVmIds({
   did,
-  registry
+  registry,
+  vmIds
 }: {
-  doc: object
   did: string
   registry: { methods?: unknown[] } | null
+  vmIds: string[]
 }): Promise<UnlockMethod[]> {
-  const standing = new Set(credentialKeyAgreementVmIds({ doc, did }))
-  const retired: UnlockMethod[] = []
+  const named = new Set(vmIds)
+  if (named.size === 0) {
+    return []
+  }
+  const entries: UnlockMethod[] = []
   for (const method of (registry?.methods ?? []) as UnlockMethod[]) {
-    if (method?.type !== 'passphrase' && method?.type !== 'passkey') {
-      continue
-    }
-    const keyAgreementKeyMultibase = method.keyAgreementKeyMultibase
+    const keyAgreementKeyMultibase = method?.keyAgreementKeyMultibase
     if (typeof keyAgreementKeyMultibase !== 'string') {
       continue
     }
-    const verbatimVmId = unlockKeyVmId({
+    const vmId = unlockKeyVmId({
       did,
-      keyAgreement: { publicKeyMultibase: keyAgreementKeyMultibase }
+      keyAgreement:
+        method.type === 'passphrase'
+          ? {
+              commitment: await keyAgreementCommitment({
+                keyAgreementKeyMultibase
+              })
+            }
+          : { publicKeyMultibase: keyAgreementKeyMultibase }
     })
-    const commitmentVmId = unlockKeyVmId({
-      did,
-      keyAgreement: {
-        commitment: await keyAgreementCommitment({ keyAgreementKeyMultibase })
-      }
-    })
-    if (!standing.has(verbatimVmId) && !standing.has(commitmentVmId)) {
-      retired.push(method)
+    if (named.has(vmId)) {
+      entries.push(method)
     }
   }
-  return retired
+  return entries
 }

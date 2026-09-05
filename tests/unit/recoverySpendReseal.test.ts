@@ -76,7 +76,13 @@ vi.mock('@interop/wallet-core/recovery', async importOriginal => ({
       })
       return {
         did: 'did:webvh:QmScidForTests:was.example.test:space:space-123:id',
-        committed: true
+        committed: true,
+        // The add-and-retire entry struck the passkey below, verbatim form.
+        retiredCredentialVmIds: [
+          `did:webvh:QmScidForTests:was.example.test:space:space-123:id#${RETIRED_KEY_AGREEMENT_MULTIBASE}`
+        ],
+        struckRungHashes: [],
+        unclaimedCredentialVmIds: []
       }
     }
   )
@@ -260,10 +266,9 @@ describe('the recovery spend, torn in the collection fan-out', () => {
   it("drops the retired credentials' registry entries and deletes their unlock Spaces", async () => {
     const code = await storeRecordForCode()
     const { idb } = createFakeSessionIdb()
-    // The mocked account document publishes no keyAgreement entry at all --
-    // the state the add-and-retire entry leaves, every pre-recovery standing
-    // credential struck -- so the passkey below names a credential nothing
-    // backs.
+    // The mocked continuation reports the passkey below retired, the way
+    // the add-and-retire entry reports every pre-recovery standing
+    // credential it struck.
     state.registry = {
       version: 1,
       webAuthnUserId: 'AAAAAAAAAAAAAAAAAAAAAA',

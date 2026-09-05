@@ -1863,12 +1863,21 @@ enrolled client is minted anywhere. The add-and-retire entry publishes the
 fresh credential's ladder VM in the new client's place (`assertionMethod`
 and `capabilityDelegation` only), beside the new passphrase's `keyAgreement`
 commitment and the replacement code's inventory, and retires every
-pre-recovery standing credential: its `keyAgreement` member, its ladder VM,
-and its committed rung hashes (the stale-third-party retirement no other
-ceremony performs). The remembered continuation strikes the same set. A
-recovery therefore leaves the account reachable by the new passphrase and
-the replacement code alone, and the recovery page says so. The account
-lands client-less and ladder-anchored.
+pre-recovery standing credential, every other passphrase, passkey, and
+unspent recovery code alike: its `keyAgreement` member, its ladder VM, its
+committed rung hashes, and any revealed rung it still holds (the
+stale-third-party retirement no other ceremony performs). The remembered
+continuation strikes the same set. Each credential's rungs are attributed
+from the log alone; one the log cannot attribute is reported on the
+outcome's `unclaimedCredentialVmIds` rather than struck, keeps a committed
+rung it could still reveal, and is warned about by name at both variants'
+return sites, while the struck rung hashes and retired credentials are
+logged as a record of work done. A retired credential's bridge delegation is
+not revoked: signed by its own ladder VM, which the entry struck, it stays
+live but inert, since it can extend nothing. A recovery therefore leaves the
+account reachable by the new passphrase and the replacement code alone, and
+the recovery page says so. The account lands client-less and
+ladder-anchored.
 
 The continuation's persist-before-publish seam runs after the reveal entry
 validates the code and before the ladder VM publishes. It mints a fresh
@@ -1899,13 +1908,17 @@ retired, fresh credential and replacement code escrowed, fresh epoch minted,
 one write anchored at the add-and-retire entry). The pre-rotation user key
 the registry update needs is unwrapped afterwards, from the superseded
 epoch's escrow to the fresh credential. The epoch cascade and the
-unlock-methods registry update (spent entry out, every retired passphrase
-and passkey entry out with it, replacement and new-passphrase entries in,
-re-sealed to the rotated user key) ride the generation delegation. Which
-entries are retired is read off the post-entry document inside the
-compare-and-swap (`findRetiredCredentialEntries`): a passphrase or passkey
-entry whose recorded key-agreement key the document publishes in neither
-form. Each retired entry's unlock Space is then deleted best-effort through
+unlock-methods registry update (spent entry out, every retired credential's
+entry out with it, unspent codes included, replacement and new-passphrase
+entries in, re-sealed to the rotated user key) ride the generation
+delegation. Which entries are retired is keyed on the continuation's own
+report (`retiredCredentialVmIds`) inside the compare-and-swap
+(`registryEntriesForCredentialVmIds`): an entry whose recorded key-agreement
+key the report names, in the form its type publishes under. An entry the
+report lists as unclaimed is kept and warned about instead, as every other
+retirement path keeps an unclaimed credential's entry, since it still
+records the rung-0 anchor a later retirement attributes the credential by.
+Each retired entry's unlock Space is then deleted best-effort through
 a DELETE-only child of its own management zcap, signed by the fresh
 credential's ladder VM and sent by its bare did:key; a refusal is reported
 rather than failing the run. The deletes run only once the registry write
@@ -1948,14 +1961,20 @@ entry then brings in the new client, retires the spent code's inventory, and
 adds the replacement code's. The tail then makes the passphrase standing:
 roster wrap, then commitment and rung-0 entry, before the rotation. The user
 key unwraps from the code's wrap and mandatorily rotates off it. The
-registry mutation (spent entry out, every retired passphrase and passkey
-entry out with it, successors in) runs between the re-seal and the cascade,
+registry mutation (spent entry out, every retired credential's entry out
+with it, successors in, keyed on the same report) runs between the re-seal
+and the cascade,
 and the new enrolled client then deletes each retired entry's unlock Space
 and this browser's unlock-local state for it, best-effort, and only once
 that registry write has landed (the transient tail's rule above). A write
 that failed leaves the entries named and their Spaces standing, and the
 spend resume's registry pass drops and deletes them on every arm, whether or
-not the successors already stand. The replacement
+not the successors already stand. The resume never re-enters the
+continuation, so it reads the same report back off the log
+(wallet-core's `recoverySpendRetirementFromLog`, from the pending record's
+update seeds, the replacement code, and the spent code's unwrap key); a
+record the add-and-retire entry never followed reports nothing retired. The
+replacement
 code is pushed hard, its save confirm completing the local record and
 clearing the carrier. The spent code's unlock Space is deleted, so a spent
 code thereafter fails distinctly. A

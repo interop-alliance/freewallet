@@ -381,7 +381,7 @@
       "codeLabel": "Recovery code",
       "checkCode": "Check code",
       "accountFound": "Found a wallet account for this code.",
-      "newPassphraseExplain": "Choose a new passphrase for this browser. Recovering retires every passphrase and passkey this wallet had before, on every browser; add the ones you still want back from Settings once you are signed in. It also retires the code you just typed and issues a replacement -- a typed code counts as used.",
+      "newPassphraseExplain": "Choose a new passphrase for this browser. Recovering retires every passphrase, passkey, and other recovery code this wallet had before, on every browser; add the ones you still want back from Settings once you are signed in. It also retires the code you just typed and issues a replacement -- a typed code counts as used.",
       "newPassphraseLabel": "New passphrase",
       "submit": "Recover wallet",
       "recovered": "Your wallet was recovered. This browser is now an enrolled client, and the code you typed no longer works.",

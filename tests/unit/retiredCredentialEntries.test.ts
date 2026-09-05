@@ -1,16 +1,17 @@
 // @vitest-environment node
 /**
- * The retired-credential detector a recovery spend's registry mutation runs
- * (`findRetiredCredentialEntries` in `src/session/credentialCoverage.ts`), and
- * the session-less arm of the deletion pre-flight the spend's Space deletes
- * ride (`unlockSpaceDeletionRefusal` in `src/session/unlockMethods.ts`).
+ * The entry lookup a recovery spend's registry mutation runs over the
+ * continuation's retirement report (`registryEntriesForCredentialVmIds` in
+ * `src/session/credentialCoverage.ts`), and the session-less arm of the
+ * deletion pre-flight the spend's Space deletes ride
+ * (`unlockSpaceDeletionRefusal` in `src/session/unlockMethods.ts`).
  *
  * A recovery continuation strikes every pre-recovery standing credential from
- * the account document, so the registry entries naming them are left pointing
- * at credentials nothing backs. The detector finds them in both published
- * forms; the pre-flight refuses a caller holding neither a session nor its own
- * signer, which is what makes the tails' explicit-signer deletes the only way
- * in.
+ * the account document and reports their verification-method ids. The lookup
+ * finds the registry entries naming them in both published forms, unspent
+ * recovery codes included; the pre-flight refuses a caller holding neither a
+ * session nor its own signer, which is what makes the tails' explicit-signer
+ * deletes the only way in.
  */
 import { describe, expect, it, vi } from 'vitest'
 
@@ -22,7 +23,7 @@ vi.mock('@/app.config', async importOriginal => ({
 import type { IZcap } from '@interop/data-integrity-core'
 import { agentsFromSeed } from '@interop/wallet-core/identity'
 import { keyAgreementCommitment } from '@interop/wallet-core/webvh'
-import { findRetiredCredentialEntries } from '@/session/credentialCoverage'
+import { registryEntriesForCredentialVmIds } from '@/session/credentialCoverage'
 import {
   unlockSpaceDeletionRefusal,
   type UnlockMethod
@@ -47,34 +48,13 @@ async function keyAgreementMultibase(seedByte: number): Promise<string> {
   return publicKeyMultibase
 }
 
-describe('findRetiredCredentialEntries', () => {
-  it('keeps the credentials the document still publishes and drops the rest', async () => {
+describe('registryEntriesForCredentialVmIds', () => {
+  it('finds the entries naming the given credentials, in either published form, codes included', async () => {
     const standingVerbatim = await keyAgreementMultibase(1)
     const standingCommitted = await keyAgreementMultibase(2)
     const goneVerbatim = await keyAgreementMultibase(3)
     const goneCommitted = await keyAgreementMultibase(4)
     const codeMultibase = await keyAgreementMultibase(5)
-    const doc = {
-      capabilityInvocation: [],
-      keyAgreement: [
-        {
-          id: `${DID}#${standingVerbatim}`,
-          type: 'Multikey',
-          controller: DID,
-          publicKeyMultibase: standingVerbatim
-        },
-        {
-          id: `${DID}#${await keyAgreementCommitment({
-            keyAgreementKeyMultibase: standingCommitted
-          })}`,
-          type: 'MultikeyCommitment',
-          controller: DID,
-          publicKeyCommitment: await keyAgreementCommitment({
-            keyAgreementKeyMultibase: standingCommitted
-          })
-        }
-      ]
-    }
     const methods = [
       {
         type: 'passkey',
@@ -117,7 +97,7 @@ describe('findRetiredCredentialEntries', () => {
       },
       {
         type: 'recovery-code',
-        label: 'a code',
+        label: 'an unspent code the recovery struck',
         createdAt: '2026-09-01T00:00:00.000Z',
         unlockSpaceId: 'unlock-code',
         recoveryKid: 'kid-code',
@@ -125,25 +105,45 @@ describe('findRetiredCredentialEntries', () => {
         updateKeyMultibase: 'z6MkCodeRung0'
       }
     ] as unknown as UnlockMethod[]
+    // What a continuation reports: the passkey and the code under their
+    // verbatim ids, the passphrase under its commitment id. The standing
+    // credentials' ids, and the retired passphrase's verbatim form, are not
+    // in it.
+    const vmIds = [
+      `${DID}#${goneVerbatim}`,
+      `${DID}#${await keyAgreementCommitment({
+        keyAgreementKeyMultibase: goneCommitted
+      })}`,
+      `${DID}#${codeMultibase}`,
+      `${DID}#${goneCommitted}`
+    ]
 
-    const retired = await findRetiredCredentialEntries({
-      doc,
+    const entries = await registryEntriesForCredentialVmIds({
       did: DID,
-      registry: { methods }
+      registry: { methods },
+      vmIds
     })
 
-    expect(retired.map(entry => entry.unlockSpaceId)).toEqual([
+    expect(entries.map(entry => entry.unlockSpaceId)).toEqual([
       'unlock-retired-passkey',
-      'unlock-retired-passphrase'
+      'unlock-retired-passphrase',
+      'unlock-code'
     ])
   })
 
-  it('finds nothing in a registry that records no credentials', async () => {
+  it('finds nothing for an empty id set or an absent registry', async () => {
     expect(
-      await findRetiredCredentialEntries({
-        doc: { keyAgreement: [] },
+      await registryEntriesForCredentialVmIds({
         did: DID,
-        registry: null
+        registry: null,
+        vmIds: [`${DID}#zAnything`]
+      })
+    ).toEqual([])
+    expect(
+      await registryEntriesForCredentialVmIds({
+        did: DID,
+        registry: { methods: [{ type: 'passphrase', unlockSpaceId: 'x' }] },
+        vmIds: []
       })
     ).toEqual([])
   })

@@ -254,7 +254,12 @@ describe('establishClientAnnexGeneration', () => {
         accountSpaceId: POINTER.spaceId,
         wasServerUrl: POINTER.host,
         mintController: 'did:key:zClient',
-        updateKeys: { updateSeed: expect.any(Uint8Array) }
+        signer: {
+          kind: 'client',
+          updateKeys: expect.objectContaining({
+            updateSeed: expect.any(Uint8Array)
+          })
+        }
       })
     )
     // The fold minted the generation with its delegation embedded, so the

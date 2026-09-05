@@ -129,6 +129,7 @@ import {
   publishRecoveryKey,
   recoverWebvhClient,
   recoveryClientFromCode,
+  recoverySpendRetirementFromLog,
   RECOVERY_KDF,
   remintRecoveryDelegations as remintDelegationsCore,
   removeRecoveryKey,
@@ -138,6 +139,7 @@ import {
   type RecoveryClient,
   type RecoveryDelegationEntry,
   type RecoveryLogStore,
+  type RecoverySpendRetirement,
   type UnlockRecordProofState
 } from '@interop/wallet-core/recovery'
 import { base58 } from '@scure/base'
@@ -163,7 +165,7 @@ import {
   type PersistableClientKeys
 } from '@/session/keyring'
 import { KEYRING_KDF } from '@interop/wallet-core/keyring'
-import { findRetiredCredentialEntries } from '@/session/credentialCoverage'
+import { registryEntriesForCredentialVmIds } from '@/session/credentialCoverage'
 import { transientSessionStores } from '@/session/persistence'
 import {
   deleteUnlockSpaceForEntry,
@@ -915,6 +917,118 @@ export interface RecoveryOutcome {
 }
 
 /**
+ * Logs what a recovery continuation retired, at both variants' return sites:
+ * the struck rung hashes and the retired credentials are a record of work
+ * done, at info; each credential on `unclaimedCredentialVmIds` is a residue
+ * at warn, since the log could not attribute its rungs and it keeps a
+ * committed rung it could still reveal. Its bridge delegation stays live but
+ * inert.
+ *
+ * @param options {object}
+ * @param options.variant {'remembered' | 'transient'}
+ * @param options.retirement {RecoverySpendRetirement}
+ */
+function reportRecoveryRetirement({
+  variant,
+  retirement
+}: {
+  variant: 'remembered' | 'transient'
+  retirement: RecoverySpendRetirement
+}): void {
+  log.info('Recovery retired the pre-recovery credentials', {
+    variant,
+    retiredCredentialVmIds: retirement.retiredCredentialVmIds,
+    struckRungHashes: retirement.struckRungHashes
+  })
+  for (const credentialVmId of retirement.unclaimedCredentialVmIds) {
+    log.warn(
+      "Recovery could not attribute a retired credential's rungs; it keeps a committed rung it could still reveal",
+      { credentialVmId }
+    )
+  }
+}
+
+/**
+ * The registry prologue every spend tail and the spend resume share: the
+ * entries of every credential the continuation retired out -- passphrases,
+ * passkeys, and unspent recovery codes alike, keyed on the continuation's
+ * `retiredCredentialVmIds` -- plus the recovery-code entries the tail names
+ * dropped by kid (the spent code's; the replacement's, re-appended after
+ * this), with the acting credential's own entry spared (a torn earlier
+ * attempt may have written it, and the caller re-upserts it).
+ *
+ * An entry on `unclaimedCredentialVmIds` is kept, and said so: the
+ * credential's `keyAgreement` member left the document, but the log could
+ * not attribute its ladder and its committed rung hash stays live, so the
+ * entry keeps recording the rung-0 anchor a later retirement attributes it
+ * by, as every other retirement path keeps an unclaimed credential's entry.
+ *
+ * @param options {object}
+ * @param options.registry {UnlockMethodsRecord | null}   the served record
+ * @param options.did {string}   the account's did:webvh
+ * @param options.retirement {RecoverySpendRetirement}   the continuation's
+ *   report
+ * @param options.spareUnlockSpaceId {string}   the acting credential's unlock
+ *   Space id
+ * @param options.dropRecoveryKids {string[]}   the recovery-code entries
+ *   dropped by kid
+ * @returns {Promise<{ record: UnlockMethodsRecord, retired: UnlockMethod[] }>}
+ *   the record without them, and the retired entries the caller deletes
+ *   unlock Spaces for once the write lands
+ */
+async function withoutRetiredCredentialEntries({
+  registry,
+  did,
+  retirement,
+  spareUnlockSpaceId,
+  dropRecoveryKids
+}: {
+  registry: UnlockMethodsRecord | null
+  did: string
+  retirement: RecoverySpendRetirement
+  spareUnlockSpaceId: string
+  dropRecoveryKids: string[]
+}): Promise<{ record: UnlockMethodsRecord; retired: UnlockMethod[] }> {
+  const base = registry ?? emptyUnlockMethodsRegistry()
+  const unclaimed = await registryEntriesForCredentialVmIds({
+    did,
+    registry: base,
+    vmIds: retirement.unclaimedCredentialVmIds
+  })
+  for (const entry of unclaimed) {
+    log.warn(
+      "A retired credential's registry entry is kept: the recovery could not attribute its rungs, and its committed rung hash is still live",
+      { unlockSpaceId: entry.unlockSpaceId, type: entry.type }
+    )
+  }
+  const kept = new Set(unclaimed.map(entry => entry.unlockSpaceId))
+  const retired = (
+    await registryEntriesForCredentialVmIds({
+      did,
+      registry: base,
+      vmIds: retirement.retiredCredentialVmIds
+    })
+  ).filter(
+    entry =>
+      entry.unlockSpaceId !== spareUnlockSpaceId &&
+      !kept.has(entry.unlockSpaceId)
+  )
+  const retiredSpaceIds = new Set(retired.map(entry => entry.unlockSpaceId))
+  const dropped = new Set(dropRecoveryKids)
+  return {
+    retired,
+    record: {
+      ...base,
+      methods: base.methods.filter(
+        method =>
+          !retiredSpaceIds.has(method.unlockSpaceId) &&
+          (method.type !== 'recovery-code' || !dropped.has(method.recoveryKid))
+      )
+    }
+  }
+}
+
+/**
  * Best-effort removal of the unlock Spaces a recovery spend just retired: the
  * pre-recovery passphrase and passkey credentials the add-and-retire entry
  * struck from the account document, whose registry entries the tail has
@@ -1362,6 +1476,7 @@ export async function recoverAccountWithCode({
         "credential's records."
     )
   }
+  reportRecoveryRetirement({ variant: 'remembered', retirement: continuation })
 
   // From here the new client is an enrolled client under the current-key-set
   // rule: its `<did:webvh>#<multibase>` key signs everything.
@@ -1552,37 +1667,26 @@ export async function recoverAccountWithCode({
   try {
     const bridgeKeyId = delegationProofKeyId(newBridge)
     const siblingKeyId = sibling ? delegationProofKeyId(sibling) : undefined
-    const dropped = new Set([replacementMethod.recoveryKid, spent.recipientKid])
     await updateUnlockMethodsWithClient({
       zcapClient: newZcapClient,
       spaceId: pointer.spaceId,
       userKey: newUserKey,
       mutate: async existing => {
-        const base = existing ?? emptyUnlockMethodsRegistry()
-        // Every pre-recovery passphrase and passkey left the document in the
-        // add-and-retire entry, so its registry entry names a credential
-        // nothing backs. The new passphrase's own unlock Space is spared:
-        // a torn earlier attempt may have written its entry before the
-        // establishment landed, and that entry is re-upserted below.
-        retired = (
-          await findRetiredCredentialEntries({
-            doc,
-            did: accountDid,
-            registry: base
-          })
-        ).filter(entry => entry.unlockSpaceId !== recordBind.unlockSpaceId)
-        const retiredSpaceIds = new Set(
-          retired.map(entry => entry.unlockSpaceId)
-        )
-        const methods = [
-          ...base.methods.filter(
-            method =>
-              (method.type !== 'recovery-code' ||
-                !dropped.has(method.recoveryKid)) &&
-              !retiredSpaceIds.has(method.unlockSpaceId)
-          ),
-          replacementMethod
-        ]
+        // Every credential the add-and-retire entry struck -- passphrases,
+        // passkeys, and unspent codes -- names nothing the document backs,
+        // so its entry goes, keyed on the continuation's own report. The
+        // new passphrase's own unlock Space is spared: a torn earlier
+        // attempt may have written its entry before the establishment
+        // landed, and that entry is re-upserted below.
+        const base = await withoutRetiredCredentialEntries({
+          registry: existing,
+          did: accountDid,
+          retirement: continuation,
+          spareUnlockSpaceId: recordBind.unlockSpaceId,
+          dropRecoveryKids: [replacementMethod.recoveryKid, spent.recipientKid]
+        })
+        retired = base.retired
+        const methods = [...base.record.methods, replacementMethod]
         // The standing block only when the establishment above landed: a
         // failed establishment writes a BARE entry instead -- the shape the
         // bare-entry repairs treat as mendable (and they rebuild only once
@@ -1590,7 +1694,7 @@ export async function recoverAccountWithCode({
         // the registry never asserts a standing configuration the account
         // does not back.
         return upsertPassphraseUnlockMethod({
-          record: { ...base, methods },
+          record: { ...base.record, methods },
           unlockSpaceId: recordBind.unlockSpaceId,
           manageCapability: recordBind.manageCapability,
           ...(standingEstablished
@@ -1890,18 +1994,53 @@ export async function resumeRecoverySpend({
         code: base58.encode(pending.replacementCode)
       })
     : undefined
-  // The verified account document, resolved at most once and shared by the
-  // standing backfill and the registry backfill below. A resume that runs on
-  // a record the add-and-retire entry never followed resolves the PRE-entry
-  // document, where every pre-recovery credential still stands -- so the
-  // retired-entry detection below finds nothing, which is the safe direction.
+  // The verified account log, resolved at most once and shared by the
+  // standing backfill and the registry backfill below.
   let verifiedAccount: VerifiedAccountLog | undefined = verifiedLog
-  async function accountDocument(): Promise<object> {
+  async function accountLog(): Promise<VerifiedAccountLog> {
     verifiedAccount ??= await verifyAccountLog({
       ...logPointer,
       pinStore: memoryResourceLogPinStore()
     })
-    return verifiedAccount.doc as object
+    return verifiedAccount
+  }
+  async function accountDocument(): Promise<object> {
+    return (await accountLog()).doc as object
+  }
+  // What the add-and-retire entry retired, read back off the log from the
+  // successors' public halves the pending record carries (this client's
+  // update seeds, the replacement code, the spent code's unwrap key): the
+  // same report the first run's continuation returned, so the resume drops
+  // and deletes exactly what the tail would have. A resume on a record the
+  // entry never followed reports nothing retired, the safe direction; so
+  // does one whose record carries no unwrap key, since the spent code's own
+  // id cannot be set apart then.
+  async function spendRetirement(): Promise<RecoverySpendRetirement> {
+    const updateKeys = clientKeys!.webvhUpdateKeys!
+    if (!replacement || !pending?.unwrapKey) {
+      return {
+        retiredCredentialVmIds: [],
+        struckRungHashes: [],
+        unclaimedCredentialVmIds: []
+      }
+    }
+    const spentIdentity = await unlockClientIdentityFromSeed({
+      clientSeed: pending.unwrapKey
+    })
+    return recoverySpendRetirementFromLog({
+      log: (await accountLog()).log,
+      did,
+      successor: {
+        updateKeyMultibase: await updateKeyMultibase({
+          seed: updateKeys.updateSeed
+        }),
+        stagedKeyMultibase: await updateKeyMultibase({
+          seed: updateKeys.stagedSeed
+        })
+      },
+      replacementUpdateKeyMultibase: replacement.updateKeyMultibase,
+      spentKeyAgreementKeyMultibase: spentIdentity.keyAgreementKeyMultibase
+    })
   }
 
   // 1. The escrow completion. Both `addUserKeyRosterRecipient` calls are the
@@ -2085,32 +2224,32 @@ export async function resumeRecoverySpend({
         spaceId: pointer.spaceId,
         userKey
       })
-      const doc = await accountDocument()
-      // Every pre-recovery passphrase and passkey left the document in the
-      // add-and-retire entry, so its registry entry names a credential
-      // nothing backs. The new passphrase's own unlock Space is spared: it
-      // is re-upserted below.
-      const retiredIn = async (
-        registry: UnlockMethodsRecord | null
-      ): Promise<UnlockMethod[]> =>
-        (await findRetiredCredentialEntries({ doc, did, registry })).filter(
-          retiredEntry => retiredEntry.unlockSpaceId !== found.unlockSpaceId
-        )
+      const retirement = await spendRetirement()
+      reportRecoveryRetirement({ variant: 'remembered', retirement })
+      // Every credential the add-and-retire entry struck names nothing the
+      // document backs, so its entry goes. The new passphrase's own unlock
+      // Space is spared: it is re-upserted below.
       const withoutRetired = async (
-        base: UnlockMethodsRecord
+        base: UnlockMethodsRecord | null,
+        dropRecoveryKids: string[] = []
       ): Promise<UnlockMethodsRecord> => {
-        retired = await retiredIn(base)
-        const retiredSpaceIds = new Set(
-          retired.map(retiredEntry => retiredEntry.unlockSpaceId)
-        )
-        return {
-          ...base,
-          methods: base.methods.filter(
-            method => !retiredSpaceIds.has(method.unlockSpaceId)
-          )
-        }
+        const dropped = await withoutRetiredCredentialEntries({
+          registry: base,
+          did,
+          retirement,
+          spareUnlockSpaceId: found.unlockSpaceId,
+          dropRecoveryKids
+        })
+        retired = dropped.retired
+        return dropped.record
       }
-      const retiredStanding = (await retiredIn(existing)).length > 0
+      const retiredStanding = (
+        await registryEntriesForCredentialVmIds({
+          did,
+          registry: existing,
+          vmIds: retirement.retiredCredentialVmIds
+        })
+      ).some(retiredEntry => retiredEntry.unlockSpaceId !== found.unlockSpaceId)
       const hasReplacement = recoveryEntriesOf({ record: existing }).some(
         entry => entry.recoveryKid === replacement.recipientKid
       )
@@ -2168,26 +2307,16 @@ export async function resumeRecoverySpend({
         const standingFields = standingEstablished
           ? await standingFieldsOfKeyringHit({ found })
           : undefined
-        const dropped = new Set([
-          entry.recoveryKid,
-          ...(spentKid ? [spentKid] : [])
-        ])
         await updateUnlockMethodsWithClient({
           zcapClient: newZcapClient,
           spaceId: pointer.spaceId,
           userKey,
           mutate: async current => {
-            const base = await withoutRetired(
-              current ?? emptyUnlockMethodsRegistry()
-            )
-            const methods = [
-              ...base.methods.filter(
-                method =>
-                  method.type !== 'recovery-code' ||
-                  !dropped.has(method.recoveryKid)
-              ),
-              entry
-            ]
+            const base = await withoutRetired(current, [
+              entry.recoveryKid,
+              ...(spentKid ? [spentKid] : [])
+            ])
+            const methods = [...base.methods, entry]
             return upsertPassphraseUnlockMethod({
               record: { ...base, methods },
               unlockSpaceId: found.unlockSpaceId,
@@ -2210,9 +2339,7 @@ export async function resumeRecoverySpend({
           userKey,
           mutate: async current =>
             upsertPassphraseUnlockMethod({
-              record: await withoutRetired(
-                current ?? emptyUnlockMethodsRegistry()
-              ),
+              record: await withoutRetired(current),
               unlockSpaceId: found.unlockSpaceId,
               manageCapability: found.manageCapability,
               standing: standingFields
@@ -2230,8 +2357,7 @@ export async function resumeRecoverySpend({
           zcapClient: newZcapClient,
           spaceId: pointer.spaceId,
           userKey,
-          mutate: async current =>
-            withoutRetired(current ?? emptyUnlockMethodsRegistry())
+          mutate: async current => withoutRetired(current)
         })
       }
     } catch (err) {
@@ -2649,6 +2775,7 @@ async function recoverAccountTransient({
         "credential's records."
     )
   }
+  reportRecoveryRetirement({ variant: 'transient', retirement: continuation })
 
   // The fresh genesis embedded its delegation inside the seam; a generation
   // without one here is a torn establishment, not a mintable state.
@@ -2755,7 +2882,6 @@ async function recoverAccountTransient({
   // Filled by the mutation below, consumed by the Space deletes after it.
   let retired: UnlockMethod[] = []
   try {
-    const dropped = new Set([replacementMethod.recoveryKid, spent.recipientKid])
     const bridgeKeyId = delegationProofKeyId(bridge)
     const siblingKeyId = delegationProofKeyId(sibling)
     await updateUnlockMethodsWithClient({
@@ -2765,31 +2891,21 @@ async function recoverAccountTransient({
       writeUserKey: newUserKey,
       capability: generationDelegation,
       mutate: async existing => {
-        const base = existing ?? emptyUnlockMethodsRegistry()
-        // Every pre-recovery passphrase and passkey left the document in the
-        // add-and-retire entry, so its registry entry names a credential
-        // nothing backs. The fresh credential's own unlock Space is spared.
-        retired = (
-          await findRetiredCredentialEntries({
-            doc: continuation.doc as object,
-            did,
-            registry: base
-          })
-        ).filter(entry => entry.unlockSpaceId !== recordBind.unlockSpaceId)
-        const retiredSpaceIds = new Set(
-          retired.map(entry => entry.unlockSpaceId)
-        )
-        const methods = [
-          ...base.methods.filter(
-            method =>
-              (method.type !== 'recovery-code' ||
-                !dropped.has(method.recoveryKid)) &&
-              !retiredSpaceIds.has(method.unlockSpaceId)
-          ),
-          replacementMethod
-        ]
+        // Every credential the add-and-retire entry struck -- passphrases,
+        // passkeys, and unspent codes -- names nothing the document backs,
+        // so its entry goes, keyed on the continuation's own report. The
+        // fresh credential's own unlock Space is spared.
+        const base = await withoutRetiredCredentialEntries({
+          registry: existing,
+          did,
+          retirement: continuation,
+          spareUnlockSpaceId: recordBind.unlockSpaceId,
+          dropRecoveryKids: [replacementMethod.recoveryKid, spent.recipientKid]
+        })
+        retired = base.retired
+        const methods = [...base.record.methods, replacementMethod]
         return upsertPassphraseUnlockMethod({
-          record: { ...base, methods },
+          record: { ...base.record, methods },
           unlockSpaceId: recordBind.unlockSpaceId,
           manageCapability: recordBind.manageCapability,
           standing: {

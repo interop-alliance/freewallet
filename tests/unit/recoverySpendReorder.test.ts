@@ -45,7 +45,14 @@ const state = vi.hoisted(() => ({
   rosterReads: 0,
   rosterUnwrapFailuresBeforeSuccess: 0,
   rosterRecipients: [] as string[],
-  accountDoc: { verificationMethod: [] } as unknown
+  accountDoc: { verificationMethod: [] } as unknown,
+  // What the continuation (and, on the resume, the log read-back) reports
+  // retired: the tails key their registry drop on it.
+  retirement: {
+    retiredCredentialVmIds: [] as string[],
+    struckRungHashes: [] as string[],
+    unclaimedCredentialVmIds: [] as string[]
+  }
 }))
 
 vi.mock('@/app.config', async importOriginal => ({
@@ -106,10 +113,13 @@ vi.mock('@interop/wallet-core/recovery', async importOriginal => ({
       state.calls.push('add-entry')
       return {
         did: 'did:webvh:QmScidForTests:was.example.test:space:space-123:id',
-        ...(state.omitCommitted ? {} : { committed: true })
+        ...(state.omitCommitted ? {} : { committed: true }),
+        ...state.retirement
       }
     }
-  )
+  ),
+  // The resume's read-back of the same report off the log.
+  recoverySpendRetirementFromLog: vi.fn(async () => state.retirement)
 }))
 
 vi.mock('@interop/wallet-core/unlock', async importOriginal => ({
@@ -328,31 +338,83 @@ async function docPublishingCommitment({
 }
 
 /**
+ * A real X25519 key-agreement multibase for a fixture credential, so the
+ * registry passes hash decodable multikey bytes into the commitment form.
+ *
+ * @param seedByte {number}   the fill byte of the 32-byte seed
+ * @returns {Promise<string>}
+ */
+async function keyAgreementMultibase(seedByte: number): Promise<string> {
+  const { agentsFromSeed } = await import('@interop/wallet-core/identity')
+  const { keyAgreementKey } = await agentsFromSeed({
+    seed: new Uint8Array(32).fill(seedByte)
+  })
+  return (keyAgreementKey as unknown as { publicKeyMultibase: string })
+    .publicKeyMultibase
+}
+
+/**
  * A registry entry for a pre-recovery passphrase the add-and-retire entry
- * struck: its key-agreement multibase is real (the retired-entry detector
- * hashes it into a commitment) and the mocked document publishes neither
- * form, so every registry pass finds it retired. The management zcap names
- * its own controller, the delegatee the remembered tail's deletes take.
+ * struck, and marks the mocked continuation as reporting it retired under
+ * its commitment id. The management zcap names its own controller, the
+ * delegatee the remembered tail's deletes take.
  *
  * @returns {Promise<Record<string, unknown>>}
  */
 async function retiredPassphraseEntry(): Promise<Record<string, unknown>> {
-  const { agentsFromSeed } = await import('@interop/wallet-core/identity')
-  const { keyAgreementKey } = await agentsFromSeed({
-    seed: new Uint8Array(32).fill(7)
-  })
+  const multibase = await keyAgreementMultibase(7)
+  state.retirement.retiredCredentialVmIds.push(
+    unlockKeyVmId({
+      did: POINTER.did!,
+      keyAgreement: {
+        commitment: await keyAgreementCommitment({
+          keyAgreementKeyMultibase: multibase
+        })
+      }
+    })
+  )
   return {
     type: 'passphrase',
     createdAt: '2026-09-01T00:00:00.000Z',
     unlockSpaceId: 'unlock-retired-passphrase',
-    keyAgreementKeyMultibase: (
-      keyAgreementKey as unknown as { publicKeyMultibase: string }
-    ).publicKeyMultibase,
+    keyAgreementKeyMultibase: multibase,
     manageCapability: {
       id: 'urn:zcap:delegated:manage-retired',
       controller: 'did:key:z6MkRetiredUnlockIdentity',
       invocationTarget: `${POINTER.host}/space/unlock-retired-passphrase`,
       allowedAction: ['GET', 'PUT', 'DELETE']
+    }
+  }
+}
+
+/**
+ * A registry entry for an UNSPENT recovery code the add-and-retire entry
+ * struck beside the passphrases and passkeys: a code's `keyAgreement` member
+ * publishes verbatim, so its id is the plain `<did>#<multibase>` form.
+ *
+ * @returns {Promise<{ entry: Record<string, unknown>, vmId: string }>}
+ */
+async function unspentCodeEntry(): Promise<{
+  entry: Record<string, unknown>
+  vmId: string
+}> {
+  const multibase = await keyAgreementMultibase(8)
+  return {
+    vmId: `${POINTER.did}#${multibase}`,
+    entry: {
+      type: 'recovery-code',
+      label: 'an unspent code the recovery struck',
+      createdAt: '2026-09-01T00:00:00.000Z',
+      unlockSpaceId: 'unlock-other-code',
+      recoveryKid: 'kid-other-code',
+      keyAgreementKeyMultibase: multibase,
+      updateKeyMultibase: 'z6MkOtherCodeRung0',
+      manageCapability: {
+        id: 'urn:zcap:delegated:manage-other-code',
+        controller: 'did:key:z6MkOtherCodeUnlockIdentity',
+        invocationTarget: `${POINTER.host}/space/unlock-other-code`,
+        allowedAction: ['GET', 'PUT', 'DELETE']
+      }
     }
   }
 }
@@ -373,6 +435,11 @@ beforeEach(() => {
   state.rosterUnwrapFailuresBeforeSuccess = 0
   state.rosterRecipients = []
   state.accountDoc = { verificationMethod: [] }
+  state.retirement = {
+    retiredCredentialVmIds: [],
+    struckRungHashes: [],
+    unclaimedCredentialVmIds: []
+  }
   vi.clearAllMocks()
 })
 
@@ -758,6 +825,75 @@ describe('the retired credentials -- entry-drop-first, deletes gated on the drop
     expect(state.calls.indexOf('deleteRetiredSpace')).toBeGreaterThan(
       state.calls.indexOf('registryMutation')
     )
+  })
+
+  it("drops an unspent code's entry and deletes its Space, keyed on the continuation's report", async () => {
+    const { code } = await storeRecordForCode()
+    const { idb } = createFakeSessionIdb()
+    const other = await unspentCodeEntry()
+    // Two unspent codes on the account: the one being spent (its entry was
+    // never in this fixture registry) and this one, which the add-and-retire
+    // entry struck beside every other pre-recovery credential.
+    state.registryRecord = { methods: [other.entry] }
+    state.retirement.retiredCredentialVmIds = [other.vmId]
+
+    await recoverAccountWithCode({
+      code,
+      newPassphrase: NEW_PASSPHRASE,
+      rememberBrowser: true,
+      idb
+    })
+
+    const written = state.registryRecord as {
+      methods: Array<{ type: string; unlockSpaceId?: string }>
+    }
+    expect(
+      written.methods.some(
+        method => method.unlockSpaceId === 'unlock-other-code'
+      )
+    ).toBe(false)
+    // The replacement code's own entry still lands beside the passphrase's.
+    expect(
+      written.methods.filter(method => method.type === 'recovery-code')
+    ).toHaveLength(1)
+    expect(state.deletedEntrySpaceIds).toEqual(['unlock-other-code'])
+  })
+
+  it('keeps and warns about a credential whose rungs the continuation could not claim', async () => {
+    const { code } = await storeRecordForCode()
+    const { idb } = createFakeSessionIdb()
+    const other = await unspentCodeEntry()
+    state.registryRecord = { methods: [other.entry] }
+    // Struck from the document, but its committed rung hash is still live.
+    state.retirement.retiredCredentialVmIds = [other.vmId]
+    state.retirement.unclaimedCredentialVmIds = [other.vmId]
+    const capture = captureSink()
+    addSink(capture.sink)
+
+    await recoverAccountWithCode({
+      code,
+      newPassphrase: NEW_PASSPHRASE,
+      rememberBrowser: true,
+      idb
+    })
+
+    const written = state.registryRecord as {
+      methods: Array<{ unlockSpaceId?: string }>
+    }
+    expect(
+      written.methods.some(
+        method => method.unlockSpaceId === 'unlock-other-code'
+      )
+    ).toBe(true)
+    expect(state.deletedEntrySpaceIds).toEqual([])
+    expect(
+      capture.events.filter(
+        event =>
+          event.level === 'warn' &&
+          (String(event.msg).includes('could not attribute') ||
+            String(event.msg).includes('registry entry is kept'))
+      )
+    ).toHaveLength(2)
   })
 
   it('deletes no Space when the registry write fails: the entries still name them', async () => {
