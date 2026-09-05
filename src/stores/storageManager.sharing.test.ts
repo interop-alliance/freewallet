@@ -1338,6 +1338,71 @@ describe('StorageManager.revokeAppCollectionRecipients', () => {
     )
   })
 
+  it('retires several non-owner recipients in one rotation', async () => {
+    const owner = await generateKey()
+    const app = await generateKey()
+    const other = await generateKey()
+    const { remoteStore, revoked } = makeFakeRemote()
+    const descriptors = await provisionFakeRemote(owner, remoteStore)
+    const ciphers = await buildCiphers(owner, descriptors)
+    const { localStore, user } = await initLocalStore(ciphers)
+    const storage = new StorageManager({
+      persistence: browserLocalSessionPersistence(),
+      localStore,
+      remoteStore,
+      ciphers,
+      vaultKeys: owner,
+      descriptors
+    })
+
+    await storage.provisionAppCollection({
+      collectionId: 'app-docs',
+      appRecipient: ownerRecipient({ keyAgreementKey: app.keyAgreementKey })
+    })
+    await storage.provisionAppCollection({
+      collectionId: 'app-docs',
+      appRecipient: ownerRecipient({ keyAgreementKey: other.keyAgreementKey })
+    })
+    const before = await remoteStore.collectionEncryption({
+      collectionId: 'app-docs'
+    })
+    expect(currentEpochKids(before!)).toHaveLength(3)
+    const epochsBefore = before!.epochs!.length
+
+    const future = new Date(Date.now() + 1_000_000).toISOString()
+    const target = 'https://was.example/space/s-space/app-docs'
+    await storage.addHistoryLogin({
+      user,
+      origin: APP_ORIGIN,
+      grants: [
+        {
+          id: 'g-app-docs',
+          target,
+          allowedActions: ['GET', 'HEAD'],
+          expires: future,
+          zcap: delegatedZcap({ id: 'z-app-docs', target, expires: future })
+        }
+      ],
+      appConnect: { name: 'Example App', firstRun: true }
+    })
+
+    const outcome = await storage.revokeAppCollectionRecipients({
+      origin: APP_ORIGIN,
+      subjectDid: APP_SUBJECT
+    })
+
+    expect(outcome).toEqual({ collections: 1, rotated: 1, failed: 0 })
+    const after = await remoteStore.collectionEncryption({
+      collectionId: 'app-docs'
+    })
+    // One fresh epoch for both retiring readers, and one revocation POST.
+    expect(after!.epochs).toHaveLength(epochsBefore + 1)
+    expect(currentEpochKids(after!)).toEqual([owner.keyAgreementKey.id])
+    expect((revoked as Array<{ id: string }>).map(zcap => zcap.id)).toEqual([
+      'z-app-docs'
+    ])
+  })
+
   it('drops the app from the blinding-key wrap set without rotating the key', async () => {
     const owner = await generateKey()
     const app = await generateKey()

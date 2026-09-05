@@ -2134,7 +2134,11 @@ durable-state-only, the fan-out completes a cascade another client crashed
 partway through; on a healthy account both stages read descriptors and write
 nothing. Together they are the standing invariant check that the roster keys
 exactly the document's clients and that no collection's current epoch names
-a retired user key generation.
+a retired user key generation. The roster stage writes through the store
+instance the login read came through (`checkUserKeyRosterAtLogin` hands it
+back beside the read), seeded with that read's validator, so a convergence
+that rotates or escrows acquires the roster log no second time, and its
+adoption runs on the rotation's own verified result.
 
 Recovery-code spend and revocation drive stages 2 and 3 of the same cascade,
 which closes the "writes still land under readable epochs" residue in both

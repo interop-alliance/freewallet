@@ -2914,12 +2914,12 @@ export class StorageManager {
   /**
    * The key-rotation half of revoking a connected app's access: for each
    * app-provisioned encrypted collection the app was granted, removes every
-   * non-owner recipient entry from the current epoch via was-client's
-   * `removeRecipient` (which rotates the epoch FIRST, then runs the pull axis
-   * -- indivisible), so a revoked app cannot decrypt future writes. The
-   * collection's pull-axis zcaps are revoked once, on the first removal; a
-   * further non-owner entry rotates under a no-op pull rather than re-POSTing
-   * the same revocations. The owner (the vault KAK) stays recipient zero; for
+   * non-owner recipient entry from the current epoch in ONE was-client
+   * `removeRecipient` call (which rotates the epoch FIRST, then runs the pull
+   * axis -- indivisible), so a revoked app cannot decrypt future writes.
+   * However many non-owner entries retire, the collection gains one epoch and
+   * its pull-axis zcaps are revoked once. The owner (the vault KAK) stays
+   * recipient zero; for
    * these collections every non-owner entry is the app's, and removal needs no
    * seed (the roster kid is in the descriptor), so it works even for an
    * orphaned state.
@@ -2997,27 +2997,19 @@ export class StorageManager {
           if (nonOwner.length === 0) {
             return 'skipped' as const
           }
-          // Each removal rotates the current epoch, so they run in order
-          // against this collection's descriptor. The pull axis is spent
-          // once: the first removal carries the collection's grants, and the
-          // rest pass a no-op pull, so k non-owner recipients no longer mean
-          // k POSTs of the same capabilities.
-          for (const [position, recipientId] of nonOwner.entries()) {
-            const newDescriptor = await removeRecipient({
-              collection: remote.collectionHandle({ collectionId }),
-              ...(position === 0
-                ? { space: remote.spaceHandle(), revoke }
-                : { pull: async () => {} }),
-              recipientId
-            })
-            await this.#descriptorCache?.writeDescriptor({
-              collectionId,
-              descriptor: newDescriptor
-            })
-            this.#appDescriptors[collectionId] = newDescriptor
-            delete this.#appCiphers[collectionId]
-            this.#refreshPolicy.reset({ collectionId })
-          }
+          const newDescriptor = await removeRecipient({
+            collection: remote.collectionHandle({ collectionId }),
+            space: remote.spaceHandle(),
+            revoke,
+            recipientId: nonOwner
+          })
+          await this.#descriptorCache?.writeDescriptor({
+            collectionId,
+            descriptor: newDescriptor
+          })
+          this.#appDescriptors[collectionId] = newDescriptor
+          delete this.#appCiphers[collectionId]
+          this.#refreshPolicy.reset({ collectionId })
           return 'rotated' as const
         } catch (err) {
           log.warn(

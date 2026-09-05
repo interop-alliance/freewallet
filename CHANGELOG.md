@@ -4,6 +4,16 @@
 
 ### Changed
 
+- Revoking a connected app rotates each app-provisioned collection once,
+  however many non-owner recipients its current epoch carries, through
+  was-client's `removeRecipient` taking the whole retiring set. The
+  per-recipient loop, which minted one epoch per recipient, is gone.
+- The login's cascade-completion sweep writes through the roster store
+  instance the login read came through (`checkUserKeyRosterAtLogin` in
+  `src/session/initSession.ts` returns it beside the read), and hands
+  wallet-core's `convergeUserKeyRosterToAccount` that read's `etag`, so a
+  convergence that rotates or escrows no longer walks the roster log a second
+  time; the sweep no longer builds a `sessionRosterStore` of its own.
 - Issuer-registry lookups are cached on two layers
   (`src/lib/registryManager.ts`), each entry fresh for five minutes and both
   layers cleared at logout. `lookupDid` is memoized by DID, with concurrent
