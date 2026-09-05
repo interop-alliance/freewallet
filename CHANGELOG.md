@@ -156,6 +156,13 @@
   database format alone. The legacy pre-RxDB `-credentials-db` / `-sync-db`
   names are neither reported as forgettable nor deleted, so the two sites
   agree on what a browser holds.
+- The recovery spend's registry write and its unlock-Space deletes run
+  through one step, `retireCredentialsFromRegistry`, called by both
+  continuations' tails and the spend resume: the retired entries dropped on
+  the continuation's report, the path's successors upserted, and the deletes
+  ordered after the landed write. The resume's drop-only arm writes only
+  when an entry was actually dropped, and no longer runs a separate registry
+  lookup to decide that.
 
 ### Fixed
 

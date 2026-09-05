@@ -213,6 +213,10 @@ vi.mock('@/session/unlockMethods', async importOriginal => ({
   updateUnlockMethodsWithClient: vi.fn(async ({ mutate }) => {
     state.calls.push('registryMutation')
     const next = await mutate(state.registryRecord as never)
+    if (next === null) {
+      // The real wrapper's "no write needed": the stored record stands.
+      return state.registryRecord
+    }
     if (state.failNextRegistryWrite) {
       state.failNextRegistryWrite = false
       throw new Error('registry write failed (simulated lost CAS race)')
