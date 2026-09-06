@@ -44,7 +44,7 @@ import {
   replaceRecipient
 } from '@interop/was-client/edv'
 import { cidFrom } from '@interop/was-client/sync'
-import type { Json } from '@/lib/sync'
+import type { Json } from '@interop/was-sync'
 import {
   inMemorySessionPersistence,
   transientSessionStores

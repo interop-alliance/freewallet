@@ -8,41 +8,51 @@
  * side's edit.
  *
  * The rule itself lives in `@interop/wallet-core/sync`, so both replicas
- * decide a race identically; everything here is the RxDB shape around it. The
- * collection's document cipher is read lazily through `getCipher`, so a later
- * `setCiphers` swap is honored.
+ * decide a race identically; the RxDB shape around it comes from
+ * `@interop/was-sync`, so everything here is the decision closure. The
+ * collection's document cipher is read at resolve time through `getCipher`,
+ * never captured, so a later `setCiphers` swap (the epoch cascade's) is
+ * honored. A resolver throw (an undecryptable side, say) is reported by
+ * `makeConflictHandler` itself on the `fw:sync:conflict` namespace before it
+ * propagates.
+ *
+ * Equality is the whole-row `deepEqual`, not the package's `statesEqual`
+ * (which compares the revision and body members alone): the feed echo of a
+ * row this replica just pushed carries the server-managed `createdBy` and
+ * `updatedAt`, and a handler that called the two states equal would let RxDB
+ * skip writing them into the local row.
  */
-import type { RxConflictHandler } from 'rxdb/plugins/core'
-import { deepEqual } from 'rxdb/plugins/utils'
+import { makeConflictHandler, type ConflictHandler } from '@interop/was-sync'
 import { resolveContactHeadConflict } from '@interop/wallet-core/sync'
-import type { SyncedDoc } from '@/lib/sync'
 import type { DocCipher } from '@interop/was-client/edv'
+import { deepEqual } from 'rxdb/plugins/utils'
+import { createLogger } from '@/lib/log'
+
+const log = createLogger('fw:sync:conflict')
 
 /**
  * @param options {object}
  * @param options.getCipher {() => DocCipher | undefined}   lazy accessor for
  *   the `contacts` document cipher (undefined for a plaintext store)
- * @returns {RxConflictHandler<SyncedDoc>}
+ * @returns {ConflictHandler}
  */
 export function createContactsConflictHandler({
   getCipher
 }: {
   getCipher: () => DocCipher | undefined
-}): RxConflictHandler<SyncedDoc> {
-  return {
-    isEqual(a, b) {
-      return deepEqual(a, b)
-    },
+}): ConflictHandler {
+  return makeConflictHandler({
+    log,
+    isEqual: deepEqual,
     async resolve({ realMasterState, newDocumentState }) {
       const cipher = getCipher()
-      const winner = await resolveContactHeadConflict({
+      return await resolveContactHeadConflict({
         remote: realMasterState.data,
         local: newDocumentState.data,
         ...(cipher ? { cipher } : {}),
         remoteDeleted: Boolean(realMasterState._deleted),
         localDeleted: Boolean(newDocumentState._deleted)
       })
-      return winner === 'local' ? newDocumentState : realMasterState
     }
-  }
+  })
 }

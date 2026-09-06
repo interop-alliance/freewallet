@@ -5,7 +5,7 @@
  * body, plus the copy-to-clipboard configuration they use for the snippet.
  */
 import { useCopyToClipboard } from '@/hooks/useCopyToClipboard'
-import type { Json } from '@/lib/sync'
+import type { Json } from '@interop/was-sync'
 import type { FetchedCollectionResource } from '@/lib/storageResource'
 import type { StorageManager } from '@/stores/storageManager'
 import { createLogger } from '@/lib/log'

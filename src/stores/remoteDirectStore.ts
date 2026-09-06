@@ -45,7 +45,7 @@ import {
 } from '@interop/social-core'
 import { cidFrom, errorStatus } from '@interop/was-client/sync'
 import { compareContactRevisionsNewestFirst } from '@/lib/contactRevisions'
-import type { Json } from '@/lib/sync'
+import type { Json } from '@interop/was-sync'
 import { isEncryptedEnvelope, type DocCipher } from '@interop/was-client/edv'
 import {
   classifyDecryptFailure,

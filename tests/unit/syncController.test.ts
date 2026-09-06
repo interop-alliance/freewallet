@@ -1,16 +1,15 @@
 /**
- * Unit tests for `SyncController`'s lifecycle contract
- * (`src/stores/syncController.ts`), focused on the re-login / account-switch
- * fix: the login path must tear down a controller left running by a previous
- * session before starting the new one. `restart()` (stop-then-start,
- * serialized) is the one entry point that starts replication.
+ * Unit tests for the sync binding's lifecycle contract
+ * (`src/stores/syncController.ts`): the gate that decides which sessions
+ * replicate at all, and the re-login / account-switch rule that a controller
+ * left running by a previous session is torn down before the new one starts.
+ * `restart()` is the one entry point that starts replication.
  *
- * The RxDB replication machinery and the WAS sync port are mocked so the test
- * exercises only the controller's own lifecycle bookkeeping: how many
- * replications it creates, which it cancels, and how it serializes overlapping
- * transitions. `app.config` is mocked to configure a remote WAS replica (a
- * truthy `WAS_SERVER_URL`) so the controller does not bail on the no-remote
- * guard.
+ * The replication core in `@interop/was-sync/rxdb` is stubbed, so what these
+ * cases exercise is the binding's own bookkeeping: which sessions reach the
+ * core, how many cores it constructs, which it stops, and how it serializes
+ * overlapping transitions. `stop()` is terminal for a core instance, so a
+ * restart must construct a fresh one rather than re-starting the old.
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
@@ -18,8 +17,6 @@ vi.mock('@/app.config', () => ({
   WAS_SERVER_URL: 'https://was.example',
   WAS_SYNC_BATCH_SIZE: undefined,
   WAS_SYNC_RETRY_MS: undefined,
-  // 0 disables the pull poll timer; poll behavior has its own suite
-  // (src/stores/syncController.test.ts)
   WAS_SYNC_POLL_MS: 0,
   SYNCED_COLLECTIONS: [
     { key: 'privateCredentials', id: 'private-credentials' },
@@ -28,37 +25,44 @@ vi.mock('@/app.config', () => ({
   ]
 }))
 
-vi.mock('@interop/was-client/sync', () => ({
-  createWasSyncPort: vi.fn(() => ({ fakePort: true }))
+// Each `createSyncController` call yields a distinct stub core, so the test can
+// count constructions and track which cores get stopped.
+const cores = vi.hoisted(() => ({
+  created: [] as Array<{
+    spaceId: string
+    start: ReturnType<typeof vi.fn>
+    stop: ReturnType<typeof vi.fn>
+    reSync: ReturnType<typeof vi.fn>
+  }>
 }))
 
-// Each `createWasReplication` call yields a distinct fake replication state so
-// the test can count creations and track which states get cancelled.
-const createdStates: Array<{ id: string; cancel: ReturnType<typeof vi.fn> }> =
-  []
-vi.mock('@/lib/sync', () => ({
-  createWasReplication: vi.fn(({ replicationIdentifier }) => {
-    const state = {
-      id: replicationIdentifier,
-      cancel: vi.fn().mockResolvedValue(undefined),
-      reSync: vi.fn(),
-      active$: { subscribe: vi.fn(() => ({ unsubscribe: vi.fn() })) },
-      error$: { subscribe: vi.fn(() => ({ unsubscribe: vi.fn() })) }
+vi.mock('@interop/was-sync/rxdb', () => ({
+  createSyncController: vi.fn(({ port }: { port: { spaceId: string } }) => {
+    const core = {
+      spaceId: port.spaceId,
+      start: vi.fn().mockResolvedValue(undefined),
+      stop: vi.fn().mockResolvedValue(undefined),
+      reSync: vi.fn()
     }
-    createdStates.push(state)
-    return state
+    cores.created.push(core)
+    return core
   })
 }))
 
-import { createWasReplication } from '@/lib/sync'
+vi.mock('@/stores/syncStatusStore', () => ({
+  useSyncStatusStore: {
+    getState: () => ({ setStatus: vi.fn(), reset: vi.fn() })
+  }
+}))
+
+import { createSyncController } from '@interop/was-sync/rxdb'
 import { syncController } from '@/stores/syncController'
 import type { Session } from '@/types/auth'
 
-const COLLECTION_COUNT = 3
-
 /**
  * Builds a minimal non-guest session whose storage looks like it has a
- * configured remote WAS replica, so the controller proceeds past its guards.
+ * configured remote WAS replica and a local one, so the binding proceeds past
+ * its gate.
  *
  * @param options {object}
  * @param options.spaceId {string}
@@ -77,38 +81,33 @@ function fakeSession({ spaceId }: { spaceId: string }): Session {
 }
 
 beforeEach(() => {
-  createdStates.length = 0
-  vi.mocked(createWasReplication).mockClear()
+  cores.created.length = 0
+  vi.mocked(createSyncController).mockClear()
 })
 
 afterEach(async () => {
   await syncController.stop()
 })
 
-describe('SyncController lifecycle', () => {
-  it('restart() cancels the running replications and starts fresh', async () => {
+describe('sync binding lifecycle', () => {
+  it('restart() stops the running core and constructs a fresh one', async () => {
     await syncController.restart({ session: fakeSession({ spaceId: 'A' }) })
-    expect(createWasReplication).toHaveBeenCalledTimes(COLLECTION_COUNT)
-    const firstBatch = createdStates.slice(0, COLLECTION_COUNT)
+    expect(cores.created).toHaveLength(1)
+    expect(cores.created[0].start).toHaveBeenCalledTimes(1)
 
     await syncController.restart({ session: fakeSession({ spaceId: 'B' }) })
-    // Old replications torn down, a new batch created.
-    for (const state of firstBatch) {
-      expect(state.cancel).toHaveBeenCalledTimes(1)
-    }
-    expect(createWasReplication).toHaveBeenCalledTimes(2 * COLLECTION_COUNT)
-    // The new batch targets account B's space.
-    const secondBatch = createdStates.slice(COLLECTION_COUNT)
-    for (const state of secondBatch) {
-      expect(state.id).toContain(':B:')
-      expect(state.cancel).not.toHaveBeenCalled()
-    }
+    // The first core is stopped -- terminal for that instance -- and the new
+    // session gets a core of its own, aimed at account B's Space.
+    expect(cores.created[0].stop).toHaveBeenCalledTimes(1)
+    expect(cores.created).toHaveLength(2)
+    expect(cores.created[1].spaceId).toBe('B')
+    expect(cores.created[1].stop).not.toHaveBeenCalled()
   })
 
   it('serializes overlapping restart() calls without interleaving', async () => {
     // Two restarts fired without awaiting the first: the queue must run them
-    // one after the other, leaving exactly one live batch and no dangling
-    // replications from the intermediate transition.
+    // one after the other, leaving exactly one live core and no dangling one
+    // from the intermediate transition.
     const first = syncController.restart({
       session: fakeSession({ spaceId: 'A' })
     })
@@ -117,23 +116,39 @@ describe('SyncController lifecycle', () => {
     })
     await Promise.all([first, second])
 
-    // Two full batches created across the two starts...
-    expect(createWasReplication).toHaveBeenCalledTimes(2 * COLLECTION_COUNT)
-    // ...and the first batch was cancelled by the second restart's stop phase,
-    // so only the last batch remains live.
-    const firstBatch = createdStates.slice(0, COLLECTION_COUNT)
-    const secondBatch = createdStates.slice(COLLECTION_COUNT)
-    for (const state of firstBatch) {
-      expect(state.cancel).toHaveBeenCalledTimes(1)
-    }
-    for (const state of secondBatch) {
-      expect(state.cancel).not.toHaveBeenCalled()
-    }
+    expect(cores.created).toHaveLength(2)
+    expect(cores.created[0].stop).toHaveBeenCalledTimes(1)
+    expect(cores.created[1].stop).not.toHaveBeenCalled()
+  })
+
+  it('reSync() reaches the live core and is a no-op once stopped', async () => {
+    await syncController.restart({ session: fakeSession({ spaceId: 'A' }) })
+    syncController.reSync()
+    expect(cores.created[0].reSync).toHaveBeenCalledTimes(1)
+
+    await syncController.stop()
+    syncController.reSync()
+    expect(cores.created[0].reSync).toHaveBeenCalledTimes(1)
   })
 
   it('a guest session does not start replication', async () => {
     const guest = { ...fakeSession({ spaceId: 'A' }), isGuest: true } as Session
     await syncController.restart({ session: guest })
-    expect(createWasReplication).not.toHaveBeenCalled()
+    expect(createSyncController).not.toHaveBeenCalled()
+  })
+
+  it('a replica-less session does not start replication', async () => {
+    const session = fakeSession({ spaceId: 'A' })
+    ;(
+      session.storage as unknown as { hasLocalReplica: boolean }
+    ).hasLocalReplica = false
+    await syncController.restart({ session })
+    expect(createSyncController).not.toHaveBeenCalled()
+  })
+
+  it('a session with no remote Space does not start replication', async () => {
+    const session = fakeSession({ spaceId: '' })
+    await syncController.restart({ session })
+    expect(createSyncController).not.toHaveBeenCalled()
   })
 })

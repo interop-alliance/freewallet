@@ -1,15 +1,17 @@
 /**
- * Unit tests for the SyncController's background pull-poll timer: it is
- * installed at `WAS_SYNC_POLL_MS` once replications are running, skips ticks
- * while offline, and is torn down by `stop()` so login/logout cycles leak no
- * timers. Replication itself is faked -- no RxDB engine, no server.
+ * Unit tests for the port and callbacks the sync binding
+ * (`src/stores/syncController.ts`) hands the replication core in
+ * `@interop/was-sync/rxdb`. The core itself is that package's, with its own
+ * suites, so it is stubbed here: what these cases pin is the seam between the
+ * session and the core -- which collections, which handles, where status goes,
+ * and which reachability signal the poll tick reads.
  */
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
+import { addSink, captureSink } from '@interop/logger'
+import type { SyncStatus } from '@interop/was-client/sync'
 import type { Session } from '@/types/auth'
 
-const POLL_MS = 1000
-
-const config = vi.hoisted(() => ({ pollMs: 1000 }))
+const POLL_MS = 30_000
 
 vi.mock('@/app.config', () => ({
   SYNCED_COLLECTIONS: [
@@ -19,145 +21,211 @@ vi.mock('@/app.config', () => ({
   WAS_SERVER_URL: 'https://was.example',
   WAS_SYNC_BATCH_SIZE: 10,
   WAS_SYNC_RETRY_MS: 5000,
-  get WAS_SYNC_POLL_MS() {
-    return config.pollMs
-  }
+  WAS_SYNC_POLL_MS: 30_000
 }))
 
-const replications = vi.hoisted(() => ({
-  created: [] as Array<{ reSync: ReturnType<typeof vi.fn> }>
+const cores = vi.hoisted(() => ({
+  options: [] as unknown[],
+  instances: [] as Array<{
+    start: ReturnType<typeof vi.fn>
+    stop: ReturnType<typeof vi.fn>
+    reSync: ReturnType<typeof vi.fn>
+  }>,
+  startRejection: undefined as Error | undefined
 }))
 
-vi.mock('@/lib/sync', () => ({
-  createWasReplication: vi.fn(() => {
-    const state = {
-      reSync: vi.fn(),
-      cancel: vi.fn().mockResolvedValue(undefined),
-      active$: { subscribe: () => ({ unsubscribe: vi.fn() }) },
-      error$: { subscribe: () => ({ unsubscribe: vi.fn() }) }
+vi.mock('@interop/was-sync/rxdb', () => ({
+  createSyncController: vi.fn((options: unknown) => {
+    cores.options.push(options)
+    const instance = {
+      start: vi.fn(() =>
+        cores.startRejection
+          ? Promise.reject(cores.startRejection)
+          : Promise.resolve()
+      ),
+      stop: vi.fn().mockResolvedValue(undefined),
+      reSync: vi.fn()
     }
-    replications.created.push(state)
-    return state
+    cores.instances.push(instance)
+    return instance
   })
 }))
 
-vi.mock('@interop/was-client/sync', () => ({
-  createWasSyncPort: vi.fn(() => ({}))
+const statusStore = vi.hoisted(() => ({
+  setStatus: vi.fn(),
+  reset: vi.fn()
 }))
 
 vi.mock('@/stores/syncStatusStore', () => ({
-  useSyncStatusStore: {
-    getState: () => ({ setStatus: vi.fn(), reset: vi.fn() })
-  }
+  useSyncStatusStore: { getState: () => statusStore }
 }))
 
 import { syncController } from './syncController'
 
 /**
- * A session shaped just enough for the controller: not a guest, a remote WAS
- * client and space id present, and a local collection handle per key.
+ * The core options the binding builds, as these cases read them back.
+ */
+interface CoreOptions {
+  port: {
+    wasClient: unknown
+    spaceId: string
+    serverUrl: string
+    collections: Array<{ key: string; id: string }>
+    rxCollection: (key: string) => unknown
+    batchSize?: number
+    retryTime?: number
+  }
+  onStatus: (key: string, collectionId: string, status: SyncStatus) => void
+  onlineSource: {
+    isOnline: () => boolean
+    subscribe: (onOnline: () => void) => () => void
+  }
+  pollMs: number
+  log: {
+    warn: (message: string, meta?: object) => void
+    error: (message: string, meta?: object) => void
+  }
+}
+
+/**
+ * The options handed to the most recently constructed core.
+ *
+ * @returns {CoreOptions}
+ */
+function lastOptions(): CoreOptions {
+  return cores.options[cores.options.length - 1] as CoreOptions
+}
+
+const localCollection = vi.fn((key: string) => ({ localKey: key }))
+
+/**
+ * A session shaped just enough for the binding: not a guest, a remote WAS
+ * client and space id present, and a local replica behind `localCollection`.
+ *
+ * @returns {Session}
  */
 function fakeSession(): Session {
   return {
     isGuest: false,
     storage: {
-      wasClient: {},
+      wasClient: { fake: 'client' },
       spaceId: 'space-1',
       hasLocalReplica: true,
-      localCollection: vi.fn(() => ({}))
+      localCollection
     }
   } as unknown as Session
 }
 
-/**
- * Total `reSync()` calls across every replication created so far.
- *
- * @returns {number}
- */
-function totalReSyncCalls(): number {
-  return replications.created.reduce(
-    (total, state) => total + state.reSync.mock.calls.length,
-    0
-  )
-}
-
-let onLine = true
-
 beforeEach(() => {
-  vi.useFakeTimers()
-  replications.created = []
-  config.pollMs = POLL_MS
-  onLine = true
-  vi.spyOn(window.navigator, 'onLine', 'get').mockImplementation(() => onLine)
+  cores.options = []
+  cores.instances = []
+  cores.startRejection = undefined
+  statusStore.setStatus.mockClear()
+  statusStore.reset.mockClear()
+  localCollection.mockClear()
 })
 
 afterEach(async () => {
   await syncController.stop()
-  vi.useRealTimers()
   vi.restoreAllMocks()
 })
 
-describe('SyncController background pull poll', () => {
-  it('reSyncs every replication once per poll interval while online', async () => {
+describe('sync binding: the port handed to the core', () => {
+  it('locates the Space and carries the configured collection set', async () => {
     await syncController.restart({ session: fakeSession() })
-    expect(replications.created).toHaveLength(2)
 
-    await vi.advanceTimersByTimeAsync(POLL_MS)
-    for (const state of replications.created) {
-      expect(state.reSync).toHaveBeenCalledTimes(1)
-    }
-
-    await vi.advanceTimersByTimeAsync(POLL_MS * 3)
-    for (const state of replications.created) {
-      expect(state.reSync).toHaveBeenCalledTimes(4)
-    }
+    const { port, pollMs } = lastOptions()
+    expect(port.serverUrl).toBe('https://was.example')
+    expect(port.spaceId).toBe('space-1')
+    expect(port.wasClient).toEqual({ fake: 'client' })
+    expect(port.collections).toEqual([
+      { key: 'privateCredentials', id: 'private-credentials' },
+      { key: 'walletActivity', id: 'wallet-activity' }
+    ])
+    expect(port.batchSize).toBe(10)
+    expect(port.retryTime).toBe(5000)
+    expect(pollMs).toBe(POLL_MS)
   })
 
-  it('skips ticks while offline and resumes once back online', async () => {
-    onLine = false
+  it('resolves the local end of replication through the session storage', async () => {
     await syncController.restart({ session: fakeSession() })
 
-    await vi.advanceTimersByTimeAsync(POLL_MS * 3)
-    expect(totalReSyncCalls()).toBe(0)
+    expect(lastOptions().port.rxCollection('walletActivity')).toEqual({
+      localKey: 'walletActivity'
+    })
+    expect(localCollection).toHaveBeenCalledWith('walletActivity')
+  })
 
+  it('writes status keyed on the WAS collection id, not the logical key', async () => {
+    await syncController.restart({ session: fakeSession() })
+
+    lastOptions().onStatus('walletActivity', 'wallet-activity', 'syncing')
+    expect(statusStore.setStatus).toHaveBeenCalledWith(
+      'wallet-activity',
+      'syncing'
+    )
+  })
+
+  it('reads reachability off the browser and resyncs on the online event', async () => {
+    const addEventListener = vi.spyOn(window, 'addEventListener')
+    const removeEventListener = vi.spyOn(window, 'removeEventListener')
+    let onLine = false
+    vi.spyOn(window.navigator, 'onLine', 'get').mockImplementation(() => onLine)
+
+    await syncController.restart({ session: fakeSession() })
+    const { onlineSource } = lastOptions()
+
+    expect(onlineSource.isOnline()).toBe(false)
     onLine = true
-    await vi.advanceTimersByTimeAsync(POLL_MS)
-    for (const state of replications.created) {
-      expect(state.reSync).toHaveBeenCalledTimes(1)
+    expect(onlineSource.isOnline()).toBe(true)
+
+    const onOnline = vi.fn()
+    const unsubscribe = onlineSource.subscribe(onOnline)
+    expect(addEventListener).toHaveBeenCalledWith('online', onOnline)
+    window.dispatchEvent(new Event('online'))
+    expect(onOnline).toHaveBeenCalledTimes(1)
+
+    unsubscribe()
+    expect(removeEventListener).toHaveBeenCalledWith('online', onOnline)
+  })
+
+  it("carries a log port on the binding's own namespace", async () => {
+    await syncController.restart({ session: fakeSession() })
+
+    const capture = captureSink()
+    const removeSink = addSink(capture.sink)
+    try {
+      const { log } = lastOptions()
+      log.warn('a warning', { id: 'wallet-activity' })
+      log.error('a failure', { err: new Error('nope') })
+    } finally {
+      removeSink()
     }
+
+    // The driver's diagnostics must stay on the ring buffer's namespace, or a
+    // sync failure returns nothing to the debug-logs procedure.
+    expect(capture.events.map(event => [event.ns, event.level])).toEqual([
+      ['fw:sync:controller', 'warn'],
+      ['fw:sync:controller', 'error']
+    ])
+  })
+})
+
+describe('sync binding: start failure and teardown', () => {
+  it('logs a failed start rather than rejecting (the login path is fire-and-forget)', async () => {
+    cores.startRejection = new Error('bring-up failed')
+
+    await expect(
+      syncController.restart({ session: fakeSession() })
+    ).resolves.toBeUndefined()
   })
 
-  it('installs no timer when the poll interval is zero', async () => {
-    config.pollMs = 0
+  it('resets the status store when replication stops', async () => {
     await syncController.restart({ session: fakeSession() })
-
-    await vi.advanceTimersByTimeAsync(POLL_MS * 10)
-    expect(totalReSyncCalls()).toBe(0)
-  })
-
-  it('clears the timer on stop', async () => {
-    await syncController.restart({ session: fakeSession() })
-    await vi.advanceTimersByTimeAsync(POLL_MS)
-    expect(totalReSyncCalls()).toBe(2)
+    statusStore.reset.mockClear()
 
     await syncController.stop()
-    await vi.advanceTimersByTimeAsync(POLL_MS * 5)
-    expect(totalReSyncCalls()).toBe(2)
-  })
-
-  it('leaves exactly one timer running across start/stop cycles', async () => {
-    await syncController.restart({ session: fakeSession() })
-    await syncController.stop()
-
-    replications.created = []
-    await syncController.restart({ session: fakeSession() })
-    expect(replications.created).toHaveLength(2)
-
-    await vi.advanceTimersByTimeAsync(POLL_MS)
-    // One tick, one reSync per live replication: a leaked timer from the first
-    // cycle would double these counts.
-    for (const state of replications.created) {
-      expect(state.reSync).toHaveBeenCalledTimes(1)
-    }
+    expect(cores.instances[0].stop).toHaveBeenCalledTimes(1)
+    expect(statusStore.reset).toHaveBeenCalled()
   })
 })

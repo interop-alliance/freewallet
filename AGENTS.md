@@ -26,6 +26,9 @@ model, and ZCap authorization model.
 - **Zustand** for global session state (`src/stores/authStore.ts`)
 - **RxDB + Dexie (IndexedDB)** for local wallet storage -- the always-active
   replica (`BrowserStore` in `src/stores/browserStore.ts`)
+- **`@interop/was-sync`** for background replication of that replica to the
+  remote WAS Space: the synced-document schema and conflict-handler seam on
+  its root entry, the RxDB driver and controller core on `/rxdb`
 - **`@interop/webkms-client`** (`CapabilityAgent`, `KmsClient`,
   `KeystoreAgent`) for key derivation and WebKMS keystore access
 - **`@interop/ezcap`** (`ZcapClient`) for ZCap-signed HTTP requests

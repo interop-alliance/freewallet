@@ -6,15 +6,9 @@
  * only, like the session -- cleared on logout.
  */
 import { create } from 'zustand'
+import type { SyncStatus } from '@interop/was-client/sync'
 
-/**
- * A single collection's replication status:
- * - `idle`    -- configured but no cycle has run yet
- * - `syncing` -- a pull/push cycle is in flight
- * - `synced`  -- last cycle completed without error
- * - `error`   -- last cycle failed (RxDB is backing off / will retry)
- */
-export type SyncStatus = 'idle' | 'syncing' | 'synced' | 'error'
+export type { SyncStatus }
 
 interface SyncStatusState {
   /**

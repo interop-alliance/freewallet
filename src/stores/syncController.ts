@@ -1,33 +1,27 @@
 /**
- * SyncController: the app-side lifecycle around background WAS replication.
+ * The session binding around background WAS replication. The driver and the
+ * lifecycle core live in `@interop/was-sync`; what is here is everything that
+ * is this app's: which sessions replicate at all, where the core's access seam
+ * comes from, and where status and diagnostics go.
  *
  * The local RxDB collections owned by the session's storage (BrowserStore) are
- * the always-on active replica; when a remote WAS Space is configured and the
- * session is not a guest, this controller starts a `replicateRxCollection`
- * state machine per synced collection against its remote counterpart via the
- * generic adapter in `src/lib/sync/`.
- *
- * Reachability is not polled: the replication attempt is the probe. RxDB's own
- * `retryTime` backoff retries a down server silently and surfaces failures on
- * `error$`; the controller's only reachability wiring is `window` `online` /
- * `offline`, firing `reSync()` on reconnect so a long-offline session recovers
- * promptly rather than waiting out the backoff. Status is driven off
- * `active$` / `error$` into the `syncStatusStore` for the UI.
- *
- * Pulls ARE polled: the server offers no live change stream yet (no
- * `pull.stream$`), so a timer re-runs the pull cycle every `WAS_SYNC_POLL_MS`
- * (skipped while offline, torn down on `stop()`) to surface rows another
- * wallet pushed mid-session. An interim measure until server-side live
- * streaming replaces it.
+ * the always-on active replica. A guest, a deployment with no remote WAS Space,
+ * and a replica-less session (the transient session's remote-direct storage)
+ * each have nothing to replicate, so the gate below returns before the core is
+ * ever constructed.
  *
  * The collection set is data-driven (`SYNCED_COLLECTIONS`, projected from the
  * standard collections): every standard collection replicates through the same
- * adapter. The encrypted ones
- * (`private-credentials`, `wallet-activity`) need nothing special here -- their
- * locally stored EDV envelopes ship verbatim; encrypt/decrypt happens at the
- * storage layer's read/write time, never in the sync path.
+ * driver. The encrypted ones (`private-credentials`, `wallet-activity`) need
+ * nothing special here -- their locally stored EDV envelopes ship verbatim;
+ * encrypt and decrypt happen at the storage layer's read and write time, never
+ * in the sync path.
+ *
+ * The core's `stop()` is terminal for an instance, so `restart()` constructs a
+ * fresh core per session and this module-scope singleton is a thin shell
+ * holding the current one.
  */
-import type { RxReplicationState } from 'rxdb/plugins/replication'
+import type { SyncController } from '@interop/was-sync/rxdb'
 import {
   SYNCED_COLLECTIONS,
   WAS_SERVER_URL,
@@ -35,8 +29,6 @@ import {
   WAS_SYNC_POLL_MS,
   WAS_SYNC_RETRY_MS
 } from '@/app.config'
-import type { SyncCheckpoint, SyncedDoc, WasSyncPort } from '@/lib/sync'
-import { createWasSyncPort } from '@interop/was-client/sync'
 import { useSyncStatusStore } from '@/stores/syncStatusStore'
 import type { Session } from '@/types/auth'
 import { createLogger } from '@/lib/log'
@@ -44,28 +36,34 @@ import { createLogger } from '@/lib/log'
 const log = createLogger('fw:sync:controller')
 
 /**
- * The subset of an RxJS `Subscription` we hold (rxjs is only a transitive dep,
- * so we type structurally rather than import it).
+ * The browser's reachability source: `navigator.onLine` for the poll tick, and
+ * the `online` event for the immediate reconnect resync. An environment that
+ * cannot answer reads as online, so a missing signal never stops the poll.
+ *
+ * @returns {{ isOnline: () => boolean, subscribe: (onOnline: () => void) => () => void }}
  */
-type Unsubscribable = { unsubscribe: () => void }
-
-interface CollectionReplication {
-  state: RxReplicationState<SyncedDoc, SyncCheckpoint>
-  subscriptions: Unsubscribable[]
+function browserOnlineSource() {
+  return {
+    isOnline(): boolean {
+      return typeof navigator === 'undefined' ? true : navigator.onLine
+    },
+    subscribe(onOnline: () => void): () => void {
+      window.addEventListener('online', onOnline)
+      return () => window.removeEventListener('online', onOnline)
+    }
+  }
 }
 
 /**
- * Singleton controlling replication for the current session. Constructed once
- * and shared; `restart()`/`stop()` bracket a login/logout.
+ * Singleton bracketing replication for the current session. Constructed once
+ * and shared; `restart()` / `stop()` bracket a login / logout.
  */
-class SyncController {
-  #replications: CollectionReplication[] = []
-  #onlineHandler?: () => void
-  #pollTimer?: ReturnType<typeof setInterval>
+class SessionSyncController {
+  #core: SyncController | null = null
   // Serializes every lifecycle transition (restart / stop) onto a single chain
-  // so overlapping login / logout calls can never interleave and leave
-  // dangling replications. A start racing a stop is thereby impossible: each
-  // runs to completion before the next begins.
+  // so overlapping login / logout calls can never interleave and leave a
+  // dangling core. The core serializes its own start and stop; this chain is
+  // what keeps two SESSIONS' cores from overlapping.
   #queue: Promise<void> = Promise.resolve()
 
   /**
@@ -86,8 +84,8 @@ class SyncController {
   /**
    * Stops any running replication, then starts it fresh for `session`,
    * serialized as a single atomic transition. The one entry point for
-   * starting: it guarantees a controller left running by a previous (restored
-   * or other-account) session is torn down before the new one starts, so a
+   * starting: it guarantees a core left running by a previous (restored or
+   * other-account) session is torn down before the new one starts, so a
    * re-login can never silently fail to replicate.
    *
    * @param options {object}
@@ -112,27 +110,37 @@ class SyncController {
   }
 
   /**
-   * Starts background replication for a logged-in session. A no-op for guests,
-   * or when no remote WAS replica is configured. Expects the session storage's
+   * Triggers an immediate replication cycle on every running collection
+   * replication, rather than waiting for the next scheduled tick.
+   * Fire-and-forget: progress surfaces through the syncStatusStore as usual. A
+   * no-op when replication is not running (guest, no remote, stopped).
+   *
+   * @returns {void}
+   */
+  reSync(): void {
+    this.#core?.reSync()
+  }
+
+  /**
+   * Builds the core for a logged-in session and starts it. A no-op for guests,
+   * when no remote WAS replica is configured, and for a replica-less session:
+   * every synced-collection operation there is already served remote-direct,
+   * so replication has no local end to drive. Expects the session storage's
    * local collections to be initialized (`ensureUserCollections()` runs before
-   * login). Runs inside the serialized queue, always behind a stop; callers
-   * use `restart()`.
+   * login). Runs inside the serialized queue, always behind a stop; callers use
+   * `restart()`.
    *
    * @param options {object}
    * @param options.session {Session}
    * @returns {Promise<void>}
    */
   async #start({ session }: { session: Session }): Promise<void> {
-    // Guests never sync; a missing client/space means no remote replica.
-    // A replica-less session (the transient session's remote-direct storage)
-    // has no local end for replication to drive: every synced-collection
-    // operation is already served remote-direct, so replication never starts.
-    const was = session.storage.wasClient
+    const wasClient = session.storage.wasClient
     const spaceId = session.storage.spaceId
     if (
       session.isGuest ||
       !WAS_SERVER_URL ||
-      !was ||
+      !wasClient ||
       !spaceId ||
       !session.storage.hasLocalReplica
     ) {
@@ -142,117 +150,60 @@ class SyncController {
     const setStatus = useSyncStatusStore.getState().setStatus
 
     try {
-      // Dynamically imported: the replication adapter drags in RxDB's
+      // Dynamically imported: the RxDB half of the driver drags in RxDB's
       // replication machinery (rxdb core, rxjs, broadcast-channel), which
       // would otherwise land in the eager entry chunk via the auth store.
-      const { createWasReplication } = await import('@/lib/sync')
-      for (const { key, id } of SYNCED_COLLECTIONS) {
-        setStatus(id, 'idle')
-        // The local end of replication IS the page-facing active replica.
-        const rxCollection = session.storage.localCollection(key)
-        // The library port ships the opaque wire body typed as `unknown`; the
-        // driver's stricter `WasSyncPort` types it as `Json`. Bridge onto the
-        // stricter interface here (the body is moved verbatim either way).
-        const wasPort = createWasSyncPort({
-          was,
+      const { createSyncController } = await import('@interop/was-sync/rxdb')
+      const core = createSyncController({
+        port: {
+          wasClient,
           spaceId,
-          collectionId: id
-        }) as unknown as WasSyncPort
-        const state = createWasReplication({
-          rxCollection,
-          wasPort,
-          replicationIdentifier: `was-sync:${WAS_SERVER_URL}:${spaceId}:${id}`,
+          serverUrl: WAS_SERVER_URL,
+          collections: SYNCED_COLLECTIONS,
+          // The local end of replication IS the page-facing active replica.
+          rxCollection: key => session.storage.localCollection(key),
           ...(WAS_SYNC_BATCH_SIZE !== undefined && {
             batchSize: WAS_SYNC_BATCH_SIZE
           }),
           ...(WAS_SYNC_RETRY_MS !== undefined && {
             retryTime: WAS_SYNC_RETRY_MS
           })
-        })
-
-        // Drive UI status off the replication streams. `active$` toggles while a
-        // cycle runs; `error$` marks a failed cycle (RxDB then backs off/retries).
-        const subscriptions: Unsubscribable[] = [
-          state.active$.subscribe(active => {
-            setStatus(id, active ? 'syncing' : 'synced')
-          }),
-          state.error$.subscribe(err => {
-            log.error('Sync error for collection', { id, err })
-            setStatus(id, 'error')
-          })
-        ]
-        this.#replications.push({ state, subscriptions })
-      }
-
-      // The one genuinely useful reachability signal: on reconnect, resync
-      // immediately rather than waiting out RxDB's backoff tick.
-      this.#onlineHandler = () => this.reSync()
-      window.addEventListener('online', this.#onlineHandler)
-
-      // Poll for pulls: replication has no live stream from the server
-      // (no `pull.stream$` yet), so without a timer a row another wallet
-      // pushes after this session's initial pull sits on the server until a
-      // push, an `online` event, or a re-login. Skipped while offline (the
-      // `online` handler above already resyncs on reconnect).
-      if (WAS_SYNC_POLL_MS > 0) {
-        this.#pollTimer = setInterval(() => {
-          if (navigator.onLine) {
-            this.reSync()
-          }
-        }, WAS_SYNC_POLL_MS)
-      }
+        },
+        onStatus: (_key, collectionId, status) => {
+          setStatus(collectionId, status)
+        },
+        onlineSource: browserOnlineSource(),
+        pollMs: WAS_SYNC_POLL_MS,
+        // The core's log port takes `Record<string, unknown>` metadata, which
+        // the namespaced logger already satisfies, so its diagnostics ride
+        // the `fw:sync:controller` namespace with no adapter.
+        log
+      })
+      this.#core = core
+      await core.start()
     } catch (err) {
+      // The login path fires `restart()` inside a `void` async block, where a
+      // rethrow would surface as an unhandled rejection. The core has already
+      // unwound its own partial bring-up and flagged each collection `error`.
       log.error('Failed to start sync controller', { err })
-      // Tear down any partial state cleanly. Call the internal `#stop()`
-      // directly rather than the queueing `stop()`: we already hold the queue,
-      // so enqueuing here would deadlock on our own in-flight task.
-      await this.#stop()
     }
   }
 
   /**
-   * Triggers an immediate replication cycle on every running collection
-   * replication, rather than waiting for RxDB's next scheduled tick.
-   * Fire-and-forget: progress surfaces through the syncStatusStore as usual.
-   * A no-op when replication is not running (guest, no remote, stopped).
-   *
-   * @returns {void}
-   */
-  reSync(): void {
-    for (const { state } of this.#replications) {
-      state.reSync()
-    }
-  }
-
-  /**
-   * Stops replication and releases all resources (the underlying database is
-   * owned by the session's storage, which closes it on logout). Idempotent.
-   * Runs inside the serialized queue; callers use `stop()` / `restart()`.
+   * Stops the current core and drops it (the underlying database is owned by
+   * the session's storage, which closes it on logout). Idempotent. Runs inside
+   * the serialized queue; callers use `stop()` / `restart()`.
    *
    * @returns {Promise<void>}
    */
   async #stop(): Promise<void> {
-    if (this.#pollTimer !== undefined) {
-      clearInterval(this.#pollTimer)
-      this.#pollTimer = undefined
+    const core = this.#core
+    this.#core = null
+    if (core) {
+      await core.stop()
     }
-    if (this.#onlineHandler) {
-      window.removeEventListener('online', this.#onlineHandler)
-      this.#onlineHandler = undefined
-    }
-    for (const { state, subscriptions } of this.#replications) {
-      for (const subscription of subscriptions) {
-        subscription.unsubscribe()
-      }
-      try {
-        await state.cancel()
-      } catch (err) {
-        log.error('Error cancelling replication', { err })
-      }
-    }
-    this.#replications = []
     useSyncStatusStore.getState().reset()
   }
 }
 
-export const syncController = new SyncController()
+export const syncController = new SessionSyncController()

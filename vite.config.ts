@@ -40,7 +40,13 @@ export default defineConfig({
     // on-the-fly the first time the signup page needs a score -- a cold-start
     // stall that can run to tens of seconds under load (and flakes the
     // signup-driven e2e tests). Dev-only: production still lazy-loads them.
+    // The sync binding imports `@interop/was-sync/rxdb` dynamically inside
+    // `start`, so RxDB's first discovery under the dev server would otherwise
+    // land at the first login. Vite's lazy re-optimization then fails the
+    // in-flight module fetch, which flakes the e2e login flows the same way
+    // the dictionaries above did.
     include: [
+      '@interop/was-sync/rxdb',
       '@zxcvbn-ts/core',
       '@zxcvbn-ts/language-common',
       '@zxcvbn-ts/language-en',
@@ -56,6 +62,12 @@ export default defineConfig({
     interopLoggerPlugin({ file: process.env.INTEROP_LOGGER_FILE })
   ],
   resolve: {
+    // One RxDB copy in the graph. `@interop/was-sync/rxdb` carries rxdb as an
+    // optional peer, but while the package is consumed from a sibling checkout
+    // it also has its own physical copy; two copies means the leader-election
+    // plugin installed on the wrong prototypes, which breaks only when the tab
+    // is hidden.
+    dedupe: ['rxdb'],
     alias: {
       '@': path.resolve(import.meta.dirname, './src')
     }

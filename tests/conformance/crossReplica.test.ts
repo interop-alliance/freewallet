@@ -3,8 +3,8 @@
  * real server.
  *
  * DCW (the mobile wallet) replicates with `@interop/wallet-core/sync`'s
- * `SyncEngine`; this wallet replicates with its own RxDB adapter
- * (`src/lib/sync/`). They are two independent implementations of one wire
+ * `SyncEngine`; this wallet replicates with the RxDB driver in
+ * `@interop/was-sync`. They are two independent implementations of one wire
  * protocol, written to agree, and this exercise is the proof that they do:
  * both replicas attach to the SAME Space on a real in-process
  * `was-teaching-server` (no fakes anywhere on the wire) and round-trip
@@ -57,11 +57,12 @@ import { createRxDatabase, type RxCollection } from 'rxdb/plugins/core'
 import { getRxStorageMemory } from 'rxdb/plugins/storage-memory'
 import { uuidv7 } from 'uuidv7'
 
-import { createWasReplication, syncedDocSchema } from '../../src/lib/sync'
-import type {
-  SyncedDoc,
-  WasSyncPort as FwWasSyncPort
-} from '../../src/lib/sync/types'
+import { createWasReplication } from '@interop/was-sync/rxdb'
+import {
+  syncedDocSchema,
+  type SyncedDoc,
+  type WasSyncPort as FwWasSyncPort
+} from '@interop/was-sync'
 import { createContactsConflictHandler } from '../../src/stores/contactsConflictHandler'
 
 import { WasClient, type CollectionEncryption } from '@interop/was-client'

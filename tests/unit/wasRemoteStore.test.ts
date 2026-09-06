@@ -393,7 +393,7 @@ describe('WASRemoteStore.listSyncedDocuments', () => {
     ])
     expect(space).toHaveBeenCalledWith('space-id', { capability })
     expect(collection).toHaveBeenCalledWith('wallet-activity')
-    expect(documents).toHaveBeenCalledWith({ pageSize: 2 })
+    expect(documents).toHaveBeenCalledWith({ limit: 2 })
   })
 
   it('lists a missing collection as empty', async () => {

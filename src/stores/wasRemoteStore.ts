@@ -54,7 +54,7 @@ import {
   WALLET_STANDARD_COLLECTIONS,
   WAS_SYNC_BATCH_SIZE
 } from '@/app.config'
-import type { Json } from '@/lib/sync/types.js'
+import type { Json } from '@interop/was-sync'
 import type { StorageCollection, StorageResource } from '@/lib/storage'
 import type { SpaceQuotaReport } from '@/types/storageQuota'
 import {
@@ -940,7 +940,7 @@ export class WASRemoteStore {
       documents = await this.#space()
         .collection(collectionId)
         .documents({
-          pageSize: WAS_SYNC_BATCH_SIZE ?? SYNCED_LISTING_PAGE_SIZE
+          limit: WAS_SYNC_BATCH_SIZE ?? SYNCED_LISTING_PAGE_SIZE
         })
     } catch (err) {
       log.error('Error listing synced documents for collection', {

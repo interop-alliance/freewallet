@@ -37,8 +37,9 @@ src/lib/            Pure business logic (no React)
                     pasted-URL credential fetch, the `oidf` issuer-registry
                     lookups, and the retry behind a blocked direct registry
                     fetch
-  writerId.ts, prefsStorage.ts, log.ts   The writerId mint, the global UI
-                    prefs seam, the @interop/logger wiring
+  writerId.ts, prefsStorage.ts, log.ts   The writerId binding over the
+                    package's mint, the global UI prefs seam, the
+                    @interop/logger wiring
   connectedApps.ts  Connected-app and agent listings for the Applications page
   viewMappers/      Transform raw credential data into display-ready values
   walletRequest/    VPR classification + response assembly for CHAPI requests
@@ -47,7 +48,6 @@ src/lib/            Pure business logic (no React)
     externalRequest.ts  The interaction-URL entry point's pure half: the
                     deep-link parser, exchange opening, and pre-consent
                     refusal matrix
-  sync/             Collection-agnostic WAS replication adapter (RxDB-based)
 src/stores/         Global state
   authStore.ts      Zustand store -- holds the live Session object
   storageManager.ts StorageManager facade (local-first routing)
@@ -2316,7 +2316,10 @@ every synced-collection operation past it (see "Remote-direct popup
 storage"). One local database per user holds every standard collection
 (`private-credentials`, `public-credentials`, `wallet-activity`, `contacts`,
 `contacts-history`, `app-connections`) on the generic synced-doc schema (`{
-id, updatedAt, version, data }`, `src/lib/sync/syncedDocSchema.ts`).
+id, updatedAt, version, data }`, `syncedDocSchema` from
+`@interop/was-sync`). RxDB hashes that schema and refuses a replica whose
+stored hash differs, so its shape is browser-local stored state rather than a
+code detail.
 
 The encrypted collections, all of the above except `public-credentials`,
 store **EDV envelopes**: encrypted at rest locally and opaque to the server.
@@ -2333,8 +2336,12 @@ When `VITE_WAS_SERVER_URL` is set and the session is not a guest, a remote
 WAS Space is attached as a **sync target**. `SyncController`
 (`src/stores/syncController.ts`) replicates every synced local collection to
 its remote WAS Collection counterpart in the background, through the
-collection-agnostic adapter in `src/lib/sync/`, which ships stored bodies
-(plaintext or envelope) verbatim and never touches keys. Every replication,
+collection-agnostic driver in `@interop/was-sync`, which ships stored bodies
+(plaintext or envelope) verbatim and never touches keys. That module is the
+session binding around the package's controller core: it owns the gate (a
+guest, a deployment with no WAS server, and a replica-less session each
+replicate nothing), the port the core reads the Space and the local
+collections through, and where status and diagnostics go. Every replication,
 and every `WASRemoteStore` request, is signed with the session's root key.
 
 `WASRemoteStore` does not serve credential reads and writes. It keeps the
@@ -2600,7 +2607,7 @@ purgeable from the Applications page; the other two kinds are real data and
 stay unpurged.
 
 Which of the three buckets a row lands in is decided by the error's NAME, never
-by `instanceof`: `isUnknownEpochError` (`@interop/wallet-core/sync`) and
+by `instanceof`: `isUnknownEpochError` (`@interop/was-client/sync`) and
 `isKeyUnwrapError` (`@interop/wallet-core/descriptors`), the shared predicates
 every scan in `browserStore`, `remoteDirectStore`, and `storageManager` calls.
 The cipher is an injected seam, so in a wallet whose `@interop/was-client`
@@ -3124,10 +3131,20 @@ cascades, and the permanent wire-level constants.
     side:
     the did:webvh controller adapter `webvhResourceLogController` and the
     ceremony-tail license)
-  - `/sync` (contacts head-conflict resolution only:
-    `resolveContactHeadConflict`, over social-core's comparison). Freewallet
-    keeps its own RxDB replication driver in `src/lib/sync/`, over the wire
-    contract from `@interop/was-client/sync`.
+  - `/sync` (contacts head-conflict resolution: `resolveContactHeadConflict`,
+    over social-core's comparison; the change engine beside it is the mobile
+    wallet's, reached here only by the cross-replica conformance exercise).
+- **`@interop/was-sync`** (+ `/rxdb`, `/testing`) -- the WAS replication
+  driver for RxDB, shared with `@interop/was-react`: the synced-document
+  schema, the opaque-body helpers, the conflict-handler seam, and the
+  writer-id mint on the root entry; the changes-feed pull handler, the
+  conditional-write push handler, the `replicateRxCollection` wiring, and the
+  controller core on `/rxdb`; test fixtures on `/testing`, which an eslint
+  rule keeps out of production code. Freewallet keeps the three bindings
+  around it: the session binding in `stores/syncController.ts` (the gate, the
+  port, the status store, the browser reachability source), the contacts
+  decision closure in `stores/contactsConflictHandler.ts`, and the writer-id
+  key prefix and storage in `lib/writerId.ts`.
 - **`@interop/vh-resource-log`** -- the Resource Log Profile's generic
   client side: chain verification, the chain-head pin port
   (`ResourceLogPinStore`, `ResourceLogHeadPin`, `memoryResourceLogPinStore`)
@@ -3135,9 +3152,11 @@ cascades, and the permanent wire-level constants.
   classes. Freewallet imports the pin port and refusal classes directly; the
   did:webvh controller adapter stays on `@interop/wallet-core/resourceLog`.
 - **`@interop/was-client`** (+ `/edv`, `/sync`, `/paths`) -- the WAS HTTP
-  client, the sync wire contract the RxDB driver speaks, the EDV envelope
-  cipher and key-epoch construction (`createEdvDocCipher`,
-  `x25519RecipientFromDidKey`), and the descriptor-store seam.
+  client, the sync wire contract the RxDB driver speaks, its error classes
+  and the `err.name` predicates that classify them (`isUnknownEpochError`,
+  `isSyncConflictError`, `isSyncAuthError`), the EDV envelope cipher and
+  key-epoch construction (`createEdvDocCipher`, `x25519RecipientFromDidKey`),
+  and the descriptor-store seam.
 - **`@interop/social-core`** -- the contacts collection specs and the
   `remotePayloadWins` last-write-wins comparison itself.
 - **`@interop/vc-display`** -- credential display mapping.
@@ -3216,8 +3235,9 @@ Containment hierarchy (remote mode): **Space > Collection > Resource**.
   inventory), agent client, bot.
 - **`writerId`** -- an unkeyed, clearable, unrecoverable attribution label
   saying which writing agent produced a revision. It attributes history and
-  breaks last-write-wins ties. Minted locally (`src/lib/writerId.ts`, a
-  `localStorage` key), derived from no secret, and lost on a wallet reset,
+  breaks last-write-wins ties. The mint is `@interop/was-sync`'s, bound in
+  `src/lib/writerId.ts` to this app's key prefix and `localStorage` (the key
+  is `freewallet:writerId`), derived from no secret, and lost on a wallet reset,
   so it is never an identity: unlike a `clientId` it can vanish and be
   re-minted with nothing carried over. Not a `replicaId` either, since it is
   minted per browser profile while the local database is per user. Avoid:
@@ -3544,11 +3564,14 @@ Containment hierarchy (remote mode): **Space > Collection > Resource**.
   `ZcapClient`. Handles the Space lifecycle, the storage-browser
   read-through over arbitrary collections and resources, export/import, and
   quotas; wallet data reaches it via background replication.
-- **SyncController** -- the lifecycle around background replication
-  (`src/stores/syncController.ts`): starts per-collection
-  `replicateRxCollection` state machines on login, cancels on logout,
-  re-syncs on reconnect. Uses the collection-agnostic adapter in
-  `src/lib/sync/`.
+- **SyncController** -- the lifecycle around background replication: one
+  `replicateRxCollection` state machine per synced collection, started on
+  login, cancelled on logout, re-synced on reconnect. The lifecycle core and
+  the driver under it are `@interop/was-sync`'s;
+  `src/stores/syncController.ts` is the session binding around them (the
+  gate, the injected port, the status store, the browser reachability
+  source). The core's `stop()` is terminal for an instance, so the binding
+  constructs a fresh core per session.
 - **DCC Known Registries** -- a public JSON registry of trusted issuer DIDs
   fetched from GitHub (`KNOWN_REGISTRIES_URL` in `app.config.ts`) and used
   during credential verification.

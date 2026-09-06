@@ -160,6 +160,19 @@ describe('the browser-local persistence strategy', () => {
     expect(handle.descriptorCache({ scope: 'space-b' })).not.toBe(cache)
   })
 
+  it('persists one writer id under exactly `freewallet:writerId`', () => {
+    // The key is what the no-unlock-material wipe grade enumerates by prefix,
+    // and what the package's mint is handed; it stays exactly this string.
+    localStorage.removeItem('freewallet:writerId')
+    const handle = browserLocalSessionPersistence()
+
+    const writerId = handle.getWriterId()
+    expect(writerId).toBeTruthy()
+    expect(localStorage.getItem('freewallet:writerId')).toBe(writerId)
+    // Persisted, so a second reader on this browser answers the same label.
+    expect(browserLocalSessionPersistence().getWriterId()).toBe(writerId)
+  })
+
   it('serves in-memory caches for a guest (persistCaches: false)', async () => {
     const handle = browserLocalSessionPersistence({ persistCaches: false })
     const cache = handle.descriptorCache({ scope: 'space' })

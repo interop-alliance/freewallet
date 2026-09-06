@@ -34,7 +34,7 @@ import {
   credentialDetailStyles
 } from '@/styles/credentialStyles'
 import type { StorageCollection, StorageResource } from '@/lib/storage'
-import type { Json } from '@/lib/sync'
+import type { Json } from '@interop/was-sync'
 import {
   isVerifiableCredentialData,
   type FetchedCollectionResource

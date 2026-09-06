@@ -102,7 +102,7 @@ import {
   type EdvDocCipher
 } from '@interop/was-client/edv'
 import type { StorageCollection, StorageResource } from '@/lib/storage'
-import type { Json, SyncedDoc } from '@/lib/sync'
+import type { Json, SyncedDoc } from '@interop/was-sync'
 import type { SpaceQuotaReport } from '@/types/storageQuota'
 import type { FetchedCollectionResource } from '@/lib/storageResource'
 import type { StoredCredential } from '@/types/credential'
@@ -609,8 +609,9 @@ export class StorageManager {
 
   /**
    * The live local RxDB collection backing one of the wallet's standard
-   * logical collections. The sync controller uses this as the local end of
-   * replication.
+   * logical collections. The one member of this facade typed in RxDB terms,
+   * and the one caller is the sync binding, which puts it behind the injected
+   * port the replication core reads its local end through.
    *
    * @param logicalKey {string} e.g. 'publicCredentials'.
    * @returns {RxCollection<SyncedDoc>}
@@ -1141,7 +1142,8 @@ export class StorageManager {
    * presenting as an app key is refused outright, whether or not it binds to
    * its own seed: app keys are wallet-minted, never imported, and the mint
    * path has its own door ({@link addMintedAppKey}). The background sync pull
-   * (`src/lib/sync/`) writes pulled rows into the local replica without
+   * (the driver in `@interop/was-sync`) writes pulled rows into the local
+   * replica without
    * passing through here, deliberately: it replicates the account's own
    * remote collections, which only the account's enrolled wallet clients can
    * write (`private-credentials` is a protected collection -- RP and share
@@ -1381,8 +1383,8 @@ export class StorageManager {
    * tombstone against a resource this call has already deleted remotely, which
    * the push path tolerates: a `DELETE` of an absent resource is the
    * tombstone's goal state, and a conditional delete refused on a vanished
-   * master resolves as an ordinary delete/delete conflict (`deleteContent` and
-   * `assembleConflict` in `src/lib/sync/pushWrites.ts`).
+   * master resolves as an ordinary delete/delete conflict (the push handler's
+   * `deleteContent` and conflict assembler in `@interop/was-sync`).
    *
    * @param options {object}
    * @param options.cid {string}

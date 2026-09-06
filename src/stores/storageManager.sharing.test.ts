@@ -48,7 +48,7 @@ import {
 import { getRxStorageMemory } from 'rxdb/plugins/storage-memory'
 import type { ControllerProfile, User } from '@/types/auth'
 import { cidFrom } from '@interop/was-client/sync'
-import type { Json } from '@/lib/sync'
+import type { Json } from '@interop/was-sync'
 import { BrowserStore } from './browserStore'
 import {
   createEdvDocCipher,

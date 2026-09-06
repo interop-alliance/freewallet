@@ -1,5 +1,45 @@
 # History
 
+## 0.50.0 - TBD
+
+### Changed
+
+- The RxDB replication driver now lives in `@interop/was-sync`, shared with
+  `@interop/was-react`. `src/lib/sync/` is gone. `stores/syncController.ts` is
+  the session binding around the package's controller core: the guest, no-WAS,
+  and replica gate, the port built from `session.storage`, the status store,
+  the browser reachability source, and the dynamic import that keeps RxDB out
+  of the eager bundle chunk. `stores/contactsConflictHandler.ts` is the
+  decision closure over `resolveContactHeadConflict`, passed to the package's
+  conflict-handler factory. `lib/writerId.ts` is the key prefix and the
+  storage handed to the package's mint; the key is unchanged
+  (`freewallet:writerId`).
+- The merged synced-doc schema is this wallet's own shape, so RxDB's stored
+  schema hash is unchanged and a remembered browser keeps its replica. No
+  local data reset, and no forget-and-log-in-again.
+- A metadata clear is now written rather than skipped. A row whose `custom`
+  body is removed issues the `/meta` write with the cleared state, where the
+  previous driver wrote only when a body was present.
+- The sync error predicates (`isSyncConflictError`, `isUnknownEpochError`) and
+  the `SyncStatus` type are imported from `@interop/was-client/sync`, which now
+  owns them; the was-client floor moves to `^0.49.0`.
+- The local `formatEtag` copy in `src/lib/sync/pushWrites.ts` is gone.
+  was-client exports the same function and it is imported from there.
+
+### Added
+
+- Dependency: `@interop/was-sync` `^0.1.0`.
+
+### Fixed
+
+- An accepted push writes its acked revision back into the local row, so two
+  conditional writes to one row between pulls no longer send a stale
+  `If-Match` and draw a spurious conflict. Inherited from the package's push
+  handler.
+- The replica-less collection listing passes its page size as `limit`, the
+  option `Collection.documents()` reads. It was passing `pageSize`, which the
+  method ignored, so every walk ran at the 1000-document default.
+
 ## 0.49.1 - TBD
 
 ### Fixed

@@ -12,7 +12,7 @@ import { getRxStorageMemory } from 'rxdb/plugins/storage-memory'
 import type { RxStorage } from 'rxdb/plugins/core'
 import type { ContactData, ContactRevisionPayload } from '@interop/social-core'
 import type { DocCipher } from '@interop/was-client/edv'
-import type { Json } from '@/lib/sync'
+import type { Json } from '@interop/was-sync'
 import { BrowserStore } from '@/stores/browserStore'
 import type { User } from '@/types/auth'
 

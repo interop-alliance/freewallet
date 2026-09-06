@@ -62,5 +62,28 @@ export default defineConfig([
       ],
       'react-refresh/only-export-components': 'warn' // warn, not error
     }
+  },
+  {
+    // `@interop/was-sync/testing` is test fixtures: its fake WAS server accepts
+    // every write and serves a plausible changes feed, so a production import
+    // would show a healthy sync status over a replica writing nothing to WAS.
+    // Tests may use it; `src/**/*.test.*` and `tests/` are outside this glob.
+    files: ['src/**/*.{ts,tsx}'],
+    ignores: ['src/**/*.test.{ts,tsx}'],
+    rules: {
+      'no-restricted-imports': [
+        'error',
+        {
+          patterns: [
+            {
+              group: ['@interop/was-sync/testing'],
+              message:
+                'Test fixtures only. Import it from a test file, never from ' +
+                'application code.'
+            }
+          ]
+        }
+      ]
+    }
   }
 ])

@@ -13,6 +13,8 @@ const dirname = path.dirname(fileURLToPath(import.meta.url))
  */
 export default defineConfig({
   resolve: {
+    // One RxDB copy in the graph; see the note in `vite.config.ts`.
+    dedupe: ['rxdb'],
     alias: { '@': path.resolve(dirname, 'src') }
   },
   test: {

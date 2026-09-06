@@ -21,7 +21,7 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import type { IVerifiableCredential } from '@interop/data-integrity-core'
 import { getRxStorageMemory } from 'rxdb/plugins/storage-memory'
-import type { Json } from '@/lib/sync'
+import type { Json } from '@interop/was-sync'
 import { browserLocalSessionPersistence } from '@/session/persistence'
 import type { User } from '@/types/auth'
 import { BrowserStore } from './browserStore'
