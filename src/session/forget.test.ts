@@ -158,6 +158,11 @@ vi.mock('@/session/verifiedLog', () => ({
 }))
 const { invalidateVerifiedLog } = await import('@/session/verifiedLog')
 
+vi.mock('@/stores/syncController', () => ({
+  syncController: { stop: vi.fn(async () => {}) }
+}))
+const { syncController } = await import('@/stores/syncController')
+
 vi.mock('@/session/wipe', async importOriginal => {
   const actual = await importOriginal<typeof import('@/session/wipe')>()
   return {
@@ -253,6 +258,7 @@ function stubLocalStorage({ entries }: { entries: Record<string, string> }): {
 afterEach(() => {
   vi.unstubAllGlobals()
   vi.mocked(verifyAccountLog).mockReset()
+  vi.mocked(syncController.stop).mockReset()
 })
 
 describe('forgetBrowserWalletData (the no-unlock-material grade)', () => {
@@ -615,6 +621,9 @@ describe('forgetThisBrowser (the ceremony grades)', () => {
       order.push('ceremony')
       return { rotated: true } as never
     })
+    vi.mocked(syncController.stop).mockImplementation(async () => {
+      order.push('stop-sync')
+    })
     vi.mocked(executeLocalWipe).mockImplementation(async () => {
       order.push('wipe')
       return { failed: ['session-db'], unverified: [] }
@@ -628,7 +637,9 @@ describe('forgetThisBrowser (the ceremony grades)', () => {
     })
     expect(vi.mocked(forgetEnrolledClient)).toHaveBeenCalledTimes(1)
     expect(vi.mocked(forgetLastEnrolledClient)).not.toHaveBeenCalled()
-    expect(order).toEqual(['ceremony', 'wipe'])
+    // Replication stops between the ceremony and the replica delete, so the
+    // controller's poll timer never drives reSync() against a closed handle.
+    expect(order).toEqual(['ceremony', 'stop-sync', 'wipe'])
     expect(vi.mocked(executeLocalWipe).mock.calls[0]![0]).toMatchObject({
       targets: WIPE_TARGETS,
       clearWriter: true
@@ -670,6 +681,9 @@ describe('forgetThisBrowser (the ceremony grades)', () => {
       order.push('ceremony')
       return { installed: true } as never
     })
+    vi.mocked(syncController.stop).mockImplementation(async () => {
+      order.push('stop-sync')
+    })
     vi.mocked(executeLocalWipe).mockImplementation(async () => {
       order.push('wipe')
       return { failed: [], unverified: [] }
@@ -682,7 +696,7 @@ describe('forgetThisBrowser (the ceremony grades)', () => {
       wipeUnverified: []
     })
     expect(vi.mocked(forgetEnrolledClient)).not.toHaveBeenCalled()
-    expect(order).toEqual(['ceremony', 'wipe'])
+    expect(order).toEqual(['ceremony', 'stop-sync', 'wipe'])
     const options = vi.mocked(forgetLastEnrolledClient).mock.calls[0]![0]
     expect(options.annex).toMatchObject({
       wasServerUrl: pointer.host,

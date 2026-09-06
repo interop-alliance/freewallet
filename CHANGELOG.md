@@ -39,6 +39,10 @@
 - The replica-less collection listing passes its page size as `limit`, the
   option `Collection.documents()` reads. It was passing `pageSize`, which the
   method ignored, so every walk ran at the 1000-document default.
+- The forget ceremony (both the ordinary forget and the last-client
+  transition) stops background replication before its local wipe removes the
+  replica database. The controller's poll timer used to keep calling
+  `reSync()` against the closed handle.
 
 ## 0.49.1 - TBD
 

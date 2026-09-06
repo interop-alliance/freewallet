@@ -100,6 +100,7 @@ import type { VerifiedAccountLog } from '@interop/wallet-core/clients'
 import { SESSION_DB_NAME } from '@/lib/sessionKey'
 import { clearWriterId } from '@/lib/writerId'
 import { BrowserStore } from '@/stores/browserStore'
+import { syncController } from '@/stores/syncController'
 import {
   assertBrowserLocalSession,
   deleteAllLocalCacheFamilies,
@@ -456,6 +457,15 @@ export async function forgetThisBrowser({
     }
   } finally {
     invalidateVerifiedLog({ profile: session.profile })
+  }
+
+  // Quiesce first: stop background replication before the replica database
+  // goes, so the controller's poll timer does not keep driving reSync()
+  // against a closed handle (the order account deletion and logout keep).
+  try {
+    await syncController.stop()
+  } catch (err) {
+    log.warn('Could not stop background replication before the wipe', { err })
   }
 
   // The local wipe runs strictly last -- it is what makes a torn run read as

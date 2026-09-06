@@ -862,8 +862,11 @@ alone and this client's authority ends there. That store is required. The
 idempotent already-forgotten path writes no projection at all, since the
 removal entry landed on an earlier run and this client's authority is
 already gone; the next transient visit's ensure is that projection's mender.
-Only then does the local wipe run (`clearWriter: true`, the wipe's one writerId
-consumer).
+Only then does the local teardown run. Its first stage stops background
+replication, so the controller's poll timer is not left driving `reSync()`
+against a replica the next stage deletes (the same order account deletion
+and logout keep). The local wipe follows (`clearWriter: true`, the wipe's one
+writerId consumer).
 
 Wipe-last is the tear story. A run torn before the entry reads as "not
 forgotten", and a re-click resumes. A run torn between the projection PUT
@@ -942,7 +945,7 @@ amendment). Its stages, in order:
 6. The removal entry. The post-removal did:web projection is PUT through
    this client's root-authority `id` store immediately before it publishes,
    in the same last window of authority.
-7. The local wipe.
+7. The local teardown: replication stopped, then the local wipe.
 
 Stages 2 through 5 precede the removal entry because the removed client's
 signatures rot there, and on a client-less account no remembered login's
