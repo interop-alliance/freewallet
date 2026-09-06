@@ -156,7 +156,11 @@ async function establishmentHooks({
     serverUrl: host,
     zcapClient: bootstrapZcap
   })
-  const idStore = wasWebvhIdStore({ was: bootstrapWas, spaceId })
+  const idStore = wasWebvhIdStore({
+    was: bootstrapWas,
+    spaceId,
+    pinStore: logPins
+  })
 
   // The KMS stage's thunk, when a KMS is configured: the ceremony starts it
   // BEFORE the Space is awaited and joins on it before the genesis entry, so

@@ -28,7 +28,7 @@ import {
   type ClientWebvhUpdateKeys
 } from '@interop/wallet-core/webvh'
 import { setClientLabel } from '@interop/wallet-core/keys'
-import { memoryResourceLogPinStore } from '@interop/vh-resource-log'
+import { browserLocalSessionPersistence } from '@/session/persistence'
 import { WAS_SERVER_URL } from '@/app.config'
 import { KEYRING_KDF } from '@interop/wallet-core/keyring'
 import {
@@ -188,7 +188,17 @@ export async function completeEnrollment({
     secret: passphrase,
     kdf: KEYRING_KDF
   })
-  const found = await fetchKeyring({ secret: passphrase, credential, idb })
+  // The session's persistence strategy, built ahead of the login that ends
+  // the ceremony: its chain-head pin store rides the verification below and
+  // the login's own reads, so the head this enrollment verified against is
+  // what the session's first reads are checked against.
+  const persistence = browserLocalSessionPersistence({ idb })
+  const found = await fetchKeyring({
+    secret: passphrase,
+    credential,
+    idb,
+    accountLogPinStore: persistence.logPins
+  })
   if (!found) {
     throw new Error('No account was found for this passphrase.')
   }
@@ -205,9 +215,7 @@ export async function completeEnrollment({
     clientSeed,
     webvhUpdateKeys,
     pointer,
-    // The ceremony's own in-memory chain-head pin: one enrollment reads the
-    // log more than once, and nothing about the pin outlives the ceremony.
-    accountLogPinStore: memoryResourceLogPinStore()
+    accountLogPinStore: persistence.logPins
   })
 
   // Persist the key set under the unlock layer (this also pins the account
@@ -232,7 +240,12 @@ export async function completeEnrollment({
 
   // The ordinary login the ceremony ends in, on the identity already derived:
   // the caller gets the same session shape every other login path returns.
-  const { session } = await loginWithPassphrase({ passphrase, credential, idb })
+  const { session } = await loginWithPassphrase({
+    passphrase,
+    credential,
+    idb,
+    persistence
+  })
   if (!session) {
     throw new Error(
       'The enrolled key set did not produce a session; connecting this ' +

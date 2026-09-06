@@ -57,7 +57,6 @@ import {
 } from '@interop/wallet-core/unlock'
 import type { ClientKeyRecord } from '@interop/wallet-core/keys'
 import {
-  accountLogPinId,
   delegatedWebvhLogStore,
   didKeyZcapClient,
   isWebvhDid,
@@ -84,7 +83,7 @@ import { keyAgreementCommitment } from '@interop/wallet-core/webvh'
 import type { AccountPointer, UnlockKdf } from '@interop/wallet-core/keyring'
 import type { ZcapClient } from '@interop/ezcap'
 import { ID_COLLECTION } from '@interop/wallet-core/space'
-import { memoryResourceLogPinStore } from '@interop/vh-resource-log'
+import type { ResourceLogPinStore } from '@interop/vh-resource-log'
 import type { Session } from '@/types/auth'
 import {
   bindUnlockSecret,
@@ -134,23 +133,29 @@ const log = createLogger('fw:session:unlock')
  * @param options.delegation {IZcap}   the record's PUT-on-`did.jsonl` bridge
  * @param options.zcapClient {ZcapClient}   the credential-derived client the
  *   delegated PUT is invoked with
+ * @param options.pinStore {ResourceLogPinStore}   the caller's chain-head
+ *   pins; the store carries the account log's slot, so every read and
+ *   publish through it is checked against the pin and advances it
  * @returns {UnlockLogStore}
  */
 export function unlockLogStore({
   pointer,
   delegation,
-  zcapClient
+  zcapClient,
+  pinStore
 }: {
   pointer: AccountPointer
   delegation: IZcap
   zcapClient: ZcapClient
+  pinStore: ResourceLogPinStore
 }): UnlockLogStore {
   return delegatedWebvhLogStore({
     host: pointer.host,
     spaceId: pointer.spaceId,
     collectionId: ID_COLLECTION.id,
     delegation,
-    zcapClient
+    zcapClient,
+    pinStore
   })
 }
 
@@ -320,7 +325,8 @@ export async function establishStandingUnlock({
             standing: {
               standingClient: session.profile.standingUnlock!.standingClient,
               delegatedClients: ctx.sibling
-            }
+            },
+            pinStore: session.profile.persistence.logPins
           })
         : clientAnnexReachOf({ session, pointer, clientAnnexDid })
     await commitClientAnnexRung({
@@ -328,9 +334,7 @@ export async function establishStandingUnlock({
       boundLadderSeed: ladderSeed,
       actingLadderSeed,
       generationId: reach.generationId,
-      expectedDid: clientAnnexDid,
-      pinStore: session.profile.persistence.logPins,
-      logId: reach.logId
+      expectedDid: clientAnnexDid
     })
   }
 
@@ -384,9 +388,7 @@ export async function establishStandingUnlock({
         updateKeyMultibase: rung0.keyMultibase
       },
       ladderSeed,
-      expectedDid: pointer.did,
-      pinStore: session.profile.persistence.logPins,
-      logId: accountLogPinId({ spaceId: pointer.spaceId })
+      expectedDid: pointer.did
     })
     invalidateVerifiedLog({ profile: session.profile })
     // The escrow, anchored at the entry just published: the new credential's
@@ -436,9 +438,7 @@ export async function establishStandingUnlock({
         updateKeyMultibase: rung0.keyMultibase
       },
       ladderSeed,
-      expectedDid: pointer.did,
-      pinStore: session.profile.persistence.logPins,
-      logId: accountLogPinId({ spaceId: pointer.spaceId })
+      expectedDid: pointer.did
     })
     invalidateVerifiedLog({ profile: session.profile })
 
@@ -583,7 +583,12 @@ export async function establishClientAnnexGeneration({
     })
   const { zcapClient } = session.profile
 
-  const found = await fetchKeyring({ secret, kdf, idb })
+  const found = await fetchKeyring({
+    secret,
+    kdf,
+    idb,
+    accountLogPinStore: session.profile.persistence.logPins
+  })
   const foundStanding = found?.standing
   const ladderSeed = foundStanding?.ladderSeed
   if (!found || !foundStanding || !ladderSeed || !found.standingClient) {
@@ -614,7 +619,6 @@ export async function establishClientAnnexGeneration({
   const pointed = await ensurePointedClientAnnexGeneration({
     account: { did: pointer.did, doc: account.doc, log: account.log },
     wasServerUrl: pointer.host,
-    accountSpaceId: pointer.spaceId,
     ladderSeed,
     was: new WasClient({
       serverUrl: pointer.host,
@@ -756,15 +760,21 @@ export class SelfEnrollmentSkewError extends Error {
  * @param options {object}
  * @param options.found {KeyringFetchResult}   a hit `canSelfEnroll` accepted
  *   (fresh), or a pending-record hit the resume gate accepted (`resume`)
+ * @param options.pinStore {ResourceLogPinStore}   the login's chain-head
+ *   pins, which the ceremony's log store carries: this login's first contact
+ *   establishes the account log's slot, every later read in the same login
+ *   checks against it, and it dies with the tab
  * @param [options.resume] {object}   the pending record's replayed contents:
  *   `{ clientSeed, webvhUpdateKeys, builtOnHead }`
  * @returns {Promise<object>}   the persisted key set and its persist closure
  */
 export async function selfEnrollStandingClient({
   found,
+  pinStore,
   resume
 }: {
   found: KeyringFetchResult
+  pinStore: ResourceLogPinStore
   resume?: {
     clientSeed: Uint8Array
     webvhUpdateKeys: ClientWebvhUpdateKeys
@@ -795,12 +805,9 @@ export async function selfEnrollStandingClient({
     logStore: unlockLogStore({
       pointer,
       delegation: standing.delegation,
-      zcapClient: standingClient.agents.zcapClient
+      zcapClient: standingClient.agents.zcapClient,
+      pinStore
     }),
-    // Every visit starts pin-less: this first contact establishes the
-    // chain-head pin, the later reads in this same login check against it,
-    // and it dies with the tab.
-    accountLogPinStore: memoryResourceLogPinStore(),
     ...(resume ? { resume } : {}),
     // The persist-before-publish seam: the pending-shape record is written
     // browser-local, stamped with the head the add entry is about to be

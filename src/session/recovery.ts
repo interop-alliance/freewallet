@@ -85,7 +85,6 @@ import {
 import { accountRosterStore } from '@/session/rosterStore'
 import { cascadeCollectionsToUserKey } from '@/session/userKeyCascade'
 import {
-  accountLogPinId,
   clientSigningKeyMultibase,
   delegationKeyInDocument,
   didKeyZcapClient,
@@ -99,7 +98,6 @@ import {
 } from '@interop/wallet-core/webvh'
 import {
   clientAnnexDidParts,
-  clientAnnexLogPinId,
   delegatedClientsPointer,
   clientAnnexLogStore,
   embeddedGenerationDelegation,
@@ -579,8 +577,6 @@ export async function issueRecoveryCode({
     action: 'Recovery-code issuance'
   })
   const { pointer, controller, idStore, rosterStore, signer } = context
-  const logPins = session.profile.persistence.logPins
-  const logId = accountLogPinId({ spaceId: pointer.spaceId })
 
   const client = await recoveryClientFromCode({ code })
   const recovery = {
@@ -639,9 +635,7 @@ export async function issueRecoveryCode({
       // and the authority half publishes the ladder's VM.
       ladderSeed: client.ladderSeed,
       part,
-      expectedDid: pointer.did,
-      pinStore: logPins,
-      logId
+      expectedDid: pointer.did
     })
     invalidateVerifiedLog({ profile: session.profile })
   }
@@ -687,18 +681,22 @@ export async function issueRecoveryCode({
 function delegatedLogStore({
   pointer,
   delegation,
-  client
+  client,
+  pinStore
 }: {
   pointer: AccountPointer
   delegation: IZcap
   client: RecoveryClient
+  pinStore: ResourceLogPinStore
 }): RecoveryLogStore {
   // The shared delegated store (public log GET + bridge-delegated PUT),
-  // invoked with the code-derived did:key client.
+  // invoked with the code-derived did:key client, carrying the ceremony's
+  // chain-head pins.
   return unlockLogStore({
     pointer,
     delegation,
-    zcapClient: client.agents.zcapClient
+    zcapClient: client.agents.zcapClient,
+    pinStore
   })
 }
 
@@ -789,11 +787,10 @@ async function readRecoveryRecord({ code }: { code: string }) {
  *   returned it
  * @param options.pointer {AccountPointer}   the code-authenticated account
  *   pointer (as `unwrapUnlockRecord` returned it, its binding verified)
- * @param [options.verifiedLog] {VerifiedAccountLog}   an already-verified
- *   account log; fetched and verified here when absent
- * @param [options.accountLogPinStore] {ResourceLogPinStore}   the chain-head
- *   pin store the log fetch rides when no `verifiedLog` is supplied; this
- *   check's own in-memory store is the default
+ * @param [options.verifiedLog] {VerifiedAccountLog}   the ceremony's
+ *   verified account log; fetched here when absent
+ * @param options.pinStore {ResourceLogPinStore}   the chain-head pins the
+ *   fetch rides when no `verifiedLog` is supplied
  * @returns {Promise<void>}
  */
 async function completeRecoveryRecordProof({
@@ -801,13 +798,13 @@ async function completeRecoveryRecordProof({
   proofState,
   pointer,
   verifiedLog,
-  accountLogPinStore
+  pinStore
 }: {
   record: unknown
   proofState: UnlockRecordProofState
   pointer: AccountPointer
   verifiedLog?: VerifiedAccountLog
-  accountLogPinStore?: ResourceLogPinStore
+  pinStore: ResourceLogPinStore
 }): Promise<void> {
   if (proofState === 'verified') {
     return
@@ -829,12 +826,7 @@ async function completeRecoveryRecordProof({
     // ladder VM, the one key a client-less account's document still lists.
     const signingKeys = await currentAccountRecordSigners({
       pointer: logPointer,
-      ...(verifiedLog
-        ? { verifiedLog }
-        : {
-            accountLogPinStore:
-              accountLogPinStore ?? memoryResourceLogPinStore()
-          })
+      ...(verifiedLog ? { verifiedLog } : { accountLogPinStore: pinStore })
     })
     await verifyRecordProof({
       record,
@@ -880,7 +872,10 @@ export async function locateRecoveryAccount({
   await completeRecoveryRecordProof({
     record,
     proofState,
-    pointer: contents.pointer
+    pointer: contents.pointer,
+    // One read and nothing after it: the locate step holds no session, and
+    // the spend that may follow runs under its own store from first contact.
+    pinStore: memoryResourceLogPinStore()
   })
 }
 
@@ -1285,15 +1280,20 @@ export async function recoverAccountWithCode({
   if (!rememberBrowser) {
     return recoverAccountTransient({ recovered, newPassphrase })
   }
-  // Verify the world-readable log locally before invoking anything. The
-  // recovering browser holds no account-log chain-head pin yet (this read
-  // is its first contact), which is exactly the pin's trust-on-first-use
-  // establishment.
+  // The ceremony's chain-head pins, one keyed store for every log read
+  // below (the account log and the roster log). The recovering browser
+  // holds no pin yet, so this first read is the pin's trust-on-first-use
+  // establishment, and every later read in the ceremony -- the continuation's
+  // two entry builds, the standing establishment, the post-entry
+  // re-resolution -- is checked against it. It dies with the tab; the
+  // remembered login that follows starts its own.
+  const logPins = memoryResourceLogPinStore()
+  // Verify the world-readable log locally before invoking anything.
   const verifiedLog = await verifyAccountLog({
     did: pointer.did,
     spaceId: pointer.spaceId,
     host: pointer.host,
-    pinStore: memoryResourceLogPinStore()
+    pinStore: logPins
   })
 
   // Settle the record's proof before acting on anything it carries. An
@@ -1304,7 +1304,8 @@ export async function recoverAccountWithCode({
     record,
     proofState,
     pointer,
-    verifiedLog
+    verifiedLog,
+    pinStore: logPins
   })
 
   // The new passphrase's credential (one KDF run, reused by every bind
@@ -1396,15 +1397,14 @@ export async function recoverAccountWithCode({
   const logStore = delegatedLogStore({
     pointer,
     delegation: contents.delegation,
-    client: spent
+    client: spent,
+    pinStore: logPins
   })
   const continuation = await recoverWebvhClient({
     store: logStore,
     // The ceremony's own did.jsonl reads must resolve to the account the
     // record's pointer names.
     expectedDid: pointer.did,
-    pinStore: memoryResourceLogPinStore(),
-    logId: accountLogPinId({ spaceId: pointer.spaceId }),
     recovery: {
       updateSeed: spent.updateSeed,
       keyAgreementKeyMultibase: spent.keyAgreementKeyMultibase,
@@ -1575,7 +1575,8 @@ export async function recoverAccountWithCode({
     storageServerUrl: pointer.host,
     zcapClient: newZcapClient,
     spaceId: pointer.spaceId,
-    controller: did
+    controller: did,
+    pinStore: logPins
   })
 
   // Republish the did.json projection the delegated continuation could not
@@ -1604,7 +1605,7 @@ export async function recoverAccountWithCode({
     zcapClient: newZcapClient,
     keyAgent: newClientAgents.keyAgent,
     pointer: { did: pointer.did, spaceId: pointer.spaceId, host: pointer.host },
-    pinStore: memoryResourceLogPinStore()
+    pinStore: logPins
   })
   await addUserKeyRosterRecipient({
     store: rosterStore,
@@ -1666,9 +1667,7 @@ export async function recoverAccountWithCode({
         updateKeyMultibase: newRung0.keyMultibase
       },
       ladderSeed: newLadderSeed,
-      expectedDid: pointer.did,
-      pinStore: memoryResourceLogPinStore(),
-      logId: accountLogPinId({ spaceId: pointer.spaceId })
+      expectedDid: pointer.did
     })
     standingEstablished = true
     log.debug(
@@ -1688,7 +1687,7 @@ export async function recoverAccountWithCode({
     did: pointer.did,
     spaceId: pointer.spaceId,
     host: pointer.host,
-    pinStore: memoryResourceLogPinStore()
+    pinStore: logPins
   })
   const preRotation = await readUserKeyRoster({
     store: rosterStore,
@@ -2011,15 +2010,19 @@ export interface RecoverySpendPrompt {
  *   hit, holding the spend-written pending record
  * @param [options.verifiedLog] {VerifiedAccountLog}   the caller's verified
  *   account log (the pending router's own read); fetched here when absent
+ * @param options.pinStore {ResourceLogPinStore}   the login's chain-head
+ *   pins, which every log read and store here rides
  * @returns {Promise<object>}   the completed key set, its persist closure,
  *   and the show-once prompt while the confirm is still owed
  */
 export async function resumeRecoverySpend({
   found,
-  verifiedLog
+  verifiedLog,
+  pinStore
 }: {
   found: KeyringFetchResult
   verifiedLog?: VerifiedAccountLog
+  pinStore: ResourceLogPinStore
 }): Promise<{
   clientKeys: ClientKeyRecord
   persistClientKeys: (changes: PersistableClientKeys) => Promise<void>
@@ -2058,7 +2061,7 @@ export async function resumeRecoverySpend({
     zcapClient: newZcapClient,
     keyAgent: agents.keyAgent,
     pointer: logPointer,
-    pinStore: memoryResourceLogPinStore()
+    pinStore
   })
   const replacement = pending.replacementCode
     ? await recoveryClientFromCode({
@@ -2071,7 +2074,7 @@ export async function resumeRecoverySpend({
   async function accountLog(): Promise<VerifiedAccountLog> {
     verifiedAccount ??= await verifyAccountLog({
       ...logPointer,
-      pinStore: memoryResourceLogPinStore()
+      pinStore
     })
     return verifiedAccount
   }
@@ -2253,7 +2256,8 @@ export async function resumeRecoverySpend({
           storageServerUrl: pointer.host,
           zcapClient: newZcapClient,
           spaceId: pointer.spaceId,
-          controller: did
+          controller: did,
+          pinStore
         })
         const rung0 = await ladderRung({
           ladderSeed: standingLadderSeed,
@@ -2267,9 +2271,7 @@ export async function resumeRecoverySpend({
             updateKeyMultibase: rung0.keyMultibase
           },
           ladderSeed: standingLadderSeed,
-          expectedDid: did,
-          pinStore: memoryResourceLogPinStore(),
-          logId: accountLogPinId({ spaceId: pointer.spaceId })
+          expectedDid: did
         })
       }
       standingEstablished = true
@@ -2587,7 +2589,8 @@ async function recoverAccountTransient({
     record,
     proofState,
     pointer,
-    verifiedLog
+    verifiedLog,
+    pinStore: logPins
   })
 
   // The fresh credential (one KDF run), its ladder, and the replacement code
@@ -2627,7 +2630,8 @@ async function recoverAccountTransient({
   const logStore = delegatedLogStore({
     pointer,
     delegation: contents.delegation,
-    client: spent
+    client: spent,
+    pinStore: logPins
   })
 
   // The per-visit transient client: minted here, enrolled inside the seam
@@ -2689,13 +2693,15 @@ async function recoverAccountTransient({
           wasServerUrl: host,
           spaceId: clientAnnexSpaceId,
           controller: bootstrapAgent.id,
-          ladderSeed
+          ladderSeed,
+          pinStore: logPins
         })
         await ensureGenerationDelegationCurrent({
           store: clientAnnexLogStore({
             was: bootstrapWas,
             spaceId: clientAnnexSpaceId,
-            generationId: minted.generationId
+            generationId: minted.generationId,
+            pinStore: logPins
           }),
           ladderSeed,
           generationId: minted.generationId,
@@ -2720,19 +2726,15 @@ async function recoverAccountTransient({
           store: clientAnnexLogStore({
             was: bootstrapWas,
             spaceId: clientAnnexSpaceId,
-            generationId: minted.generationId
+            generationId: minted.generationId,
+            pinStore: logPins
           }),
           ladderSeed,
           generationId: minted.generationId,
           transientKeyMultibase: clientSigningKeyMultibase({
             keyAgent: visitAgents.keyAgent
           }),
-          expectedDid: minted.did,
-          pinStore: logPins,
-          logId: clientAnnexLogPinId({
-            spaceId: clientAnnexSpaceId,
-            generationId: minted.generationId
-          })
+          expectedDid: minted.did
         })
         clientAnnexDoc = enrolled.doc
         // The description the annex Space's own ensure just read (present
@@ -2903,7 +2905,8 @@ async function recoverAccountTransient({
     zcapClient: transientZcapClient,
     spaceId,
     controller: did,
-    capability: generationDelegation
+    capability: generationDelegation,
+    pinStore: logPins
   })
   await cascadeCollectionsToUserKey({
     remoteStore,
@@ -3112,13 +3115,12 @@ export async function revokeRecoveryCode({
   // Wait out the login-time registry passes rather than racing their
   // read-modify-writes; on a settled session the chain resolved long ago.
   await session.registryReady
-  const { epochPins, logPins } = session.profile.persistence
+  const { epochPins } = session.profile.persistence
   const context = await requireRecoveryContext({
     session,
     action: 'Recovery-code revocation'
   })
   const { remoteStore, pointer, idStore, rosterStore, signer } = context
-  const logId = accountLogPinId({ spaceId: pointer.spaceId })
   const recovery = {
     keyAgreementKeyMultibase: entry.keyAgreementKeyMultibase,
     updateKeyMultibase: entry.updateKeyMultibase
@@ -3133,9 +3135,7 @@ export async function revokeRecoveryCode({
       keyAgreement: { publicKeyMultibase: entry.keyAgreementKeyMultibase },
       updateKeyMultibase: entry.updateKeyMultibase
     },
-    expectedDid: pointer.did,
-    pinStore: logPins,
-    logId
+    expectedDid: pointer.did
   })
 
   // 2. The document entry out (idempotent), striking the code's
@@ -3154,9 +3154,7 @@ export async function revokeRecoveryCode({
           projectionStore: context.projectionStore
         }
       : {}),
-    expectedDid: pointer.did,
-    pinStore: logPins,
-    logId
+    expectedDid: pointer.did
   })
   invalidateVerifiedLog({ profile: session.profile })
 

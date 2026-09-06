@@ -9,6 +9,7 @@
  * HTTP seam is mocked.
  */
 import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { memoryResourceLogPinStore } from '@interop/vh-resource-log'
 import type { IKeyAgreementKey, IZcap } from '@interop/data-integrity-core'
 
 const state = vi.hoisted(() => ({
@@ -331,7 +332,11 @@ describe('the bind under the spend obligations', () => {
 
     // The freshly written record supersedes the fast-clock one: its stamp is
     // strictly newer, so no reader sees the rewrite as the older of the two.
-    const found = await fetchKeyring({ secret: PASSPHRASE, idb })
+    const found = await fetchKeyring({
+      accountLogPinStore: memoryResourceLogPinStore(),
+      secret: PASSPHRASE,
+      idb
+    })
     expect(Date.parse(found!.createdAt)).toBeGreaterThan(
       Date.parse(fastCreatedAt)
     )
@@ -393,7 +398,11 @@ describe('the bind under the spend obligations', () => {
       idb
     })
 
-    const found = await fetchKeyring({ secret: PASSPHRASE, idb })
+    const found = await fetchKeyring({
+      accountLogPinStore: memoryResourceLogPinStore(),
+      secret: PASSPHRASE,
+      idb
+    })
     expect(found?.clientKeys?.userKey).toBeUndefined()
     expect(found?.clientKeys?.pending).toMatchObject({
       ceremony: 'recovery-spend',

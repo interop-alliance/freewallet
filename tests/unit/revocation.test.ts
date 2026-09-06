@@ -86,7 +86,6 @@ import { deriveNextKeyHash } from '@interop/did-method-webvh'
 import { revokeAccountClient } from '@interop/wallet-core/clients'
 import { userKeyVaultKeys } from '@interop/wallet-core/keys'
 import {
-  clientAnnexLogPinId,
   clientAnnexLogStore,
   ensureGenerationDelegationCurrent
 } from '@interop/wallet-core/clientAnnex'
@@ -654,17 +653,16 @@ describe('the generation-delegation re-mint stage', () => {
         expectedDid: CLIENT_ANNEX_DID,
         // The signer-death axis: the document the revocation edit just
         // produced, never a cached view.
-        accountDoc: POINTED_DOCUMENT,
-        logId: clientAnnexLogPinId({
-          spaceId: CLIENT_ANNEX_SPACE_ID,
-          generationId: GENERATION_ID
-        })
+        accountDoc: POINTED_DOCUMENT
       })
     )
+    // The generation log's chain-head pin rides the store, under the
+    // session's own pins.
     expect(vi.mocked(clientAnnexLogStore)).toHaveBeenCalledWith(
       expect.objectContaining({
         spaceId: CLIENT_ANNEX_SPACE_ID,
-        generationId: GENERATION_ID
+        generationId: GENERATION_ID,
+        pinStore: expect.objectContaining({ read: expect.any(Function) })
       })
     )
   })

@@ -1,5 +1,6 @@
 // @vitest-environment node
 import { describe, it, expect, vi } from 'vitest'
+import { memoryResourceLogPinStore } from '@interop/vh-resource-log'
 import type { ZcapClient } from '@interop/ezcap'
 import type { IZcap } from '@interop/data-integrity-core'
 import type { SpaceDescription, WasClient } from '@interop/was-client'
@@ -26,6 +27,7 @@ import type { ControllerProfile, User } from '../../src/types/auth'
  */
 function storeWithStubbedClient(was: unknown): WASRemoteStore {
   const store = new WASRemoteStore({
+    pinStore: memoryResourceLogPinStore(),
     storageServerUrl: 'https://example.test',
     zcapClient: { request: vi.fn() } as unknown as ZcapClient,
     spaceId: 'space-id',
@@ -510,7 +512,8 @@ describe('WASRemoteStore.initClient', () => {
       user: { id: 'user-id-that-is-not-controller' } as unknown as User,
       profile: {
         keyAgent: { id: controller },
-        zcapClient: { request: vi.fn() }
+        zcapClient: { request: vi.fn() },
+        persistence: { logPins: memoryResourceLogPinStore() }
       } as unknown as ControllerProfile
     })
 
@@ -527,6 +530,7 @@ describe('WASRemoteStore.initClient', () => {
       profile: {
         keyAgent: { id: clientDid },
         zcapClient: { request: vi.fn() },
+        persistence: { logPins: memoryResourceLogPinStore() },
         accountPointer: { spaceId: 'minted-space-id', host: 'https://h' }
       } as unknown as ControllerProfile
     })
@@ -544,6 +548,7 @@ describe('WASRemoteStore.initClient', () => {
       profile: {
         keyAgent: { id: clientDid },
         zcapClient: { request: vi.fn() },
+        persistence: { logPins: memoryResourceLogPinStore() },
         accountPointer: {
           did: webvhDid,
           spaceId: 'minted-space-id',
@@ -833,6 +838,7 @@ describe('WASRemoteStore.clientLabelsStore', () => {
    */
   function storeWithCapability(capability?: IZcap): WASRemoteStore {
     return new WASRemoteStore({
+      pinStore: memoryResourceLogPinStore(),
       storageServerUrl: 'https://example.test',
       zcapClient: { request: vi.fn() } as unknown as ZcapClient,
       spaceId: 'space-id',

@@ -13,6 +13,7 @@
  * wallet-core's suites); everything else runs real.
  */
 import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { memoryResourceLogPinStore } from '@interop/vh-resource-log'
 import { addSink, captureSink } from '@interop/logger'
 
 vi.mock('@interop/wallet-core/clientAnnex', async importOriginal => ({
@@ -135,7 +136,10 @@ describe('selfEnrollStandingClient -- the persist hook (fresh run)', () => {
       order.push('complete')
     })
 
-    const { clientKeys } = await selfEnrollStandingClient({ found })
+    const { clientKeys } = await selfEnrollStandingClient({
+      pinStore: memoryResourceLogPinStore(),
+      found
+    })
 
     // The hook's pending write: seeds + controller + pointerDid + pending,
     // and NO userKey -- the pending discriminator.
@@ -170,9 +174,9 @@ describe('selfEnrollStandingClient -- the persist hook (fresh run)', () => {
     coreFiringHook()
     enrollClientKeys.mockRejectedValue(new Error('quota exceeded'))
 
-    await expect(selfEnrollStandingClient({ found })).rejects.toThrow(
-      'quota exceeded'
-    )
+    await expect(
+      selfEnrollStandingClient({ pinStore: memoryResourceLogPinStore(), found })
+    ).rejects.toThrow('quota exceeded')
     expect(enrolledPersister).not.toHaveBeenCalled()
   })
 
@@ -182,7 +186,10 @@ describe('selfEnrollStandingClient -- the persist hook (fresh run)', () => {
     const { found } = makeFound()
     coreFiringHook({ hookFires: 2 })
 
-    await selfEnrollStandingClient({ found })
+    await selfEnrollStandingClient({
+      pinStore: memoryResourceLogPinStore(),
+      found
+    })
 
     expect(
       capture.events.some(
@@ -204,9 +211,9 @@ describe('selfEnrollStandingClient -- the build-skew guard', () => {
     const { found, enrollClientKeys } = makeFound()
     coreFiringHook({ committed: 'omitted', hookFires: 0 })
 
-    await expect(selfEnrollStandingClient({ found })).rejects.toThrow(
-      SelfEnrollmentSkewError
-    )
+    await expect(
+      selfEnrollStandingClient({ pinStore: memoryResourceLogPinStore(), found })
+    ).rejects.toThrow(SelfEnrollmentSkewError)
     expect(enrollClientKeys).toHaveBeenCalledTimes(1)
     const persisted = enrollClientKeys.mock.calls[0]![0] as Record<
       string,
@@ -222,9 +229,9 @@ describe('selfEnrollStandingClient -- the build-skew guard', () => {
     coreFiringHook({ committed: 'omitted', hookFires: 0 })
     enrollClientKeys.mockRejectedValue(new Error('quota exceeded'))
 
-    await expect(selfEnrollStandingClient({ found })).rejects.toThrow(
-      SelfEnrollmentSkewError
-    )
+    await expect(
+      selfEnrollStandingClient({ pinStore: memoryResourceLogPinStore(), found })
+    ).rejects.toThrow(SelfEnrollmentSkewError)
   })
 })
 
@@ -238,7 +245,11 @@ describe('selfEnrollStandingClient -- the resume mode', () => {
     }
     coreFiringHook()
 
-    const { clientKeys } = await selfEnrollStandingClient({ found, resume })
+    const { clientKeys } = await selfEnrollStandingClient({
+      pinStore: memoryResourceLogPinStore(),
+      found,
+      resume
+    })
 
     // The core was handed the resume verbatim (the mint skip + fork guard).
     const coreOptions = vi.mocked(selfEnrollClientCore).mock
@@ -276,7 +287,11 @@ describe('selfEnrollStandingClient -- the resume mode', () => {
     }
     coreFiringHook({ committed: false, hookFires: 0 })
 
-    const { clientKeys } = await selfEnrollStandingClient({ found, resume })
+    const { clientKeys } = await selfEnrollStandingClient({
+      pinStore: memoryResourceLogPinStore(),
+      found,
+      resume
+    })
 
     expect(clientKeys.userKey).toBe(USER_KEY)
     expect(persistClientKeys).toHaveBeenCalledWith(
@@ -288,6 +303,7 @@ describe('selfEnrollStandingClient -- the resume mode', () => {
     const { found } = makeFound({ persistClientKeys: undefined })
     await expect(
       selfEnrollStandingClient({
+        pinStore: memoryResourceLogPinStore(),
         found,
         resume: {
           clientSeed: randomSeed(),

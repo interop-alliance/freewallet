@@ -22,7 +22,6 @@ import type { IKeyAgreementKey, IZcap } from '@interop/data-integrity-core'
 import type { ZcapClient } from '@interop/ezcap'
 import type { DIDLog } from '@interop/did-method-webvh'
 import { agentsFromSeed } from '@interop/wallet-core/identity'
-import { memoryResourceLogPinStore } from '@interop/vh-resource-log'
 import type { ControllerProfile, Session, User } from '@/types/auth'
 import { KMS_SERVER_URL, PASSKEY_KDF, WAS_SERVER_URL } from '@/app.config'
 import { ensureKeystore } from '@/lib/kms'
@@ -62,6 +61,7 @@ import {
   browserLocalSessionPersistence,
   isBrowserLocalSession,
   isRememberedSession,
+  type BrowserLocalSessionPersistence,
   type SessionPersistence
 } from '@/session/persistence'
 import { StorageManager } from '@/stores/storageManager'
@@ -780,6 +780,9 @@ async function checkUserKeyRosterAtLogin({
  *   credential
  * @param options.type {'passphrase' | 'passkey'}   sets `lowEntropy`
  * @param [options.email] {string}
+ * @param options.persistence {BrowserLocalSessionPersistence}   the
+ *   login's persistence strategy; the mend and the re-fetch read under its
+ *   chain-head pins
  * @param [options.idb] {IDBFactory}
  * @returns {Promise<KeyringFetchResult>}   the refreshed hit, or the
  *   original when the re-fetch missed
@@ -789,12 +792,14 @@ async function healUnpromotedRememberedAccount({
   credential,
   type,
   email,
+  persistence,
   idb
 }: {
   found: KeyringFetchResult
   credential: UnlockCredential
   type: 'passphrase' | 'passkey'
   email?: string
+  persistence: BrowserLocalSessionPersistence
   idb?: IDBFactory
 }): Promise<KeyringFetchResult> {
   const ladderSeed = found.standing?.ladderSeed
@@ -810,7 +815,7 @@ async function healUnpromotedRememberedAccount({
     lowEntropy: type === 'passphrase',
     email: email ?? found.email,
     priorCreatedAt: found.createdAt,
-    persistence: { logPins: memoryResourceLogPinStore() },
+    persistence,
     // The resume runs only on a pointer naming no did:webvh, so there is no
     // account DID to key a roster-epoch pin by and this caller states that
     // it holds none rather than dropping the option.
@@ -834,7 +839,8 @@ async function healUnpromotedRememberedAccount({
     ? await fetchKeyring({
         credential,
         idb,
-        mintManageCapability: true
+        mintManageCapability: true,
+        accountLogPinStore: persistence.logPins
       })
     : undefined
   if (!refreshed || !isWebvhDid(refreshed.pointer?.did)) {
@@ -935,6 +941,11 @@ async function healUnpromotedRememberedAccount({
  *   already holding this credential's client-key record). Absent, the
  *   routing decides: record present -> remembered (the silent ratchet), absent
  *   -> transient, the default on a non-remembered browser
+ * @param [options.persistence] {BrowserLocalSessionPersistence}   the
+ *   remembered session's persistence strategy, when a caller's reads
+ *   already ran under its chain-head pins (the enrollment completion, the
+ *   remembered signup's establishment) and the login must check its own
+ *   reads against the same heads; built here when absent
  * @returns {Promise<{ session: Session | null, userExists: boolean }>}
  */
 export async function loginWithPassphrase({
@@ -944,7 +955,8 @@ export async function loginWithPassphrase({
   popup = false,
   provisionStorage = true,
   credential,
-  rememberBrowser
+  rememberBrowser,
+  persistence
 }: {
   passphrase: string
   email?: string
@@ -953,6 +965,7 @@ export async function loginWithPassphrase({
   provisionStorage?: boolean
   credential?: UnlockCredential
   rememberBrowser?: boolean
+  persistence?: BrowserLocalSessionPersistence
 }): Promise<{ session: Session | null; userExists: boolean }> {
   return loginWithUnlockCredential({
     secret: passphrase,
@@ -967,7 +980,8 @@ export async function loginWithPassphrase({
     popup,
     provisionStorage,
     credential,
-    rememberBrowser
+    rememberBrowser,
+    ...(persistence ? { persistence } : {})
   })
 }
 
@@ -1002,6 +1016,9 @@ export async function loginWithPassphrase({
  * @param [options.credential] {UnlockCredential}   an already-derived unlock
  *   credential for the same secret
  * @param [options.rememberBrowser] {boolean}   the explicit routing input
+ * @param [options.persistence] {BrowserLocalSessionPersistence}   the
+ *   remembered session's persistence strategy, when the caller's own reads
+ *   already ran under its chain-head pins; built here when absent
  * @returns {Promise<{ session: Session | null, userExists: boolean }>}
  */
 async function loginWithUnlockCredential({
@@ -1014,7 +1031,8 @@ async function loginWithUnlockCredential({
   popup,
   provisionStorage,
   credential,
-  rememberBrowser
+  rememberBrowser,
+  persistence: suppliedPersistence
 }: {
   secret?: string | Uint8Array
   kdf: UnlockKdf
@@ -1026,6 +1044,7 @@ async function loginWithUnlockCredential({
   provisionStorage: boolean
   credential?: UnlockCredential
   rememberBrowser?: boolean
+  persistence?: BrowserLocalSessionPersistence
 }): Promise<{ session: Session | null; userExists: boolean }> {
   let derived = credential
   for (let staleRetries = 0; ; staleRetries++) {
@@ -1055,12 +1074,26 @@ async function loginWithUnlockCredential({
     }
     derived = routed.credential ?? derived
 
+    // The remembered session's persistence strategy, built BEFORE the
+    // keyring fetch: its chain-head pin store rides every account-log read
+    // on this path (the pending-proof settlement, the forgotten-browser
+    // detector, the self-enrollment or the pending resume) and then the
+    // session itself, so the reads that follow are checked against the
+    // head the first one saw rather than each starting pin-less. Caches
+    // are suppressed for a popup exactly as the seed-based tail decides.
+    const persistence =
+      suppliedPersistence ??
+      browserLocalSessionPersistence({
+        idb,
+        persistCaches: !(popup && !!WAS_SERVER_URL)
+      })
     let found = await fetchKeyring({
       ...(secret !== undefined ? { secret } : {}),
       kdf,
       idb,
       mintManageCapability: true,
-      ...(derived ? { credential: derived } : {})
+      ...(derived ? { credential: derived } : {}),
+      accountLogPinStore: persistence.logPins
     })
     if (!found) {
       return { session: null, userExists: false }
@@ -1087,6 +1120,7 @@ async function loginWithUnlockCredential({
         credential: derived,
         type,
         email,
+        persistence,
         idb
       })
     }
@@ -1098,6 +1132,7 @@ async function loginWithUnlockCredential({
         email,
         popup,
         provisionStorage,
+        persistence,
         idb,
         ...(loginCredential
           ? {
@@ -1165,6 +1200,7 @@ async function sessionFromKeyringHit({
   email,
   popup = false,
   provisionStorage = true,
+  persistence,
   idb,
   loginCredential
 }: {
@@ -1173,6 +1209,7 @@ async function sessionFromKeyringHit({
   email?: string
   popup?: boolean
   provisionStorage?: boolean
+  persistence: BrowserLocalSessionPersistence
   idb?: IDBFactory
   loginCredential?: { secret: string | Uint8Array; derived?: UnlockCredential }
 }): Promise<{ session: Session | null; userExists: boolean }> {
@@ -1250,14 +1287,15 @@ async function sessionFromKeyringHit({
   // pending-shape record is the resume's to route (its own
   // published-then-removed branch hands the genuine removal back to the same
   // wipe).
+  const pinStore = persistence.logPins
   const detectorLog =
     found.clientKeys && !pendingResume
-      ? await assertClientStillEnrolled({ found, idb })
+      ? await assertClientStillEnrolled({ found, pinStore, idb })
       : undefined
   const enrolled = !found.clientKeys
-    ? await selfEnrollStandingClient({ found })
+    ? await selfEnrollStandingClient({ found, pinStore })
     : pendingResume
-      ? await resumePendingEnrollment({ found, idb })
+      ? await resumePendingEnrollment({ found, pinStore, idb })
       : undefined
   const clientKeys = enrolled?.clientKeys ?? found.clientKeys!
   const persistClientKeys =
@@ -1271,6 +1309,7 @@ async function sessionFromKeyringHit({
     email: email ?? found.email,
     popup,
     provisionStorage,
+    persistence,
     idb,
     // The detector above verified this account's log for the same pointer,
     // moments ago and freshest in this sequence: the login-time roster read
@@ -1620,15 +1659,13 @@ async function sessionFromKeyringHit({
       if (reach === null) {
         return
       }
-      const logPins = session.profile.persistence?.logPins
       try {
         await ensureGenerationDelegation({
           session,
           pointer,
           reach,
           ladderSeed,
-          accountDoc: reach.doc as PublishedKeyDocument,
-          ...(logPins ? { pin: { pinStore: logPins, logId: reach.logId } } : {})
+          accountDoc: reach.doc as PublishedKeyDocument
         })
       } catch (err) {
         // A rung the generation does not commit (a credential bound
@@ -1714,6 +1751,8 @@ async function sessionFromKeyringHit({
  *   credential for this passkey's PRF output, which SKIPS the PRF assertion
  *   ceremony -- the passkey signup's login half passes it so one signup runs
  *   one WebAuthn ceremony
+ * @param [options.persistence] {BrowserLocalSessionPersistence}   exactly
+ *   as on `loginWithPassphrase`
  * @returns {Promise<{ session: Session | null, userExists: boolean }>}
  */
 export async function loginWithPasskey({
@@ -1722,7 +1761,8 @@ export async function loginWithPasskey({
   provisionStorage = true,
   signal,
   rememberBrowser,
-  credential
+  credential,
+  persistence
 }: {
   idb?: IDBFactory
   popup?: boolean
@@ -1730,6 +1770,7 @@ export async function loginWithPasskey({
   signal?: AbortSignal
   rememberBrowser?: boolean
   credential?: UnlockCredential
+  persistence?: BrowserLocalSessionPersistence
 } = {}): Promise<{ session: Session | null; userExists: boolean }> {
   // The one WebAuthn tap, skipped when the caller already holds the derived
   // credential; the shared body's stale-record retry never repeats it.
@@ -1745,6 +1786,7 @@ export async function loginWithPasskey({
     popup,
     provisionStorage,
     credential,
-    rememberBrowser
+    rememberBrowser,
+    ...(persistence ? { persistence } : {})
   })
 }

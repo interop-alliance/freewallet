@@ -654,6 +654,32 @@ wallet-core also names the slot for a log-governed collection descriptor
 no collection descriptor in this wallet is log-governed yet, so nothing
 here produces that slot.
 
+The pin is a property of the store, not an argument of the ceremonies.
+Every did:webvh store this wallet builds carries `persistence.logPins`
+under the slot wallet-core derives for the log it serves: the remote
+store's `webvhIdStore()` (the constructor takes the pin store), the bridge
+store a standing credential writes through (`unlockLogStore`), the
+projection store a ladder-branch ceremony PUTs `did.json` through
+(`didWebProjectionStore`), and the annex reach's generation log store
+(`clientAnnexReachOf`, `standingClientAnnexReachOf`). Every read and every
+publish through one of them is checked against the pin and advances it, so
+no ceremony call names a pin store or a slot, and a store cannot be built
+without one. The consequence for the login paths is that the pin store
+exists BEFORE the first account-log read rather than being minted per read.
+A remembered login (`loginWithUnlockCredential`) builds its browser-local
+persistence ahead of the keyring fetch, and the pending-proof settlement,
+the forgotten-browser detector, the self-enrollment or pending resume, and
+the session that follows all read under that one store; a caller whose own
+reads precede the login (the enrollment completion in `lib/enrollment.ts`,
+the remembered signup's establishment) builds the persistence itself and
+hands it to `loginWithPassphrase` / `loginWithPasskey`. The remembered
+recovery spend holds one store for the whole ceremony (the code's record
+proof, the continuation's two entries, the new passphrase's standing
+establishment, the post-entry re-resolution). The only account-log read
+left on a fresh per-call store is the `/recover` page's locate probe, one
+read with nothing after it in the same session. The roster log's slot is
+separate and its stores keep their own wiring (`sessionRosterStore`).
+
 The pin store is in-memory on both persistence strategies
 (`decisions/0012-no-durable-continuity-pins.md`). The rule, stated once here
 for the whole document: continuity is checked within a session and not

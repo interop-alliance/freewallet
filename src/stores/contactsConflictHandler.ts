@@ -13,8 +13,8 @@
  * collection's document cipher is read at resolve time through `getCipher`,
  * never captured, so a later `setCiphers` swap (the epoch cascade's) is
  * honored. A resolver throw (an undecryptable side, say) is reported by
- * `makeConflictHandler` itself on the `fw:sync:conflict` namespace before it
- * propagates.
+ * `makeConflictHandler` itself, through was-sync's logging seam (the `sync`
+ * namespace), before it propagates.
  *
  * Equality is the whole-row `deepEqual`, not the package's `statesEqual`
  * (which compares the revision and body members alone): the feed echo of a
@@ -26,9 +26,6 @@ import { makeConflictHandler, type ConflictHandler } from '@interop/was-sync'
 import { resolveContactHeadConflict } from '@interop/wallet-core/sync'
 import type { DocCipher } from '@interop/was-client/edv'
 import { deepEqual } from 'rxdb/plugins/utils'
-import { createLogger } from '@/lib/log'
-
-const log = createLogger('fw:sync:conflict')
 
 /**
  * @param options {object}
@@ -42,7 +39,6 @@ export function createContactsConflictHandler({
   getCipher: () => DocCipher | undefined
 }): ConflictHandler {
   return makeConflictHandler({
-    log,
     isEqual: deepEqual,
     async resolve({ realMasterState, newDocumentState }) {
       const cipher = getCipher()

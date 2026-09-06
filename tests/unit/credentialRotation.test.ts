@@ -11,6 +11,7 @@
  * the verified-log memo invalidation on both sides of the call.
  */
 import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { memoryResourceLogPinStore } from '@interop/vh-resource-log'
 import { addSink, captureSink } from '@interop/logger'
 
 const state = vi.hoisted(() => ({
@@ -138,12 +139,8 @@ import {
   preflightUnlockCredentialRetirement,
   retireUnlockCredential
 } from '@interop/wallet-core/unlock'
+import { keyAgreementCommitment } from '@interop/wallet-core/webvh'
 import {
-  accountLogPinId,
-  keyAgreementCommitment
-} from '@interop/wallet-core/webvh'
-import {
-  clientAnnexLogPinId,
   clientAnnexLogStore,
   ladderRung,
   retireClientAnnexRung,
@@ -692,17 +689,16 @@ describe('the annex strike-or-swap stage', () => {
         retiredLadderSeed: RETIRED_SEED,
         actingLadderSeed: SURVIVING_SEED,
         generationId: GENERATION_ID,
-        expectedDid: CLIENT_ANNEX_DID,
-        logId: clientAnnexLogPinId({
-          spaceId: CLIENT_ANNEX_SPACE_ID,
-          generationId: GENERATION_ID
-        })
+        expectedDid: CLIENT_ANNEX_DID
       })
     )
+    // The generation log's chain-head pin rides the store, under the
+    // session's own pins.
     expect(vi.mocked(clientAnnexLogStore)).toHaveBeenCalledWith(
       expect.objectContaining({
         spaceId: CLIENT_ANNEX_SPACE_ID,
-        generationId: GENERATION_ID
+        generationId: GENERATION_ID,
+        pinStore: expect.objectContaining({ read: expect.any(Function) })
       })
     )
     expect(vi.mocked(swapClientAnnexGeneration)).not.toHaveBeenCalled()
@@ -858,6 +854,7 @@ describe('the annex strike-or-swap stage', () => {
         // exactly as the real context builds it.
         get projectionStore() {
           return (projection ??= didWebProjectionStore({
+            pinStore: memoryResourceLogPinStore(),
             host: POINTER.host,
             spaceId: POINTER.spaceId,
             invoker: (() => invoker) as never
@@ -1257,16 +1254,9 @@ describe('the retirement gate (WC-187)', () => {
           updateKeyMultibase: PASSPHRASE_METHOD.updateKeyMultibase
         },
         ladderSeed: RETIRED_SEED,
-        expectedDid: POINTER.did,
-        logId: accountLogPinId({ spaceId: POINTER.spaceId })
+        expectedDid: POINTER.did
       })
     )
-    // The visit's own chain-head pins, not a second store: a pre-flight
-    // reading past the pinned head would accept a log the retirement itself
-    // refuses.
-    expect(
-      vi.mocked(preflightUnlockCredentialRetirement).mock.calls[0]![0].pinStore
-    ).toBe(session.profile.persistence.logPins)
   })
 
   it('checks nothing when there is nothing to retire', async () => {

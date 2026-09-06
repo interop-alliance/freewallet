@@ -411,11 +411,7 @@ async function remintGenerationDelegation({
       pointer,
       reach,
       ladderSeed,
-      accountDoc: document,
-      pin: {
-        pinStore: session.profile.persistence.logPins,
-        logId: reach.logId
-      }
+      accountDoc: document
     })
     return { renewed }
   } catch (err) {

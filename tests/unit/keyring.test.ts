@@ -123,6 +123,9 @@ import {
 import { currentAccountRecordSigners } from '@interop/wallet-core/clients'
 import { memoryResourceLogPinStore } from '@interop/vh-resource-log'
 
+// The login's chain-head pins every keyring fetch below settles under.
+const logPins = memoryResourceLogPinStore()
+
 const KDF = {
   version: 1,
   algorithm: 'PBKDF2',
@@ -451,6 +454,7 @@ describe('wrap / unwrap', () => {
     })
 
     const found = await fetchKeyring({
+      accountLogPinStore: logPins,
       secret: 'round-trip passphrase',
       idb,
       kdf: KDF
@@ -503,7 +507,12 @@ describe('wrap / unwrap', () => {
     wasState.spaces.set(spaceId, record)
 
     await expect(
-      fetchKeyring({ secret: 'legacy v1 passphrase', idb, kdf: KDF })
+      fetchKeyring({
+        accountLogPinStore: logPins,
+        secret: 'legacy v1 passphrase',
+        idb,
+        kdf: KDF
+      })
     ).rejects.toThrow(KeyringRecordUnusableError)
   })
 
@@ -521,7 +530,12 @@ describe('wrap / unwrap', () => {
     wasState.spaces.set(spaceId, frameWithoutDescriptor)
 
     await expect(
-      fetchKeyring({ secret: 'no descriptor passphrase', idb, kdf: KDF })
+      fetchKeyring({
+        accountLogPinStore: logPins,
+        secret: 'no descriptor passphrase',
+        idb,
+        kdf: KDF
+      })
     ).rejects.toThrow(KeyringRecordUnusableError)
   })
 
@@ -538,6 +552,7 @@ describe('wrap / unwrap', () => {
 
     await expect(
       fetchKeyring({
+        accountLogPinStore: logPins,
         secret: 'empty controller passphrase',
         idb,
         kdf: KDF
@@ -559,6 +574,7 @@ describe('wrap / unwrap', () => {
 
     await expect(
       fetchKeyring({
+        accountLogPinStore: logPins,
         secret: 'malformed pointer passphrase',
         idb,
         kdf: KDF
@@ -581,6 +597,7 @@ describe('wrap / unwrap', () => {
 
     await expect(
       fetchKeyring({
+        accountLogPinStore: logPins,
         secret: 'corrupt record passphrase',
         idb,
         kdf: KDF
@@ -608,6 +625,7 @@ describe('the client key set under the unlock layer', () => {
     })
 
     const found = await fetchKeyring({
+      accountLogPinStore: logPins,
       secret: 'client keys round-trip passphrase',
       idb,
       kdf: KDF
@@ -645,6 +663,7 @@ describe('the client key set under the unlock layer', () => {
     })
 
     const found = await fetchKeyring({
+      accountLogPinStore: logPins,
       secret: 'webvh keys round-trip passphrase',
       idb,
       kdf: KDF
@@ -668,6 +687,7 @@ describe('the client key set under the unlock layer', () => {
     await found!.persistClientKeys!({ webvhUpdateKeys: rolled })
 
     const after = await fetchKeyring({
+      accountLogPinStore: logPins,
       secret: 'webvh keys round-trip passphrase',
       idb,
       kdf: KDF
@@ -705,6 +725,7 @@ describe('the client key set under the unlock layer', () => {
       kdf: KDF
     })
     const found = await fetchKeyring({
+      accountLogPinStore: logPins,
       secret: 'enrolled shape passphrase',
       idb,
       kdf: KDF
@@ -725,6 +746,7 @@ describe('the client key set under the unlock layer', () => {
       kdf: KDF
     })
     let found = await fetchKeyring({
+      accountLogPinStore: logPins,
       secret: 'pending shape passphrase',
       idb,
       kdf: KDF
@@ -739,6 +761,7 @@ describe('the client key set under the unlock layer', () => {
       pending: { ceremony: 'self-enrollment', builtOnHead }
     })
     found = await fetchKeyring({
+      accountLogPinStore: logPins,
       secret: 'pending shape passphrase',
       idb,
       kdf: KDF
@@ -757,6 +780,7 @@ describe('the client key set under the unlock layer', () => {
       pending: null
     })
     found = await fetchKeyring({
+      accountLogPinStore: logPins,
       secret: 'pending shape passphrase',
       idb,
       kdf: KDF
@@ -782,6 +806,7 @@ describe('the client key set under the unlock layer', () => {
       kdf: KDF
     })
     let found = await fetchKeyring({
+      accountLogPinStore: logPins,
       secret: 'pending drop passphrase',
       idb,
       kdf: KDF
@@ -795,6 +820,7 @@ describe('the client key set under the unlock layer', () => {
     // the userKey member; the record stays pending and unenrolled.
     await found!.persistClientKeys!({ userKey: await mintUserKey() })
     found = await fetchKeyring({
+      accountLogPinStore: logPins,
       secret: 'pending drop passphrase',
       idb,
       kdf: KDF
@@ -813,6 +839,7 @@ describe('the client key set under the unlock layer', () => {
       pending: null
     })
     found = await fetchKeyring({
+      accountLogPinStore: logPins,
       secret: 'pending drop passphrase',
       idb,
       kdf: KDF
@@ -835,6 +862,7 @@ describe('the client key set under the unlock layer', () => {
     })
 
     const found = await fetchKeyring({
+      accountLogPinStore: logPins,
       secret: 'fresh profile passphrase',
       idb: createFakeIdb(),
       kdf: KDF
@@ -867,11 +895,13 @@ describe('the client key set under the unlock layer', () => {
     })
 
     const foundA = await fetchKeyring({
+      accountLogPinStore: logPins,
       secret: 'shared passphrase',
       idb: profileA,
       kdf: KDF
     })
     const foundB = await fetchKeyring({
+      accountLogPinStore: logPins,
       secret: 'shared passphrase',
       idb: profileB,
       kdf: KDF
@@ -904,6 +934,7 @@ describe('the client key set under the unlock layer', () => {
     })
 
     const found = await fetchKeyring({
+      accountLogPinStore: logPins,
       secret: 'garbled client keys passphrase',
       idb,
       kdf: KDF
@@ -933,6 +964,7 @@ describe('record authenticity (the proof)', () => {
     expect(stored.proof?.verificationMethod).toContain('did:key:')
 
     const found = await fetchKeyring({
+      accountLogPinStore: logPins,
       secret: 'signed round trip passphrase',
       idb,
       kdf: KDF
@@ -955,7 +987,12 @@ describe('record authenticity (the proof)', () => {
     wasState.spaces.set(spaceId, record)
 
     await expect(
-      fetchKeyring({ secret: 'forged record passphrase', idb, kdf: KDF })
+      fetchKeyring({
+        accountLogPinStore: logPins,
+        secret: 'forged record passphrase',
+        idb,
+        kdf: KDF
+      })
     ).rejects.toThrow(KeyringRecordForgedError)
     // A refused record never becomes tomorrow's offline fallback.
     expect(await loadKeyringCache({ spaceId, idb })).toBeNull()
@@ -975,7 +1012,12 @@ describe('record authenticity (the proof)', () => {
     wasState.spaces.set(spaceId, record)
 
     await expect(
-      fetchKeyring({ secret: 'unsigned record passphrase', idb, kdf: KDF })
+      fetchKeyring({
+        accountLogPinStore: logPins,
+        secret: 'unsigned record passphrase',
+        idb,
+        kdf: KDF
+      })
     ).rejects.toThrow(KeyringRecordForgedError)
   })
 
@@ -1005,7 +1047,12 @@ describe('record authenticity (the proof)', () => {
     })
 
     await expect(
-      fetchKeyring({ secret: 'tampered record passphrase', idb, kdf: KDF })
+      fetchKeyring({
+        accountLogPinStore: logPins,
+        secret: 'tampered record passphrase',
+        idb,
+        kdf: KDF
+      })
     ).rejects.toThrow(KeyringRecordForgedError)
   })
 })
@@ -1023,6 +1070,7 @@ describe('fetchKeyring', () => {
     vi.clearAllMocks()
 
     const found = await fetchKeyring({
+      accountLogPinStore: logPins,
       secret: 'cache hit passphrase',
       idb,
       kdf: KDF
@@ -1046,6 +1094,7 @@ describe('fetchKeyring', () => {
     wasState.spaces.clear()
 
     const found = await fetchKeyring({
+      accountLogPinStore: logPins,
       secret: 'retired passphrase',
       idb,
       kdf: KDF
@@ -1072,12 +1121,18 @@ describe('fetchKeyring', () => {
     // A (possibly lying) 404: the fetch reports no account...
     wasState.spaces.clear()
     await expect(
-      fetchKeyring({ secret: 'survives miss passphrase', idb, kdf: KDF })
+      fetchKeyring({
+        accountLogPinStore: logPins,
+        secret: 'survives miss passphrase',
+        idb,
+        kdf: KDF
+      })
     ).resolves.toBeNull()
 
     // ...but once the record is back, this client still holds its keys.
     wasState.spaces.set(spaceId, record)
     const found = await fetchKeyring({
+      accountLogPinStore: logPins,
       secret: 'survives miss passphrase',
       idb,
       kdf: KDF
@@ -1102,6 +1157,7 @@ describe('fetchKeyring', () => {
     })
 
     const found = await fetchKeyring({
+      accountLogPinStore: logPins,
       secret: 'offline fallback passphrase',
       idb,
       kdf: KDF
@@ -1130,6 +1186,7 @@ describe('fetchKeyring', () => {
 
     await expect(
       fetchKeyring({
+        accountLogPinStore: logPins,
         secret: 'expired cache passphrase',
         idb,
         kdf: KDF
@@ -1154,7 +1211,12 @@ describe('fetchKeyring', () => {
     wasState.getError = networkError
 
     await expect(
-      fetchKeyring({ secret: 'legacy cache passphrase', idb, kdf: KDF })
+      fetchKeyring({
+        accountLogPinStore: logPins,
+        secret: 'legacy cache passphrase',
+        idb,
+        kdf: KDF
+      })
     ).rejects.toBe(networkError)
   })
 
@@ -1172,6 +1234,7 @@ describe('fetchKeyring', () => {
 
     const freshIdb = createFakeIdb()
     const found = await fetchKeyring({
+      accountLogPinStore: logPins,
       secret: 'cache miss passphrase',
       idb: freshIdb,
       kdf: KDF
@@ -1187,6 +1250,7 @@ describe('fetchKeyring', () => {
 
   it('returns null when no keyring exists anywhere', async () => {
     const found = await fetchKeyring({
+      accountLogPinStore: logPins,
       secret: 'unknown account passphrase',
       idb: createFakeIdb(),
       kdf: KDF
@@ -1201,6 +1265,7 @@ describe('fetchKeyring', () => {
     wasState.getError = networkError
     await expect(
       fetchKeyring({
+        accountLogPinStore: logPins,
         secret: 'offline passphrase',
         idb: createFakeIdb(),
         kdf: KDF
@@ -1211,6 +1276,7 @@ describe('fetchKeyring', () => {
   it('is cache-only (no remote call) when no WAS server is configured', async () => {
     wasState.url = undefined
     const found = await fetchKeyring({
+      accountLogPinStore: logPins,
       secret: 'no was passphrase',
       idb: createFakeIdb(),
       kdf: KDF
@@ -1236,6 +1302,7 @@ describe('fetchKeyring', () => {
     vi.setSystemTime(Date.now() + KEYRING_CACHE_TTL_MS * 10)
 
     const found = await fetchKeyring({
+      accountLogPinStore: logPins,
       secret: 'no was warm cache passphrase',
       idb,
       kdf: KDF
@@ -1327,6 +1394,7 @@ describe('bindPassphrase', () => {
     })
 
     const found = await fetchKeyring({
+      accountLogPinStore: logPins,
       secret: 'email carrying passphrase',
       idb,
       kdf: KDF
@@ -1345,6 +1413,7 @@ describe('bindPassphrase', () => {
     })
 
     const found = await fetchKeyring({
+      accountLogPinStore: logPins,
       secret: 'no email passphrase',
       idb,
       kdf: KDF
@@ -1421,6 +1490,7 @@ describe('changePassphrase', () => {
     })
 
     const found = await fetchKeyring({
+      accountLogPinStore: logPins,
       secret: 'carry rebind new passphrase',
       idb,
       kdf: KDF
@@ -1456,6 +1526,7 @@ describe('changePassphrase', () => {
     })
 
     const found = await fetchKeyring({
+      accountLogPinStore: logPins,
       secret: 'userKey fallback new passphrase',
       idb,
       kdf: KDF
@@ -1492,6 +1563,7 @@ describe('changePassphrase', () => {
     // only copy of its update-key seeds: dropping them here would strand the
     // client's did:webvh update authority for good.
     const found = await fetchKeyring({
+      accountLogPinStore: logPins,
       secret: 'webvh fallback new passphrase',
       idb,
       kdf: KDF
@@ -1539,6 +1611,7 @@ describe('changePassphrase', () => {
     })
 
     const found = await fetchKeyring({
+      accountLogPinStore: logPins,
       secret: 'webvh precedence new passphrase',
       idb,
       kdf: KDF
@@ -1599,6 +1672,7 @@ describe('changePassphrase', () => {
     await persistClientKeys({ webvhUpdateKeys: rolled })
 
     const found = await fetchKeyring({
+      accountLogPinStore: logPins,
       secret: 'persist closure new passphrase',
       idb,
       kdf: KDF
@@ -1958,6 +2032,7 @@ describe('deleteKeyring', () => {
     // The keyring is gone: nothing resolves for this passphrase any more.
     await expect(
       fetchKeyring({
+        accountLogPinStore: logPins,
         secret: 'delete keyring passphrase',
         idb,
         kdf: KDF
@@ -2151,6 +2226,7 @@ describe('deriveUnlockIdentity (method-agnostic derivation)', () => {
       })
 
       const found = await fetchKeyring({
+        accountLogPinStore: logPins,
         secret: prfOutput,
         kdf: PASSKEY_KDF,
         idb
@@ -2178,6 +2254,7 @@ describe('deriveUnlockIdentity (method-agnostic derivation)', () => {
       const otherOutput = new Uint8Array(32)
       crypto.getRandomValues(otherOutput)
       const miss = await fetchKeyring({
+        accountLogPinStore: logPins,
         secret: otherOutput,
         kdf: PASSKEY_KDF,
         idb
@@ -2281,6 +2358,7 @@ describe('management zcap delegation', () => {
       })
 
       const found = await fetchKeyring({
+        accountLogPinStore: logPins,
         secret: 'mint on fetch passphrase',
         idb,
         kdf: KDF,
@@ -2307,6 +2385,7 @@ describe('management zcap delegation', () => {
       })
 
       const found = await fetchKeyring({
+        accountLogPinStore: logPins,
         secret: 'no mint passphrase',
         idb,
         kdf: KDF
@@ -2390,6 +2469,7 @@ describe('standing unlock records (FW-154)', () => {
     })
 
     const found = await fetchKeyring({
+      accountLogPinStore: logPins,
       secret: 'standing round trip',
       idb,
       kdf: KDF
@@ -2422,6 +2502,7 @@ describe('standing unlock records (FW-154)', () => {
       kdf: KDF
     })
     const found = await fetchKeyring({
+      accountLogPinStore: logPins,
       secret: 'standing sibling round trip',
       idb,
       kdf: KDF
@@ -2446,6 +2527,7 @@ describe('standing unlock records (FW-154)', () => {
     // A different browser profile: same remote record, empty local records.
     const freshIdb = createFakeIdb()
     const found = await fetchKeyring({
+      accountLogPinStore: logPins,
       secret: 'standing fresh browser',
       idb: freshIdb,
       kdf: KDF
@@ -2460,6 +2542,7 @@ describe('standing unlock records (FW-154)', () => {
       controller: DATA_CONTROLLER
     })
     const after = await fetchKeyring({
+      accountLogPinStore: logPins,
       secret: 'standing fresh browser',
       idb: freshIdb,
       kdf: KDF
@@ -2492,7 +2575,12 @@ describe('standing unlock records (FW-154)', () => {
     })
 
     await expect(
-      fetchKeyring({ secret: 'standing tampered binding', idb, kdf: KDF })
+      fetchKeyring({
+        accountLogPinStore: logPins,
+        secret: 'standing tampered binding',
+        idb,
+        kdf: KDF
+      })
     ).rejects.toBeInstanceOf(KeyringRecordForgedError)
   })
 
@@ -2527,6 +2615,7 @@ describe('standing unlock records (FW-154)', () => {
     })
 
     const found = await fetchKeyring({
+      accountLogPinStore: logPins,
       secret: 'standing login management actions',
       idb,
       kdf: KDF,

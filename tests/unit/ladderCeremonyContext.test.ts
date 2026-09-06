@@ -84,6 +84,7 @@ const POINTER = {
 }
 
 const LADDER_SEED = new Uint8Array(32).fill(7)
+const LOG_PINS = { isLogPinStore: true }
 const GENERATION_DELEGATION = { id: 'urn:zcap:generation' }
 const BRIDGE = { id: 'urn:zcap:bridge' }
 const SIBLING = { id: 'urn:zcap:delegated-clients' }
@@ -110,6 +111,7 @@ function ladderSession(
       zcapClient: { isAnnexVmZcapClient: true },
       accountPointer: POINTER,
       accountController: 'did:key:z6MkAccountController',
+      persistence: { logPins: LOG_PINS },
       ladderSeed:
         'ladderSeed' in overrides ? overrides.ladderSeed : LADDER_SEED,
       standingUnlock:
@@ -198,10 +200,13 @@ describe("the ladder kind's authorities", () => {
     // The store is lazy: a gate that only asked for the kind builds none.
     expect(vi.mocked(unlockLogStore)).not.toHaveBeenCalled()
     expect(context?.idStore).toEqual({ isUnlockLogStore: true })
+    // Built over the session's own chain-head pins, so its reads and the
+    // ceremony's publish are checked against the head the login saw.
     expect(state.unlockLogStoreCalls[0]).toMatchObject({
       pointer: POINTER,
       delegation: BRIDGE,
-      zcapClient: { isStandingClientZcapClient: true }
+      zcapClient: { isStandingClientZcapClient: true },
+      pinStore: LOG_PINS
     })
   })
 

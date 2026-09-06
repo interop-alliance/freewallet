@@ -251,7 +251,6 @@ describe('establishClientAnnexGeneration', () => {
     expect(ensurePointedClientAnnexGeneration).toHaveBeenCalledWith(
       expect.objectContaining({
         account: expect.objectContaining({ did: POINTER.did }),
-        accountSpaceId: POINTER.spaceId,
         wasServerUrl: POINTER.host,
         mintController: 'did:key:zClient',
         signer: {

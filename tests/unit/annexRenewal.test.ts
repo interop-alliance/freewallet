@@ -31,6 +31,7 @@ vi.mock('@interop/was-client', async importOriginal => ({
 }))
 
 import {
+  clientAnnexLogStore,
   ensureGenerationDelegationCurrent,
   ladderVmKeyMultibase
 } from '@interop/wallet-core/clientAnnex'
@@ -142,7 +143,11 @@ describe('renewTransientGenerationDelegation', () => {
     expect(ensureCall.accountDoc).toBe(doc)
     expect(ensureCall.ladderSeed).toBe(LADDER_SEED)
     expect(ensureCall.expectedDid).toBe(CLIENT_ANNEX_DID)
-    expect(ensureCall.pinStore).toBe(handle.logPins)
+    // The generation log's chain-head pin rides the store, under the
+    // visit's own pins.
+    expect(vi.mocked(clientAnnexLogStore)).toHaveBeenCalledWith(
+      expect.objectContaining({ pinStore: handle.logPins })
+    )
     // The live session adopts it everywhere a reader looks.
     expect(session.profile.invocationCapability).toBe(FRESH_DELEGATION)
     expect(handle.clientAnnex.invocationCapability).toBe(FRESH_DELEGATION)

@@ -4,6 +4,26 @@
 
 ### Changed
 
+- The WAS replication driver's diagnostics arrive under the `sync` namespace,
+  wired once at bootstrap through `@interop/was-sync`'s `setLogger`; the
+  binding no longer passes a `log` port to the controller core or the contacts
+  conflict handler.
+- The account log's chain-head pin rides the did:webvh stores rather than
+  being threaded into every ceremony call (wallet-core 0.68.0). The remote
+  store, the standing credential's bridge store, the did:web projection
+  store, and the annex reach's generation log store all take the session's
+  `persistence.logPins` at construction, and the `pinStore` / `logId` /
+  `accountLogPinStore` options are gone from every ceremony call. A remembered
+  login builds its persistence before the keyring fetch, so the pending-proof
+  settlement, the forgotten-browser detector, the self-enrollment or pending
+  resume, and the session all read under one pin store; the enrollment
+  completion and the remembered signups hand theirs to the login the same
+  way, and the remembered recovery spend holds one store for the whole
+  ceremony. `fetchKeyring`, `selfEnrollStandingClient`,
+  `resumePendingEnrollment`, `resumeRecoverySpend`, and
+  `assertClientStillEnrolled` take the pin store required, and
+  `loginWithPassphrase` / `loginWithPasskey` accept an optional
+  `persistence`.
 - The RxDB replication driver now lives in `@interop/was-sync`, shared with
   `@interop/was-react`. `src/lib/sync/` is gone. `stores/syncController.ts` is
   the session binding around the package's controller core: the guest, no-WAS,

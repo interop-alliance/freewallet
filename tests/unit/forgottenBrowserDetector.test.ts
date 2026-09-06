@@ -11,6 +11,7 @@
  * client-identity derivation runs for real.
  */
 import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { memoryResourceLogPinStore } from '@interop/vh-resource-log'
 import { agentsFromSeed } from '@interop/wallet-core/identity'
 import { clientSigningKeyMultibase } from '@interop/wallet-core/webvh'
 
@@ -83,7 +84,10 @@ describe('assertClientStillEnrolled -- the narrowed trigger', () => {
     } as never)
 
     await expect(
-      assertClientStillEnrolled({ found: makeFound(enrolledRecord()) })
+      assertClientStillEnrolled({
+        pinStore: memoryResourceLogPinStore(),
+        found: makeFound(enrolledRecord())
+      })
     ).rejects.toMatchObject({ name: 'BrowserForgottenError' })
     expect(executeLocalWipe).toHaveBeenCalled()
   })
@@ -99,7 +103,10 @@ describe('assertClientStillEnrolled -- the narrowed trigger', () => {
     vi.mocked(verifyAccountLog).mockResolvedValue(verified as never)
 
     await expect(
-      assertClientStillEnrolled({ found: makeFound(enrolledRecord()) })
+      assertClientStillEnrolled({
+        pinStore: memoryResourceLogPinStore(),
+        found: makeFound(enrolledRecord())
+      })
     ).resolves.toBe(verified)
     expect(executeLocalWipe).not.toHaveBeenCalled()
   })
@@ -109,7 +116,10 @@ describe('assertClientStillEnrolled -- the narrowed trigger', () => {
     delete pending.userKey
 
     await expect(
-      assertClientStillEnrolled({ found: makeFound(pending) })
+      assertClientStillEnrolled({
+        pinStore: memoryResourceLogPinStore(),
+        found: makeFound(pending)
+      })
     ).resolves.toBeUndefined()
     expect(verifyAccountLog).not.toHaveBeenCalled()
     expect(executeLocalWipe).not.toHaveBeenCalled()
@@ -128,7 +138,10 @@ describe('assertClientStillEnrolled -- the narrowed trigger', () => {
     } as never)
 
     await expect(
-      assertClientStillEnrolled({ found: makeFound(preChange) })
+      assertClientStillEnrolled({
+        pinStore: memoryResourceLogPinStore(),
+        found: makeFound(preChange)
+      })
     ).rejects.toMatchObject({ name: 'BrowserForgottenError' })
     expect(executeLocalWipe).toHaveBeenCalled()
   })

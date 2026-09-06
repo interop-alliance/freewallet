@@ -9,6 +9,9 @@
  */
 import { describe, expect, it } from 'vitest'
 import { addSink, captureSink } from '@interop/logger'
+// The driver logs through was-sync's own seam, which the app's logging module
+// wires to the `sync` namespace on import.
+import '@/lib/log'
 import type { DocCipher } from '@interop/was-client/edv'
 import type { SyncedDoc, WithDeleted } from '@interop/was-sync'
 import { createContactsConflictHandler } from './contactsConflictHandler'
@@ -134,7 +137,7 @@ describe('the contacts conflict binding', () => {
     ).toBe(false)
   })
 
-  it('reports a resolver failure on the fw:sync:conflict namespace', async () => {
+  it("reports a resolver failure on the driver's sync namespace", async () => {
     // Both sides' own unreachability is fail-safe inside
     // resolveContactHeadConflict; what can still throw out of this binding's
     // resolve closure is `getCipher` itself, and `makeConflictHandler` is the
@@ -159,7 +162,7 @@ describe('the contacts conflict binding', () => {
     }
 
     expect(capture.events.map(event => [event.ns, event.level])).toEqual([
-      ['fw:sync:conflict', 'error']
+      ['sync', 'error']
     ])
   })
 })

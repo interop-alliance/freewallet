@@ -7,6 +7,7 @@
  * is the phantom-client window the ordering closes).
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { memoryResourceLogPinStore } from '@interop/vh-resource-log'
 import type { KeyringFetchResult } from '@/session/keyring'
 
 vi.mock('@/app.config', async importOriginal => ({
@@ -114,7 +115,10 @@ afterEach(() => {
 describe('selfEnrollStandingClient', () => {
   it('persists the pending shape in the hook and the enrolled shape on the return', async () => {
     const found = hit()
-    const outcome = await selfEnrollStandingClient({ found })
+    const outcome = await selfEnrollStandingClient({
+      pinStore: memoryResourceLogPinStore(),
+      found
+    })
     // Two persists: the hook's pending write (pre-pivot), then the
     // completion's enrolled shape.
     expect(order).toEqual(['persist', 'persist'])
@@ -150,8 +154,8 @@ describe('selfEnrollStandingClient', () => {
     vi.mocked(found.enrollClientKeys!).mockRejectedValue(
       new Error('client-key record write failed')
     )
-    await expect(selfEnrollStandingClient({ found })).rejects.toThrow(
-      /client-key record write failed/
-    )
+    await expect(
+      selfEnrollStandingClient({ pinStore: memoryResourceLogPinStore(), found })
+    ).rejects.toThrow(/client-key record write failed/)
   })
 })

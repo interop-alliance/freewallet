@@ -26,6 +26,7 @@
  * @vitest-environment node
  */
 import { describe, expect, it, vi } from 'vitest'
+import { memoryResourceLogPinStore } from '@interop/vh-resource-log'
 import type { IVerifiableCredential } from '@interop/data-integrity-core'
 import type {
   IKeyAgreementKey,
@@ -176,6 +177,7 @@ function makeRecordedStore({ capability }: { capability?: IZcap }): {
   requestCalls: Array<{ path?: string; method?: string; capability?: unknown }>
 } {
   const store = new WASRemoteStore({
+    pinStore: memoryResourceLogPinStore(),
     storageServerUrl: 'https://was.example',
     zcapClient: {
       invocationSigner: { id: 'did:key:z6MkTest#z6MkTest' }

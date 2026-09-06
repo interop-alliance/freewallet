@@ -27,6 +27,7 @@
  * identities, and the stored records are real.
  */
 import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { memoryResourceLogPinStore } from '@interop/vh-resource-log'
 import { addSink, captureSink } from '@interop/logger'
 import type { IKeyAgreementKey, IZcap } from '@interop/data-integrity-core'
 
@@ -471,7 +472,11 @@ describe('the remembered spend reorder -- the persist hook', () => {
     expect(state.recordPutSpaceIds.length).toBeGreaterThanOrEqual(2)
     // The pending client-key record is browser-local and PENDING (no user
     // key, the carrier present) until the confirm-gated completion runs.
-    const found = await fetchKeyring({ secret: NEW_PASSPHRASE, idb })
+    const found = await fetchKeyring({
+      accountLogPinStore: memoryResourceLogPinStore(),
+      secret: NEW_PASSPHRASE,
+      idb
+    })
     expect(found?.clientKeys?.userKey).toBeUndefined()
     expect(found?.clientKeys?.pending).toMatchObject({
       ceremony: 'recovery-spend',
@@ -500,7 +505,11 @@ describe('the remembered spend reorder -- the persist hook', () => {
 
     await outcome.completeRecovery!()
 
-    const found = await fetchKeyring({ secret: NEW_PASSPHRASE, idb })
+    const found = await fetchKeyring({
+      accountLogPinStore: memoryResourceLogPinStore(),
+      secret: NEW_PASSPHRASE,
+      idb
+    })
     expect(found?.clientKeys?.userKey).toBeDefined()
     expect(found?.clientKeys?.pending).toBeUndefined()
     expect(found?.clientKeys?.pointerDid).toBe(POINTER.did)
@@ -607,7 +616,11 @@ describe('the remembered spend reorder -- the persist hook', () => {
       })
     ).rejects.toThrow(RecoverySpendSkewError)
 
-    const found = await fetchKeyring({ secret: NEW_PASSPHRASE, idb })
+    const found = await fetchKeyring({
+      accountLogPinStore: memoryResourceLogPinStore(),
+      secret: NEW_PASSPHRASE,
+      idb
+    })
     expect(found?.clientKeys?.pending?.ceremony).toBe('recovery-spend')
   })
 
@@ -784,11 +797,16 @@ describe('the standing-establishment success gate', () => {
     // A later resume (the pending record still stands -- the completion was
     // never confirmed) finishes the establishment from durable state and
     // upgrades the bare entry with the now-real standing configuration.
-    const found = await fetchKeyring({ secret: NEW_PASSPHRASE, idb })
+    const found = await fetchKeyring({
+      accountLogPinStore: memoryResourceLogPinStore(),
+      secret: NEW_PASSPHRASE,
+      idb
+    })
     expect(found?.clientKeys?.pending?.ceremony).toBe('recovery-spend')
     state.rosterRecipients = ['everyone-already-escrowed']
 
     const resumed = await resumeRecoverySpend({
+      pinStore: memoryResourceLogPinStore(),
       found: found as KeyringFetchResult
     })
 
@@ -999,7 +1017,10 @@ describe('resumeRecoverySpend -- the spend-completion resume', () => {
       standingClient.recipientKid
     ]
 
-    const result = await resumeRecoverySpend({ found })
+    const result = await resumeRecoverySpend({
+      pinStore: memoryResourceLogPinStore(),
+      found
+    })
 
     // Both escrows ran, owned by the spent code's re-derived KAK.
     expect(state.escrows).toHaveLength(2)
@@ -1027,7 +1048,7 @@ describe('resumeRecoverySpend -- the spend-completion resume', () => {
     // carries no wrap for the replacement code; the standing wrap stands.
     state.rosterRecipients = [standingClient.recipientKid]
 
-    await resumeRecoverySpend({ found })
+    await resumeRecoverySpend({ pinStore: memoryResourceLogPinStore(), found })
 
     expect(state.escrows.map(escrow => escrow.recipientId)).toContain(
       replacement.recipientKid
@@ -1044,7 +1065,7 @@ describe('resumeRecoverySpend -- the spend-completion resume', () => {
     ]
     state.registryRecord = null
 
-    await resumeRecoverySpend({ found })
+    await resumeRecoverySpend({ pinStore: memoryResourceLogPinStore(), found })
 
     expect(state.calls).toContain('registryMutation')
     const written = state.registryWrites[0] as {
@@ -1069,7 +1090,10 @@ describe('resumeRecoverySpend -- the spend-completion resume', () => {
       standingClient.recipientKid
     ]
 
-    const result = await resumeRecoverySpend({ found })
+    const result = await resumeRecoverySpend({
+      pinStore: memoryResourceLogPinStore(),
+      found
+    })
 
     // Nothing persisted until the confirm.
     expect(persistClientKeys).not.toHaveBeenCalled()
@@ -1092,7 +1116,10 @@ describe('resumeRecoverySpend -- the spend-completion resume', () => {
     // commitment do not (the tail died before the establishment stages).
     state.rosterRecipients = ['everyone-already-escrowed']
 
-    const result = await resumeRecoverySpend({ found })
+    const result = await resumeRecoverySpend({
+      pinStore: memoryResourceLogPinStore(),
+      found
+    })
 
     // The backfill finished both halves, so the prompt reports established.
     expect(result.recoverySpendPrompt?.standing).toBe('established')
@@ -1131,7 +1158,7 @@ describe('resumeRecoverySpend -- the spend-completion resume', () => {
       nextKeyHashes: []
     } as never)
 
-    await resumeRecoverySpend({ found })
+    await resumeRecoverySpend({ pinStore: memoryResourceLogPinStore(), found })
 
     expect(
       state.escrows.some(
@@ -1151,7 +1178,10 @@ describe('resumeRecoverySpend -- the spend-completion resume', () => {
       new Error('document entry publish failed (simulated)')
     )
 
-    const result = await resumeRecoverySpend({ found })
+    const result = await resumeRecoverySpend({
+      pinStore: memoryResourceLogPinStore(),
+      found
+    })
 
     // The failed backfill never fails the resume; the prompt reports the
     // standing as still pending.
@@ -1205,7 +1235,7 @@ describe('resumeRecoverySpend -- the spend-completion resume', () => {
 
     const capture = captureSink()
     addSink(capture.sink)
-    await resumeRecoverySpend({ found })
+    await resumeRecoverySpend({ pinStore: memoryResourceLogPinStore(), found })
 
     // The drop-only arm, not the successor backfill.
     expect(
@@ -1236,7 +1266,7 @@ describe('resumeRecoverySpend -- the spend-completion resume', () => {
     state.registryRecord = { methods: [await retiredPassphraseEntry()] }
     state.failNextRegistryWrite = true
 
-    await resumeRecoverySpend({ found })
+    await resumeRecoverySpend({ pinStore: memoryResourceLogPinStore(), found })
 
     expect(state.calls).toContain('registryMutation')
     expect(state.deletedEntrySpaceIds).toEqual([])
@@ -1248,6 +1278,8 @@ describe('resumeRecoverySpend -- the spend-completion resume', () => {
     refusal.name = 'UserKeyRosterContinuityError'
     vi.mocked(readUserKeyRoster).mockRejectedValueOnce(refusal)
 
-    await expect(resumeRecoverySpend({ found })).rejects.toBe(refusal)
+    await expect(
+      resumeRecoverySpend({ pinStore: memoryResourceLogPinStore(), found })
+    ).rejects.toBe(refusal)
   })
 })

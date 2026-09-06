@@ -2248,13 +2248,10 @@ export class StorageManager {
             idStore: remoteStore.webvhIdStore(),
             provideKmsAuthentication,
             ...(knownDid ? { expectedDid: knownDid } : {}),
-            // The provisioning read runs under the same chain-head pin the
-            // login-time account-log reads use, so a truncated or substituted
-            // log is refused before any entry is built on it. The pin slot is
-            // keyed by the data Space id (wallet-core derives it), so one
-            // slot serves every run -- true first contact, a pre-promotion
-            // heal, and a promoted login alike.
-            accountLogPinStore: this.#persistence.logPins,
+            // The provisioning read runs under the chain-head pin the id
+            // store carries (the same slot the login-time account-log reads
+            // use), so a truncated or substituted log is refused before any
+            // entry is built on it.
             onDidPublished: async ({ did }) => {
               profile.didWebvh = { did }
               // Fired on both of the ceremony's branches -- the one that

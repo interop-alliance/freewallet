@@ -10,6 +10,7 @@
  * ordering both share.
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { memoryResourceLogPinStore } from '@interop/vh-resource-log'
 import { agentsFromSeed } from '@interop/wallet-core/identity'
 import {
   assertClientStillEnrolled,
@@ -34,8 +35,7 @@ vi.mock('@interop/wallet-core/webvh', async importOriginal => {
     updateKeyMultibase: vi.fn(async () => 'zForgottenUpdate')
   }
 })
-const { accountLogPinId, verifyAccountLog } =
-  await import('@interop/wallet-core/webvh')
+const { verifyAccountLog } = await import('@interop/wallet-core/webvh')
 
 vi.mock('@interop/did-method-webvh', async importOriginal => {
   const actual = await importOriginal<object>()
@@ -143,6 +143,7 @@ const { sessionRosterStore } = await import('@/session/rosterStore')
 vi.mock('@/session/standingUnlock', () => ({
   unlockLogStore: vi.fn(() => ({ unlockLogStore: true }))
 }))
+const { unlockLogStore } = await import('@/session/standingUnlock')
 
 vi.mock('@/session/userKeyCascade', () => ({
   cascadeCollections: vi.fn(() => ({ collections: true }))
@@ -422,9 +423,12 @@ describe('assertClientStillEnrolled (the forgotten-browser detector)', () => {
       updateKeys: [],
       nextKeyHashes: []
     } as never)
-    await expect(assertClientStillEnrolled({ found: hit() })).rejects.toThrow(
-      BrowserForgottenError
-    )
+    await expect(
+      assertClientStillEnrolled({
+        pinStore: memoryResourceLogPinStore(),
+        found: hit()
+      })
+    ).rejects.toThrow(BrowserForgottenError)
     expect(deleted).toContain(`${dbPrefix}-wallet-db`)
   })
 
@@ -442,7 +446,10 @@ describe('assertClientStillEnrolled (the forgotten-browser detector)', () => {
     // The verification is handed back so the login can prime its memo with
     // it rather than verifying the same log again.
     await expect(
-      assertClientStillEnrolled({ found: hit() })
+      assertClientStillEnrolled({
+        pinStore: memoryResourceLogPinStore(),
+        found: hit()
+      })
     ).resolves.toMatchObject({
       doc: { verificationMethod: [{ id: `${pointer.did}#${multibase}` }] }
     })
@@ -454,7 +461,10 @@ describe('assertClientStillEnrolled (the forgotten-browser detector)', () => {
     stubLocalStorage({ entries: {} })
     vi.mocked(verifyAccountLog).mockRejectedValue(new Error('network down'))
     await expect(
-      assertClientStillEnrolled({ found: hit() })
+      assertClientStillEnrolled({
+        pinStore: memoryResourceLogPinStore(),
+        found: hit()
+      })
     ).resolves.toBeUndefined()
     expect(deleted).toEqual([])
   })
@@ -464,6 +474,7 @@ describe('assertClientStillEnrolled (the forgotten-browser detector)', () => {
     stubLocalStorage({ entries: {} })
     await expect(
       assertClientStillEnrolled({
+        pinStore: memoryResourceLogPinStore(),
         found: {
           controller: 'did:key:zClientA',
           unlockSpaceId: 'unlock-1'
@@ -700,8 +711,7 @@ describe('forgetThisBrowser (the ceremony grades)', () => {
     const options = vi.mocked(forgetLastEnrolledClient).mock.calls[0]![0]
     expect(options.annex).toMatchObject({
       wasServerUrl: pointer.host,
-      accountSpaceId: pointer.spaceId,
-      pinStore: session.profile.persistence.logPins
+      accountSpaceId: pointer.spaceId
     })
     expect(typeof options.annex.storeFor).toBe('function')
     expect(typeof options.annex.revoke).toBe('function')
@@ -719,8 +729,13 @@ describe('forgetThisBrowser (the ceremony grades)', () => {
     expect(typeof options.onBeforeRemoval).toBe('function')
     expect(options.expectedDid).toBe(pointer.did)
     expect(options.knownLatentHashes).toEqual(['hash:zRung'])
-    // The account log's chain-head pin rides every read the ceremony makes.
-    expect(options.pinStore).toBe(session.profile.persistence.logPins)
+    // The account log's chain-head pin rides the bridge store the ceremony
+    // reads and publishes through.
+    expect(vi.mocked(unlockLogStore)).toHaveBeenCalledWith(
+      expect.objectContaining({
+        pinStore: session.profile.persistence.logPins
+      })
+    )
   })
 
   it('threads an unverified wipe onto the outcome instead of reading clean', async () => {
@@ -1048,12 +1063,15 @@ describe('forgetThisBrowser (the ceremony grades)', () => {
     expect(vi.mocked(managementZcapClient)).not.toHaveBeenCalled()
   })
 
-  it("threads the account log's chain-head pin and slot into the ceremony", async () => {
+  it("builds the ceremony's bridge store over the session's chain-head pins", async () => {
     const { session } = fakeSession()
     await forgetThisBrowser({ session })
-    const options = vi.mocked(forgetEnrolledClient).mock.calls[0]![0]
-    expect(options.pinStore).toBe(session.profile.persistence.logPins)
-    expect(options.logId).toBe(accountLogPinId({ spaceId: pointer.spaceId }))
+    expect(vi.mocked(unlockLogStore)).toHaveBeenCalledWith(
+      expect.objectContaining({
+        pointer,
+        pinStore: session.profile.persistence.logPins
+      })
+    )
   })
 
   it('adopts a rotation in band (re-seal, pin, client keys, session)', async () => {

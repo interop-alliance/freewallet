@@ -43,13 +43,11 @@ import {
   passphraseRegistryUpsertHook
 } from '@/session/credentialAnchoredGenesis'
 import {
+  browserLocalSessionPersistence,
   transientSessionStores,
   type TransientSessionStores
 } from '@/session/persistence'
-import {
-  memoryResourceLogPinStore,
-  type ResourceLogPinStore
-} from '@interop/vh-resource-log'
+import type { ResourceLogPinStore } from '@interop/vh-resource-log'
 import { transientSessionFromKeyringHit } from '@/session/transientLogin'
 import {
   provisionNewWallet,
@@ -346,11 +344,14 @@ export async function signUpWithPassphrase({
   if (WAS_SERVER_URL && rememberBrowser === true) {
     // The remembered signup: the establishment half only (never the
     // transient composition -- that would mint and abandon a per-visit
-    // annex client).
+    // annex client). The remembered session's persistence is built here so
+    // the establishment's reads and the login's run under one chain-head
+    // pin store.
+    const persistence = browserLocalSessionPersistence()
     const outcome = await establishPassphraseAnchoredAccount({
       passphrase,
       email,
-      logPins: memoryResourceLogPinStore(),
+      logPins: persistence.logPins,
       ...(onStage ? { onStage } : {})
     })
     if (outcome.userExists) {
@@ -370,7 +371,8 @@ export async function signUpWithPassphrase({
       passphrase,
       email,
       credential: outcome.credential,
-      rememberBrowser: true
+      rememberBrowser: true,
+      persistence
     })
     if (!session) {
       throw new Error(
@@ -543,13 +545,16 @@ async function signUpCredentialAnchoredWithPasskey({
   const spaceId = mintSpaceId()
   const pointer: AccountPointer = { spaceId, host: WAS_SERVER_URL }
   const ladderSeed = generateLadderSeed()
+  // The remembered session's persistence, built here so the establishment's
+  // reads and the login's run under one chain-head pin store.
+  const persistence = browserLocalSessionPersistence()
   await establishCredentialAnchoredAccount({
     credential,
     ladderSeed,
     pointer,
     lowEntropy: false,
     email,
-    persistence: { logPins: memoryResourceLogPinStore() },
+    persistence,
     ...(onStage ? { onStage } : {}),
     beforePromotion: async ({ zcapClient, userKey, establishment }) => {
       // The passkey registry entry, in the last root-invocation window --
@@ -595,7 +600,8 @@ async function signUpCredentialAnchoredWithPasskey({
   // credential skips a second WebAuthn ceremony.
   const { session } = await loginWithPasskey({
     credential,
-    rememberBrowser: true
+    rememberBrowser: true,
+    persistence
   })
   if (!session) {
     throw new Error(

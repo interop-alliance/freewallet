@@ -173,11 +173,7 @@ class SessionSyncController {
           setStatus(collectionId, status)
         },
         onlineSource: browserOnlineSource(),
-        pollMs: WAS_SYNC_POLL_MS,
-        // The core's log port takes `Record<string, unknown>` metadata, which
-        // the namespaced logger already satisfies, so its diagnostics ride
-        // the `fw:sync:controller` namespace with no adapter.
-        log
+        pollMs: WAS_SYNC_POLL_MS
       })
       this.#core = core
       await core.start()

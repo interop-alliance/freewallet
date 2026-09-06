@@ -640,14 +640,14 @@ describe('transientSessionFromKeyringHit -- the composition wiring', () => {
     const enrollCall = vi.mocked(enrollTransientClient).mock.calls[0]![0]
     expect(enrollCall.ladderSeed).toBe(found.standing!.ladderSeed)
     expect(enrollCall.transientKeyMultibase).toMatch(/^z6Mk/)
-    expect(enrollCall.pinStore).toBe(persistence.logPins)
     enrollCall.storeForGenerationId('gen-Ux3v0kQf9aPmB2hZ')
     expect(delegatedWebvhLogStore).toHaveBeenCalledWith({
       host: POINTER.host,
       spaceId: 'clientAnnex-space-1',
       collectionId: 'gen-Ux3v0kQf9aPmB2hZ',
       delegation: SIBLING_DELEGATION,
-      zcapClient: found.standingClient.agents.zcapClient
+      zcapClient: found.standingClient.agents.zcapClient,
+      pinStore: persistence.logPins
     })
 
     // The account log was verified under the same in-memory pins.
@@ -740,10 +740,11 @@ describe('transientSessionFromKeyringHit -- the composition wiring', () => {
 describe('transientSessionFromKeyringHit -- the did:web projection mend', () => {
   it('ensures the projection after the enrollment, under the generation delegation', async () => {
     primeHappyPath()
+    const persistence = transientSessionStores()
     await transientSessionFromKeyringHit({
       found: makeFound(),
       type: 'passphrase',
-      persistence: transientSessionStores()
+      persistence
     })
 
     // The store: the account Space's world-readable `id` collection, read
@@ -758,7 +759,8 @@ describe('transientSessionFromKeyringHit -- the did:web projection mend', () => 
       spaceId: POINTER.spaceId,
       collectionId: ID_COLLECTION.id,
       delegation: GENERATION_DELEGATION,
-      zcapClient: expect.objectContaining({ isClientAnnexZcapClient: true })
+      zcapClient: expect.objectContaining({ isClientAnnexZcapClient: true }),
+      pinStore: persistence.logPins
     })
     expect(ensureDidWebProjection).toHaveBeenCalledWith({
       store: expect.anything(),

@@ -17,6 +17,7 @@
  * sibling credential's record is read or re-signed at any point.
  */
 import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { memoryResourceLogPinStore } from '@interop/vh-resource-log'
 
 const state = vi.hoisted(() => ({
   wasUrl: 'https://was.example.test' as string | undefined,
@@ -259,6 +260,7 @@ function ladderContext(): object {
     // context builds it.
     get projectionStore() {
       return (projection ??= didWebProjectionStore({
+        pinStore: memoryResourceLogPinStore(),
         host: POINTER.host,
         spaceId: POINTER.spaceId,
         invoker: invokerNow as never

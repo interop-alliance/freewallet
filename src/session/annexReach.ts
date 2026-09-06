@@ -3,8 +3,8 @@
  * annex-touching surface opens with, resolved once here instead of open-coded
  * per ceremony. The account document's `#DelegatedClients` pointer names the
  * live generation; its did:webvh splits into the auxiliary Space id and the
- * generation id, which together address the generation's log store and its
- * chain-head pin slot, reached through a `WasClient` on the account
+ * generation id, which together address the generation's log store (carrying
+ * the log's chain-head pin), reached through a `WasClient` on the account
  * pointer's host under this session's own authority.
  *
  * "No pointed generation" is resolved as `null` rather than thrown: an
@@ -16,14 +16,12 @@
  * it is always run over: the login-time self-heal, the revocation cascade's
  * re-mint stage, and the bind ceremony's install all drive wallet-core's
  * `ensureGenerationDelegationCurrent` with the same store, ladder seed, and
- * minting closure, differing only in the ladder seed's provenance, whether
- * they hand it a post-edit account document, and whether they wire the pin
- * store -- all three passed in by the caller.
+ * minting closure, differing only in the ladder seed's provenance and whether
+ * they hand it a post-edit account document -- both passed in by the caller.
  */
 import { WasClient } from '@interop/was-client'
 import {
   clientAnnexDidParts,
-  clientAnnexLogPinId,
   clientAnnexLogStore,
   delegatedClientsPointer,
   ensureGenerationDelegationCurrent,
@@ -35,6 +33,7 @@ import type { IZcap } from '@interop/data-integrity-core'
 import type { ZcapClient } from '@interop/ezcap'
 import type { ResourceLogPinStore } from '@interop/vh-resource-log'
 import {
+  accountLogPinId,
   delegatedWebvhLogStore,
   ensureDidWebProjection,
   ladderVmIds,
@@ -66,16 +65,15 @@ type ReachPointer = { host: string; spaceId: string }
 /**
  * One pointed annex generation, as a ceremony reaches it: the generation's
  * did:webvh and its two parts, the client that talks to the auxiliary Space,
- * the generation log's chain-head pin slot key, and the log store itself
- * (built on first use, so a caller that only wants the Space id does not
- * build one).
+ * and the log store itself (built on first use, so a caller that only wants
+ * the Space id does not build one). The store carries the generation log's
+ * chain-head pin, so every read and publish through it runs pinned.
  */
 export interface ClientAnnexReach {
   clientAnnexDid: string
   spaceId: string
   generationId: string
   was: WasClient
-  logId: string
   logStore: () => ReturnType<typeof clientAnnexLogStore>
 }
 
@@ -110,9 +108,13 @@ export function clientAnnexReachOf({
     spaceId,
     generationId,
     was,
-    logId: clientAnnexLogPinId({ spaceId, generationId }),
     logStore: () =>
-      (store ??= clientAnnexLogStore({ was, spaceId, generationId }))
+      (store ??= clientAnnexLogStore({
+        was,
+        spaceId,
+        generationId,
+        pinStore: session.profile.persistence.logPins
+      }))
   }
 }
 
@@ -127,12 +129,15 @@ export function clientAnnexReachOf({
  * @param options.clientAnnexDid {string}   the generation's did:webvh
  * @param options.standing {object}   the session's standing members: the
  *   credential's client identity and its annex-Space sibling delegation
+ * @param options.pinStore {ResourceLogPinStore}   the session's chain-head
+ *   pins, which the generation log store carries
  * @returns {ClientAnnexReach}
  */
 export function standingClientAnnexReachOf({
   pointer,
   clientAnnexDid,
-  standing
+  standing,
+  pinStore
 }: {
   pointer: ReachPointer
   clientAnnexDid: string
@@ -140,6 +145,7 @@ export function standingClientAnnexReachOf({
     standingClient: { agents: { zcapClient: ZcapClient } }
     delegatedClients: IZcap
   }
+  pinStore: ResourceLogPinStore
 }): ClientAnnexReach {
   const { spaceId, generationId } = clientAnnexDidParts({
     did: clientAnnexDid
@@ -154,12 +160,12 @@ export function standingClientAnnexReachOf({
     spaceId,
     generationId,
     was,
-    logId: clientAnnexLogPinId({ spaceId, generationId }),
     logStore: () =>
       (store ??= clientAnnexLogStore({
         was,
         spaceId,
         generationId,
+        pinStore,
         capability: standing.delegatedClients
       }))
   }
@@ -182,12 +188,15 @@ export function standingClientAnnexReachOf({
  *   of (a ceremony's post-edit document, or a verified one)
  * @param options.standing {object}   the credential's client identity and its
  *   annex-Space sibling delegation
+ * @param options.pinStore {ResourceLogPinStore}   the session's chain-head
+ *   pins, which the generation log store carries
  * @returns {ClientAnnexReach | null}
  */
 export function standingClientAnnexReachFor({
   pointer,
   doc,
-  standing
+  standing,
+  pinStore
 }: {
   pointer: ReachPointer
   doc: AccountDoc
@@ -195,6 +204,7 @@ export function standingClientAnnexReachFor({
     standingClient: { agents: { zcapClient: ZcapClient } }
     delegatedClients: IZcap
   }
+  pinStore: ResourceLogPinStore
 }): ClientAnnexReach | null {
   const pointedDid = delegatedClientsPointer({ doc })
   if (pointedDid === undefined) {
@@ -203,7 +213,8 @@ export function standingClientAnnexReachFor({
   return standingClientAnnexReachOf({
     pointer,
     clientAnnexDid: pointedDid,
-    standing
+    standing,
+    pinStore
   })
 }
 
@@ -273,10 +284,10 @@ export async function pointedClientAnnexReach({
  * account Space the pointer names, signed by this session's own key; the
  * annex entry that embeds it is signed by the supplied ladder seed's rung.
  *
- * The optional members are the callers' documented divergences: the
+ * The optional member is the callers' documented divergence: the
  * signer-death axis (`accountDoc`, a post-edit document) is supplied only
- * where a ceremony holds one, and the chain-head pin wiring only where the
- * caller has a pin store to hand.
+ * where a ceremony holds one. The generation log's chain-head pin rides the
+ * reach's store.
  *
  * @param options {object}
  * @param options.session {Session}
@@ -286,8 +297,6 @@ export async function pointedClientAnnexReach({
  *   signs the annex entry
  * @param [options.accountDoc] {PublishedKeyDocument}   the account document
  *   the delegation's signer is checked against
- * @param [options.pin] {object}   the generation log's chain-head pin store
- *   and slot key
  * @returns {Promise<{ renewed: boolean }>}
  */
 export async function ensureGenerationDelegation({
@@ -295,15 +304,13 @@ export async function ensureGenerationDelegation({
   pointer,
   reach,
   ladderSeed,
-  accountDoc,
-  pin
+  accountDoc
 }: {
   session: Session
   pointer: ReachPointer
   reach: ClientAnnexReach
   ladderSeed: Uint8Array
   accountDoc?: PublishedKeyDocument
-  pin?: { pinStore: ResourceLogPinStore; logId: string }
 }): Promise<{ renewed: boolean }> {
   return await runEnsureGenerationDelegation({
     reach,
@@ -315,8 +322,7 @@ export async function ensureGenerationDelegation({
         spaceId: pointer.spaceId,
         clientAnnexDid
       }),
-    ...(accountDoc !== undefined ? { accountDoc } : {}),
-    ...(pin !== undefined ? { pin } : {})
+    ...(accountDoc !== undefined ? { accountDoc } : {})
   })
 }
 
@@ -339,8 +345,8 @@ export async function ensureGenerationDelegation({
  *   both the delegation's signer and the rung the annex entry is signed with
  * @param [options.accountDoc] {PublishedKeyDocument}   the account document
  *   the standing delegation's signer is checked against
- * @param [options.pin] {object}   the generation log's chain-head pin store
- *   and slot key
+ * @param [options.retiringKeyMultibases] {string[]}   key multibases about to
+ *   leave the account document, whose signed delegation counts as rotted
  * @returns {Promise<{ renewed: boolean, delegation: IZcap }>}
  */
 export async function ensureLadderSignedGenerationDelegation({
@@ -349,7 +355,6 @@ export async function ensureLadderSignedGenerationDelegation({
   reach,
   ladderSeed,
   accountDoc,
-  pin,
   retiringKeyMultibases
 }: {
   accountDid: string
@@ -357,7 +362,6 @@ export async function ensureLadderSignedGenerationDelegation({
   reach: ClientAnnexReach
   ladderSeed: Uint8Array
   accountDoc?: PublishedKeyDocument
-  pin?: { pinStore: ResourceLogPinStore; logId: string }
   retiringKeyMultibases?: string[]
 }): Promise<{ renewed: boolean; delegation: IZcap }> {
   return await runEnsureGenerationDelegation({
@@ -370,7 +374,6 @@ export async function ensureLadderSignedGenerationDelegation({
       spaceId: pointer.spaceId
     }),
     ...(accountDoc !== undefined ? { accountDoc } : {}),
-    ...(pin !== undefined ? { pin } : {}),
     ...(retiringKeyMultibases !== undefined ? { retiringKeyMultibases } : {})
   })
 }
@@ -385,7 +388,7 @@ export async function ensureLadderSignedGenerationDelegation({
  *   signs the annex entry
  * @param options.mint {Function}   `({ clientAnnexDid }) => Promise<IZcap>`
  * @param [options.accountDoc] {PublishedKeyDocument}
- * @param [options.pin] {object}
+ * @param [options.retiringKeyMultibases] {string[]}
  * @returns {Promise<{ renewed: boolean, delegation: IZcap }>}
  */
 async function runEnsureGenerationDelegation({
@@ -393,14 +396,12 @@ async function runEnsureGenerationDelegation({
   ladderSeed,
   mint,
   accountDoc,
-  pin,
   retiringKeyMultibases
 }: {
   reach: ClientAnnexReach
   ladderSeed: Uint8Array
   mint: (options: { clientAnnexDid: string }) => Promise<IZcap>
   accountDoc?: PublishedKeyDocument
-  pin?: { pinStore: ResourceLogPinStore; logId: string }
   retiringKeyMultibases?: string[]
 }): Promise<{ renewed: boolean; delegation: IZcap }> {
   return await ensureGenerationDelegationCurrent({
@@ -410,7 +411,6 @@ async function runEnsureGenerationDelegation({
     mintGenerationDelegation: mint,
     expectedDid: reach.clientAnnexDid,
     ...(accountDoc !== undefined ? { accountDoc } : {}),
-    ...(pin !== undefined ? { pinStore: pin.pinStore, logId: pin.logId } : {}),
     ...(retiringKeyMultibases !== undefined ? { retiringKeyMultibases } : {})
   })
 }
@@ -492,7 +492,8 @@ export async function renewTransientGenerationDelegation({
       standing: {
         standingClient: standingUnlock.standingClient,
         delegatedClients
-      }
+      },
+      pinStore: persistence.logPins
     })
     const { delegation } = await ensureLadderSignedGenerationDelegation({
       accountDid,
@@ -500,7 +501,6 @@ export async function renewTransientGenerationDelegation({
       reach,
       ladderSeed,
       accountDoc: doc,
-      pin: { pinStore: persistence.logPins, logId: reach.logId },
       ...(retiringKeyMultibases !== undefined ? { retiringKeyMultibases } : {})
     })
     // The live session adopts it. The profile stamp is what the grant path
@@ -536,16 +536,20 @@ export async function renewTransientGenerationDelegation({
  * @param options.spaceId {string}   the account Space
  * @param options.invoker {Function}   `() => { zcapClient, capability? }`,
  *   read afresh on every call
+ * @param options.pinStore {ResourceLogPinStore}   the session's chain-head
+ *   pins; the store carries the account log's slot
  * @returns {DelegatedWebvhLogStore}
  */
 export function didWebProjectionStore({
   host,
   spaceId,
-  invoker
+  invoker,
+  pinStore
 }: {
   host: string
   spaceId: string
   invoker: () => { zcapClient: ZcapClient; capability?: IZcap }
+  pinStore: ResourceLogPinStore
 }): DelegatedWebvhLogStore {
   const storeNow = (): DelegatedWebvhLogStore => {
     const { zcapClient, capability } = invoker()
@@ -560,10 +564,15 @@ export function didWebProjectionStore({
       spaceId,
       collectionId: ID_COLLECTION.id,
       delegation: capability,
-      zcapClient
+      zcapClient,
+      pinStore
     })
   }
   return {
+    pin: {
+      store: pinStore,
+      logId: accountLogPinId({ spaceId })
+    },
     getIdResourceRaw: async options => storeNow().getIdResourceRaw(options),
     putIdResource: async options => storeNow().putIdResource(options)
   }
@@ -627,7 +636,8 @@ export async function refreshDidWebProjection({
       store: didWebProjectionStore({
         host,
         spaceId,
-        invoker: () => ({ zcapClient, capability: delegation })
+        invoker: () => ({ zcapClient, capability: delegation }),
+        pinStore
       }),
       did,
       doc,

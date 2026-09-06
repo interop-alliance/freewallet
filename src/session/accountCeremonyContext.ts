@@ -384,7 +384,8 @@ export async function accountCeremonyContext({
       return (ladderIdStore ??= unlockLogStore({
         pointer: reach.pointer,
         delegation: standingUnlock.delegation,
-        zcapClient: standingAgents.zcapClient
+        zcapClient: standingAgents.zcapClient,
+        pinStore: profile.persistence.logPins
       }) as WebvhIdStore)
     },
     // Ladder-signed appends, invoked by the annex VM under the generation
@@ -416,7 +417,8 @@ export async function accountCeremonyContext({
       return (ladderProjectionStore ??= didWebProjectionStore({
         host: reach.pointer.host,
         spaceId: reach.pointer.spaceId,
-        invoker: invokerNow
+        invoker: invokerNow,
+        pinStore: profile.persistence.logPins
       }))
     },
     ladderDeleter: {

@@ -299,6 +299,7 @@ function refuseMissingGeneration(
   store: ClientAnnexWriteStore
 ): ClientAnnexWriteStore {
   return {
+    pin: store.pin,
     async getIdResourceRaw(options) {
       const result = await store.getIdResourceRaw(options)
       if (result === undefined) {
@@ -391,7 +392,8 @@ async function ensureClientAnnexGenerationReady({
         unlockLogStore({
           pointer,
           delegation,
-          zcapClient
+          zcapClient,
+          pinStore: persistence.logPins
         }) as WebvhIdStore,
       onRebindRecord: async ({ delegation, delegatedClients }) => {
         const rebind = found.rebindStandingRecord
@@ -737,7 +739,8 @@ export async function transientSessionFromKeyringHit({
           spaceId: annexSpaceId,
           collectionId: generationId,
           delegation: siblingDelegation,
-          zcapClient: found.standingClient.agents.zcapClient
+          zcapClient: found.standingClient.agents.zcapClient,
+          pinStore: persistence.logPins
         })
       ),
     ladderSeed,
@@ -755,7 +758,6 @@ export async function transientSessionFromKeyringHit({
           : {})
       })
     },
-    pinStore: persistence.logPins,
     ...(readiness.outcome?.generationLog !== undefined
       ? { published: readiness.outcome.generationLog }
       : {})

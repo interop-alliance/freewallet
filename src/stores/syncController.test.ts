@@ -7,7 +7,6 @@
  * and which reachability signal the poll tick reads.
  */
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
-import { addSink, captureSink } from '@interop/logger'
 import type { SyncStatus } from '@interop/was-client/sync'
 import type { Session } from '@/types/auth'
 
@@ -81,10 +80,6 @@ interface CoreOptions {
     subscribe: (onOnline: () => void) => () => void
   }
   pollMs: number
-  log: {
-    warn: (message: string, meta?: object) => void
-    error: (message: string, meta?: object) => void
-  }
 }
 
 /**
@@ -187,27 +182,6 @@ describe('sync binding: the port handed to the core', () => {
 
     unsubscribe()
     expect(removeEventListener).toHaveBeenCalledWith('online', onOnline)
-  })
-
-  it("carries a log port on the binding's own namespace", async () => {
-    await syncController.restart({ session: fakeSession() })
-
-    const capture = captureSink()
-    const removeSink = addSink(capture.sink)
-    try {
-      const { log } = lastOptions()
-      log.warn('a warning', { id: 'wallet-activity' })
-      log.error('a failure', { err: new Error('nope') })
-    } finally {
-      removeSink()
-    }
-
-    // The driver's diagnostics must stay on the ring buffer's namespace, or a
-    // sync failure returns nothing to the debug-logs procedure.
-    expect(capture.events.map(event => [event.ns, event.level])).toEqual([
-      ['fw:sync:controller', 'warn'],
-      ['fw:sync:controller', 'error']
-    ])
   })
 })
 

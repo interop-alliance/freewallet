@@ -38,10 +38,7 @@ import type {
   StandingUnlockKeys
 } from '@interop/wallet-core/unlock'
 import type { UserKey } from '@interop/wallet-core/keys'
-import {
-  accountLogPinId,
-  keyAgreementCommitment
-} from '@interop/wallet-core/webvh'
+import { keyAgreementCommitment } from '@interop/wallet-core/webvh'
 import {
   attributeLadderRung,
   ladderRung,
@@ -419,9 +416,7 @@ export async function preflightCredentialRetirement({
     idStore: context.idStore,
     unlockKeys: { keyAgreement, updateKeyMultibase },
     ...(method.ladderSeed ? { ladderSeed: method.ladderSeed } : {}),
-    expectedDid: pointer.did,
-    pinStore: session.profile.persistence.logPins,
-    logId: accountLogPinId({ spaceId: pointer.spaceId })
+    expectedDid: pointer.did
   })
 }
 
@@ -522,7 +517,12 @@ async function retireClientAnnexInventoryStage({
     // rather than by root-invoking as this session's own key.
     const reach =
       context.kind === 'ladder' && standingReach
-        ? standingClientAnnexReachFor({ pointer, doc, standing: standingReach })
+        ? standingClientAnnexReachFor({
+            pointer,
+            doc,
+            standing: standingReach,
+            pinStore: session.profile.persistence.logPins
+          })
         : clientAnnexReachFor({ session, pointer, doc })
     if (reach === null) {
       return { action: 'skipped', reason: 'no-pointer' }
@@ -546,9 +546,7 @@ async function retireClientAnnexInventoryStage({
           retiredLadderSeed,
           actingLadderSeed: survivingLadderSeed,
           generationId,
-          expectedDid: reach.clientAnnexDid,
-          pinStore: logPins,
-          logId: reach.logId
+          expectedDid: reach.clientAnnexDid
         })
         return { action: struck ? 'struck' : 'clean' }
       } catch (err) {

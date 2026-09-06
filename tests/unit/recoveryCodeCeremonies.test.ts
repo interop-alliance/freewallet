@@ -12,6 +12,7 @@
  * asserted against durable state the mocks hold.
  */
 import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { memoryResourceLogPinStore } from '@interop/vh-resource-log'
 import type { IZcap } from '@interop/data-integrity-core'
 
 const wasState = vi.hoisted(() => ({
@@ -315,6 +316,7 @@ async function ceremonyContext(): Promise<AccountCeremonyContext> {
     standingKeyAgreementKey: agents.keyAgreementKey,
     invoker: { zcapClient: {}, capability: GENERATION_DELEGATION },
     projectionStore: didWebProjectionStore({
+      pinStore: memoryResourceLogPinStore(),
       host: POINTER.host,
       spaceId: POINTER.spaceId,
       invoker: () => ({

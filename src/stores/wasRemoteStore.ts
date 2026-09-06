@@ -22,6 +22,7 @@
  * carries the user's invocation signer.
  */
 import type { ZcapClient } from '@interop/ezcap'
+import type { ResourceLogPinStore } from '@interop/vh-resource-log'
 import {
   readEtag,
   WasClient,
@@ -121,21 +122,28 @@ export class WASRemoteStore {
   // delegation). Absent, every request invokes the root capability, exactly
   // as before the option existed.
   #capability?: IZcap
+  // The session's chain-head pins: the `id`-collection store built here
+  // carries them under the account log's slot, so every did:webvh ceremony
+  // read and publish through it is checked against the pin and advances it.
+  #pinStore: ResourceLogPinStore
 
   constructor({
     storageServerUrl,
     zcapClient,
     spaceId,
     controller,
-    capability
+    capability,
+    pinStore
   }: {
     storageServerUrl: string
     zcapClient: ZcapClient
     spaceId: string
     controller: string
     capability?: IZcap
+    pinStore: ResourceLogPinStore
   }) {
     this.storageServerUrl = storageServerUrl
+    this.#pinStore = pinStore
     this.was = new WasClient({
       serverUrl: storageServerUrl,
       zcapClient,
@@ -546,7 +554,11 @@ export class WASRemoteStore {
    * @returns {WebvhIdStore}
    */
   webvhIdStore(): WebvhIdStore {
-    return wasWebvhIdStore({ was: this.was, spaceId: this.spaceId })
+    return wasWebvhIdStore({
+      was: this.was,
+      spaceId: this.spaceId,
+      pinStore: this.#pinStore
+    })
   }
 
   /**
@@ -749,7 +761,8 @@ export class WASRemoteStore {
       controller,
       // A session holding only a delegated Space-subtree zcap (the transient
       // session's generation delegation) rides it on every request.
-      capability: profile.invocationCapability
+      capability: profile.invocationCapability,
+      pinStore: profile.persistence.logPins
     })
 
     return { remoteStore }

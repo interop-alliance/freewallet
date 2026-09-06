@@ -50,7 +50,7 @@ import {
 } from '@interop/wallet-core/webvh'
 import { unlockClientIdentityFromSeed } from '@interop/wallet-core/unlock'
 import type { ClientKeyRecord } from '@interop/wallet-core/keys'
-import { memoryResourceLogPinStore } from '@interop/vh-resource-log'
+import type { ResourceLogPinStore } from '@interop/vh-resource-log'
 import { deleteClientKeyRecord } from '@/lib/sessionKey'
 import { isStorageUnreachable } from '@/lib/storageErrors'
 import { finishForgottenBrowserWipe } from '@/session/forget'
@@ -205,9 +205,11 @@ export function isPendingKeyringHit({
  */
 export async function resumePendingEnrollment({
   found,
+  pinStore,
   idb
 }: {
   found: KeyringFetchResult
+  pinStore: ResourceLogPinStore
   idb?: IDBFactory
 }): Promise<{
   clientKeys: ClientKeyRecord
@@ -215,7 +217,7 @@ export async function resumePendingEnrollment({
   recoverySpendPrompt?: RecoverySpendPrompt
 }> {
   try {
-    return await decidePendingResume({ found, idb })
+    return await decidePendingResume({ found, pinStore, idb })
   } catch (err) {
     if (
       isStorageUnreachable(err) ||
@@ -233,14 +235,17 @@ export async function resumePendingEnrollment({
  *
  * @param options {object}
  * @param options.found {KeyringFetchResult}
+ * @param options.pinStore {ResourceLogPinStore}
  * @param [options.idb] {IDBFactory}
  * @returns {Promise<object>}
  */
 async function decidePendingResume({
   found,
+  pinStore,
   idb
 }: {
   found: KeyringFetchResult
+  pinStore: ResourceLogPinStore
   idb?: IDBFactory
 }): Promise<{
   clientKeys: ClientKeyRecord
@@ -265,7 +270,7 @@ async function decidePendingResume({
       did: pointerDid,
       spaceId: pointer.spaceId,
       host: pointer.host,
-      pinStore: memoryResourceLogPinStore()
+      pinStore
     })
   } catch (err) {
     if (
@@ -290,13 +295,17 @@ async function decidePendingResume({
         branch: 'spend-complete',
         clientDid
       })
-      return await resumeRecoverySpend({ found, verifiedLog: verified })
+      return await resumeRecoverySpend({
+        found,
+        verifiedLog: verified,
+        pinStore
+      })
     }
     log.info('Pending-record resume: completing through the ceremony', {
       branch: 'complete',
       clientDid
     })
-    return await resumeThroughCeremony({ found })
+    return await resumeThroughCeremony({ found, pinStore })
   }
 
   // A spend record's branches below are decided from log HISTORY, so they
@@ -404,7 +413,7 @@ async function decidePendingResume({
     branch: 'seeded-rerun',
     clientDid
   })
-  return await resumeThroughCeremony({ found })
+  return await resumeThroughCeremony({ found, pinStore })
 }
 
 /**
@@ -418,9 +427,11 @@ async function decidePendingResume({
  * @returns {Promise<object>}
  */
 async function resumeThroughCeremony({
-  found
+  found,
+  pinStore
 }: {
   found: KeyringFetchResult
+  pinStore: ResourceLogPinStore
 }): Promise<{
   clientKeys: ClientKeyRecord
   persistClientKeys: (changes: PersistableClientKeys) => Promise<void>
@@ -436,6 +447,7 @@ async function resumeThroughCeremony({
   }
   return await selfEnrollStandingClient({
     found,
+    pinStore,
     resume: {
       clientSeed: clientKeys.clientSeed,
       webvhUpdateKeys: clientKeys.webvhUpdateKeys,

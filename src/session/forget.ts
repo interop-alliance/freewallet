@@ -86,14 +86,13 @@ import {
   delegationProofKeyId
 } from '@interop/wallet-core/recovery'
 import {
-  accountLogPinId,
   clientSigningKeyMultibase,
   isWebvhDid,
   updateKeyMultibase,
   verifyAccountLog
 } from '@interop/wallet-core/webvh'
 import type { RevokedClientKeys } from '@interop/wallet-core/webvh'
-import { memoryResourceLogPinStore } from '@interop/vh-resource-log'
+import type { ResourceLogPinStore } from '@interop/vh-resource-log'
 import type { Session, User } from '@/types/auth'
 import { deriveSpaceId } from '@interop/was-client/sync'
 import type { VerifiedAccountLog } from '@interop/wallet-core/clients'
@@ -355,7 +354,8 @@ export async function forgetThisBrowser({
     logStore: unlockLogStore({
       pointer,
       delegation: standing.delegation,
-      zcapClient: standing.standingClient.agents.zcapClient
+      zcapClient: standing.standingClient.agents.zcapClient,
+      pinStore: session.profile.persistence.logPins
     }),
     ladderSeed,
     forgottenClient,
@@ -363,12 +363,11 @@ export async function forgetThisBrowser({
     knownLatentHashes: await Promise.all(
       latentMultibases.map(multibase => deriveNextKeyHash(multibase))
     ),
+    // Every read the ceremony makes (the pre-edit read the roster rotation's
+    // recipient document comes from, and each ladder entry's own read) runs
+    // under the chain-head pin the log stores carry, so a served truncated
+    // prefix is refused before anything is built on it.
     expectedDid: pointer.did,
-    // The account log's chain-head pin: every read the ceremony makes (the
-    // pre-edit read the roster rotation's recipient document comes from,
-    // and each ladder entry's own read) is checked against it, so a served
-    // truncated prefix is refused before anything is built on it.
-    pinStore: session.profile.persistence.logPins,
     ...(session.profile.userKey ? { userKey: session.profile.userKey } : {}),
     credentialKeyAgreementKey: standing.standingClient.agents.keyAgreementKey,
     pinnedEpochId,
@@ -412,7 +411,6 @@ export async function forgetThisBrowser({
     if (!lastClient) {
       const ceremony = await forgetEnrolledClient({
         ...shared,
-        logId: accountLogPinId({ spaceId: pointer.spaceId }),
         // The post-removal did:web projection PUT, made immediately before
         // the removal entry under this still-standing client's root
         // authority: the removal entry itself publishes `did.jsonl` alone
@@ -510,12 +508,17 @@ function annexCeremonyReach({
     }: {
       spaceId: string
       generationId: string
-    }) => clientAnnexLogStore({ was, spaceId, generationId }),
+    }) =>
+      clientAnnexLogStore({
+        was,
+        spaceId,
+        generationId,
+        pinStore: session.profile.persistence.logPins
+      }),
     revoke: async (delegation: Parameters<WasClient['revoke']>[0]) =>
       was.revoke(delegation),
     wasServerUrl: pointer.host,
-    accountSpaceId: pointer.spaceId,
-    pinStore: session.profile.persistence.logPins
+    accountSpaceId: pointer.spaceId
   }
 }
 
@@ -617,14 +620,19 @@ async function rebindLoginCredentialRecord({
  *
  * @param options {object}
  * @param options.found {KeyringFetchResult}   a hit carrying `clientKeys`
+ * @param options.pinStore {ResourceLogPinStore}   the login's chain-head
+ *   pins; this read establishes or checks the account log's slot, and the
+ *   session built afterwards reads under the same store
  * @param [options.idb] {IDBFactory}
  * @returns {Promise<VerifiedAccountLog | undefined>}
  */
 export async function assertClientStillEnrolled({
   found,
+  pinStore,
   idb
 }: {
   found: KeyringFetchResult
+  pinStore: ResourceLogPinStore
   idb?: IDBFactory
 }): Promise<VerifiedAccountLog | undefined> {
   const { clientKeys, pointer } = found
@@ -653,7 +661,7 @@ export async function assertClientStillEnrolled({
       did: pointer.did,
       spaceId: pointer.spaceId,
       host: pointer.host,
-      pinStore: memoryResourceLogPinStore()
+      pinStore
     })
   } catch {
     // Unverifiable is not "forgotten": a flap, a missing log, and a

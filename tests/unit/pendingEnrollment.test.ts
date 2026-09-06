@@ -14,6 +14,7 @@
  * true did:key multibase.
  */
 import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { memoryResourceLogPinStore } from '@interop/vh-resource-log'
 import { WasError } from '@interop/was-client'
 import { agentsFromSeed } from '@interop/wallet-core/identity'
 import { clientSigningKeyMultibase } from '@interop/wallet-core/webvh'
@@ -186,7 +187,10 @@ describe('resumePendingEnrollment -- branch decision', () => {
     }
     vi.mocked(selfEnrollStandingClient).mockResolvedValue(completed as never)
 
-    const result = await resumePendingEnrollment({ found })
+    const result = await resumePendingEnrollment({
+      found,
+      pinStore: memoryResourceLogPinStore()
+    })
 
     expect(result).toBe(completed)
     expect(selfEnrollStandingClient).toHaveBeenCalledWith(
@@ -210,7 +214,10 @@ describe('resumePendingEnrollment -- branch decision', () => {
       persistClientKeys: vi.fn()
     } as never)
 
-    await resumePendingEnrollment({ found })
+    await resumePendingEnrollment({
+      found,
+      pinStore: memoryResourceLogPinStore()
+    })
 
     expect(selfEnrollStandingClient).toHaveBeenCalledWith(
       expect.objectContaining({
@@ -223,7 +230,9 @@ describe('resumePendingEnrollment -- branch decision', () => {
     const { found } = makeFound()
     serveLog({ headVmIds: [], historyVmIds: [[VM_ID]] })
 
-    await expect(resumePendingEnrollment({ found })).rejects.toMatchObject({
+    await expect(
+      resumePendingEnrollment({ found, pinStore: memoryResourceLogPinStore() })
+    ).rejects.toMatchObject({
       name: 'BrowserForgottenError'
     })
     expect(finishForgottenBrowserWipe).toHaveBeenCalled()
@@ -237,9 +246,9 @@ describe('resumePendingEnrollment -- branch decision', () => {
     const { found } = makeFound({ standing: undefined })
     serveLog()
 
-    await expect(resumePendingEnrollment({ found })).rejects.toThrow(
-      PendingEnrollmentDiscardedError
-    )
+    await expect(
+      resumePendingEnrollment({ found, pinStore: memoryResourceLogPinStore() })
+    ).rejects.toThrow(PendingEnrollmentDiscardedError)
     expect(deleteClientKeyRecord).toHaveBeenCalledWith(
       expect.objectContaining({ spaceId: 'unlock-space-test' })
     )
@@ -254,9 +263,9 @@ describe('resumePendingEnrollment -- branch decision', () => {
     }
     serveLog()
 
-    await expect(resumePendingEnrollment({ found })).rejects.toThrow(
-      PendingEnrollmentDiscardedError
-    )
+    await expect(
+      resumePendingEnrollment({ found, pinStore: memoryResourceLogPinStore() })
+    ).rejects.toThrow(PendingEnrollmentDiscardedError)
     expect(deleteClientKeyRecord).toHaveBeenCalled()
   })
 
@@ -274,7 +283,10 @@ describe('resumePendingEnrollment -- branch decision', () => {
       persistClientKeys: vi.fn()
     } as never)
 
-    await resumePendingEnrollment({ found })
+    await resumePendingEnrollment({
+      found,
+      pinStore: memoryResourceLogPinStore()
+    })
 
     expect(deleteClientKeyRecord).not.toHaveBeenCalled()
   })
@@ -287,7 +299,9 @@ describe('resumePendingEnrollment -- branch decision', () => {
     }
     serveLog({ headVmIds: [], historyVmIds: [[VM_ID]] })
 
-    await expect(resumePendingEnrollment({ found })).rejects.toMatchObject({
+    await expect(
+      resumePendingEnrollment({ found, pinStore: memoryResourceLogPinStore() })
+    ).rejects.toMatchObject({
       name: 'BrowserForgottenError'
     })
     expect(finishForgottenBrowserWipe).toHaveBeenCalled()
@@ -306,7 +320,9 @@ describe('resumePendingEnrollment -- branch decision', () => {
     // The served log has reached the recorded built-on head (2 entries).
     serveLog({ historyVmIds: [[]] })
 
-    await expect(resumePendingEnrollment({ found })).rejects.toMatchObject({
+    await expect(
+      resumePendingEnrollment({ found, pinStore: memoryResourceLogPinStore() })
+    ).rejects.toMatchObject({
       name: 'PendingEnrollmentError',
       reason: 'recovery-spend'
     })
@@ -329,7 +345,9 @@ describe('resumePendingEnrollment -- branch decision', () => {
     }
     serveLog() // one entry: behind the recorded '2-head'
 
-    await expect(resumePendingEnrollment({ found })).rejects.toMatchObject({
+    await expect(
+      resumePendingEnrollment({ found, pinStore: memoryResourceLogPinStore() })
+    ).rejects.toMatchObject({
       name: 'PendingResumeLogUnavailableError'
     })
     expect(deleteClientKeyRecord).not.toHaveBeenCalled()
@@ -352,9 +370,9 @@ describe('resumePendingEnrollment -- branch decision', () => {
     }
     serveLog({ historyVmIds: [[]] })
 
-    await expect(resumePendingEnrollment({ found })).rejects.toThrow(
-      PendingEnrollmentDiscardedError
-    )
+    await expect(
+      resumePendingEnrollment({ found, pinStore: memoryResourceLogPinStore() })
+    ).rejects.toThrow(PendingEnrollmentDiscardedError)
     expect(deleteClientKeyRecord).toHaveBeenCalled()
   })
 
@@ -378,7 +396,9 @@ describe('resumePendingEnrollment -- branch decision', () => {
       historyVmIds: [[]]
     })
 
-    await expect(resumePendingEnrollment({ found })).rejects.toMatchObject({
+    await expect(
+      resumePendingEnrollment({ found, pinStore: memoryResourceLogPinStore() })
+    ).rejects.toMatchObject({
       name: 'PendingEnrollmentError',
       reason: 'recovery-spend'
     })
@@ -408,7 +428,10 @@ describe('resumePendingEnrollment -- branch decision', () => {
     }
     vi.mocked(resumeRecoverySpend).mockResolvedValue(completed as never)
 
-    const result = await resumePendingEnrollment({ found })
+    const result = await resumePendingEnrollment({
+      found,
+      pinStore: memoryResourceLogPinStore()
+    })
 
     expect(result).toBe(completed)
     expect(resumeRecoverySpend).toHaveBeenCalledWith(
@@ -428,7 +451,9 @@ describe('resumePendingEnrollment -- fail-closed bounds', () => {
     vi.mocked(verifyAccountLog).mockRejectedValue(outage)
     const { found } = makeFound()
 
-    await expect(resumePendingEnrollment({ found })).rejects.toBe(outage)
+    await expect(
+      resumePendingEnrollment({ found, pinStore: memoryResourceLogPinStore() })
+    ).rejects.toBe(outage)
     expect(deleteClientKeyRecord).not.toHaveBeenCalled()
     expect(finishForgottenBrowserWipe).not.toHaveBeenCalled()
   })
@@ -439,7 +464,9 @@ describe('resumePendingEnrollment -- fail-closed bounds', () => {
     vi.mocked(verifyAccountLog).mockRejectedValue(refusal)
     const { found } = makeFound()
 
-    await expect(resumePendingEnrollment({ found })).rejects.toBe(refusal)
+    await expect(
+      resumePendingEnrollment({ found, pinStore: memoryResourceLogPinStore() })
+    ).rejects.toBe(refusal)
     expect(deleteClientKeyRecord).not.toHaveBeenCalled()
   })
 
@@ -450,7 +477,9 @@ describe('resumePendingEnrollment -- fail-closed bounds', () => {
     lagging.name = 'BuiltOnHeadNotReachedError'
     vi.mocked(selfEnrollStandingClient).mockRejectedValue(lagging)
 
-    await expect(resumePendingEnrollment({ found })).rejects.toBe(lagging)
+    await expect(
+      resumePendingEnrollment({ found, pinStore: memoryResourceLogPinStore() })
+    ).rejects.toBe(lagging)
     expect(deleteClientKeyRecord).not.toHaveBeenCalled()
   })
 
@@ -463,7 +492,9 @@ describe('resumePendingEnrollment -- fail-closed bounds', () => {
     )
     const { found } = makeFound()
 
-    await expect(resumePendingEnrollment({ found })).rejects.toMatchObject({
+    await expect(
+      resumePendingEnrollment({ found, pinStore: memoryResourceLogPinStore() })
+    ).rejects.toMatchObject({
       name: 'PendingResumeLogUnavailableError'
     })
     expect(deleteClientKeyRecord).not.toHaveBeenCalled()
@@ -476,7 +507,9 @@ describe('resumePendingEnrollment -- fail-closed bounds', () => {
     )
     const { found } = makeFound()
 
-    await expect(resumePendingEnrollment({ found })).rejects.toMatchObject({
+    await expect(
+      resumePendingEnrollment({ found, pinStore: memoryResourceLogPinStore() })
+    ).rejects.toMatchObject({
       name: 'PendingResumeLogUnavailableError'
     })
     expect(deleteClientKeyRecord).not.toHaveBeenCalled()
@@ -487,7 +520,9 @@ describe('resumePendingEnrollment -- fail-closed bounds', () => {
     serveLog({ headVmIds: [VM_ID] })
     vi.mocked(selfEnrollStandingClient).mockRejectedValue(new Error('boom'))
 
-    await expect(resumePendingEnrollment({ found })).rejects.toMatchObject({
+    await expect(
+      resumePendingEnrollment({ found, pinStore: memoryResourceLogPinStore() })
+    ).rejects.toMatchObject({
       name: 'PendingEnrollmentError',
       reason: 'resume-failed'
     })
@@ -507,7 +542,9 @@ describe('resumePendingEnrollment -- fail-closed bounds', () => {
     }
     serveLog({ headVmIds: [VM_ID] })
 
-    await expect(resumePendingEnrollment({ found })).rejects.toMatchObject({
+    await expect(
+      resumePendingEnrollment({ found, pinStore: memoryResourceLogPinStore() })
+    ).rejects.toMatchObject({
       name: 'PendingEnrollmentError',
       reason: 'unresumable'
     })

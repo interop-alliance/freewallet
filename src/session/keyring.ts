@@ -117,10 +117,7 @@ import {
   type UnlockRecordProofState
 } from '@interop/wallet-core/unlock'
 import { currentAccountRecordSigners } from '@interop/wallet-core/clients'
-import {
-  memoryResourceLogPinStore,
-  type ResourceLogPinStore
-} from '@interop/vh-resource-log'
+import type { ResourceLogPinStore } from '@interop/vh-resource-log'
 import { isStorageUnreachable } from '@/lib/storageErrors'
 import { isResourceLogContinuityError } from '@/session/verifiedLog'
 import {
@@ -802,21 +799,21 @@ async function unwrapStoredKeyringRecord({
  * @param options.proofState {UnlockRecordProofState}
  * @param options.found {KeyringRecordContents}   the unwrapped contents (the
  *   credential-authenticated pointer names the account to check against)
- * @param [options.accountLogPinStore] {ResourceLogPinStore}   the chain-head
- *   pin store the account-log read rides; defaults to the settlement's own
- *   in-memory one.
+ * @param options.accountLogPinStore {ResourceLogPinStore}   the chain-head
+ *   pin store the account-log read rides: the login's own, so the reads
+ *   that follow this settlement are checked against the head it saw
  * @returns {Promise<void>}
  */
 async function settlePendingRecordProof({
   record,
   proofState,
   found,
-  accountLogPinStore = memoryResourceLogPinStore()
+  accountLogPinStore
 }: {
   record: unknown
   proofState: UnlockRecordProofState
   found: KeyringRecordContents
-  accountLogPinStore?: ResourceLogPinStore
+  accountLogPinStore: ResourceLogPinStore
 }): Promise<void> {
   if (proofState === 'verified') {
     return
@@ -897,6 +894,8 @@ function nextRecordCreatedAt({
  * @param options.cached {{ record: unknown }}   the loaded cache entry
  * @param options.credential {UnlockCredential}
  * @param options.mintManageCapability {boolean}
+ * @param options.accountLogPinStore {ResourceLogPinStore}   see
+ *   {@link fetchKeyring}
  * @param [options.idb] {IDBFactory}
  * @returns {Promise<KeyringFetchResult | null>}
  */
@@ -904,11 +903,13 @@ async function readCachedRecord({
   cached,
   credential,
   mintManageCapability,
+  accountLogPinStore,
   idb
 }: {
   cached: { record: unknown }
   credential: UnlockCredential
   mintManageCapability: boolean
+  accountLogPinStore: ResourceLogPinStore
   idb?: IDBFactory
 }): Promise<KeyringFetchResult | null> {
   const { unlock } = credential
@@ -926,7 +927,8 @@ async function readCachedRecord({
     await settlePendingRecordProof({
       record: cached.record,
       proofState: unwrapped.proofState,
-      found: unwrapped.found
+      found: unwrapped.found,
+      accountLogPinStore
     })
     return await buildFetchResult({
       unwrapped,
@@ -983,6 +985,10 @@ async function readCachedRecord({
  * @param [options.credential] {UnlockCredential}   an already-derived unlock
  *   credential for the same secret, so a flow that unlocks more than once
  *   (finishing an enrollment) runs the KDF a single time
+ * @param options.accountLogPinStore {ResourceLogPinStore}   the chain-head
+ *   pin store a pending-proof settlement's account-log read rides -- the
+ *   login's own (`persistence.logPins`), so the session that follows checks
+ *   its reads against the head the settlement saw
  * @returns {Promise<KeyringFetchResult | null>}
  */
 export async function fetchKeyring({
@@ -990,13 +996,15 @@ export async function fetchKeyring({
   idb,
   kdf = KEYRING_KDF,
   mintManageCapability = false,
-  credential: derived
+  credential: derived,
+  accountLogPinStore
 }: {
   secret?: string | Uint8Array
   idb?: IDBFactory
   kdf?: UnlockKdf
   mintManageCapability?: boolean
   credential?: UnlockCredential
+  accountLogPinStore: ResourceLogPinStore
 }): Promise<KeyringFetchResult | null> {
   if (!derived && secret === undefined) {
     throw new TypeError('An unlock secret is required.')
@@ -1021,6 +1029,7 @@ export async function fetchKeyring({
       cached,
       credential,
       mintManageCapability,
+      accountLogPinStore,
       idb
     })
   }
@@ -1052,6 +1061,7 @@ export async function fetchKeyring({
       cached,
       credential,
       mintManageCapability,
+      accountLogPinStore,
       idb
     })
     if (!result) {
@@ -1089,7 +1099,8 @@ export async function fetchKeyring({
   await settlePendingRecordProof({
     record,
     proofState: unwrapped.proofState,
-    found: unwrapped.found
+    found: unwrapped.found,
+    accountLogPinStore
   })
   await saveKeyringCache({ spaceId: unlock.spaceId, record, idb })
   return await buildFetchResult({

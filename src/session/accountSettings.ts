@@ -12,7 +12,6 @@ import type { ZcapClient } from '@interop/ezcap'
 import { WasClient } from '@interop/was-client'
 import type { DIDLog } from '@interop/did-method-webvh'
 import {
-  accountLogPinId,
   clientKeyAgreementController,
   didKeyZcapClient,
   isWebvhDid,
@@ -1297,7 +1296,8 @@ async function recoverFailedPasskeyEstablishment({
       secret,
       kdf: PASSKEY_KDF,
       credential,
-      mintManageCapability: true
+      mintManageCapability: true,
+      accountLogPinStore: session.profile.persistence.logPins
     })
   } catch (err) {
     // Cannot verify, so nothing is acted on: the bare entry and whatever the
@@ -1794,12 +1794,9 @@ export async function rotateAccountUpdateKey({
         await persistClientKeys({ webvhUpdateKeys: next })
         session.profile.clientWebvhKeys = next
       },
-      expectedDid,
-      // The pin slot is keyed by the data Space id, so the same slot serves
-      // the account log from first contact on; the read the rotation builds
-      // on runs under it.
-      pinStore: session.profile.persistence.logPins,
-      logId: accountLogPinId({ spaceId: remoteStore.spaceId })
+      // The read the rotation builds on runs under the id store's chain-head
+      // pin, the same slot the account log has ridden since first contact.
+      expectedDid
     })
   } finally {
     // The rotation publishes a log entry (and a torn rotation may have
