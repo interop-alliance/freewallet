@@ -72,7 +72,10 @@ vi.mock('@interop/wallet-core/clientAnnex', async importOriginal => ({
     if (state.swapError) {
       throw state.swapError
     }
-    return { did: 'did:webvh:fresh-generation' }
+    return {
+      clientAnnexDid: 'did:webvh:fresh-generation',
+      revoke: 'revoked' as const
+    }
   })
 }))
 

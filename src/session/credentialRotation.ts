@@ -537,7 +537,6 @@ async function retireClientAnnexInventoryStage({
       return { action: 'skipped', reason: 'no-ladder-seed' }
     }
     const { generationId, was } = reach
-    const logPins = session.profile.persistence.logPins
 
     if (retiredLadderSeed !== undefined && survivingLadderSeed !== undefined) {
       try {
@@ -575,7 +574,7 @@ async function retireClientAnnexInventoryStage({
       )
       return { action: 'skipped', reason: 'no-ladder-seed' }
     }
-    await swapClientAnnexGeneration({
+    const { revoke } = await swapClientAnnexGeneration({
       was,
       wasServerUrl: pointer.host,
       accountSpaceId: pointer.spaceId,
@@ -586,9 +585,17 @@ async function retireClientAnnexInventoryStage({
       idStore: remoteStore.webvhIdStore(),
       signer: context.signer,
       zcapClient: session.profile.zcapClient,
-      ladderSeed: survivingLadderSeed,
-      pinStore: logPins
+      ladderSeed: survivingLadderSeed
     })
+    if (revoke !== 'revoked') {
+      // The re-point retires the old delegation on a conforming server;
+      // the explicit revoke only covers the fail-open case, so a skipped
+      // one is worth a warning, not a failure.
+      log.warn(
+        "The generation swap found no old delegation to revoke; the re-point alone retires the retired credential's annex inventory",
+        { revoke }
+      )
+    }
     return { action: 'swapped' }
   } catch (err) {
     log.warn(

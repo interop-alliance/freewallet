@@ -215,7 +215,6 @@ describe('sweepClientAnnexGenerations -- the pass', () => {
     expect(options.idStore).toBe(ID_STORE)
     expect(options.updateKeys).toBe(CLIENT_WEBVH_KEYS)
     expect(options.ladderSeed).toBe(ladderSeed)
-    expect(options.pinStore).toBe(persistence.logPins)
   })
 
   it('omits ladderSeed entirely when none is supplied', async () => {

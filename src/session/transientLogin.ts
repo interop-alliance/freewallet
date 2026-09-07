@@ -410,8 +410,7 @@ async function ensureClientAnnexGenerationReady({
       },
       ...(standing.delegatedClients
         ? { delegatedClients: standing.delegatedClients }
-        : {}),
-      pinStore: persistence.logPins
+        : {})
     })
     return { outcome }
   } catch (err) {

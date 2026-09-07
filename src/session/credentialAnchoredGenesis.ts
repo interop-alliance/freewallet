@@ -443,8 +443,7 @@ export async function establishCredentialAnchoredAccount({
           }
         }
       : {}),
-    onStage: mark,
-    pinStore: persistence.logPins
+    onStage: mark
   })
 
   // The best-effort stages' collected failures: warned here (wallet-core
@@ -666,8 +665,7 @@ export async function mendCredentialAnchoredAccount({
     ...(userKey ? { userKey } : {}),
     ...(repairShaped !== undefined ? { repairShaped } : {}),
     collectionIds,
-    onStage: mark,
-    pinStore: persistence.logPins
+    onStage: mark
   })
   return report
 }

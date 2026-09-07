@@ -189,7 +189,6 @@ describe('establishCredentialAnchoredAccount -- the orchestrator binding', () =>
       keyAgreementKey: CREDENTIAL.standing.agents.keyAgreementKey
     })
     expect(options.lowEntropy).toBe(true)
-    expect(options.pinStore).toBe(persistence.logPins)
     expect(options.idStore).toEqual({ isIdStore: true })
     expect(ladderVmAgent).toHaveBeenCalledTimes(1)
     // The bootstrap storage client the hooks share, signing as the ladder
@@ -430,7 +429,6 @@ describe('mendCredentialAnchoredAccount -- the mend binding', () => {
     expect(typeof options.rosterStoreFor).toBe('function')
     expect(typeof options.bootstrapWasFor).toBe('function')
     expect(options.idStore).toEqual({ isIdStore: true })
-    expect(options.pinStore).toBe(persistence.logPins)
     // The mend members ride through unchanged.
     expect(options.priorCreatedAt).toBe('2026-08-20T00:00:00.000Z')
     expect(options.beforePromotion).toBe(beforePromotion)

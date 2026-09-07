@@ -895,12 +895,11 @@ describe('transientSessionFromKeyringHit -- the client-annex generation-readines
 
   it('runs the ensure on every visit, with the credential members', async () => {
     primeHappyPath()
-    const { ensureCall, persistence, found } = await runComposition()
+    const { ensureCall, found } = await runComposition()
     expect(ensureCall.wasServerUrl).toBe(POINTER.host)
     expect(ensureCall.spaceId).toBe(POINTER.spaceId)
     expect(ensureCall.ladderSeed).toBe(found.standing!.ladderSeed)
     expect(ensureCall.delegatedClients).toBe(SIBLING_DELEGATION)
-    expect(ensureCall.pinStore).toBe(persistence.logPins)
     expect(ensureCall.standingClient).toEqual({
       did: found.standingClient.clientDid,
       zcapClient: found.standingClient.agents.zcapClient

@@ -23,7 +23,14 @@
   `resumePendingEnrollment`, `resumeRecoverySpend`, and
   `assertClientStillEnrolled` take the pin store required, and
   `loginWithPassphrase` / `loginWithPasskey` accept an optional
-  `persistence`.
+  `persistence`. The annex orchestrators (the establishment, the mend, the
+  transient readiness ensure, the remembered pointer fold, the GC pass, and
+  the credential-rotation swap) take no `pinStore` either: the annex logs pin
+  in the account-log store's pin store.
+- The credential-rotation swap warns when the old generation's delegation
+  could not be revoked (the pointed log was absent or embedded none), reading
+  `swapClientAnnexGeneration`'s new `revoke` outcome; the re-point alone
+  retires it on a conforming server.
 - The RxDB replication driver now lives in `@interop/was-sync`, shared with
   `@interop/was-react`. `src/lib/sync/` is gone. `stores/syncController.ts` is
   the session binding around the package's controller core: the guest, no-WAS,

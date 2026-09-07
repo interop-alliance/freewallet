@@ -80,8 +80,7 @@ export async function sweepClientAnnexGenerations({
         user: session.user,
         ...digest
       })
-    },
-    pinStore: persistence.logPins
+    }
   })
   if (report.swap === 'replaced') {
     invalidateVerifiedLog({ profile: session.profile })
