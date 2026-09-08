@@ -226,6 +226,10 @@ describe('the login-time cascade-completion sweep', () => {
       vi.mocked(cascadeCollectionsToUserKey)
     ).toHaveBeenCalledExactlyOnceWith({
       remoteStore: fake.remoteStore,
+      // Each collection's log-governed descriptor store, built for this
+      // session so the sweep's appends sign with a key the account document
+      // lists.
+      storeFor: expect.any(Function),
       rosterDescriptor: ROSTER_DESCRIPTOR,
       clientKeyAgreementKey: session.profile.clientKeyAgreementKey,
       userKey: OLD_USER_KEY

@@ -105,6 +105,12 @@ vi.mock('@/session/rosterStore', () => ({
   sessionRosterStore: vi.fn(() => ({ rosterStore: true }))
 }))
 
+vi.mock('@/session/collectionLogStore', () => ({
+  sessionCollectionStores: vi.fn(() => (collectionId: string) => ({
+    collectionId
+  }))
+}))
+
 vi.mock('@/session/userKeyCascade', () => ({
   cascadeCollections: vi.fn(() => ({
     collectionIds: async () => ['private-credentials'],
@@ -146,12 +152,14 @@ import { keyAgreementCommitment } from '@interop/wallet-core/webvh'
 import {
   clientAnnexLogStore,
   ladderRung,
+  ladderVmAgent,
   retireClientAnnexRung,
   swapClientAnnexGeneration
 } from '@interop/wallet-core/clientAnnex'
 import { didWebProjectionStore } from '@/session/annexReach'
 import { browserLocalSessionPersistence } from '@/session/persistence'
 import { sessionRosterStore } from '@/session/rosterStore'
+import { sessionCollectionStores } from '@/session/collectionLogStore'
 import { cascadeCollections } from '@/session/userKeyCascade'
 import {
   invalidateVerifiedLog,
@@ -446,7 +454,10 @@ describe('the ceremony hand-off', () => {
       expect.objectContaining({ profile: session.profile })
     )
     expect(vi.mocked(cascadeCollections)).toHaveBeenCalledWith({
-      remoteStore: session.storage.remoteStore
+      remoteStore: session.storage.remoteStore,
+      // Each collection's log-governed descriptor store, which the fan-out
+      // appends the fresh epoch through.
+      storeFor: expect.any(Function)
     })
     expect(epochPinLoad).toHaveBeenCalledWith(
       expect.objectContaining({ accountDid: POINTER.did })
@@ -905,6 +916,29 @@ describe('the annex strike-or-swap stage', () => {
         verb: 'changing the passphrase'
       })
     }
+
+    it('signs the collection descriptor appends with the surviving ladder VM', async () => {
+      await retireOnLadder({
+        context: ladderContext({ sibling: ACTING_SIBLING }),
+        standingUnlock: {
+          standingClient: { agents: { zcapClient: ACTING_ZCAP_CLIENT } }
+        }
+      })
+
+      // The collection appends are proved at the POST-edit document, which no
+      // longer lists the retiring credential's ladder VM; the surviving
+      // credential's is the one key every append can verify against.
+      const surviving = await ladderVmAgent({ ladderSeed: SURVIVING_SEED })
+      expect(vi.mocked(sessionCollectionStores)).toHaveBeenCalledWith(
+        expect.objectContaining({
+          keyAgent: expect.objectContaining({ id: surviving.id })
+        })
+      )
+      // The same lookup is what the fan-out rotates each collection through.
+      expect(vi.mocked(cascadeCollections)).toHaveBeenCalledWith(
+        expect.objectContaining({ storeFor: expect.any(Function) })
+      )
+    })
 
     it("reaches the annex log through the caller's surviving sibling", async () => {
       const outcome = await retireOnLadder({

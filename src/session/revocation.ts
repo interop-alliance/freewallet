@@ -299,7 +299,10 @@ export async function revokeEnrolledClient({
         latestEpochId,
         descriptor
       }),
-    collections: cascadeCollections({ remoteStore }),
+    collections: cascadeCollections({
+      remoteStore,
+      storeFor: context.collectionStore
+    }),
     // No unlock record is re-sealed on either branch: every record's frame
     // proof, bridge, and sibling delegation are signed by its OWN
     // credential's unlock identity and ladder VM, which this entry does not

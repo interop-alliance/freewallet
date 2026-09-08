@@ -15,7 +15,7 @@
  * its recorded storage grants and records the revocation, which is what takes
  * the row out of the listing.
  */
-import { useState } from 'react'
+import { useCallback, useState } from 'react'
 import { Link as RouterLink, useNavigate } from 'react-router'
 import { useTranslation } from 'react-i18next'
 import { MdChevronRight } from 'react-icons/md'
@@ -34,6 +34,11 @@ import { DashboardLayout } from '@/components/DashboardLayout'
 import { LoadingSpinner } from '@/components/LoadingSpinner'
 import { RevokeAppDialog } from '@/components/RevokeAppDialog'
 import { useAsyncLoad } from '@/hooks/useAsyncLoad'
+import { usePullSettled } from '@/hooks/usePullSettled'
+import {
+  APP_CONNECTIONS_COLLECTION,
+  WALLET_ACTIVITY_COLLECTION
+} from '@interop/wallet-core/space'
 import { useAuthStore } from '@/stores/authStore'
 import { showToast } from '@/stores/toastStore'
 import { dashboardStyles } from '@/styles/appStyles'
@@ -52,6 +57,12 @@ import {
 import { createLogger } from '@/lib/log'
 
 const log = createLogger('fw:ui:applications')
+
+// The collections whose pulls change what this page lists.
+const PULLED_COLLECTIONS = [
+  APP_CONNECTIONS_COLLECTION,
+  WALLET_ACTIVITY_COLLECTION
+]
 
 /**
  * The soonest still-future expiry among a row's recorded grants, so the row
@@ -130,6 +141,20 @@ export function ApplicationsPage() {
       }
     }
   )
+
+  // The app rows come from `app-connections` and the grant state (the
+  // orphaned marker included) from the Login activities in
+  // `wallet-activity`; on a fresh browser either pull can land after the
+  // mount read, so re-list when one settles.
+  const reloadAfterPull = useCallback(() => {
+    reload().catch((err: unknown) => {
+      log.error('Could not reload applications after a pull', { err })
+    })
+  }, [reload])
+  usePullSettled({
+    collectionIds: PULLED_COLLECTIONS,
+    onSettled: reloadAfterPull
+  })
 
   const apps = view?.apps ?? []
   const agents = view?.agents ?? []

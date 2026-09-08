@@ -65,10 +65,12 @@ import {
 import type { ImportSpaceSummary } from '@/stores/storageManager'
 import {
   deriveSpaceId,
+  ensureSpaceAndCollection,
   errorStatus,
   KEY_EPOCH_HEADER
 } from '@interop/was-client/sync'
 import { provisionWalletSpace } from '@interop/wallet-core/space'
+import type { EncryptionDescriptorStore } from '@interop/was-client/edv'
 import {
   ensureWalletSpaceEpochs,
   type UserKey
@@ -433,11 +435,21 @@ export class WASRemoteStore {
    * @param options {object}
    * @param options.userKey {UserKey}   the account's user key, epoch[0]'s one
    *   initial recipient
+   * @param options.storeFor {Function}   `(collectionId) =>
+   *   EncryptionDescriptorStore` -- each collection's log-governed
+   *   descriptor store, through which epoch[0] lands as the governing log's
+   *   genesis
    * @returns {Promise<void>}
    */
-  async ensureSpaceEpochs({ userKey }: { userKey: UserKey }): Promise<void> {
+  async ensureSpaceEpochs({
+    userKey,
+    storeFor
+  }: {
+    userKey: UserKey
+    storeFor: (collectionId: string) => EncryptionDescriptorStore
+  }): Promise<void> {
     await ensureWalletSpaceEpochs({
-      was: this.was,
+      storeFor,
       spaceId: this.spaceId,
       userKey
     })
@@ -636,69 +648,49 @@ export class WASRemoteStore {
   }
 
   /**
-   * Ensures an App Connect app-provisioned collection exists AND is declared
-   * encrypted with the `'edv'` scheme, without ever clobbering an existing
-   * `encryption` descriptor (which may already carry a key-epoch roster). Reads the
-   * description first: a missing collection or one with no encryption block is
-   * configured with the bare `{ scheme: 'edv' }` descriptor (a fresh create or a
-   * late in-place declaration); a collection that already carries an encryption
-   * block is left untouched so its epochs survive. Returns the current
-   * encryption descriptor after ensuring the declaration -- `undefined` when the
-   * collection was just declared and has no epochs yet, or the existing descriptor
-   * (possibly with epochs) otherwise -- so the caller can decide whether to
-   * initialize or extend the recipient roster.
+   * Ensures an App Connect app-provisioned collection exists as a
+   * log-governed encrypted collection: was-client's ensure with
+   * `encryption: 'governed'`, a bare guarded create (`{ name }` under
+   * `If-None-Match: *`), since the Description's `encryption` member is the
+   * server's to derive from the collection's governing log, and the
+   * declaration itself is that log's genesis (`ensureIndexedFirstEpoch`
+   * through the collection's descriptor store, the caller's next step). A
+   * collection already standing is left untouched, a lost create race reads
+   * as the standing collection, and a collection already carrying a
+   * client-written `encryption` member refuses rather than trip the server's
+   * `encryption-immutable` refusal on the genesis.
+   *
+   * Every request rides this store's bound invocation capability (a transient
+   * session's generation delegation), which is scoped below the bare Space
+   * URL, so the ensure's Space half is skipped by supplying the description
+   * of the Space this session already runs in.
    *
    * @param options {object}
    * @param options.id {string}   the WAS collection id
    * @param [options.name] {string}   display name; defaults to the id
-   * @returns {Promise<CollectionEncryption | undefined>}
+   * @returns {Promise<void>}
    */
-  async ensureEncryptedCollection({
+  async ensureGovernedCollection({
     id,
     name
   }: {
     id: string
     name?: string
-  }): Promise<CollectionEncryption | undefined> {
-    const collection = this.#space().collection(id)
-    let current
-    try {
-      current = await collection.describe()
-    } catch (err) {
-      log.error('Error describing collection', { id, err })
-      throw new Error(
-        `Error describing collection "${id}" in space "${this.spaceId}".`,
-        { cause: err }
-      )
-    }
-    // Declare `'edv'` only when there is no encryption block to lose: a fresh
-    // create (current === null) or a plaintext collection getting a late
-    // in-place declaration. Never re-send `encryption` when a descriptor already
-    // exists -- `configure` merges the passed value forward, so a bare
-    // `{ scheme: 'edv' }` would drop an existing epoch roster.
-    if (!current || !current.encryption) {
-      try {
-        await collection.configure({
-          name: name ?? current?.name ?? id,
-          encryption: { scheme: 'edv' },
-          force: true,
-          // The description this method just read through the same handle,
-          // with no Description write in between -- `null` is the answer
-          // "absent", not a request to look again. Supplying it skips
-          // `configure`'s own pre-merge describe, which `force` does not.
-          current
-        })
-      } catch (err) {
-        log.error('Error declaring collection encrypted', { id, err })
-        throw new Error(
-          `Error declaring collection "${id}" encrypted in space ` +
-            `"${this.spaceId}".`,
-          { cause: err }
-        )
-      }
-      return undefined
-    }
-    return current.encryption
+  }): Promise<void> {
+    await ensureSpaceAndCollection({
+      was: this.was,
+      spaceId: this.spaceId,
+      controllerDid: this.controller,
+      collectionId: id,
+      collectionName: name ?? id,
+      encryption: 'governed',
+      spaceDescription: {
+        id: this.spaceId,
+        type: ['Space'],
+        controller: this.controller
+      },
+      capability: this.#capability
+    })
   }
 
   /**

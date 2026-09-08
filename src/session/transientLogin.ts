@@ -67,6 +67,7 @@ import { WasClient } from '@interop/was-client'
 import { WAS_SERVER_URL } from '@/app.config'
 import { hasClientKeyRecord } from '@/lib/sessionKey'
 import { isStorageUnreachable } from '@/lib/storageErrors'
+import { accountCollectionStores } from '@/session/collectionLogStore'
 import { createLogger } from '@/lib/log'
 import {
   mendCredentialAnchoredAccount,
@@ -856,6 +857,21 @@ export async function transientSessionFromKeyringHit({
         capability: generationDelegation
       },
       rosterStore: rosterStoreSignedBy(await ladderVmAgent({ ladderSeed })),
+      // The collection stores the roster-and-epochs arm installs epoch[0]
+      // through: ladder-signed appends, invoked as the annex VM under the
+      // generation delegation, the controller view verified fresh under the
+      // visit's pins (the arm may have moved the head this visit stood on).
+      collectionStore: accountCollectionStores({
+        zcapClient: transientZcapClient,
+        keyAgent: await ladderVmAgent({ ladderSeed }),
+        pointer: {
+          did: accountDid,
+          spaceId: accountSpaceId,
+          host: accountHost
+        },
+        pinStore: persistence.logPins,
+        capability: generationDelegation
+      }),
       registry: {
         unlockSpaceId: found.unlockSpaceId,
         delegation: usableBridge,

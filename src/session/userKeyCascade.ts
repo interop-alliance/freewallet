@@ -6,8 +6,12 @@
  * key in parallel, so writes stop landing under epochs the revoked party can
  * decrypt. The driving (and the per-collection staleness/rotation op) lives
  * in `@interop/wallet-core/keys`; this module owns what only this wallet
- * knows -- which collections exist, and how each one's descriptor store and
- * encryption declaration are reached through the remote store.
+ * knows -- which collections exist, and how each one's encryption
+ * declaration is reached through the remote store. Each collection's
+ * descriptor store is the caller's: a log-governed store whose appends are
+ * signed by whichever key the caller's ceremony is licensed to sign with
+ * (`src/session/collectionLogStore.ts`), so the fan-out takes the lookup
+ * rather than building one.
  *
  * Convergence is the design, not an afterthought: staleness is detected from
  * durable data alone (a collection is stale exactly when its current epoch
@@ -16,7 +20,6 @@
  * epochs. Failures are collected per collection rather than aborting the
  * fan-out; the cascade-completion sweep is the standing backstop.
  */
-import { collectionDescriptorStore } from '@interop/was-client/edv'
 import type { CollectionEncryption } from '@interop/was-client'
 import type { IKeyAgreementKey } from '@interop/data-integrity-core'
 import {
@@ -25,8 +28,10 @@ import {
   type UserKeyCascadeResult
 } from '@interop/wallet-core/keys'
 import type { CascadeCollections } from '@interop/wallet-core/clients'
+import type { WebvhResourceLogController } from '@interop/wallet-core/resourceLog'
 import { ENCRYPTED_STANDARD_COLLECTIONS } from '@/app.config'
 import type { WASRemoteStore } from '@/stores/wasRemoteStore'
+import type { CollectionStoreFor } from '@/session/collectionLogStore'
 import { createLogger } from '@/lib/log'
 
 const log = createLogger('fw:session:cascade')
@@ -79,8 +84,8 @@ async function listedCollections({
  * The fan-out's work, as the shared cascade orchestrator expects it: which
  * encrypted collections exist in this Space (the standard collections that
  * declare encryption, plus every remotely listed encrypted collection,
- * deduplicated), and how each one's descriptor store and encryption
- * declaration are reached through the remote store.
+ * deduplicated), each one's descriptor store, and how its encryption
+ * declaration is reached through the remote store.
  *
  * The remote listing is read once per cascade and memoized, since the
  * orchestrator asks for the ids and then for each collection's encryption
@@ -88,13 +93,18 @@ async function listedCollections({
  *
  * @param options {object}
  * @param options.remoteStore {WASRemoteStore}
+ * @param options.storeFor {CollectionStoreFor}   each collection's
+ *   log-governed descriptor store, signed by the key the calling ceremony
+ *   is licensed to append with at the post-edit document
  * @returns {CascadeCollections}   with `collectionIds` narrowed to the
  *   resolver form, so callers driving the cascade themselves can await it
  */
 export function cascadeCollections({
-  remoteStore
+  remoteStore,
+  storeFor
 }: {
   remoteStore: WASRemoteStore
+  storeFor: CollectionStoreFor
 }): CascadeCollections & { collectionIds: () => Promise<string[]> } {
   let listing: Promise<{
     listed: boolean
@@ -114,21 +124,16 @@ export function cascadeCollections({
       }
       return [...ids]
     },
-    storeFor: collectionId =>
-      collectionDescriptorStore({
-        collection: remoteStore.collectionHandle({ collectionId })
-      }),
-    // Skip a collection the server does not declare encrypted (e.g. a
-    // standard collection on an account that never provisioned it). Answered
-    // from the listing above; a collection the listing did not cover (or a
-    // listing that failed) still falls back to one describe.
-    isEncrypted: async collectionId => {
-      const { ids, encrypted } = await listOnce()
-      if (ids.has(collectionId)) {
-        return encrypted.has(collectionId)
-      }
-      return Boolean(await remoteStore.collectionEncryption({ collectionId }))
-    }
+    storeFor,
+    // Skip a collection that carries no governing log (a plaintext one, or
+    // a standard collection on an account that never provisioned it).
+    // Answered from the collection's own verified log rather than the
+    // server's derived `encryption` member: the listing above only
+    // enumerates, since a host omitting the member for one collection could
+    // otherwise keep it out of every rotation and leave it keyed to the
+    // retired generation.
+    isEncrypted: async collectionId =>
+      (await storeFor(collectionId).read()) !== null
   }
 }
 
@@ -139,32 +144,44 @@ export function cascadeCollections({
  *
  * @param options {object}
  * @param options.remoteStore {WASRemoteStore}
+ * @param options.storeFor {CollectionStoreFor}   each collection's
+ *   log-governed descriptor store (see `cascadeCollections`)
  * @param options.rosterDescriptor {CollectionEncryption}   the freshly read
  *   `key-map/user-key.jsonl` roster (the source of the user key generations)
  * @param options.clientKeyAgreementKey {IKeyAgreementKey}   this client's own
  *   (identity) key-agreement key, unwrapping the generations
  * @param options.userKey {UserKey}   the roster's current user key
+ * @param [options.controller] {WebvhResourceLogController}   a ceremony's
+ *   post-edit controller view, set as every sealable store's minimum
+ *   controller version before its first append so no collection append
+ *   anchors behind the edit. Omitted, each store's own resolver decides,
+ *   which is the login sweep's case
  * @returns {Promise<UserKeyCascadeResult>}
  */
 export async function cascadeCollectionsToUserKey({
   remoteStore,
+  storeFor,
   rosterDescriptor,
   clientKeyAgreementKey,
-  userKey
+  userKey,
+  controller
 }: {
   remoteStore: WASRemoteStore
+  storeFor: CollectionStoreFor
   rosterDescriptor: CollectionEncryption
   clientKeyAgreementKey: IKeyAgreementKey
   userKey: UserKey
+  controller?: WebvhResourceLogController
 }): Promise<UserKeyCascadeResult> {
-  const work = cascadeCollections({ remoteStore })
+  const work = cascadeCollections({ remoteStore, storeFor })
   const result = await driveCascade({
     collectionIds: await work.collectionIds(),
     storeFor: work.storeFor,
     ...(work.isEncrypted ? { isEncrypted: work.isEncrypted } : {}),
     rosterDescriptor,
     clientKeyAgreementKey,
-    userKey
+    userKey,
+    ...(controller ? { controller } : {})
   })
   for (const { collectionId, error } of result.failed) {
     log.warn('Could not rotate collection onto the current user key', {

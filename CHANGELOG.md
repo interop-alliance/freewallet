@@ -4,6 +4,73 @@
 
 ### Changed
 
+- `WASRemoteStore.ensureGovernedCollection` is was-client's
+  `ensureSpaceAndCollection` with `encryption: 'governed'`, riding the store's
+  bound invocation capability through the helper's new `capability` option
+  (was-client 0.54.0) and supplying the live Space's description so the
+  helper's Space half, unreachable under a generation delegation, is skipped.
+  The hand-rolled guarded create, lost-race re-read, and client-written
+  descriptor refusal it duplicated are gone.
+- Every encrypted collection's `encryption` descriptor is governed by a
+  resource log of its own, at the collection's `meta/log` sub-resource, and is
+  verified client-side the way the user key roster's log is: entry proofs
+  against the locally verified did:webvh document under `assertionMethod`, and
+  a chain-head pin per log on the visit's keyed store (the slot
+  `space/<spaceId>/<collectionId>/meta/log`). The server derives the
+  Collection Description's `encryption` member from the log head, so the
+  wallet writes the log alone. Every epoch rotation and recipient change -- a
+  share, an unshare, an App Connect provisioning, an app revoke, and the user
+  key cascade -- is one signed full-state append.
+- `src/session/collectionLogStore.ts` is the wiring: `accountCollectionStores`
+  (bare parts, for the geneses, the mend, the login-time epoch install, and
+  the recovery continuations), `sessionCollectionStores` (a live session,
+  through the remote store's collection handle, so a request rides the
+  capability held at call time), `sessionCollectionDescriptorSource` (the read
+  side `StorageManager` acquires descriptors through), and
+  `descriptorLogSignerAgent`. A remembered session signs the appends with the
+  enrolled client's account key; a transient session signs with the login
+  credential's ladder VM, admitted on `assertionMethod` membership alone. No
+  descriptor-writing ceremony refuses on the kind of session it runs in.
+- `StorageManager` takes a `DescriptorLogs` `{ source, storeFor }`, resolved
+  at each use once the account pointer names a did:webvh, so a login-time
+  genesis that promotes the account mid-session is picked up by the refresh
+  that follows. A verifier refusal on a descriptor
+  read throws rather than falling back to the browser-local cache; a transport
+  failure serves the cached copy without seeding the visit's pin; a served
+  head listing fewer epochs than the cache is warned about and then written.
+  The cache stays in localStorage.
+- `cascadeCollections` and `cascadeCollectionsToUserKey` take the
+  per-collection store lookup rather than building one, so a fan-out appends
+  under the key its ceremony is licensed to sign with, and every store takes
+  the edit's post-edit controller view before its first append. Whether a
+  collection is encrypted is answered by reading its governing log; the
+  Space listing only enumerates. The recovery-code revocation states its
+  post-edit controller view explicitly. The
+  account-ceremony context carries a `collectionStore` member on both kinds.
+  The forget ceremony and the last-client transition sign with the login
+  credential's ladder VM, since the removal entry strikes this client's own
+  key; the passphrase change signs with the surviving credential's ladder VM.
+- `WASRemoteStore.ensureEncryptedCollection` is replaced by
+  `ensureGovernedCollection`: a bare guarded create, with the epoch[0] install
+  through the collection's store as the governing log's genesis.
+  `ensureSpaceEpochs` takes `storeFor`. The wallet writes no Description
+  `encryption` member any more, and a collection already carrying a
+  client-written one refuses rather than being governed.
+- Collection key-epoch provisioning is skipped, with a warn, on a session
+  whose account pointer names no did:webvh: each epoch[0] is a log genesis
+  anchored in the account document.
+- The descriptor acquisition and refresh policy is consumed from
+  `@interop/was-client/edv` (was-client 0.54.0): `acquireDescriptor`,
+  `acquireDescriptors`, `DescriptorRefreshPolicy`, the
+  `EncryptionDescriptorSource` / `EncryptionDescriptorCache` seams, and
+  `isKeyUnwrapError` (also on `/sync`, beside `isUnknownEpochError`). The
+  `@interop/wallet-core/descriptors` subpath now supplies only the
+  log-governed source and the collection descriptor log's pin slot.
+- The minimum dependency versions move to `@interop/wallet-core` `^0.69.0`,
+  `@interop/was-client` `^0.54.0`, and `@interop/vh-resource-log` `^0.4.2`.
+  The storage server must be was-teaching-server 0.28.0 or later for the
+  server-derived `encryption` member, and 0.29.0 for guarded Description
+  creates.
 - The WAS replication driver's diagnostics arrive under the `sync` namespace,
   wired once at bootstrap through `@interop/was-sync`'s `setLogger`; the
   binding no longer passes a `log` port to the controller core or the contacts
@@ -70,6 +137,11 @@
   transition) stops background replication before its local wipe removes the
   replica database. The controller's poll timer used to keep calling
   `reSync()` against the closed handle.
+- The dashboard and the Applications page re-read their lists when a pull
+  of a collection they depend on settles (`usePullSettled`, over the sync
+  status store). On a fresh browser the first pull landed moments after the
+  mount read, so the credential list stayed empty and a grant's orphaned
+  marker stayed off until a manual Sync.
 
 ## 0.49.1 - TBD
 

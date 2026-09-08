@@ -3,14 +3,20 @@
  * `shareCollection` / `unshareCollection` / `listCollectionShares`, plus the
  * transparent unknown-epoch descriptor refresh on `listCredentials`.
  *
- * The remote WAS store is a structural fake -- an in-memory Collection
- * Description with a compare-and-swap etag (so the real `initRecipients` /
- * `addRecipient` / `removeRecipient` exercise their real write path against it),
- * a `collectionEncryption` served from that same description, and a `revoke`
- * recorder on the Space handle. The local store is a real BrowserStore on
- * memory RxDB, and the ciphers are real EDV codecs over freshly generated
- * X25519 keys, so an epoch written under one descriptor really fails to decrypt
- * under a stale one.
+ * Every encrypted collection's descriptor is log-governed, so the descriptor
+ * state lives in the in-memory descriptor stores (`memoryDescriptorStores`,
+ * one per collection, with real create-if-absent and compare-and-swap
+ * semantics) that stand in for each collection's governing log -- the real
+ * `initRecipients` / `addRecipient` / `removeRecipient` exercise their real
+ * write path against them, and `StorageManager` reaches them through the
+ * injected `descriptorLogs` seam. The remote WAS store is a structural fake
+ * around that: a `revoke` recorder on the Space handle, the raw synced-resource
+ * bodies, the stored `/meta` values, and a `collectionEncryption` served from
+ * the same stores (as the server derives a Collection Description's
+ * `encryption` member from the governing log). The local store is a real
+ * BrowserStore on memory RxDB, and the ciphers are real EDV codecs over
+ * freshly generated X25519 keys, so an epoch written under one descriptor
+ * really fails to decrypt under a stale one.
  *
  * @vitest-environment node
  */
@@ -23,9 +29,7 @@ import type {
 } from '@interop/data-integrity-core'
 import { X25519KeyAgreementKey2020 } from '@interop/x25519-key-agreement-key'
 import {
-  PreconditionFailedError,
   ValidationError,
-  type Collection,
   type CollectionEncryption,
   type IZcap,
   type ResourceMetadataCustom,
@@ -39,6 +43,11 @@ import {
   removeRecipient,
   resolveHmacKey
 } from '@interop/was-client/edv'
+import {
+  descriptorLogsFrom,
+  memoryDescriptorStores,
+  type MemoryDescriptorStores
+} from '../../tests/unit/fakeDescriptorStores'
 import { mintRecordEncryption } from '@/session/recordEnvelope'
 import {
   browserLocalSessionPersistence,
@@ -90,50 +99,19 @@ async function generateKey(): Promise<{
 }
 
 /**
- * A CAS-backed in-memory `Collection`: one Collection Description with an
- * `encryption` descriptor and a monotonic version counter used as the compare-and-
- * swap etag, so the real recipient operations run their real write path.
+ * A structural fake of WASRemoteStore over the in-memory descriptor stores and
+ * a revoke-recording Space handle. `collectionEncryption` is served from those
+ * same stores -- the server derives a Collection Description's `encryption`
+ * member from the collection's governing log -- so a recipient op through a
+ * store is visible to a later descriptor read.
  */
-function makeFakeCollection(collectionId: string): {
-  collection: Collection
-  descriptor(): CollectionEncryption
-} {
-  let version = 0
-  let description: {
-    name?: string
-    encryption: CollectionEncryption
-  } = { name: collectionId, encryption: { scheme: 'edv' } }
-  const fake = {
-    async describeWithEtag() {
-      return { description: { ...description }, etag: `v${version}` }
-    },
-    async replaceDescription(
-      fields: { name?: string; encryption: CollectionEncryption },
-      { ifMatch }: { ifMatch?: string }
-    ) {
-      if (ifMatch !== `v${version}`) {
-        throw new PreconditionFailedError('stale collection description etag')
-      }
-      description = { ...description, ...fields }
-      version++
-    }
-  }
-  return {
-    collection: fake as unknown as Collection,
-    descriptor: () => description.encryption
-  }
-}
-
-/**
- * A structural fake of WASRemoteStore over CAS-backed collections and a
- * revoke-recording Space handle. `collectionEncryption` and `collectionHandle`
- * share the same per-collection instance, so a recipient op through the handle
- * is visible to a later descriptor read.
- */
-function makeFakeRemote(): {
+function makeFakeRemote({ stores }: { stores: MemoryDescriptorStores }): {
   remoteStore: WASRemoteStore
   revoked: unknown[]
-  collection(collectionId: string): ReturnType<typeof makeFakeCollection>
+  /**
+   * The collection ids `ensureGovernedCollection` was asked for, in order.
+   */
+  governed: string[]
   seedResource(options: {
     logicalKey: string
     resourceId: string
@@ -147,17 +125,9 @@ function makeFakeRemote(): {
   const spaceId = 's-space'
   const spaceUrl = 'https://was.example/space/s-space'
   const revoked: unknown[] = []
+  const governed: string[] = []
   // The stored `/meta` value per collection, as `collectionMeta` serves it.
   const metas = new Map<string, { custom?: unknown }>()
-  const collections = new Map<string, ReturnType<typeof makeFakeCollection>>()
-  const collection = (collectionId: string) => {
-    let entry = collections.get(collectionId)
-    if (!entry) {
-      entry = makeFakeCollection(collectionId)
-      collections.set(collectionId, entry)
-    }
-    return entry
-  }
   // The raw synced-resource bodies keyed by logical collection key -- what the
   // remote-direct backend reads/writes over `listSyncedDocuments` etc.
   const logicalToId: Record<string, string> = {
@@ -184,21 +154,17 @@ function makeFakeRemote(): {
     spaceId,
     spaceUrl,
     async collectionEncryption({ collectionId }: { collectionId: string }) {
-      return collection(collectionId).descriptor()
+      return stores.descriptorOf(collectionId)
     },
     async collectionMeta({ collectionId }: { collectionId: string }) {
       // The real store reports "nothing stored" as undefined; a collection a
       // test never seeded metadata for has no index schema to install.
       return metas.get(collectionId)
     },
-    async ensureEncryptedCollection({ id }: { id: string }) {
-      // The fake collection is declared `edv` from birth, so this mirrors the
-      // real method's "already encrypted" return: the current descriptor (with any
-      // epochs), never re-declaring.
-      return collection(id).descriptor()
-    },
-    collectionHandle({ collectionId }: { collectionId: string }) {
-      return collection(collectionId).collection
+    async ensureGovernedCollection({ id }: { id: string }) {
+      // A bare create: the descriptor is the governing log's business, so
+      // this only records that the collection was ensured to exist.
+      governed.push(id)
     },
     spaceHandle() {
       return space
@@ -268,7 +234,7 @@ function makeFakeRemote(): {
   return {
     remoteStore,
     revoked,
-    collection,
+    governed,
     seedResource,
     setCollectionMeta
   }
@@ -354,7 +320,10 @@ async function mintCollectionMeta({
   const { custom } = await codec.encodeMeta({
     // The same cast was-client's own declareIndex applies: the index schema
     // rides inside `custom` beyond the declared `name` / `tags` members.
-    custom: { indexSchema: schema } as ResourceMetadataCustom
+    custom: { indexSchema: schema } as ResourceMetadataCustom,
+    // The collection's own stored metadata, so the envelope is AEAD-bound to
+    // the collection rather than to a resource id.
+    slot: { kind: 'collection' }
   })
   return { custom }
 }
@@ -385,24 +354,24 @@ async function storedCredentialEnvelopes(
 }
 
 /**
- * Installs epoch[0] (the owner as recipient zero) on the fake remote's
- * standard encrypted collections, as the shared provisioning two-step would
- * have -- `shareCollection` now assumes every encrypted collection already
- * carries its epochs and always `addRecipient`s. Returns the descriptors
- * (keyed by WAS collection id) to build the ciphers and seed the
+ * Installs epoch[0] (the owner as recipient zero) as the governing-log genesis
+ * of each standard encrypted collection, as the shared provisioning two-step
+ * would have -- `shareCollection` now assumes every encrypted collection
+ * already carries its epochs and always `addRecipient`s. Returns the
+ * descriptors (keyed by WAS collection id) to build the ciphers and seed the
  * StorageManager with, so a mid-test cipher rebuild keeps every collection
  * readable. `blindedIndex` mints each collection's blinded-index HMAC key
  * alongside epoch[0], as wallet provisioning does.
  */
-async function provisionFakeRemote(
+async function provisionGovernedCollections(
   owner: { keyAgreementKey: IKeyAgreementKey },
-  remoteStore: WASRemoteStore,
+  stores: MemoryDescriptorStores,
   { blindedIndex = false }: { blindedIndex?: boolean } = {}
 ): Promise<Record<string, CollectionEncryption>> {
   const descriptors: Record<string, CollectionEncryption> = {}
   for (const id of ['private-credentials', 'wallet-activity']) {
     const { descriptor } = await ensureFirstEpoch({
-      collection: remoteStore.collectionHandle({ collectionId: id }),
+      store: stores.storeFor(id),
       recipients: [ownerRecipient({ keyAgreementKey: owner.keyAgreementKey })],
       blindedIndex
     })
@@ -520,8 +489,9 @@ describe('StorageManager.shareCollection', () => {
   it('first share escrows the reader into the provisioned epoch and delegates a GET/HEAD zcap', async () => {
     const owner = await generateKey()
     const reader = await generateKey()
-    const { remoteStore } = makeFakeRemote()
-    const descriptors = await provisionFakeRemote(owner, remoteStore)
+    const stores = memoryDescriptorStores()
+    const { remoteStore } = makeFakeRemote({ stores })
+    const descriptors = await provisionGovernedCollections(owner, stores)
     const ciphers = await buildCiphers(owner, descriptors)
     const { localStore, user } = await initLocalStore(ciphers)
     const { zcapClient, calls } = makeFakeZcapClient()
@@ -529,6 +499,7 @@ describe('StorageManager.shareCollection', () => {
       persistence: browserLocalSessionPersistence(),
       localStore,
       remoteStore,
+      descriptorLogs: descriptorLogsFrom(stores),
       ciphers,
       vaultKeys: owner,
       descriptors
@@ -543,7 +514,11 @@ describe('StorageManager.shareCollection', () => {
     })
 
     // Read axis: still the one provisioned epoch, and both the owner
-    // (recipient zero) and the new reader are on its roster.
+    // (recipient zero) and the new reader are on its roster. The returned
+    // descriptor is the one the governing log now holds -- the escrow is one
+    // signed append, not a local edit.
+    expect(stores.descriptorOf('private-credentials')).toEqual(descriptor)
+    expect(stores.writes).toContain('private-credentials')
     expect(descriptor.epochs).toHaveLength(1)
     expect(descriptor.currentEpoch).toBeDefined()
     expect(currentEpochKids(descriptor)).toEqual(
@@ -576,8 +551,9 @@ describe('StorageManager.shareCollection', () => {
     const owner = await generateKey()
     const readerA = await generateKey()
     const readerB = await generateKey()
-    const { remoteStore } = makeFakeRemote()
-    const descriptors = await provisionFakeRemote(owner, remoteStore)
+    const stores = memoryDescriptorStores()
+    const { remoteStore } = makeFakeRemote({ stores })
+    const descriptors = await provisionGovernedCollections(owner, stores)
     const ciphers = await buildCiphers(owner, descriptors)
     const { localStore, user } = await initLocalStore(ciphers)
     const { zcapClient } = makeFakeZcapClient()
@@ -585,6 +561,7 @@ describe('StorageManager.shareCollection', () => {
       persistence: browserLocalSessionPersistence(),
       localStore,
       remoteStore,
+      descriptorLogs: descriptorLogsFrom(stores),
       ciphers,
       vaultKeys: owner,
       descriptors
@@ -623,8 +600,9 @@ describe('StorageManager.unshareCollection', () => {
   it('rotates the epoch and revokes the recorded zcap(s)', async () => {
     const owner = await generateKey()
     const reader = await generateKey()
-    const { remoteStore, revoked } = makeFakeRemote()
-    const descriptors = await provisionFakeRemote(owner, remoteStore)
+    const stores = memoryDescriptorStores()
+    const { remoteStore, revoked } = makeFakeRemote({ stores })
+    const descriptors = await provisionGovernedCollections(owner, stores)
     const ciphers = await buildCiphers(owner, descriptors)
     const { localStore, user } = await initLocalStore(ciphers)
     const { zcapClient } = makeFakeZcapClient()
@@ -632,6 +610,7 @@ describe('StorageManager.unshareCollection', () => {
       persistence: browserLocalSessionPersistence(),
       localStore,
       remoteStore,
+      descriptorLogs: descriptorLogsFrom(stores),
       ciphers,
       vaultKeys: owner,
       descriptors
@@ -653,7 +632,9 @@ describe('StorageManager.unshareCollection', () => {
       recipientId: reader.keyAgreementKey.id!
     })
 
-    // Read axis: the epoch rotated and the removed reader is off the new roster.
+    // Read axis: the epoch rotated and the removed reader is off the new
+    // roster, as the governing log now holds it.
+    expect(stores.descriptorOf('private-credentials')).toEqual(rotated)
     expect(rotated.currentEpoch).not.toBe(shared.currentEpoch)
     expect(currentEpochKids(rotated)).toEqual([owner.keyAgreementKey.id])
     expect(currentEpochKids(rotated)).not.toContain(reader.keyAgreementKey.id)
@@ -671,8 +652,9 @@ describe('StorageManager.unshareCollection', () => {
   it('escrows the grantee into the blinding-key wrap set and drops it on unshare', async () => {
     const owner = await generateKey()
     const reader = await generateKey()
-    const { remoteStore } = makeFakeRemote()
-    const descriptors = await provisionFakeRemote(owner, remoteStore, {
+    const stores = memoryDescriptorStores()
+    const { remoteStore } = makeFakeRemote({ stores })
+    const descriptors = await provisionGovernedCollections(owner, stores, {
       blindedIndex: true
     })
     const ciphers = await buildCiphers(owner, descriptors)
@@ -682,6 +664,7 @@ describe('StorageManager.unshareCollection', () => {
       persistence: browserLocalSessionPersistence(),
       localStore,
       remoteStore,
+      descriptorLogs: descriptorLogsFrom(stores),
       ciphers,
       vaultKeys: owner,
       descriptors
@@ -721,8 +704,9 @@ describe('StorageManager.unshareCollection', () => {
   it('lists current shares from the descriptor roster minus the owner', async () => {
     const owner = await generateKey()
     const reader = await generateKey()
-    const { remoteStore } = makeFakeRemote()
-    const descriptors = await provisionFakeRemote(owner, remoteStore)
+    const stores = memoryDescriptorStores()
+    const { remoteStore } = makeFakeRemote({ stores })
+    const descriptors = await provisionGovernedCollections(owner, stores)
     const ciphers = await buildCiphers(owner, descriptors)
     const { localStore, user } = await initLocalStore(ciphers)
     const { zcapClient } = makeFakeZcapClient()
@@ -730,6 +714,7 @@ describe('StorageManager.unshareCollection', () => {
       persistence: browserLocalSessionPersistence(),
       localStore,
       remoteStore,
+      descriptorLogs: descriptorLogsFrom(stores),
       ciphers,
       vaultKeys: owner,
       descriptors
@@ -754,8 +739,9 @@ describe('StorageManager.unshareCollection', () => {
   it('carries a connected app name and origin through to the listing', async () => {
     const owner = await generateKey()
     const reader = await generateKey()
-    const { remoteStore } = makeFakeRemote()
-    const descriptors = await provisionFakeRemote(owner, remoteStore)
+    const stores = memoryDescriptorStores()
+    const { remoteStore } = makeFakeRemote({ stores })
+    const descriptors = await provisionGovernedCollections(owner, stores)
     const ciphers = await buildCiphers(owner, descriptors)
     const { localStore, user } = await initLocalStore(ciphers)
     const { zcapClient } = makeFakeZcapClient()
@@ -763,6 +749,7 @@ describe('StorageManager.unshareCollection', () => {
       persistence: browserLocalSessionPersistence(),
       localStore,
       remoteStore,
+      descriptorLogs: descriptorLogsFrom(stores),
       ciphers,
       vaultKeys: owner,
       descriptors
@@ -821,26 +808,17 @@ describe('StorageManager.revokeAppGrants', () => {
   }
 
   /**
-   * A remote store whose `spaceHandle().revoke` is the supplied recorder, over
-   * the shared CAS-backed collections (unused by revocation but present for a
-   * well-formed store).
+   * A remote store whose `spaceHandle().revoke` is the supplied recorder.
+   * Revocation touches no descriptor, so this store carries the Space handle
+   * and its identifiers alone.
    */
   function makeRevokeRemote(
     revoke: (zcap: unknown) => Promise<void>
   ): WASRemoteStore {
-    const collections = new Map<string, ReturnType<typeof makeFakeCollection>>()
     const space = { revoke } as unknown as Space
     return {
       spaceId: 's-space',
       spaceUrl: 'https://was.example/space/s-space',
-      collectionHandle({ collectionId }: { collectionId: string }) {
-        let entry = collections.get(collectionId)
-        if (!entry) {
-          entry = makeFakeCollection(collectionId)
-          collections.set(collectionId, entry)
-        }
-        return entry.collection
-      },
       spaceHandle() {
         return space
       }
@@ -869,16 +847,18 @@ describe('StorageManager.revokeAppGrants', () => {
   it('revokes the active grant and skips expired and legacy entries', async () => {
     const owner = await generateKey()
     const revoked: unknown[] = []
+    const stores = memoryDescriptorStores()
     const remoteStore = makeRevokeRemote(async zcap => {
       revoked.push(zcap)
     })
-    const descriptors = await provisionFakeRemote(owner, remoteStore)
+    const descriptors = await provisionGovernedCollections(owner, stores)
     const ciphers = await buildCiphers(owner, descriptors)
     const { localStore, user } = await initLocalStore(ciphers)
     const storage = new StorageManager({
       persistence: browserLocalSessionPersistence(),
       localStore,
       remoteStore,
+      descriptorLogs: descriptorLogsFrom(stores),
       ciphers,
       vaultKeys: owner,
       descriptors
@@ -922,16 +902,18 @@ describe('StorageManager.revokeAppGrants', () => {
   it('skips grants delegated to a different controller', async () => {
     const owner = await generateKey()
     const revoked: unknown[] = []
+    const stores = memoryDescriptorStores()
     const remoteStore = makeRevokeRemote(async zcap => {
       revoked.push(zcap)
     })
-    const descriptors = await provisionFakeRemote(owner, remoteStore)
+    const descriptors = await provisionGovernedCollections(owner, stores)
     const ciphers = await buildCiphers(owner, descriptors)
     const { localStore, user } = await initLocalStore(ciphers)
     const storage = new StorageManager({
       persistence: browserLocalSessionPersistence(),
       localStore,
       remoteStore,
+      descriptorLogs: descriptorLogsFrom(stores),
       ciphers,
       vaultKeys: owner,
       descriptors
@@ -963,16 +945,18 @@ describe('StorageManager.revokeAppGrants', () => {
 
   it('swallows ValidationError from an already-revoked grant', async () => {
     const owner = await generateKey()
+    const stores = memoryDescriptorStores()
     const remoteStore = makeRevokeRemote(async () => {
       throw new ValidationError('already revoked')
     })
-    const descriptors = await provisionFakeRemote(owner, remoteStore)
+    const descriptors = await provisionGovernedCollections(owner, stores)
     const ciphers = await buildCiphers(owner, descriptors)
     const { localStore, user } = await initLocalStore(ciphers)
     const storage = new StorageManager({
       persistence: browserLocalSessionPersistence(),
       localStore,
       remoteStore,
+      descriptorLogs: descriptorLogsFrom(stores),
       ciphers,
       vaultKeys: owner,
       descriptors
@@ -999,16 +983,18 @@ describe('StorageManager.revokeAppGrants', () => {
 
   it('propagates a non-ValidationError revoke failure', async () => {
     const owner = await generateKey()
+    const stores = memoryDescriptorStores()
     const remoteStore = makeRevokeRemote(async () => {
       throw new Error('server unreachable')
     })
-    const descriptors = await provisionFakeRemote(owner, remoteStore)
+    const descriptors = await provisionGovernedCollections(owner, stores)
     const ciphers = await buildCiphers(owner, descriptors)
     const { localStore, user } = await initLocalStore(ciphers)
     const storage = new StorageManager({
       persistence: browserLocalSessionPersistence(),
       localStore,
       remoteStore,
+      descriptorLogs: descriptorLogsFrom(stores),
       ciphers,
       vaultKeys: owner,
       descriptors
@@ -1055,14 +1041,16 @@ describe('StorageManager.provisionAppCollection', () => {
   it('first provision mints an epoch with the owner and the app recipient', async () => {
     const owner = await generateKey()
     const app = await generateKey()
-    const { remoteStore } = makeFakeRemote()
-    const descriptors = await provisionFakeRemote(owner, remoteStore)
+    const stores = memoryDescriptorStores()
+    const { remoteStore, governed } = makeFakeRemote({ stores })
+    const descriptors = await provisionGovernedCollections(owner, stores)
     const ciphers = await buildCiphers(owner, descriptors)
     const { localStore } = await initLocalStore(ciphers)
     const storage = new StorageManager({
       persistence: browserLocalSessionPersistence(),
       localStore,
       remoteStore,
+      descriptorLogs: descriptorLogsFrom(stores),
       ciphers,
       vaultKeys: owner,
       descriptors
@@ -1077,19 +1065,25 @@ describe('StorageManager.provisionAppCollection', () => {
     expect(currentEpochKids(descriptor)).toEqual(
       expect.arrayContaining([owner.keyAgreementKey.id, app.keyAgreementKey.id])
     )
+    // Epoch[0] is the collection's governing-log genesis, and the collection
+    // itself was ensured to exist as a bare create.
+    expect(stores.descriptorOf('app-docs')).toEqual(descriptor)
+    expect(governed).toEqual(['app-docs'])
   })
 
   it('a reconnect after revoke re-adds the app without a second epoch', async () => {
     const owner = await generateKey()
     const app = await generateKey()
-    const { remoteStore } = makeFakeRemote()
-    const descriptors = await provisionFakeRemote(owner, remoteStore)
+    const stores = memoryDescriptorStores()
+    const { remoteStore } = makeFakeRemote({ stores })
+    const descriptors = await provisionGovernedCollections(owner, stores)
     const ciphers = await buildCiphers(owner, descriptors)
     const { localStore } = await initLocalStore(ciphers)
     const storage = new StorageManager({
       persistence: browserLocalSessionPersistence(),
       localStore,
       remoteStore,
+      descriptorLogs: descriptorLogsFrom(stores),
       ciphers,
       vaultKeys: owner,
       descriptors
@@ -1104,7 +1098,7 @@ describe('StorageManager.provisionAppCollection', () => {
     })
     // A revoke rotates the app off (owner alone on a fresh epoch).
     await removeRecipient({
-      collection: remoteStore.collectionHandle({ collectionId: 'app-docs' }),
+      store: stores.storeFor('app-docs'),
       space: remoteStore.spaceHandle(),
       recipientId: app.keyAgreementKey.id!,
       revoke: []
@@ -1125,14 +1119,16 @@ describe('StorageManager.provisionAppCollection', () => {
   it('is a no-op when the app is already a recipient of the current epoch', async () => {
     const owner = await generateKey()
     const app = await generateKey()
-    const { remoteStore, collection } = makeFakeRemote()
-    const descriptors = await provisionFakeRemote(owner, remoteStore)
+    const stores = memoryDescriptorStores()
+    const { remoteStore } = makeFakeRemote({ stores })
+    const descriptors = await provisionGovernedCollections(owner, stores)
     const ciphers = await buildCiphers(owner, descriptors)
     const { localStore } = await initLocalStore(ciphers)
     const storage = new StorageManager({
       persistence: browserLocalSessionPersistence(),
       localStore,
       remoteStore,
+      descriptorLogs: descriptorLogsFrom(stores),
       ciphers,
       vaultKeys: owner,
       descriptors
@@ -1152,20 +1148,25 @@ describe('StorageManager.provisionAppCollection', () => {
 
     // No rotation, no new epoch: the descriptor is unchanged.
     expect(descriptor2.currentEpoch).toBe(descriptor1.currentEpoch)
-    expect(collection('app-docs').descriptor().epochs).toHaveLength(1)
+    expect(stores.descriptorOf('app-docs')?.epochs).toHaveLength(1)
+    // The second provision appended nothing to the governing log: the first
+    // wrote epoch[0] and then escrowed the app in, and that is all.
+    expect(stores.writes.filter(id => id === 'app-docs')).toHaveLength(2)
   })
 
   it('installs a blinded-index HMAC key wrapped to the owner and the app', async () => {
     const owner = await generateKey()
     const app = await generateKey()
-    const { remoteStore } = makeFakeRemote()
-    const descriptors = await provisionFakeRemote(owner, remoteStore)
+    const stores = memoryDescriptorStores()
+    const { remoteStore } = makeFakeRemote({ stores })
+    const descriptors = await provisionGovernedCollections(owner, stores)
     const ciphers = await buildCiphers(owner, descriptors)
     const { localStore } = await initLocalStore(ciphers)
     const storage = new StorageManager({
       persistence: browserLocalSessionPersistence(),
       localStore,
       remoteStore,
+      descriptorLogs: descriptorLogsFrom(stores),
       ciphers,
       vaultKeys: owner,
       descriptors
@@ -1188,14 +1189,16 @@ describe('StorageManager.provisionAppCollection', () => {
   it('lets the app unwrap the blinding key from the descriptor and its own key alone', async () => {
     const owner = await generateKey()
     const app = await generateKey()
-    const { remoteStore } = makeFakeRemote()
-    const descriptors = await provisionFakeRemote(owner, remoteStore)
+    const stores = memoryDescriptorStores()
+    const { remoteStore } = makeFakeRemote({ stores })
+    const descriptors = await provisionGovernedCollections(owner, stores)
     const ciphers = await buildCiphers(owner, descriptors)
     const { localStore } = await initLocalStore(ciphers)
     const storage = new StorageManager({
       persistence: browserLocalSessionPersistence(),
       localStore,
       remoteStore,
+      descriptorLogs: descriptorLogsFrom(stores),
       ciphers,
       vaultKeys: owner,
       descriptors
@@ -1206,8 +1209,9 @@ describe('StorageManager.provisionAppCollection', () => {
       appRecipient: ownerRecipient({ keyAgreementKey: app.keyAgreementKey })
     })
 
-    // What an App Connect grantee holds: the fetched Collection Description's
-    // descriptor and its own key-agreement key -- no other material.
+    // What an App Connect grantee holds: the descriptor served on the
+    // Collection Description (derived from the governing log) and its own
+    // key-agreement key -- no other material.
     const fetched = await remoteStore.collectionEncryption({
       collectionId: 'app-docs'
     })
@@ -1223,14 +1227,16 @@ describe('StorageManager.provisionAppCollection', () => {
   it('adopts a pre-blind-index epoch roster without installing an HMAC key', async () => {
     const owner = await generateKey()
     const app = await generateKey()
-    const { remoteStore } = makeFakeRemote()
-    const descriptors = await provisionFakeRemote(owner, remoteStore)
+    const stores = memoryDescriptorStores()
+    const { remoteStore } = makeFakeRemote({ stores })
+    const descriptors = await provisionGovernedCollections(owner, stores)
     const ciphers = await buildCiphers(owner, descriptors)
     const { localStore } = await initLocalStore(ciphers)
     const storage = new StorageManager({
       persistence: browserLocalSessionPersistence(),
       localStore,
       remoteStore,
+      descriptorLogs: descriptorLogsFrom(stores),
       ciphers,
       vaultKeys: owner,
       descriptors
@@ -1238,7 +1244,7 @@ describe('StorageManager.provisionAppCollection', () => {
 
     // A collection provisioned before blind-index support: epoch[0], no `hmac`.
     const { descriptor: legacy } = await ensureFirstEpoch({
-      collection: remoteStore.collectionHandle({ collectionId: 'app-docs' }),
+      store: stores.storeFor('app-docs'),
       recipients: [ownerRecipient({ keyAgreementKey: owner.keyAgreementKey })]
     })
     expect(legacy.hmac).toBeUndefined()
@@ -1286,14 +1292,16 @@ describe('StorageManager.revokeAppCollectionRecipients', () => {
   it('rotates the app off each app-provisioned collection and revokes its grant', async () => {
     const owner = await generateKey()
     const app = await generateKey()
-    const { remoteStore, revoked } = makeFakeRemote()
-    const descriptors = await provisionFakeRemote(owner, remoteStore)
+    const stores = memoryDescriptorStores()
+    const { remoteStore, revoked } = makeFakeRemote({ stores })
+    const descriptors = await provisionGovernedCollections(owner, stores)
     const ciphers = await buildCiphers(owner, descriptors)
     const { localStore, user } = await initLocalStore(ciphers)
     const storage = new StorageManager({
       persistence: browserLocalSessionPersistence(),
       localStore,
       remoteStore,
+      descriptorLogs: descriptorLogsFrom(stores),
       ciphers,
       vaultKeys: owner,
       descriptors
@@ -1342,14 +1350,16 @@ describe('StorageManager.revokeAppCollectionRecipients', () => {
     const owner = await generateKey()
     const app = await generateKey()
     const other = await generateKey()
-    const { remoteStore, revoked } = makeFakeRemote()
-    const descriptors = await provisionFakeRemote(owner, remoteStore)
+    const stores = memoryDescriptorStores()
+    const { remoteStore, revoked } = makeFakeRemote({ stores })
+    const descriptors = await provisionGovernedCollections(owner, stores)
     const ciphers = await buildCiphers(owner, descriptors)
     const { localStore, user } = await initLocalStore(ciphers)
     const storage = new StorageManager({
       persistence: browserLocalSessionPersistence(),
       localStore,
       remoteStore,
+      descriptorLogs: descriptorLogsFrom(stores),
       ciphers,
       vaultKeys: owner,
       descriptors
@@ -1406,14 +1416,16 @@ describe('StorageManager.revokeAppCollectionRecipients', () => {
   it('drops the app from the blinding-key wrap set without rotating the key', async () => {
     const owner = await generateKey()
     const app = await generateKey()
-    const { remoteStore } = makeFakeRemote()
-    const descriptors = await provisionFakeRemote(owner, remoteStore)
+    const stores = memoryDescriptorStores()
+    const { remoteStore } = makeFakeRemote({ stores })
+    const descriptors = await provisionGovernedCollections(owner, stores)
     const ciphers = await buildCiphers(owner, descriptors)
     const { localStore, user } = await initLocalStore(ciphers)
     const storage = new StorageManager({
       persistence: browserLocalSessionPersistence(),
       localStore,
       remoteStore,
+      descriptorLogs: descriptorLogsFrom(stores),
       ciphers,
       vaultKeys: owner,
       descriptors
@@ -1471,14 +1483,16 @@ describe('StorageManager.revokeAppCollectionRecipients', () => {
 
   it('ignores grants on standard/protected collections', async () => {
     const owner = await generateKey()
-    const { remoteStore, revoked } = makeFakeRemote()
-    const descriptors = await provisionFakeRemote(owner, remoteStore)
+    const stores = memoryDescriptorStores()
+    const { remoteStore, revoked } = makeFakeRemote({ stores })
+    const descriptors = await provisionGovernedCollections(owner, stores)
     const ciphers = await buildCiphers(owner, descriptors)
     const { localStore, user } = await initLocalStore(ciphers)
     const storage = new StorageManager({
       persistence: browserLocalSessionPersistence(),
       localStore,
       remoteStore,
+      descriptorLogs: descriptorLogsFrom(stores),
       ciphers,
       vaultKeys: owner,
       descriptors
@@ -1515,14 +1529,16 @@ describe('StorageManager.decryptCollectionResource (app collection)', () => {
   it('decrypts an app-collection envelope with the vault KAK', async () => {
     const owner = await generateKey()
     const app = await generateKey()
-    const { remoteStore } = makeFakeRemote()
-    const descriptors = await provisionFakeRemote(owner, remoteStore)
+    const stores = memoryDescriptorStores()
+    const { remoteStore } = makeFakeRemote({ stores })
+    const descriptors = await provisionGovernedCollections(owner, stores)
     const ciphers = await buildCiphers(owner, descriptors)
     const { localStore } = await initLocalStore(ciphers)
     const storage = new StorageManager({
       persistence: browserLocalSessionPersistence(),
       localStore,
       remoteStore,
+      descriptorLogs: descriptorLogsFrom(stores),
       ciphers,
       vaultKeys: owner,
       descriptors
@@ -1555,14 +1571,16 @@ describe('StorageManager.decryptCollectionResource (app collection)', () => {
 
   it('returns undefined for an app collection with no epoch roster', async () => {
     const owner = await generateKey()
-    const { remoteStore } = makeFakeRemote()
-    const descriptors = await provisionFakeRemote(owner, remoteStore)
+    const stores = memoryDescriptorStores()
+    const { remoteStore } = makeFakeRemote({ stores })
+    const descriptors = await provisionGovernedCollections(owner, stores)
     const ciphers = await buildCiphers(owner, descriptors)
     const { localStore } = await initLocalStore(ciphers)
     const storage = new StorageManager({
       persistence: browserLocalSessionPersistence(),
       localStore,
       remoteStore,
+      descriptorLogs: descriptorLogsFrom(stores),
       ciphers,
       vaultKeys: owner,
       descriptors
@@ -1588,14 +1606,13 @@ describe('StorageManager unknown-epoch refresh', () => {
   it('re-reads the descriptor and returns a credential written under a newer epoch', async () => {
     const owner = await generateKey()
     const extra = await generateKey()
-    const { remoteStore } = makeFakeRemote()
+    const stores = memoryDescriptorStores()
+    const { remoteStore } = makeFakeRemote({ stores })
 
-    // The fake collection starts on epoch 1 (owner + a soon-removed reader).
-    const collectionHandle = remoteStore.collectionHandle({
-      collectionId: 'private-credentials'
-    })
+    // The governing log starts on epoch 1 (owner + a soon-removed reader).
+    const collectionStore = stores.storeFor('private-credentials')
     const descriptor1 = await initRecipients({
-      collection: collectionHandle,
+      store: collectionStore,
       recipients: [
         ownerRecipient({ keyAgreementKey: owner.keyAgreementKey }),
         ownerRecipient({ keyAgreementKey: extra.keyAgreementKey })
@@ -1612,16 +1629,17 @@ describe('StorageManager unknown-epoch refresh', () => {
       persistence: browserLocalSessionPersistence(),
       localStore,
       remoteStore,
+      descriptorLogs: descriptorLogsFrom(stores),
       ciphers,
       vaultKeys: owner,
       descriptors: { 'private-credentials': descriptor1 }
     })
 
-    // A rekey rotates the fake collection to epoch 2 (emitting no change feed
+    // A rekey rotates the collection to epoch 2 (emitting no change feed
     // entry): removing the extra reader leaves the owner alone on the new
     // epoch.
     const descriptor2 = await removeRecipient({
-      collection: collectionHandle,
+      store: collectionStore,
       space: remoteStore.spaceHandle(),
       recipientId: extra.keyAgreementKey.id!,
       revoke: []
@@ -1650,7 +1668,7 @@ describe('StorageManager unknown-epoch refresh', () => {
       data: envelope
     })
 
-    // listCredentials transparently refreshes the descriptor from the fake remote,
+    // listCredentials transparently refreshes the descriptor from the governing log,
     // rebuilds the cipher, and returns the credential.
     const listed = await storage.listCredentials()
     expect(listed).toEqual([{ cid, vc: credential }])
@@ -1659,13 +1677,12 @@ describe('StorageManager unknown-epoch refresh', () => {
   it('transient session: the refresh still runs, with zero localStorage residue', async () => {
     const owner = await generateKey()
     const extra = await generateKey()
-    const { remoteStore } = makeFakeRemote()
+    const stores = memoryDescriptorStores()
+    const { remoteStore } = makeFakeRemote({ stores })
 
-    const collectionHandle = remoteStore.collectionHandle({
-      collectionId: 'private-credentials'
-    })
+    const collectionStore = stores.storeFor('private-credentials')
     const descriptor1 = await initRecipients({
-      collection: collectionHandle,
+      store: collectionStore,
       recipients: [
         ownerRecipient({ keyAgreementKey: owner.keyAgreementKey }),
         ownerRecipient({ keyAgreementKey: extra.keyAgreementKey })
@@ -1694,13 +1711,14 @@ describe('StorageManager unknown-epoch refresh', () => {
       persistence,
       localStore,
       remoteStore,
+      descriptorLogs: descriptorLogsFrom(stores),
       ciphers,
       vaultKeys: owner,
       descriptors: { 'private-credentials': descriptor1 }
     })
 
     const descriptor2 = await removeRecipient({
-      collection: collectionHandle,
+      store: collectionStore,
       space: remoteStore.spaceHandle(),
       recipientId: extra.keyAgreementKey.id!,
       revoke: []
@@ -1747,13 +1765,12 @@ describe('StorageManager unknown-epoch refresh', () => {
   it('remote-direct: refreshes the descriptor and returns a fresh-epoch credential', async () => {
     const owner = await generateKey()
     const extra = await generateKey()
-    const { remoteStore, seedResource } = makeFakeRemote()
+    const stores = memoryDescriptorStores()
+    const { remoteStore, seedResource } = makeFakeRemote({ stores })
 
-    const collectionHandle = remoteStore.collectionHandle({
-      collectionId: 'private-credentials'
-    })
+    const collectionStore = stores.storeFor('private-credentials')
     const descriptor1 = await initRecipients({
-      collection: collectionHandle,
+      store: collectionStore,
       recipients: [
         ownerRecipient({ keyAgreementKey: owner.keyAgreementKey }),
         ownerRecipient({ keyAgreementKey: extra.keyAgreementKey })
@@ -1769,6 +1786,7 @@ describe('StorageManager unknown-epoch refresh', () => {
       persistence: browserLocalSessionPersistence(),
       localStore,
       remoteStore,
+      descriptorLogs: descriptorLogsFrom(stores),
       ciphers,
       remoteDirect: true,
       vaultKeys: owner,
@@ -1777,7 +1795,7 @@ describe('StorageManager unknown-epoch refresh', () => {
 
     // A rekey rotates the collection to epoch 2 (owner alone).
     const descriptor2 = await removeRecipient({
-      collection: collectionHandle,
+      store: collectionStore,
       space: remoteStore.spaceHandle(),
       recipientId: extra.keyAgreementKey.id!,
       revoke: []
@@ -1811,17 +1829,16 @@ describe('StorageManager unknown-epoch refresh', () => {
   it('refetches the collection metadata, so later writes carry index entries', async () => {
     const owner = await generateKey()
     const extra = await generateKey()
-    const { remoteStore, setCollectionMeta } = makeFakeRemote()
+    const stores = memoryDescriptorStores()
+    const { remoteStore, setCollectionMeta } = makeFakeRemote({ stores })
 
     // A blinded-index collection on epoch 1, with a second reader to remove.
-    const descriptors = await provisionFakeRemote(owner, remoteStore, {
+    const descriptors = await provisionGovernedCollections(owner, stores, {
       blindedIndex: true
     })
-    const collectionHandle = remoteStore.collectionHandle({
-      collectionId: 'private-credentials'
-    })
+    const collectionStore = stores.storeFor('private-credentials')
     const descriptor1 = await addRecipient({
-      collection: collectionHandle,
+      store: collectionStore,
       recipient: ownerRecipient({ keyAgreementKey: extra.keyAgreementKey }),
       owner: { keyAgreementKey: owner.keyAgreementKey }
     })
@@ -1835,6 +1852,7 @@ describe('StorageManager unknown-epoch refresh', () => {
       persistence: browserLocalSessionPersistence(),
       localStore,
       remoteStore,
+      descriptorLogs: descriptorLogsFrom(stores),
       ciphers,
       vaultKeys: owner,
       descriptors
@@ -1848,7 +1866,7 @@ describe('StorageManager unknown-epoch refresh', () => {
     // so the server now serves both a newer descriptor and a stored metadata
     // envelope.
     const descriptor2 = await removeRecipient({
-      collection: collectionHandle,
+      store: collectionStore,
       space: remoteStore.spaceHandle(),
       recipientId: extra.keyAgreementKey.id!,
       revoke: []
@@ -1899,11 +1917,11 @@ describe('StorageManager unknown-epoch refresh', () => {
 
 describe('StorageManager blinded index writes', () => {
   /**
-   * A StorageManager over a blinded-index-provisioned fake remote, with its
+   * A StorageManager over blinded-index-provisioned governing logs, with its
    * ciphers built from the same descriptors (no metadata applied yet).
    *
    * @returns {Promise<object>}   the manager, its local store, the owner keys,
-   *   the descriptors, and the fake remote's metadata setter
+   *   the descriptors, and the remote fake's metadata setter
    */
   async function makeIndexableManager(): Promise<{
     storage: StorageManager
@@ -1914,8 +1932,9 @@ describe('StorageManager blinded index writes', () => {
     setCollectionMeta: ReturnType<typeof makeFakeRemote>['setCollectionMeta']
   }> {
     const owner = await generateKey()
-    const { remoteStore, setCollectionMeta } = makeFakeRemote()
-    const descriptors = await provisionFakeRemote(owner, remoteStore, {
+    const stores = memoryDescriptorStores()
+    const { remoteStore, setCollectionMeta } = makeFakeRemote({ stores })
+    const descriptors = await provisionGovernedCollections(owner, stores, {
       blindedIndex: true
     })
     const ciphers = await buildCiphers(owner, descriptors)
@@ -1924,6 +1943,7 @@ describe('StorageManager blinded index writes', () => {
       persistence: browserLocalSessionPersistence(),
       localStore,
       remoteStore,
+      descriptorLogs: descriptorLogsFrom(stores),
       ciphers,
       vaultKeys: owner,
       descriptors
@@ -1934,7 +1954,7 @@ describe('StorageManager blinded index writes', () => {
   it('writes no index entries for a collection with no stored metadata', async () => {
     const { storage, localStore, user } = await makeIndexableManager()
 
-    // The fake remote serves no metadata, so the rebuilt ciphers have no
+    // The remote fake serves no metadata, so the rebuilt ciphers have no
     // schema to install -- the pre-index behavior.
     await storage.refreshEncryptedDescriptors()
     await storage.addCredential({ credential: makeCredential('Alice'), user })

@@ -80,6 +80,7 @@ import {
   type UnlockCredential
 } from '@/session/keyring'
 import { accountRosterStore } from '@/session/rosterStore'
+import { accountCollectionStores } from '@/session/collectionLogStore'
 import {
   emptyUnlockMethodsRegistry,
   updateUnlockMethodsWithClient,
@@ -301,6 +302,17 @@ async function establishmentHooks({
     // own head instead of fetching `did.jsonl` a second time.
     rosterStoreFor: ({ did, log }: { did: string; log: DIDLog }) =>
       accountRosterStore({
+        zcapClient: bootstrapZcap,
+        keyAgent: bootstrapAgent,
+        pointer: { did, spaceId, host },
+        pinStore: logPins,
+        log
+      }),
+    // Each encrypted collection's log-governed descriptor store, the same
+    // wiring: epoch[0] lands as the collection's governing-log genesis,
+    // signed by the ladder VM and invoked as the bootstrap did:key.
+    collectionStoreFor: ({ did, log }: { did: string; log: DIDLog }) =>
+      accountCollectionStores({
         zcapClient: bootstrapZcap,
         keyAgent: bootstrapAgent,
         pointer: { did, spaceId, host },
@@ -601,6 +613,7 @@ export async function mendCredentialAnchoredAccount({
   delegatedClients,
   invocation,
   rosterStore,
+  collectionStore,
   delegatedRead,
   hasRosterEpochPin,
   registry,
@@ -626,6 +639,7 @@ export async function mendCredentialAnchoredAccount({
   delegatedClients?: IZcap
   invocation?: { was: WasClient; zcapClient: ZcapClient; capability: IZcap }
   rosterStore?: EncryptionDescriptorStore
+  collectionStore?: (collectionId: string) => EncryptionDescriptorStore
   delegatedRead?: { error: unknown; retry: () => Promise<void> }
   hasRosterEpochPin: () => Promise<boolean>
   registry?: CredentialAnchoredRegistryContext
@@ -659,6 +673,7 @@ export async function mendCredentialAnchoredAccount({
     ...(beforePromotion ? { beforePromotion } : {}),
     ...(invocation ? { invocation } : {}),
     ...(rosterStore ? { rosterStore } : {}),
+    ...(collectionStore ? { collectionStore } : {}),
     ...(delegatedRead ? { delegatedRead } : {}),
     hasRosterEpochPin,
     ...(registry ? { registry } : {}),

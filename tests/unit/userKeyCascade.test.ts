@@ -4,9 +4,10 @@
  * (`src/session/userKeyCascade.ts`): the enumeration (encrypted standard
  * collections plus every remotely listed encrypted collection, deduplicated,
  * degrading to the standard set when the remote listing fails) and the
- * remote-store adapters handed to the `@interop/wallet-core/keys` driver
- * (`storeFor` over the collection handle, `isEncrypted` over the encryption
- * descriptor). The driving and the per-collection staleness/rotation logic
+ * remote-store adapter handed to the `@interop/wallet-core/keys` driver
+ * (`isEncrypted` over the encryption descriptor), plus the caller's
+ * per-collection descriptor-store lookup, which the fan-out now takes rather
+ * than builds. The driving and the per-collection staleness/rotation logic
  * live in wallet-core and are mocked here.
  */
 import { beforeEach, describe, expect, it, vi } from 'vitest'
@@ -15,13 +16,6 @@ import { addSink, captureSink } from '@interop/logger'
 vi.mock('@interop/wallet-core/keys', async importOriginal => ({
   ...(await importOriginal<typeof import('@interop/wallet-core/keys')>()),
   cascadeCollectionsToUserKey: vi.fn(async () => ({ outcomes: {}, failed: [] }))
-}))
-
-vi.mock('@interop/was-client/edv', async importOriginal => ({
-  ...(await importOriginal<typeof import('@interop/was-client/edv')>()),
-  collectionDescriptorStore: vi.fn(
-    ({ collection }: { collection: unknown }) => ({ collection })
-  )
 }))
 
 import { cascadeCollectionsToUserKey as driveCascade } from '@interop/wallet-core/keys'
@@ -39,15 +33,38 @@ const ROSTER_DESCRIPTOR = {
 } as unknown as CollectionEncryption
 const CLIENT_KAK = { id: 'did:key:z6MkClient#z6LSClient' } as never
 
+/**
+ * The caller's per-collection descriptor-store lookup, recording which
+ * collections it was asked for. The fan-out takes it whole rather than
+ * building one, so a ceremony's own signing key is what every append carries.
+ */
+function recordingStoreFor({
+  governed = () => true
+}: { governed?: (collectionId: string) => boolean } = {}) {
+  const asked: string[] = []
+  const storeFor = vi.fn((collectionId: string) => {
+    asked.push(collectionId)
+    return {
+      collectionId,
+      // A collection with no governing log reads back `null`, the way the
+      // real store answers an absent `meta/log`.
+      read: async () =>
+        governed(collectionId)
+          ? { descriptor: ROSTER_DESCRIPTOR, etag: '"1"' }
+          : null
+    } as never
+  })
+  return { storeFor, asked }
+}
+
 const STANDARD_ENCRYPTED_IDS = WALLET_STANDARD_COLLECTIONS.filter(
   spec => spec.encryption
 ).map(spec => spec.id)
 
 /**
- * A remote-store stub: `listCollections` yields the given remote items,
+ * A remote-store stub: `listCollections` yields the given remote items, and
  * `collectionEncryption` declares every collection encrypted unless the test
- * overrides it, and `collectionHandle` returns a per-collection marker the
- * descriptor-store mock passes through.
+ * overrides it.
  */
 function makeFakeRemoteStore({
   remoteItems = [] as Array<{ id?: string; isEncrypted?: boolean }>,
@@ -62,10 +79,7 @@ function makeFakeRemoteStore({
     }),
     collectionEncryption: vi.fn(
       async () => ({ scheme: 'edv' }) as unknown as CollectionEncryption
-    ),
-    collectionHandle: vi.fn(({ collectionId }: { collectionId: string }) => ({
-      collectionId
-    }))
+    )
   } as unknown as WASRemoteStore
 }
 
@@ -95,6 +109,7 @@ describe('cascadeCollectionsToUserKey', () => {
     })
     await cascadeCollectionsToUserKey({
       remoteStore,
+      storeFor: recordingStoreFor().storeFor,
       rosterDescriptor: ROSTER_DESCRIPTOR,
       clientKeyAgreementKey: CLIENT_KAK,
       userKey: USER_KEY
@@ -113,6 +128,7 @@ describe('cascadeCollectionsToUserKey', () => {
     const remoteStore = makeFakeRemoteStore({ listFails: true })
     await cascadeCollectionsToUserKey({
       remoteStore,
+      storeFor: recordingStoreFor().storeFor,
       rosterDescriptor: ROSTER_DESCRIPTOR,
       clientKeyAgreementKey: CLIENT_KAK,
       userKey: USER_KEY
@@ -122,30 +138,37 @@ describe('cascadeCollectionsToUserKey', () => {
     )
   })
 
-  it("adapts storeFor to the collection handle's descriptor store", async () => {
+  it("passes the caller's descriptor-store lookup straight to the driver", async () => {
     const remoteStore = makeFakeRemoteStore()
+    const { storeFor, asked } = recordingStoreFor()
     await cascadeCollectionsToUserKey({
       remoteStore,
+      storeFor,
       rosterDescriptor: ROSTER_DESCRIPTOR,
       clientKeyAgreementKey: CLIENT_KAK,
       userKey: USER_KEY
     })
+    // The fan-out builds no store of its own: the lookup a ceremony hands in
+    // is the one the driver calls, so every append carries that ceremony's
+    // own licensed signing key.
     const store = driverArgs().storeFor('app-notes')
-    expect(store).toEqual({ collection: { collectionId: 'app-notes' } })
-    expect(remoteStore.collectionHandle).toHaveBeenCalledWith({
-      collectionId: 'app-notes'
-    })
+    expect(store).toMatchObject({ collectionId: 'app-notes' })
+    expect(asked).toEqual(['app-notes'])
   })
 
-  it('lists the Space once and answers isEncrypted from that listing', async () => {
+  it('answers isEncrypted from the collection log, not the listing', async () => {
     const remoteStore = makeFakeRemoteStore({
       remoteItems: [
         { id: 'app-notes', isEncrypted: true },
         { id: 'public-credentials', isEncrypted: false }
       ]
     })
+    const stores = recordingStoreFor({
+      governed: collectionId => collectionId !== 'public-credentials'
+    })
     await cascadeCollectionsToUserKey({
       remoteStore,
+      storeFor: stores.storeFor,
       rosterDescriptor: ROSTER_DESCRIPTOR,
       clientKeyAgreementKey: CLIENT_KAK,
       userKey: USER_KEY
@@ -153,28 +176,29 @@ describe('cascadeCollectionsToUserKey', () => {
     const { isEncrypted } = driverArgs()
     await expect(isEncrypted!('app-notes')).resolves.toBe(true)
     await expect(isEncrypted!('public-credentials')).resolves.toBe(false)
-    // One listing for the enumeration and both probes, and no describe at all
-    // for a collection the listing already covered.
+    // One listing, for the enumeration alone: the probe reads the
+    // collection's own verified log, so the server's derived `encryption`
+    // member decides nothing here.
     expect(remoteStore.listCollections).toHaveBeenCalledOnce()
     expect(remoteStore.collectionEncryption).not.toHaveBeenCalled()
+    expect(stores.asked).toEqual(
+      expect.arrayContaining(['app-notes', 'public-credentials'])
+    )
   })
 
-  it('falls back to the encryption-descriptor read off the listing', async () => {
-    const remoteStore = makeFakeRemoteStore()
+  it('treats a listed-encrypted collection with no log as not encrypted', async () => {
+    const remoteStore = makeFakeRemoteStore({
+      remoteItems: [{ id: 'app-notes', isEncrypted: true }]
+    })
     await cascadeCollectionsToUserKey({
       remoteStore,
+      storeFor: recordingStoreFor({ governed: () => false }).storeFor,
       rosterDescriptor: ROSTER_DESCRIPTOR,
       clientKeyAgreementKey: CLIENT_KAK,
       userKey: USER_KEY
     })
     const { isEncrypted } = driverArgs()
-    await expect(isEncrypted!('private-credentials')).resolves.toBe(true)
-    // An undeclared (plaintext or absent) collection reads back undefined.
-    vi.mocked(remoteStore.collectionEncryption).mockResolvedValue(undefined)
-    await expect(isEncrypted!('public-credentials')).resolves.toBe(false)
-    expect(remoteStore.collectionEncryption).toHaveBeenCalledWith({
-      collectionId: 'private-credentials'
-    })
+    await expect(isEncrypted!('app-notes')).resolves.toBe(false)
   })
 
   it("passes the driver's result through, warning per failed collection", async () => {
@@ -189,6 +213,7 @@ describe('cascadeCollectionsToUserKey', () => {
 
     const result = await cascadeCollectionsToUserKey({
       remoteStore: makeFakeRemoteStore(),
+      storeFor: recordingStoreFor().storeFor,
       rosterDescriptor: ROSTER_DESCRIPTOR,
       clientKeyAgreementKey: CLIENT_KAK,
       userKey: USER_KEY

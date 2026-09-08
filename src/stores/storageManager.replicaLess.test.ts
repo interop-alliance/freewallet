@@ -47,12 +47,16 @@ import {
 import { cidFrom } from '@interop/was-client/sync'
 import type { Json } from '@interop/was-sync'
 import {
+  descriptorLogsFrom,
+  memoryDescriptorStores
+} from '../../tests/unit/fakeDescriptorStores'
+import {
   inMemorySessionPersistence,
   transientSessionStores
 } from '@/session/persistence'
 import type { ControllerProfile, User } from '@/types/auth'
 import { BrowserStore } from './browserStore'
-import { StorageManager } from './storageManager'
+import { StorageManager, type DescriptorLogs } from './storageManager'
 import { WASRemoteStore } from './wasRemoteStore'
 
 vi.mock('@/app.config', async importOriginal => ({
@@ -262,6 +266,7 @@ const ENCRYPTED_COLLECTION_IDS = [
 function makeFakeRemote(): {
   remoteStore: WASRemoteStore
   descriptors: Record<string, CollectionEncryption>
+  descriptorLogs: DescriptorLogs
   provision(owner: { keyAgreementKey: IKeyAgreementKey }): Promise<void>
   rotate(options: {
     from: { keyAgreementKey: IKeyAgreementKey }
@@ -271,6 +276,12 @@ function makeFakeRemote(): {
 } {
   const spaceId = 's-space'
   const descriptors: Record<string, CollectionEncryption> = {}
+  // Each collection's descriptor now lives at the verified head of its
+  // governing log rather than on the served Collection Description, so the
+  // manager reads it through the injected `DescriptorLogs` seam. The fake
+  // keeps both in step: `descriptors` is what the assertions read, and the
+  // in-memory stores are what the manager reads.
+  const descriptorStores = memoryDescriptorStores()
   const epochStamps = new Map<string, string[]>()
   const logicalToId: Record<string, string> = {
     privateCredentials: 'private-credentials',
@@ -423,6 +434,7 @@ function makeFakeRemote(): {
         recipients: [ownerRecipient({ keyAgreementKey: owner.keyAgreementKey })]
       })
       descriptors[id] = descriptor
+      descriptorStores.seed(id, descriptor)
     }
   }
   const rotate = async ({
@@ -442,15 +454,23 @@ function makeFakeRemote(): {
         // the key, and this fake has no zcaps to revoke.
         pull: async () => {}
       })
+      descriptorStores.seed(id, descriptors[id])
     }
   }
-  return { remoteStore, descriptors, provision, rotate, epochStamps }
+  return {
+    remoteStore,
+    descriptors,
+    descriptorLogs: descriptorLogsFrom(descriptorStores),
+    provision,
+    rotate,
+    epochStamps
+  }
 }
 
 describe('replica-less remote-direct StorageManager', () => {
   it('serves credential and history reads/writes with no local replica and no browser-local residue', async () => {
     const owner = await generateKey()
-    const { remoteStore, provision } = makeFakeRemote()
+    const { remoteStore, descriptorLogs, provision } = makeFakeRemote()
     await provision(owner)
 
     const persistence = inMemorySessionPersistence({
@@ -477,7 +497,8 @@ describe('replica-less remote-direct StorageManager', () => {
     try {
       const { storage, userExists } = await StorageManager.initStorageClients({
         user,
-        profile
+        profile,
+        descriptorLogs
       })
 
       // No BrowserStore was constructed: no per-user RxDB (IndexedDB)
@@ -521,7 +542,7 @@ describe('replica-less remote-direct StorageManager', () => {
 
   it('serves the contacts round-trip through the remote-direct backend', async () => {
     const owner = await generateKey()
-    const { remoteStore, provision } = makeFakeRemote()
+    const { remoteStore, descriptorLogs, provision } = makeFakeRemote()
     await provision(owner)
 
     const persistence = inMemorySessionPersistence({
@@ -545,7 +566,8 @@ describe('replica-less remote-direct StorageManager', () => {
     try {
       const { storage } = await StorageManager.initStorageClients({
         user,
-        profile
+        profile,
+        descriptorLogs
       })
       await storage.ready()
 
@@ -599,8 +621,14 @@ describe('replica-less remote-direct StorageManager', () => {
 
   it('adopts a rotated user key past the fan-out, sealing later writes under the fresh epoch', async () => {
     const owner = await generateKey()
-    const { remoteStore, descriptors, provision, rotate, epochStamps } =
-      makeFakeRemote()
+    const {
+      remoteStore,
+      descriptors,
+      descriptorLogs,
+      provision,
+      rotate,
+      epochStamps
+    } = makeFakeRemote()
     await provision(owner)
 
     const persistence = inMemorySessionPersistence({
@@ -624,7 +652,8 @@ describe('replica-less remote-direct StorageManager', () => {
     try {
       const { storage } = await StorageManager.initStorageClients({
         user,
-        profile
+        profile,
+        descriptorLogs
       })
       await storage.ready()
 
@@ -668,7 +697,7 @@ describe('replica-less remote-direct StorageManager', () => {
 
   it('refuses to rebuild the ciphers before the fan-out has run', async () => {
     const owner = await generateKey()
-    const { remoteStore, provision } = makeFakeRemote()
+    const { remoteStore, descriptorLogs, provision } = makeFakeRemote()
     await provision(owner)
 
     const persistence = inMemorySessionPersistence({
@@ -692,7 +721,8 @@ describe('replica-less remote-direct StorageManager', () => {
     try {
       const { storage } = await StorageManager.initStorageClients({
         user,
-        profile
+        profile,
+        descriptorLogs
       })
       await storage.ready()
 

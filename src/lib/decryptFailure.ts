@@ -6,8 +6,7 @@
  * skipped but is real data no refresh can reach, and anything else is
  * purgeable garbage.
  */
-import { isUnknownEpochError } from '@interop/was-client/sync'
-import { isKeyUnwrapError } from '@interop/wallet-core/descriptors'
+import { isKeyUnwrapError, isUnknownEpochError } from '@interop/was-client/sync'
 
 export type DecryptFailure = 'unknown-epoch' | 'no-epoch-key' | 'undecryptable'
 

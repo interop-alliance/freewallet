@@ -21,7 +21,7 @@
  */
 import type { IZcap } from '@interop/data-integrity-core'
 import type { CollectionEncryption } from '@interop/was-client'
-import type { EncryptionDescriptorCache } from '@interop/wallet-core/descriptors'
+import type { EncryptionDescriptorCache } from '@interop/was-client/edv'
 import {
   memoryResourceLogPinStore,
   type ResourceLogPinStore

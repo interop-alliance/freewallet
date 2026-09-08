@@ -58,6 +58,7 @@ import {
   type AccountCeremonyContext
 } from '@/session/accountCeremonyContext'
 import { sessionRosterStore } from '@/session/rosterStore'
+import { sessionCollectionStores } from '@/session/collectionLogStore'
 import { adoptRotatedUserKeyInBand } from '@/session/userKeyAdoption'
 import {
   cascadeCollections,
@@ -235,12 +236,16 @@ export async function rotateOffUnlockCredential({
     context.kind === 'enrolled'
       ? context.clientKeyAgreementKey
       : (survivingKeyAgreementKey ?? context.standingKeyAgreementKey)
+  const signingAgent =
+    context.kind === 'ladder'
+      ? await ladderVmAgent({ ladderSeed: signingLadderSeed! })
+      : undefined
   const rosterStore =
     context.kind === 'enrolled'
       ? context.rosterStore
       : sessionRosterStore({
           profile: session.profile,
-          keyAgent: await ladderVmAgent({ ladderSeed: signingLadderSeed! }),
+          keyAgent: signingAgent!,
           ...(context.invoker.capability
             ? { capability: context.invoker.capability }
             : {})
@@ -305,7 +310,21 @@ export async function rotateOffUnlockCredential({
         latestEpochId,
         descriptor
       }),
-    collections: cascadeCollections({ remoteStore }),
+    // The collection appends are proved at the POST-edit document, so on the
+    // ladder branch their stores sign with the SURVIVING credential's ladder
+    // VM (the same agent the roster store above signs with); signing with the
+    // retiring one would have every append refused.
+    collections: cascadeCollections({
+      remoteStore,
+      storeFor:
+        context.kind === 'enrolled'
+          ? context.collectionStore
+          : sessionCollectionStores({
+              profile: session.profile,
+              remoteStore,
+              keyAgent: signingAgent!
+            })
+    }),
     retireClientAnnexInventory: async ({ document }) => {
       // The document edit has landed: this closure runs only once
       // `removeUnlockKey` has returned, and before the roster tail.

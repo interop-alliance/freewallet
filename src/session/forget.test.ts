@@ -132,6 +132,17 @@ vi.mock('@/session/recovery', () => ({
   recoveryEntriesOf: vi.fn(() => [])
 }))
 
+vi.mock('@/session/collectionLogStore', () => ({
+  // The per-collection descriptor store lookup the fan-out takes: a
+  // recording factory, so the ceremony's `storeFor` can be asserted without
+  // a live account pointer or a log to verify.
+  sessionCollectionStores: vi.fn(() => (collectionId: string) => ({
+    collectionId,
+    descriptorStore: true
+  }))
+}))
+const { sessionCollectionStores } = await import('@/session/collectionLogStore')
+
 vi.mock('@/session/rosterStore', () => ({
   sessionRosterStore: vi.fn(() => ({
     read: vi.fn(),
@@ -148,6 +159,7 @@ const { unlockLogStore } = await import('@/session/standingUnlock')
 vi.mock('@/session/userKeyCascade', () => ({
   cascadeCollections: vi.fn(() => ({ collections: true }))
 }))
+const { cascadeCollections } = await import('@/session/userKeyCascade')
 
 vi.mock('@/session/userKeyAdoption', () => ({
   adoptRotatedUserKeyInBand: vi.fn()
@@ -657,6 +669,18 @@ describe('forgetThisBrowser (the ceremony grades)', () => {
     })
     expect(vi.mocked(assertBrowserLocalSession)).toHaveBeenCalledTimes(1)
     expect(vi.mocked(invalidateVerifiedLog)).toHaveBeenCalled()
+    // The collection fan-out reaches each descriptor through its own
+    // log-governed store, signed by the login credential's ladder VM rather
+    // than by the key this removal entry strikes.
+    expect(vi.mocked(cascadeCollections)).toHaveBeenCalledWith(
+      expect.objectContaining({ storeFor: expect.any(Function) })
+    )
+    expect(vi.mocked(sessionCollectionStores)).toHaveBeenCalledWith(
+      expect.objectContaining({
+        profile: session.profile,
+        keyAgent: { id: 'did:key:zLadderVm' }
+      })
+    )
     // The post-removal did:web projection PUT rides this still-standing
     // client's own root authority, the store the last-client transition
     // publishes its entries through.

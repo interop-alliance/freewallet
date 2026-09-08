@@ -113,6 +113,7 @@ import type { KeyringFetchResult } from '@/session/keyring'
 import { recoveryEntriesOf } from '@/session/recovery'
 import { findPendingPassphraseEntries } from '@/session/credentialCoverage'
 import { sessionRosterStore } from '@/session/rosterStore'
+import { sessionCollectionStores } from '@/session/collectionLogStore'
 import { unlockLogStore } from '@/session/standingUnlock'
 import {
   getUnlockMethods,
@@ -400,7 +401,21 @@ export async function forgetThisBrowser({
         latestEpochId,
         descriptor
       }),
-    collections: cascadeCollections({ remoteStore })
+    // The collection fan-out's appends sign as the login credential's
+    // ladder VM rather than this client's key: the removal entry strikes
+    // this client, and an append the struck key signed could not seal the
+    // collection logs behind it. The ladder VM stands in the post-removal
+    // document on both grades (the standing credential's on an ordinary
+    // forget, the just-installed one on the last-client transition), and a
+    // collection log admits it on `assertionMethod` membership alone.
+    collections: cascadeCollections({
+      remoteStore,
+      storeFor: sessionCollectionStores({
+        profile: session.profile,
+        remoteStore,
+        keyAgent: await ladderVmAgent({ ladderSeed })
+      })
+    })
   }
 
   // The ceremony opens with reads and ends with a document edit; no session

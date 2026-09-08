@@ -49,6 +49,7 @@ import {
   type UserKeyRosterReadResult
 } from '@interop/wallet-core/keys'
 import { accountRosterStore } from '@/session/rosterStore'
+import { sessionCollectionStores } from '@/session/collectionLogStore'
 import {
   checkUserKeyRosterAtLogin as sharedCheckUserKeyRosterAtLogin,
   convergeUserKeyRosterToAccount
@@ -526,6 +527,11 @@ export async function initSessionFromSeed({
             })
           const result = await cascadeCollectionsToUserKey({
             remoteStore,
+            storeFor: sessionCollectionStores({
+              profile: session.profile,
+              remoteStore,
+              keyAgent
+            }),
             rosterDescriptor,
             clientKeyAgreementKey: keyAgreementKey,
             userKey: sweepUserKey

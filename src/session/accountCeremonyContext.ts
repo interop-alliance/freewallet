@@ -50,6 +50,10 @@ import { WAS_SERVER_URL } from '@/app.config'
 import type { ICapabilityAgent, Session } from '@/types/auth'
 import type { WASRemoteStore } from '@/stores/wasRemoteStore'
 import { sessionRosterStore } from '@/session/rosterStore'
+import {
+  sessionCollectionStores,
+  type CollectionStoreFor
+} from '@/session/collectionLogStore'
 import { unlockLogStore } from '@/session/standingUnlock'
 import {
   didWebProjectionStore,
@@ -98,6 +102,12 @@ interface CeremonyContextBase {
   readonly idStore: WebvhIdStore
   /** built on first read, for the same reason */
   readonly rosterStore: SealableEncryptionDescriptorStore
+  /**
+   * Each encrypted collection's log-governed descriptor store, signed by the
+   * same key the roster store signs with and reached through the remote
+   * store's handle, so a request rides the capability held at call time.
+   */
+  readonly collectionStore: CollectionStoreFor
   /**
    * Read LIVE off the session's profile on every access, never snapshotted at
    * resolution: a ceremony that renews its generation delegation mid-run
@@ -227,6 +237,7 @@ function resolveEnrolledContext({
   }
   let idStore: WebvhIdStore | undefined
   let rosterStore: SealableEncryptionDescriptorStore | undefined
+  let collectionStore: CollectionStoreFor | undefined
   return {
     context: {
       kind: 'enrolled',
@@ -237,6 +248,13 @@ function resolveEnrolledContext({
       },
       get rosterStore() {
         return (rosterStore ??= sessionRosterStore({ profile }))
+      },
+      get collectionStore() {
+        return (collectionStore ??= sessionCollectionStores({
+          profile,
+          remoteStore: reach.remoteStore,
+          keyAgent: profile.keyAgent!
+        }))
       },
       get invoker() {
         return { zcapClient: profile.zcapClient }
@@ -407,6 +425,16 @@ export async function accountCeremonyContext({
         })
       }
       return ladderRosterStore
+    },
+    // Not memoized: each collection's handle is taken off the remote store at
+    // the call, so a store built after a mid-ceremony renewal rides the
+    // replacement delegation with no capability bookkeeping here.
+    get collectionStore() {
+      return sessionCollectionStores({
+        profile,
+        remoteStore: reach.remoteStore,
+        keyAgent: agent
+      })
     },
     get invoker() {
       return invokerNow()

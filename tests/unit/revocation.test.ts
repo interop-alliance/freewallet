@@ -446,7 +446,10 @@ describe('the cascade, rotated path', () => {
       })
     )
     expect(vi.mocked(cascadeCollections)).toHaveBeenCalledWith({
-      remoteStore: session.storage.remoteStore
+      remoteStore: session.storage.remoteStore,
+      // Each collection's log-governed descriptor store, which the fan-out
+      // appends the fresh epoch through.
+      storeFor: expect.any(Function)
     })
     expect(epochPinLoad).toHaveBeenCalledWith(
       expect.objectContaining({ accountDid: POINTER.did })

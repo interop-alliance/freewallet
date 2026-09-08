@@ -621,70 +621,156 @@ describe('WASRemoteStore.ensureCollection', () => {
   })
 })
 
-describe('WASRemoteStore.ensureEncryptedCollection', () => {
-  it('passes the absent read through as `current` on a fresh create', async () => {
-    const configure = vi.fn().mockResolvedValue(undefined)
-    const describeCollection = vi.fn().mockResolvedValue(null)
+describe('WASRemoteStore.ensureGovernedCollection', () => {
+  /**
+   * A governing log's projection pointer, the member that marks a
+   * Description's `encryption` as server-derived rather than client-written.
+   */
+  const HISTORY = {
+    method: 'resource-log:0.1',
+    resource: 'https://example.test/space/space-id/example-app-data/meta/log'
+  }
+
+  /**
+   * The server's echo of a create, the shape `replaceDescription` resolves.
+   */
+  const echo = vi.fn(async (description: unknown) => ({
+    description,
+    etag: 'v1'
+  }))
+
+  it('creates an absent collection with a bare guarded declaration', async () => {
+    const describeWithEtag = vi.fn().mockResolvedValue(null)
+    const replaceDescription = vi.fn(echo)
     const collection = vi
       .fn()
-      .mockReturnValue({ configure, describe: describeCollection })
+      .mockReturnValue({ describeWithEtag, replaceDescription })
     const store = storeWithStubbedClient({
       space: vi.fn().mockReturnValue({ collection })
     })
 
     await expect(
-      store.ensureEncryptedCollection({ id: 'example-app-data' })
+      store.ensureGovernedCollection({ id: 'example-app-data' })
     ).resolves.toBeUndefined()
-    // `null` is the answer "absent", not a request for a second read: the
-    // pre-merge describe `configure` would otherwise make is skipped.
-    expect(configure).toHaveBeenCalledWith({
-      name: 'example-app-data',
-      encryption: { scheme: 'edv' },
-      force: true,
-      current: null
-    })
-    expect(describeCollection).toHaveBeenCalledOnce()
+    expect(replaceDescription).toHaveBeenCalledOnce()
+    // The declaration carries the name alone: the `encryption` member is the
+    // server's to derive from the collection's governing log.
+    expect(replaceDescription).toHaveBeenCalledWith(
+      { name: 'example-app-data' },
+      { ifNoneMatch: true }
+    )
+    const [body] = replaceDescription.mock.calls[0]
+    expect(body).not.toHaveProperty('encryption')
+    expect(describeWithEtag).toHaveBeenCalledOnce()
   })
 
-  it('passes the read description through on a late in-place declaration', async () => {
-    const current = { id: 'example-app-data', name: 'Example App Data' }
-    const configure = vi.fn().mockResolvedValue(undefined)
-    const describeCollection = vi.fn().mockResolvedValue(current)
+  it('leaves a collection already governed untouched', async () => {
+    const describeWithEtag = vi.fn().mockResolvedValue({
+      description: {
+        name: 'Example App Data',
+        encryption: { scheme: 'edv', currentEpoch: 'epoch-0', history: HISTORY }
+      },
+      etag: 'v0'
+    })
+    const replaceDescription = vi.fn().mockResolvedValue(undefined)
     const collection = vi
       .fn()
-      .mockReturnValue({ configure, describe: describeCollection })
+      .mockReturnValue({ describeWithEtag, replaceDescription })
     const store = storeWithStubbedClient({
       space: vi.fn().mockReturnValue({ collection })
     })
 
     await expect(
-      store.ensureEncryptedCollection({ id: 'example-app-data' })
+      store.ensureGovernedCollection({ id: 'example-app-data' })
     ).resolves.toBeUndefined()
-    expect(configure).toHaveBeenCalledWith({
-      name: 'Example App Data',
-      encryption: { scheme: 'edv' },
-      force: true,
-      current
-    })
+    expect(replaceDescription).not.toHaveBeenCalled()
   })
 
-  it('leaves an existing encryption descriptor untouched', async () => {
-    const encryption = { scheme: 'edv', currentEpoch: 'epoch-0' }
-    const configure = vi.fn().mockResolvedValue(undefined)
-    const describeCollection = vi
-      .fn()
-      .mockResolvedValue({ name: 'Example App Data', encryption })
+  it('refuses a collection carrying a client-written encryption descriptor', async () => {
+    const describeWithEtag = vi.fn().mockResolvedValue({
+      description: {
+        name: 'Example App Data',
+        encryption: { scheme: 'edv', currentEpoch: 'epoch-0' }
+      },
+      etag: 'v0'
+    })
+    const replaceDescription = vi.fn().mockResolvedValue(undefined)
     const collection = vi
       .fn()
-      .mockReturnValue({ configure, describe: describeCollection })
+      .mockReturnValue({ describeWithEtag, replaceDescription })
     const store = storeWithStubbedClient({
       space: vi.fn().mockReturnValue({ collection })
     })
 
     await expect(
-      store.ensureEncryptedCollection({ id: 'example-app-data' })
-    ).resolves.toEqual(encryption)
-    expect(configure).not.toHaveBeenCalled()
+      store.ensureGovernedCollection({ id: 'example-app-data' })
+    ).rejects.toThrow(/cannot be governed by a history log/)
+    expect(replaceDescription).not.toHaveBeenCalled()
+  })
+
+  it('rides the bound invocation capability and skips the Space half', async () => {
+    const capability = { id: 'urn:zcap:generation' } as never
+    const describeWithEtag = vi.fn().mockResolvedValue(null)
+    const replaceDescription = vi.fn(echo)
+    const describe = vi.fn()
+    const collection = vi
+      .fn()
+      .mockReturnValue({ describeWithEtag, replaceDescription })
+    const space = vi.fn().mockReturnValue({ collection, describe })
+    const store = new WASRemoteStore({
+      pinStore: memoryResourceLogPinStore(),
+      storageServerUrl: 'https://example.test',
+      zcapClient: { request: vi.fn() } as unknown as ZcapClient,
+      spaceId: 'space-id',
+      controller: 'did:key:test',
+      capability
+    })
+    store.was = { space } as unknown as WasClient
+
+    await expect(
+      store.ensureGovernedCollection({ id: 'example-app-data' })
+    ).resolves.toBeUndefined()
+    // A generation delegation cannot reach the bare Space URL: the Space is
+    // neither described nor created, and every handle carries the capability.
+    expect(describe).not.toHaveBeenCalled()
+    expect(space).toHaveBeenCalledWith('space-id', { capability })
+    expect(replaceDescription).toHaveBeenCalledWith(
+      { name: 'example-app-data' },
+      { ifNoneMatch: true }
+    )
+  })
+
+  it('reads a lost create race back as the collection that stands', async () => {
+    const describeWithEtag = vi
+      .fn()
+      .mockResolvedValueOnce(null)
+      .mockResolvedValueOnce({
+        description: {
+          name: 'Example App Data',
+          encryption: {
+            scheme: 'edv',
+            currentEpoch: 'epoch-0',
+            history: HISTORY
+          }
+        },
+        etag: 'v0'
+      })
+    const replaceDescription = vi
+      .fn()
+      .mockRejectedValue(
+        Object.assign(new Error('precondition failed'), { status: 412 })
+      )
+    const collection = vi
+      .fn()
+      .mockReturnValue({ describeWithEtag, replaceDescription })
+    const store = storeWithStubbedClient({
+      space: vi.fn().mockReturnValue({ collection })
+    })
+
+    await expect(
+      store.ensureGovernedCollection({ id: 'example-app-data' })
+    ).resolves.toBeUndefined()
+    expect(describeWithEtag).toHaveBeenCalledTimes(2)
   })
 })
 
@@ -738,44 +824,47 @@ describe('WASRemoteStore.ensureUserCollections', () => {
   }: {
     fail?: (id: string) => boolean
   } = {}) {
-    const configures: Array<{
+    const creates: Array<{
       id: string
-      name?: string
-      encryption?: { scheme: string }
-      force?: boolean
-      current?: unknown
+      fields: { name?: string; encryption?: { scheme: string } }
+      options: { ifMatch?: string; ifNoneMatch?: boolean }
     }> = []
     const setPublics: string[] = []
-    // The 0.29.x ensure is non-clobbering: it describes first (a `null` here
-    // means "absent", so every collection takes its creation path) and checks
-    // the public policy before granting it.
+    // The ensure is non-clobbering and creates through the guarded write: it
+    // describes first (a `null` here means "absent", so every collection takes
+    // its creation path) and writes the absent description with
+    // `replaceDescription(fields, { ifNoneMatch: true })`. A collection this
+    // run just created has no policy document yet, so its `isPublic()` is
+    // never read before the world-read grant.
     //
-    // `configure` returns the description it wrote, as the real
-    // `Space.configure` does. That return is what `provisionWalletSpace`
-    // threads into every collection branch so the Space is ensured once
-    // rather than once per collection; a fake returning `undefined` sends
-    // each branch back to ensuring the Space itself, which passes while
-    // exercising the behavior the hoist replaced.
+    // `replaceDescription` answers with the description the server echoes on a
+    // create, plus its `ETag`, as both real handles do. The Space's return is
+    // what `provisionWalletSpace` threads into every collection branch so the
+    // Space is ensured once rather than once per collection.
     const was = {
       space: (spaceId: string) => ({
         describe: async () => null,
-        configure: async (opts: { name?: string; controller?: string }) => ({
-          id: spaceId,
-          type: ['Space'],
-          ...opts
+        replaceDescription: async (fields: {
+          name?: string
+          controller: string
+        }) => ({
+          description: { id: spaceId, type: ['Space'], ...fields },
+          etag: '"1"'
         }),
         collection: (id: string) => ({
-          describe: async () => null,
-          configure: async (opts: {
-            name?: string
-            encryption?: { scheme: string }
-            force?: boolean
-            current?: unknown
-          }) => {
+          describeWithEtag: async () => null,
+          replaceDescription: async (
+            fields: { name?: string; encryption?: { scheme: string } },
+            options: { ifMatch?: string; ifNoneMatch?: boolean } = {}
+          ) => {
             if (fail(id)) {
               throw new Error('boom')
             }
-            configures.push({ id, ...opts })
+            creates.push({ id, fields, options })
+            return {
+              description: { id, type: ['Collection'], ...fields },
+              etag: '"1"'
+            }
           },
           isPublic: async () => false,
           setPublic: async () => {
@@ -784,12 +873,13 @@ describe('WASRemoteStore.ensureUserCollections', () => {
         })
       })
     }
-    return { was, configures, setPublics }
+    return { was, creates, setPublics }
   }
 
   it('throws if provisioning fails', async () => {
-    // A plaintext collection gets no name-only retry, so its failure surfaces
-    // as the shared provisioner's per-collection error.
+    // A failed create is re-read (the lost-race adoption) and, with nothing
+    // there, rethrown -- so it surfaces as the shared provisioner's
+    // per-collection error.
     const { was } = recordingWas({ fail: id => id === 'key-map' })
     const store = storeWithStubbedClient(was)
 
@@ -799,32 +889,34 @@ describe('WASRemoteStore.ensureUserCollections', () => {
   })
 
   it('provisions id as collection-level public and key-map capability-only', async () => {
-    const { was, configures, setPublics } = recordingWas()
+    const { was, creates, setPublics } = recordingWas()
     const store = storeWithStubbedClient(was)
 
     await store.ensureUserCollections({ user: USER })
 
-    // Both system collections are plaintext (a descriptor-less `force`
-    // upsert), under their shared display names; only `id` goes public.
-    // `current` is the description the provisioner already read, threaded in
-    // so the fail-closed guard runs without a second read (was-client
-    // 0.45.0); `null` here is this fake's "absent".
-    expect(configures.find(({ id }) => id === 'id')).toEqual({
+    // Both system collections are plaintext (a descriptor-less create), under
+    // their shared display names; only `id` goes public. Every create is
+    // guarded, so two clients booting at once cannot both create.
+    expect(creates.find(({ id }) => id === 'id')).toEqual({
       id: 'id',
-      name: 'Identity',
-      force: true,
-      current: null
+      fields: { name: 'Identity' },
+      options: { ifNoneMatch: true }
     })
     expect(setPublics).toContain('id')
-    expect(configures.find(({ id }) => id === 'key-map')).toEqual({
+    expect(creates.find(({ id }) => id === 'key-map')).toEqual({
       id: 'key-map',
-      name: 'Key Map',
-      force: true,
-      current: null
+      fields: { name: 'Key Map' },
+      options: { ifNoneMatch: true }
     })
     expect(setPublics).not.toContain('key-map')
-    // The synced standard collections are provisioned alongside them.
-    expect(configures.map(({ id }) => id)).toContain('private-credentials')
+    // An `edv` roster collection is created bare: its `encryption` member is
+    // the server's to derive from the governing history log, so the create
+    // carries the display name alone.
+    expect(creates.find(({ id }) => id === 'private-credentials')).toEqual({
+      id: 'private-credentials',
+      fields: { name: 'Verifiable Credentials' },
+      options: { ifNoneMatch: true }
+    })
   })
 })
 

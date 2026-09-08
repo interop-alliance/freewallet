@@ -17,6 +17,8 @@ import type { FuseOptionKey } from 'fuse.js'
 import { useAuthStore } from '@/stores/authStore'
 import { showToast } from '@/stores/toastStore'
 import { syncController } from '@/stores/syncController'
+import { usePullSettled } from '@/hooks/usePullSettled'
+import { PRIVATE_CREDENTIALS_COLLECTION } from '@interop/wallet-core/space'
 import { flattenSearchValues } from '@/lib/searchValues'
 import { useAsyncLoad } from '@/hooks/useAsyncLoad'
 import { useSearch } from '@/hooks/useSearch'
@@ -32,6 +34,9 @@ import type { StoredCredential } from '@/types/credential'
 import { createLogger } from '@/lib/log'
 
 const log = createLogger('fw:ui:dashboard')
+
+// The collections whose pulls change what this page lists.
+const PULLED_COLLECTIONS = [PRIVATE_CREDENTIALS_COLLECTION]
 
 // Declared outside the component so this array is the same object on every
 // render; useSearch's index is memoized on it, so a fresh array each render
@@ -121,6 +126,20 @@ export function DashboardPage() {
       }
     }
   )
+
+  // Background replication lands rows after the mount read (on a fresh
+  // browser the first pull of `private-credentials` completes moments after
+  // the dashboard rendered its empty list), so re-read when that pull
+  // settles.
+  const reloadAfterPull = useCallback(() => {
+    loadCredentials().catch((err: unknown) => {
+      log.error('Could not reload credentials after a pull', { err })
+    })
+  }, [loadCredentials])
+  usePullSettled({
+    collectionIds: PULLED_COLLECTIONS,
+    onSettled: reloadAfterPull
+  })
 
   // The credential-anchored signup seeds its welcome content behind the
   // dashboard navigation; while its promise is pending an indicator shows in

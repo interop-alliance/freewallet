@@ -43,11 +43,24 @@ import {
   type SpaceDescription
 } from '@interop/was-client'
 import {
+  acquireDescriptor,
+  acquireDescriptors,
   addRecipient,
+  DescriptorRefreshPolicy,
   removeRecipient,
+  type EncryptionDescriptorCache,
+  type EncryptionDescriptorSource,
+  type EncryptionDescriptorStore,
   type RecipientPublicKey
 } from '@interop/was-client/edv'
 import { ensureIndexedFirstEpoch } from '@interop/wallet-core/keys'
+import { isResourceLogRefusal } from '@interop/wallet-core/resourceLog'
+import {
+  accountCollectionStores,
+  descriptorLogSignerAgent,
+  sessionCollectionDescriptorSource,
+  sessionCollectionStores
+} from '@/session/collectionLogStore'
 import type { ControllerProfile, User } from '@/types/auth'
 import { cidFrom } from '@interop/was-client/sync'
 import { classifyDecryptFailure } from '@/lib/decryptFailure'
@@ -77,12 +90,6 @@ import { clampGrantExpires } from '@interop/wallet-core/clientAnnex'
 import { promoteKeystoreController, rebindKeystoreAgent } from '@/lib/kms'
 import { accountRosterStore } from '@/session/rosterStore'
 import { mintRecordEncryption } from '@interop/wallet-core/keyring'
-import {
-  acquireDescriptor,
-  acquireDescriptors,
-  DescriptorRefreshPolicy,
-  type EncryptionDescriptorCache
-} from '@interop/wallet-core/descriptors'
 import {
   loadAccountDidForSpace,
   saveAccountDidForSpace
@@ -305,6 +312,98 @@ function warnDescriptorFetchError(
 }
 
 /**
+ * A session's reach into the per-collection descriptor logs: the verifying
+ * read side every descriptor acquisition goes through, and the per-collection
+ * store each descriptor-writing operation appends through. Absent when the
+ * session has no promoted account to verify against (no remote store, or a
+ * pointer naming no did:webvh), in which case descriptors come from the
+ * browser-local cache alone and no descriptor write can run.
+ */
+export interface DescriptorLogs {
+  source: EncryptionDescriptorSource
+  storeFor: (collectionId: string) => Promise<EncryptionDescriptorStore>
+}
+
+/**
+ * The live session's descriptor logs: reads and appends anchored in the
+ * profile's verified-log memo, requests through the remote store's handles,
+ * appends signed by the session's descriptor-log signer (the enrolled
+ * client's key, or a transient visit's ladder VM). The signer is resolved
+ * at each store build, since a passphrase change restamps the ladder seed.
+ *
+ * @param options {object}
+ * @param options.profile {ControllerProfile}
+ * @param options.remoteStore {WASRemoteStore}
+ * @returns {DescriptorLogs}
+ */
+function sessionDescriptorLogs({
+  profile,
+  remoteStore
+}: {
+  profile: ControllerProfile
+  remoteStore: WASRemoteStore
+}): DescriptorLogs {
+  return {
+    source: sessionCollectionDescriptorSource({ profile, remoteStore }),
+    storeFor: async collectionId =>
+      sessionCollectionStores({
+        profile,
+        remoteStore,
+        keyAgent: await descriptorLogSignerAgent({ profile })
+      })(collectionId)
+  }
+}
+
+/**
+ * Wraps the descriptor cache so a write that regresses the cached copy -- a
+ * served head listing fewer epochs than this browser last verified -- is
+ * warned about and then written. The cache is not a continuity pin: a log
+ * behind the copy looks exactly like replication lag, so it overwrites
+ * rather than refuses (the roster's rollback carve-out, applied here).
+ *
+ * @param cache {EncryptionDescriptorCache}
+ * @returns {EncryptionDescriptorCache}
+ */
+function regressionWarningCache(
+  cache: EncryptionDescriptorCache
+): EncryptionDescriptorCache {
+  return {
+    readDescriptor: options => cache.readDescriptor(options),
+    async writeDescriptor({ collectionId, descriptor }) {
+      const cached = await cache.readDescriptor({ collectionId })
+      const before = cached?.epochs?.length ?? 0
+      const after = descriptor.epochs?.length ?? 0
+      // Epochs are append-only, so a shorter list is a head behind the copy,
+      // and so is a current epoch the copy lists at an earlier position than
+      // its own current one.
+      const position = (
+        list: CollectionEncryption['epochs'],
+        epochId: string | undefined
+      ) => (list ?? []).findIndex(epoch => epoch.id === epochId)
+      const cachedCurrent = position(cached?.epochs, cached?.currentEpoch)
+      const servedCurrent = position(cached?.epochs, descriptor.currentEpoch)
+      const currentRegressed =
+        cachedCurrent >= 0 &&
+        servedCurrent >= 0 &&
+        servedCurrent < cachedCurrent
+      if (after < before || currentRegressed) {
+        log.warn(
+          'The served encryption descriptor is behind the cached copy; overwriting the cache',
+          {
+            collectionId,
+            cachedEpochs: before,
+            servedEpochs: after,
+            cachedCurrentEpoch: cached?.currentEpoch,
+            servedCurrentEpoch: descriptor.currentEpoch
+          }
+        )
+      }
+      await cache.writeDescriptor({ collectionId, descriptor })
+    }
+  }
+}
+
+/**
  * Fetches each encrypted collection's stored `/meta` value best-effort
  * (concurrently, like the descriptor acquisition it rides beside), caching
  * each success and falling back to the cached copy on a fetch failure. A
@@ -423,6 +522,12 @@ export class StorageManager {
   // The collection-metadata cache, beside the descriptor cache and on the
   // same storage tier.
   #metaCache?: CollectionMetaCache
+  // The per-collection descriptor logs (see `DescriptorLogs`): the verifying
+  // source every descriptor refresh reads, and the stores every descriptor
+  // write appends through. Resolved at each use rather than once, since a
+  // login-time genesis can promote the account after the session was built;
+  // `undefined` while there is no promoted account to verify against.
+  #descriptorLogsFor: () => DescriptorLogs | undefined
   // The once-per-collection-per-session unknown-epoch refresh guard, shared by
   // the standard and the app-provisioned encrypted collections, so a genuinely
   // foreign envelope cannot drive a refresh loop. Its `reset` re-arms a
@@ -462,7 +567,8 @@ export class StorageManager {
     vaultKeys,
     descriptors,
     metas,
-    persistence
+    persistence,
+    descriptorLogs
   }: {
     localStore?: BrowserStore
     remoteStore?: WASRemoteStore
@@ -475,6 +581,7 @@ export class StorageManager {
     descriptors?: Record<string, CollectionEncryption>
     metas?: Record<string, { custom?: unknown }>
     persistence: SessionPersistence
+    descriptorLogs?: DescriptorLogs | (() => DescriptorLogs | undefined)
   }) {
     this.#localStore = localStore
     this.#remoteStore = remoteStore
@@ -483,12 +590,18 @@ export class StorageManager {
     this.#descriptors = descriptors ?? {}
     this.#metas = metas ?? {}
     this.#persistence = persistence
+    this.#descriptorLogsFor =
+      typeof descriptorLogs === 'function'
+        ? descriptorLogs
+        : () => descriptorLogs
     // The cache pair rides the persistence strategy: one instance per scope
     // per session (the strategy memoizes), localStorage or in-memory by the
     // strategy's storage tier, and absent only when there is no remote Space
     // to cache for.
     this.#descriptorCache = remoteStore
-      ? persistence.descriptorCache({ scope: remoteStore.spaceId })
+      ? regressionWarningCache(
+          persistence.descriptorCache({ scope: remoteStore.spaceId })
+        )
       : undefined
     this.#metaCache = remoteStore
       ? persistence.metaCache({ scope: remoteStore.spaceId })
@@ -553,6 +666,55 @@ export class StorageManager {
       throw new Error(`${action} requires remote storage.`)
     }
     return this.#remoteStore
+  }
+  /**
+   * The log-governed descriptor store for one encrypted collection, for a
+   * descriptor-writing operation; refuses when this session has no descriptor
+   * logs to append through (no promoted account to verify against).
+   *
+   * @param options {object}
+   * @param options.collectionId {string}
+   * @param options.action {string}   what the caller is doing, for the message
+   * @returns {Promise<EncryptionDescriptorStore>}
+   */
+  async #collectionStore({
+    collectionId,
+    action
+  }: {
+    collectionId: string
+    action: string
+  }): Promise<EncryptionDescriptorStore> {
+    const logs = this.#descriptorLogsFor()
+    if (!logs) {
+      throw new Error(
+        `${action} requires a promoted account whose collection descriptor ` +
+          'logs this session can verify.'
+      )
+    }
+    return await logs.storeFor(collectionId)
+  }
+
+  /**
+   * One collection's descriptor from the verified head of its governing log
+   * (`undefined` for a collection with no log, a plaintext one), or from the
+   * served Description member when this session has no logs to verify.
+   *
+   * @param options {object}
+   * @param options.collectionId {string}
+   * @returns {Promise<CollectionEncryption | undefined>}
+   */
+  async #readGovernedDescriptor({
+    collectionId
+  }: {
+    collectionId: string
+  }): Promise<CollectionEncryption | undefined> {
+    const logs = this.#descriptorLogsFor()
+    if (logs) {
+      return await logs.source.collectionEncryption({ collectionId })
+    }
+    return await this.#requireRemote(
+      'Reading a collection descriptor'
+    ).collectionEncryption({ collectionId })
   }
 
   /**
@@ -873,9 +1035,10 @@ export class StorageManager {
     if (!this.#remoteStore || !this.#vaultKeys || !this.#descriptorCache) {
       return
     }
+    const logs = this.#descriptorLogsFor()
     ;[this.#descriptors, this.#metas] = await Promise.all([
       acquireDescriptors({
-        source: this.#remoteStore,
+        ...(logs ? { source: logs.source } : {}),
         cache: this.#descriptorCache,
         collectionIds: ENCRYPTED_COLLECTION_IDS,
         onFetchError: warnDescriptorFetchError
@@ -1000,7 +1163,8 @@ export class StorageManager {
     profile,
     isGuest = false,
     remoteDirect = false,
-    storage: rxStorage
+    storage: rxStorage,
+    descriptorLogs: suppliedDescriptorLogs
   }: {
     user: User
     profile: ControllerProfile
@@ -1011,6 +1175,9 @@ export class StorageManager {
     // An explicit RxDB storage for the local active replica, in place of the
     // default IndexedDB/Dexie one (the unit tests' memory storage).
     storage?: RxStorage<unknown, unknown>
+    // The per-collection descriptor logs, in place of the ones built from
+    // the profile (the unit tests' in-memory stores).
+    descriptorLogs?: DescriptorLogs
   }) {
     // Guest sessions never touch the remote WAS server -- they get no remote
     // replica. This keeps guest mode usable as a fallback even when the
@@ -1026,7 +1193,7 @@ export class StorageManager {
     // Build the remote store first (when configured), so its encryption descriptors
     // can be fetched before the ciphers are built: a shared collection encrypts
     // under its current key epoch, discovered from the Collection Description.
-    let remoteStore
+    let remoteStore: WASRemoteStore | undefined
     if (storageServerUrl) {
       ;({ remoteStore } = await WASRemoteStore.initClient({
         storageServerUrl,
@@ -1044,14 +1211,44 @@ export class StorageManager {
     // descriptors are minted locally instead -- every encrypted collection
     // carries its key epochs from birth, server or not -- and there is no
     // metadata to fetch (no index schema can have been declared).
+    //
+    // Each descriptor is the verified head of the collection's governing
+    // log, read under the session's pins; a verifier refusal throws through
+    // rather than serving the cached copy, and only a transport failure
+    // falls back to it. A remote session whose pointer names no did:webvh
+    // has no document to verify against, so it reads the cache alone.
+    // Resolved at each use: a login-time genesis on this session can
+    // promote the account after this point, and the refresh that follows
+    // must then read the logs rather than the cache.
+    let sessionLogs: DescriptorLogs | undefined
+    const descriptorLogsFor = (): DescriptorLogs | undefined => {
+      if (!remoteStore) {
+        return undefined
+      }
+      if (suppliedDescriptorLogs) {
+        return suppliedDescriptorLogs
+      }
+      if (isWebvhDid(profile.accountPointer?.did)) {
+        return (sessionLogs ??= sessionDescriptorLogs({ profile, remoteStore }))
+      }
+      return undefined
+    }
+    const descriptorLogs = descriptorLogsFor()
+    if (remoteStore && !descriptorLogs) {
+      log.warn(
+        'The account pointer names no did:webvh; encryption descriptors are served from the cache alone'
+      )
+    }
     const [descriptors, metas] = remoteStore
       ? await Promise.all([
           acquireDescriptors({
-            source: remoteStore,
+            ...(descriptorLogs ? { source: descriptorLogs.source } : {}),
             // The same handle-memoized instance the constructor binds below
             // (one cache pair per session in both variants), seeding the
             // in-memory pair at login in a transient session.
-            cache: persistence.descriptorCache({ scope: remoteStore.spaceId }),
+            cache: regressionWarningCache(
+              persistence.descriptorCache({ scope: remoteStore.spaceId })
+            ),
             collectionIds: ENCRYPTED_COLLECTION_IDS,
             onFetchError: warnDescriptorFetchError
           }),
@@ -1125,7 +1322,8 @@ export class StorageManager {
       vaultKeys: { keyAgreementKey, keyResolver },
       descriptors,
       metas,
-      persistence
+      persistence,
+      descriptorLogs: descriptorLogsFor
     })
     return { storage, userExists }
   }
@@ -1752,8 +1950,12 @@ export class StorageManager {
             this.#appDescriptors[collectionId]
           if (!descriptor) {
             try {
-              descriptor = await remote.collectionEncryption({ collectionId })
+              descriptor = await this.#readGovernedDescriptor({ collectionId })
             } catch (err) {
+              // A verifier refusal is never read as "nothing to decrypt".
+              if (isResourceLogRefusal(err)) {
+                throw err
+              }
               log.warn(
                 'Could not fetch the encryption descriptor for app collection',
                 { collectionId, err }
@@ -1887,14 +2089,17 @@ export class StorageManager {
       )
     }
     const { keyAgreementKey } = this.#vaultKeys
-    const collection = remote.collectionHandle({ collectionId })
-    // Ensure the collection exists and is declared encrypted without dropping
-    // an existing epoch roster, then install epoch[0] (owner as recipient
-    // zero) create-if-absent -- an existing roster is adopted, never
-    // overwritten.
-    await remote.ensureEncryptedCollection({ id: collectionId })
+    // Ensure the collection exists (a bare create; the server derives its
+    // `encryption` member from the governing log), then install epoch[0]
+    // (owner as recipient zero) as that log's genesis -- create-if-absent,
+    // so an existing roster is adopted, never overwritten.
+    await remote.ensureGovernedCollection({ id: collectionId })
+    const store = await this.#collectionStore({
+      collectionId,
+      action: 'Provisioning an app collection'
+    })
     const { descriptor: current } = await ensureIndexedFirstEpoch({
-      collection,
+      store,
       recipients: [ownerRecipient({ keyAgreementKey })]
     })
 
@@ -1909,7 +2114,7 @@ export class StorageManager {
     // First connect, or reconnect after a revoke rotated the epoch off the
     // app: escrow the app into every epoch (adds are cheap -- no rotation).
     const descriptor = await addRecipient({
-      collection,
+      store,
       recipient: appRecipient,
       owner: { keyAgreementKey }
     })
@@ -2286,6 +2491,20 @@ export class StorageManager {
                 },
                 pinStore: this.#persistence.logPins
               }),
+            // Each encrypted collection's log-governed store, the same
+            // wiring: epoch[0] lands as the collection's governing-log
+            // genesis, signed by this client's enrolled key.
+            collectionStoreFor: ({ did }) =>
+              accountCollectionStores({
+                zcapClient: profile.zcapClient,
+                keyAgent,
+                pointer: {
+                  did,
+                  spaceId: remoteStore.spaceId,
+                  host: remoteStore.storageServerUrl
+                },
+                pinStore: this.#persistence.logPins
+              }),
             promoteController: false,
             // The ceremony's one stage boundary of its own: the
             // KMS-authentication join. Timed here so the plain-genesis heal
@@ -2383,13 +2602,37 @@ export class StorageManager {
         // without epochs the affected collections' ciphers refuse
         // fail-closed (nothing leaks plaintext), and the idempotent ensure
         // resumes on the next login.
-        if (profile?.userKey) {
+        // Each epoch[0] is a governing-log genesis signed by this client's
+        // key, so the account must already have a did:webvh that lists it;
+        // a session with none skips the install and its ciphers stay
+        // refusing until a login that can publish one.
+        const pointer = profile?.accountPointer
+        if (profile?.userKey && profile.keyAgent && isWebvhDid(pointer?.did)) {
           try {
-            await remoteStore.ensureSpaceEpochs({ userKey: profile.userKey })
+            await remoteStore.ensureSpaceEpochs({
+              userKey: profile.userKey,
+              storeFor: accountCollectionStores({
+                zcapClient: profile.zcapClient,
+                keyAgent: profile.keyAgent,
+                pointer: {
+                  did: pointer.did,
+                  spaceId: remoteStore.spaceId,
+                  host: remoteStore.storageServerUrl
+                },
+                pinStore: this.#persistence.logPins
+              })
+            })
             await refreshDescriptorsWithoutEpochs()
           } catch (err) {
             log.warn('Collection key-epoch provisioning failed', { err })
           }
+        } else if (profile?.userKey) {
+          // The collections were created bare, so without this stage they
+          // carry no epochs and every encrypted collection's cipher refuses
+          // fail-closed until a login that publishes a did:webvh.
+          log.warn(
+            'Skipping collection key-epoch provisioning: the account has no did:webvh to anchor the descriptor logs in, and its encrypted collections stay unusable until one is published'
+          )
         }
         if (profile?.keystoreAgent) {
           try {
@@ -2988,7 +3231,9 @@ export class StorageManager {
     const outcomes = await Promise.all(
       [...byCollection].map(async ([collectionId, revoke]) => {
         try {
-          const descriptor = await remote.collectionEncryption({ collectionId })
+          const descriptor = await this.#readGovernedDescriptor({
+            collectionId
+          })
           if (!descriptor?.epochs?.length || !descriptor.currentEpoch) {
             return 'skipped' as const
           }
@@ -2997,7 +3242,10 @@ export class StorageManager {
             return 'skipped' as const
           }
           const newDescriptor = await removeRecipient({
-            collection: remote.collectionHandle({ collectionId }),
+            store: await this.#collectionStore({
+              collectionId,
+              action: 'Revoking an app collection recipient'
+            }),
             space: remote.spaceHandle(),
             revoke,
             recipientId: nonOwner
@@ -3243,10 +3491,13 @@ export class StorageManager {
     }
 
     // Read axis: escrow the reader into the existing epochs (epoch[0] exists
-    // from provisioning, wrapped to the owner -- recipient zero).
-    const collection = remote.collectionHandle({ collectionId })
+    // from provisioning, wrapped to the owner -- recipient zero), one signed
+    // append on the collection's governing log.
     const descriptor = await addRecipient({
-      collection,
+      store: await this.#collectionStore({
+        collectionId,
+        action: 'Sharing a collection'
+      }),
       recipient,
       owner: { keyAgreementKey }
     })
@@ -3354,7 +3605,10 @@ export class StorageManager {
       items
     })
     const descriptor = await removeRecipient({
-      collection: remote.collectionHandle({ collectionId }),
+      store: await this.#collectionStore({
+        collectionId,
+        action: 'Unsharing a collection'
+      }),
       space: remote.spaceHandle(),
       recipientId,
       revoke
@@ -3489,8 +3743,9 @@ export class StorageManager {
     let descriptor: CollectionEncryption | undefined =
       this.#descriptors[collectionId]
     if (!descriptor && remote && this.#descriptorCache) {
+      const logs = this.#descriptorLogsFor()
       descriptor = await acquireDescriptor({
-        source: remote,
+        ...(logs ? { source: logs.source } : {}),
         cache: this.#descriptorCache,
         collectionId
       })

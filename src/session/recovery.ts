@@ -83,6 +83,7 @@ import {
   type UserKey
 } from '@interop/wallet-core/keys'
 import { accountRosterStore } from '@/session/rosterStore'
+import { accountCollectionStores } from '@/session/collectionLogStore'
 import { cascadeCollectionsToUserKey } from '@/session/userKeyCascade'
 import {
   clientSigningKeyMultibase,
@@ -1835,6 +1836,16 @@ export async function recoverAccountWithCode({
   // epochs remain, escrowed to the fresh user key).
   await cascadeCollectionsToUserKey({
     remoteStore,
+    storeFor: accountCollectionStores({
+      zcapClient: newZcapClient,
+      keyAgent: newClientAgents.keyAgent,
+      pointer: {
+        did: pointer.did,
+        spaceId: pointer.spaceId,
+        host: pointer.host
+      },
+      pinStore: logPins
+    }),
     rosterDescriptor: postRotation.descriptor,
     clientKeyAgreementKey: newClientAgents.keyAgreementKey,
     userKey: newUserKey
@@ -2910,6 +2921,17 @@ async function recoverAccountTransient({
   })
   await cascadeCollectionsToUserKey({
     remoteStore,
+    // Appends signed by the fresh ladder VM, anchored at the continuation's
+    // own head like the roster store above, invoked under the generation
+    // delegation.
+    storeFor: accountCollectionStores({
+      zcapClient: transientZcapClient,
+      keyAgent: bootstrapAgent,
+      pointer: { did, spaceId, host },
+      pinStore: logPins,
+      log: continuation.log,
+      capability: generationDelegation
+    }),
     rosterDescriptor: postRotation.descriptor,
     clientKeyAgreementKey: standing.agents.keyAgreementKey,
     userKey: newUserKey
@@ -3160,7 +3182,7 @@ export async function revokeRecoveryCode({
 
   // 3. The user key rotation off the code's wrap, recipients resolved from
   // the just-updated document (the pull axis already ran there).
-  const { doc } = await verifiedAccountLog({
+  const { doc, log: postEditLog } = await verifiedAccountLog({
     profile: session.profile,
     pointer
   })
@@ -3195,9 +3217,16 @@ export async function revokeRecoveryCode({
       })
       await cascadeCollectionsToUserKey({
         remoteStore,
+        storeFor: context.collectionStore,
         rosterDescriptor: read.descriptor,
         clientKeyAgreementKey: unwrapKey,
-        userKey: read.userKey
+        userKey: read.userKey,
+        // The post-edit view, stated here rather than left to the memo the
+        // strike invalidated, so every collection append anchors past it.
+        controller: webvhResourceLogController({
+          did: pointer.did,
+          log: postEditLog
+        })
       })
       // The storage half of the adoption, past the fan-out that made the
       // fresh key a recipient of every collection's current epoch: the

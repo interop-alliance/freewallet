@@ -649,10 +649,10 @@ a per-log slot key wallet-core derives (`accountLogPinId` /
 `userKeyRosterPinId`, both `space/<spaceId>/<collection>/<resource>`), so
 two logs cannot clobber each other's pin. The slot key is host-free, so a
 log served from a claimed new host is checked against the pin already held.
-wallet-core also names the slot for a log-governed collection descriptor
-(`collectionDescriptorLogPinId`, `space/<spaceId>/key-map/<collectionId>.jsonl`);
-no collection descriptor in this wallet is log-governed yet, so nothing
-here produces that slot.
+Every encrypted collection's descriptor log takes a slot of its own
+(`collectionDescriptorLogPinId`, `space/<spaceId>/<collectionId>/meta/log`),
+so a visit reading six collections' descriptors holds six pins beside the
+account log's and the roster's (see "Per-collection descriptor logs").
 
 The pin is a property of the store, not an argument of the ceremonies.
 Every did:webvh store this wallet builds carries `persistence.logPins`
@@ -677,8 +677,10 @@ recovery spend holds one store for the whole ceremony (the code's record
 proof, the continuation's two entries, the new passphrase's standing
 establishment, the post-entry re-resolution). The only account-log read
 left on a fresh per-call store is the `/recover` page's locate probe, one
-read with nothing after it in the same session. The roster log's slot is
-separate and its stores keep their own wiring (`sessionRosterStore`).
+read with nothing after it in the same session. The roster log and the
+per-collection descriptor logs keep their own wiring (`sessionRosterStore`,
+and the builders in `src/session/collectionLogStore.ts`). Each takes the
+same pin store under its own slot.
 
 The pin store is in-memory on both persistence strategies
 (`decisions/0012-no-durable-continuity-pins.md`). The rule, stated once here
@@ -1645,6 +1647,127 @@ did:webvh document. It drops any roster entry with no `keyAgreement`
 verification method marked for that client, so a server-injected entry never
 receives a wrap and sits ignored.
 
+## Per-collection descriptor logs
+
+The roster is not the only governed log. Every encrypted collection's
+`encryption` descriptor -- the key-epoch roster carrying its recipients -- is
+governed by a resource log of its own, at the collection's `meta/log`
+sub-resource. wallet-core's `collectionDescriptorLogStore` is the store over
+it, the sibling of the roster's builder. Reads resolve to the verified head,
+writes are signed appends, and a create is the log's genesis.
+
+The verification is the roster's. Entry proofs must be signed by keys the
+independently verified did:webvh document lists under `assertionMethod` at the
+anchored version, and each log pins its chain head in its own slot of the
+visit's keyed pin store (`space/<spaceId>/<collectionId>/meta/log`). That pin
+dies with the tab, like every other (see "Log continuity within a session").
+What the form buys is client-side detection of descriptor tampering. A
+recipient the host inserts into an epoch roster is an entry that either is
+absent or is signed by a key the account document does not list, and a
+rolled-back descriptor fails against the pin. The server's own monotonicity
+checks remain the host's promise about itself.
+
+The placement is the collection's own URL subtree, so the read capability a
+share grantee or a connected app already holds covers the log. Verifying a
+descriptor's history needs no second grant, and no capability over the
+account's `key-map` collection. Being a sub-resource rather than a Resource of
+the collection keeps the log out of listings and the changes feed, so
+replication never ships it as a row. It also keeps the log outside the
+encrypted collection's envelope rule, so it stays plaintext JSON Lines.
+
+**The wallet writes the log alone.** The server derives the Collection
+Description's `encryption` member from the log head. No ceremony writes that
+member, and no `configure` call carries it forward. Provisioning creates an
+encrypted collection bare (`WASRemoteStore.ensureGovernedCollection`, a
+guarded create), and the epoch[0] install through the collection's own store
+is the genesis that declares it governed (`ensureIndexedFirstEpoch`). A re-run
+adopts the standing log, and a lost create race resolves on the collection
+that stands, so exactly one epoch[0] ever exists per collection. A collection
+already carrying a client-written `encryption` member cannot be governed;
+provisioning refuses it rather than meeting the server's own refusal at the
+genesis. The wallet opens a governed log directly, by its placement, rather
+than reading the Description first and following a pointer. Every recipient
+change is one signed full-state append: a share, an unshare, an App Connect
+provisioning, an app revoke, and each collection's rotation in the user key
+cascade.
+
+**The two builders** live in `src/session/collectionLogStore.ts`, mirroring
+the roster's pair. `accountCollectionStores` takes bare parts (a signing
+client, a key agent, an account pointer naming a did:webvh) for callers with
+no session profile: the two geneses, the mend, the login-time epoch install,
+and the recovery continuations. `sessionCollectionStores` serves a live
+session. It resolves the controller view through the profile's verified-log
+memo and reaches each collection through the remote store's handle, so every
+request rides the capability the session holds at call time, the generation
+delegation a transient visit renews mid-run included. Both return a lookup
+keyed by collection id, the seam the epoch installers and the cascade take,
+and both resolve the controller view once per lookup, so a fan-out over six
+collections verifies the account log once.
+`sessionCollectionDescriptorSource` is the read-only counterpart the storage
+layer acquires descriptors through. `StorageManager` holds the pair as
+`DescriptorLogs { source, storeFor }`, built when the account pointer names a
+did:webvh.
+
+**Which key signs** follows the session kind (`descriptorLogSignerAgent`). A
+remembered session signs with the enrolled client's own account key. A
+transient visit's per-visit key stands in no account document, so it signs
+with the login credential's ladder VM, read off the profile at each call since
+a passphrase change restamps the seed. A descriptor log admits a ladder-signed
+append on `assertionMethod` membership alone: the ceremony-tail license binds
+the user key roster log and not these. So no descriptor-writing ceremony
+refuses on the kind of session it runs in.
+
+Three ceremonies name their signer rather than taking the session's. The
+forget ceremony and the last-client transition sign the collection appends
+with the login credential's ladder VM. Their removal entry strikes this
+client's own key, and an append that key signed could not seal the logs behind
+it. The passphrase change signs with the surviving credential's ladder VM, the
+same agent its roster store signs with, since the retiring credential's VM
+leaves the document in the same edit.
+
+Which collections a rotation covers is decided from the same logs. The
+cascade's listing of the Space only enumerates collections; whether a
+collection is encrypted is answered by reading its own governing log, so a
+host omitting the derived `encryption` member for one collection cannot keep
+it out of a rotation and leave it keyed to a retired generation.
+
+**The cascade is these logs' sealing pass.** A document edit that strikes an
+`assertionMethod` key leaves every governed log needing an entry at or past
+the post-edit version, and a collection's log owes that entry exactly as the
+roster's does. So every sealable collection store takes the ceremony's
+post-edit controller view as its minimum controller version, before that
+collection's first append. A store resolving a stale cached view would anchor
+its rotation ahead of the edit and seal nothing, and a ladder-signed append
+there would be refused for naming a version the edit is not in. A rotation
+that appends nothing still seals.
+
+**The read path and the cache.** A descriptor is the verified head of its
+collection's log, read at login and on the unknown-epoch refresh. The
+browser-local descriptor cache holds the last head this browser verified, and
+three cases are handled by name. A verifier refusal (integrity, or a
+continuity refusal other than a rollback) throws rather than falling back to
+the cache, so a descriptor is adopted only from a verified head. A transport
+failure serves the cached copy, and a rollback refusal falls through to it the
+same way. That copy never seeds the visit's pin: a cached pin would outlive
+the tab, and localStorage is same-origin writable, so a forged one could lock
+the user out. A served head listing fewer epochs than
+the cached copy is warned about and then written
+(`regressionWarningCache`). That is the roster's rollback carve-out applied
+here, since the cache is not a continuity pin and a log behind it looks
+exactly like replication lag. The in-memory strategy has no cache, so a
+transient visit offline reads nothing.
+
+The cache stays in localStorage, beside the meta cache and on the session's
+storage tier. Moving it into the `freewallet-session` database would buy
+nothing. IndexedDB is same-origin writable too, and the client-key record's
+integrity comes from its seal under the unlock credential, which an unsealed
+cache beside it would not share.
+
+A session with no did:webvh to verify against holds neither half. Its
+descriptors come from the cache alone, no descriptor write can run, and
+collection key-epoch provisioning is skipped with a warn, since each epoch[0]
+is a log genesis anchored in the account document.
+
 ## The client enrollment ceremony (`@interop/wallet-core/enrollment`)
 
 Connecting a second wallet client (a fresh browser profile) to an existing
@@ -2082,17 +2205,21 @@ signs:
    authority, so the revoked client's entry drops even before the retire
    filter. An account with no roster yet stops here: the document edit
    landed, so the wallet IS disconnected. Before any roster-side work the
-   orchestrator sets the store's controller floor (`setControllerFloor`)
-   from the edit's own post-edit log, so a stale cached controller view (the
-   session's verified-log memo) can anchor neither the rotation nor the
-   sealing append at a head predating the removal. The session hands
-   wallet-core's sealable store over unwrapped, keeping that contract
-   reachable.
+   orchestrator sets the store's minimum controller version
+   (`setMinimumControllerVersion`) from the edit's own post-edit log, so a
+   stale cached controller view (the session's verified-log memo) can anchor
+   neither the rotation nor the sealing append at a head predating the
+   removal. Every collection store the fan-out writes through takes that same
+   view, before its own first append. The session hands wallet-core's
+   sealable store over unwrapped, keeping that contract reachable.
 3. **The epoch cascade**, driven by wallet-core over the collections
    `src/session/userKeyCascade.ts` enumerates: every encrypted collection
    (standard, plus any remotely listed collection whose Description carries
    an encryption descriptor) is re-epoch'd onto the fresh user key in
-   parallel via was-client's `replaceRecipient`, about 2 requests each. The
+   parallel via was-client's `replaceRecipient`, about 2 requests each. Each
+   rotation is a signed append on that collection's governing log, through
+   the store lookup the calling ceremony supplies, so it signs with the key
+   that ceremony is licensed to append with. The
    revoked user key generations retire from the epoch rosters and the fresh
    key escrows into every prior epoch, so every other replica keeps
    decrypting across the rotation. A collection is stale exactly when its
@@ -2359,7 +2486,9 @@ ciphertext, so it is identical on every replica. Page-facing identity stays
 the credential `cid` or activity `id`, recovered by decrypting at read time.
 JWE encryption is nondeterministic, so dedupe keys on that content identity
 rather than on the row id. `public-credentials` is plaintext (public data)
-and keyed directly by `cid`.
+and keyed directly by `cid`. Each encrypted collection's key epochs come from
+the verified head of the collection's own governing log rather than from a
+Description member the host serves (see "Per-collection descriptor logs").
 
 When `VITE_WAS_SERVER_URL` is set and the session is not a guest, a remote
 WAS Space is attached as a **sync target**. `SyncController`
@@ -2637,7 +2766,7 @@ stay unpurged.
 
 Which of the three buckets a row lands in is decided by the error's NAME, never
 by `instanceof`: `isUnknownEpochError` (`@interop/was-client/sync`) and
-`isKeyUnwrapError` (`@interop/wallet-core/descriptors`), the shared predicates
+`isKeyUnwrapError` (on `@interop/was-client/sync` and `/edv`), the shared predicates
 every scan in `browserStore`, `remoteDirectStore`, and `storageManager` calls.
 The cipher is an injected seam, so in a wallet whose `@interop/was-client`
 resolves to a second copy the class it throws is not the class the store
@@ -2736,12 +2865,12 @@ path. The wallet derives the app's recipient key from a public identifier it
 already has; the app derives the private half from its own controller key.
 Both read the collection, and the WAS server only ever stores ciphertext.
 
-Provisioning is idempotent. The collection gets epoch[0] wrapped to the
-owner create-if-absent (`ensureIndexedFirstEpoch` from
-`@interop/wallet-core/keys`, which adopts an existing roster rather than
-overwriting it); a first connect or a reconnect after revoke then escrows
-the app into every epoch (`addRecipient(app)`), and an app already present
-is a no-op. Epoch[0] is minted together with the collection's blinded-index
+Provisioning is idempotent. The collection is created bare, and epoch[0]
+wrapped to the owner lands as its governing log's genesis, create-if-absent
+(`ensureIndexedFirstEpoch` from `@interop/wallet-core/keys`, which adopts an
+existing roster rather than overwriting it); a first connect or a reconnect
+after revoke then escrows the app into every epoch (`addRecipient(app)`, one
+signed append), and an app already present is a no-op. Epoch[0] is minted together with the collection's blinded-index
 HMAC key, wrapped to the same roster, so the app can declare searchable
 attributes and query the collection (was-client's `declareIndex` / `find`).
 That key is installed at provisioning or never: a collection provisioned
@@ -2754,8 +2883,9 @@ opaque encrypted envelope fetched without keys and decrypted by the cipher.
 The schema is cached beside the encryption descriptors and refetched on the
 same unknown-epoch refresh, so an index declared mid-session reaches the
 ciphers at the next refresh or login. The wallet ensures the collection
-exists without clobbering an existing `encryption` descriptor, so an
-established epoch roster is never dropped.
+exists without writing a descriptor of its own, so an established epoch
+roster is never dropped. The descriptor lives in the collection's governing
+log, and provisioning appends only that log's genesis.
 
 Public (`https://w3id.org/byoe#public-collection`) grants stay plaintext and
 world-readable; only private app collections are encrypted. A public grant
@@ -2771,7 +2901,7 @@ explicit consent surface rather than a silent default.
 
 Because the user is recipient zero, the wallet decrypts these collections in
 the storage browser as an ordinary recipient with its vault KAK,
-descriptor-driven from the fetched Collection Description (no seed at read
+descriptor-driven from the collection's governing log (no seed at read
 time). Revoking a connected app rotates the epoch off the app's key for each
 such collection (`removeRecipient`, which rotates then revokes the pull-axis
 grants indivisibly), so a revoked app cannot decrypt future writes;
@@ -2916,7 +3046,8 @@ wallet predating the feature refuses visibly instead of degrading to a
 ciphertext-only read.
 
 **The two axes stay fused.** Pull (a read-only Collection zcap) and read (an
-epoch-key recipient entry) are granted together, by one call to
+epoch-key recipient entry, one signed append on the collection's governing
+log) are granted together, by one call to
 `StorageManager.shareCollection`, which returns the delegated zcap alongside
 the refreshed descriptor so it rides back in the response VP's `zcap` array.
 A share grant therefore bypasses the ordinary delegation loop in
@@ -2967,7 +3098,11 @@ locally with the app's identity key-agreement key: the X25519 twin of its
 own controller DID, exactly what `x25519RecipientFromDidKey` derived
 wallet-side, so both sides land on the same `kid` with nothing on the wire.
 It is the same key an app-provisioned collection admits the app with: one
-recipient identity per app, whoever owns the collection.
+recipient identity per app, whoever owns the collection. The `encryption`
+member it reads is the server's derivation of the collection's governing log
+head. The delegated read zcap covers that log too, so a grantee can verify
+the descriptor's history for itself. was-react reads the derived member
+today.
 
 ## Route map
 
@@ -3085,7 +3220,15 @@ the landed registry drop and the deletes: the entries are gone, so nothing
 names the Spaces again, and no mender can. The residue is inert (the
 credentials' inventory is out of the document and the roster) and is the
 class the account-deletion walk already leaves behind, since that walk is
-registry-driven too.
+registry-driven too. A tenth is the collection descriptor logs behind a
+forget ceremony's removal entry. Both forget grades run their collection
+fan-out before the entry, so every collection append anchors at a version
+that still lists the forgotten client's key, and that key can keep
+appending entries anchored there until a still-listed key appends past the
+removal. An ordinary forget leaves that to the next remembered login's
+sweep; the last-client transition leaves an account nothing seals, since
+the departing client's authority ends at its own entry and the transient
+login runs no collection seal (FW-450).
 
 One more state the credential-keyed ladder VM lifecycle produces is
 recorded here because its design predicted it as a client-less open gap.
@@ -3144,15 +3287,17 @@ cascades, and the permanent wire-level constants.
   - `/clientAnnex` (the ladder, the annex log and its GC, and the
     ladder-anchored ceremonies: credential-anchored genesis, self-enrollment,
     transient recovery). The verify-side halves stay in the base subpaths.
-  - `/keys` (the user key, its wrap-set roster, the client-key record codec,
-    client labels)
+  - `/keys` (the user key, its wrap-set roster, the per-collection
+    descriptor log store, the client-key record codec, client labels)
   - `/keyring` (the unlock layer), `/unlock` (standing unlock credentials,
     the credential rotation and retirement sequence)
   - `/genesis` (the account-genesis key mint and ceremony)
   - `/enrollment`, `/recovery`
   - `/clients` (listing, disconnect policy, the revocation cascade
     orchestrator, the login-time roster policy)
-  - `/descriptors`, `/identity`
+  - `/descriptors` (the log-governed descriptor source and the collection
+    descriptor log's pin slot; the acquisition and refresh policy it once
+    carried is `@interop/was-client/edv`'s), `/identity`
   - `/space` (collection layout, activity builders, `was-link`)
   - `/request` (classification, matching, VP composition, exchanges, the App
     Connect app-key credential)
@@ -3349,8 +3494,10 @@ Containment hierarchy (remote mode): **Space > Collection > Resource**.
   (`key-map/user-key.jsonl`) is the log-governed record whose current epoch
   IS the current user key, wrapped once per enrolled client's key-agreement
   key. A **key-epoch roster** is the per-collection recipient set on an
-  encrypted collection's `encryption` descriptor. All three deliver key
-  material or membership; none is a source of authority on its own.
+  encrypted collection's `encryption` descriptor, itself log-governed by that
+  collection's `meta/log` sub-resource (see "Per-collection descriptor
+  logs"). All three deliver key material or membership; none is a source of
+  authority on its own.
 - **Inventory** -- a credential's or client's set of durable entries in the
   account document, the annex log, or the ladder: its `keyAgreement` entry
   or commitment, its ladder VMs, its committed rung hashes, its annex rung
