@@ -4,6 +4,11 @@
 
 ### Changed
 
+- The Login Credential's inline context takes its `LoginCredential` and
+  `preferredUsername` IRIs from `byoe-context`'s `CONTEXT_V1`
+  (`https://w3id.org/byoe#LoginCredential`), retiring the last
+  `urn:freewallet:vocab#` IRI. Prior Login Credentials no longer verify
+  byte-for-byte; re-set the handle in Settings to re-issue one.
 - `WASRemoteStore.ensureGovernedCollection` is was-client's
   `ensureSpaceAndCollection` with `encryption: 'governed'`, riding the store's
   bound invocation capability through the helper's new `capability` option

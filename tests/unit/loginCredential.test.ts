@@ -69,7 +69,7 @@ describe('issueLoginCredential', () => {
     expect(context[0]).toBe('https://www.w3.org/2018/credentials/v1')
     expect(context[1]).toEqual(
       expect.objectContaining({
-        LoginCredential: 'urn:freewallet:vocab#LoginCredential',
+        LoginCredential: 'https://w3id.org/byoe#LoginCredential',
         preferredUsername:
           'https://www.w3.org/ns/activitystreams#preferredUsername'
       })

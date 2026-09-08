@@ -7,13 +7,15 @@
  *
  * The credential uses an inline `@context` object (legal JSON-LD that canonizes
  * deterministically, no hosted context or document-loader changes): the type
- * term maps to `urn:freewallet:vocab#LoginCredential` and `preferredUsername`
- * to the ActivityStreams IRI. It is a VC 1.0 credential signed with the wallet
+ * term and `preferredUsername` take the IRIs `byoe-context`'s `CONTEXT_V1`
+ * defines for them, the same source the app-key credential's context uses.
+ * It is a VC 1.0 credential signed with the wallet
  * default suite (`Ed25519Signature2020`); `vc.issue` auto-fills `issuanceDate`.
  * A VC 1.0 credential inside a VC 2.0 presentation is fine -- it carries its
  * own context.
  */
 import * as vc from '@interop/vc'
+import { CONTEXT_V1 } from 'byoe-context'
 import { Ed25519Signature2020 } from '@interop/ed25519-signature'
 import type { IVerifiableCredential } from '@interop/data-integrity-core'
 import type { Session } from '@/types/auth'
@@ -33,8 +35,8 @@ export const LOGIN_CREDENTIAL_TYPE = 'LoginCredential'
  */
 const LOGIN_CREDENTIAL_CONTEXT = {
   '@protected': true,
-  LoginCredential: 'urn:freewallet:vocab#LoginCredential',
-  preferredUsername: 'https://www.w3.org/ns/activitystreams#preferredUsername'
+  LoginCredential: CONTEXT_V1['@context'].LoginCredential,
+  preferredUsername: CONTEXT_V1['@context'].preferredUsername
 } as const
 
 const VC_1_CONTEXT_URL = 'https://www.w3.org/2018/credentials/v1'
