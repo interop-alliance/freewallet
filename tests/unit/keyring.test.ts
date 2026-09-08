@@ -8,14 +8,15 @@
  * / `changePassphrase` public contract across the WAS-configured and
  * cache-only branches. The module is method-agnostic -- unlock derivation
  * runs off a generic `{ secret, kdf }` pair (a string passphrase under
- * PBKDF2, or uniform byte material such as a passkey PRF output under HKDF)
+ * Argon2id, or uniform byte material such as a passkey PRF output under HKDF)
  * via the exported `deriveUnlockIdentity` / `bindUnlockSecret` seam, and the
  * passphrase functions are thin wrappers over it; the frozen-vector block
  * pins the production salts. The unlock-Space WAS helpers are replaced by an
  * in-memory fake keyed by unlock Space id; the `freewallet-session`
  * IndexedDB is backed by a minimal in-memory `IDBFactory` (node has no
- * IndexedDB). Tiny PBKDF2 iteration counts keep the derivation fast; the
- * real EDV cipher and CapabilityAgent / X25519 derivations run unmocked.
+ * IndexedDB). Most tests derive under a minimal Argon2id set (64 KiB, one
+ * pass) as a fast stand-in for the production set, which only the
+ * frozen-vector block runs; the real EDV cipher and CapabilityAgent / X25519 derivations run unmocked.
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { CapabilityAgent } from '@interop/webkms-client'
@@ -103,6 +104,7 @@ import {
 import {
   deleteUnlockSpace,
   deriveUnlockIdentity,
+  deriveUnlockSeed,
   ensureUnlockSpace,
   getUnlockKeyring,
   KEYRING_KDF,
@@ -128,9 +130,10 @@ const logPins = memoryResourceLogPinStore()
 
 const KDF = {
   version: 1,
-  algorithm: 'PBKDF2',
-  iterations: 2,
-  hash: 'SHA-256',
+  algorithm: 'Argon2id',
+  memory: 64,
+  passes: 1,
+  parallelism: 1,
   salt: 'freewallet/test/unlock'
 } as const
 const DATA_CONTROLLER = 'did:key:z6MkDataControllerForTests'
@@ -245,27 +248,12 @@ async function putRawSessionEntry({
 
 /**
  * Independently derives the unlock identity (KAK + resolver + Space id) for a
- * passphrase, using the exact steps `src/session/keyring.ts` uses. Lets a test
- * craft records at the right unlock Space and assert derivation determinism.
+ * passphrase: the shared seed derivation, then the exact seed-to-identity
+ * steps `src/session/keyring.ts` uses. Lets a test craft records at the right
+ * unlock Space and assert derivation determinism.
  */
 async function unlockFor(passphrase: string) {
-  const baseKey = await crypto.subtle.importKey(
-    'raw',
-    new TextEncoder().encode(passphrase),
-    'PBKDF2',
-    false,
-    ['deriveBits']
-  )
-  const bits = await crypto.subtle.deriveBits(
-    {
-      name: 'PBKDF2',
-      salt: new TextEncoder().encode(KDF.salt),
-      iterations: KDF.iterations,
-      hash: KDF.hash
-    },
-    baseKey,
-    256
-  )
+  const bits = await deriveUnlockSeed({ secret: passphrase, kdf: KDF })
   const agent = await CapabilityAgent.fromSeed({
     seed: new Uint8Array(bits),
     handle: 'unlock',
@@ -2136,15 +2124,16 @@ describe('deriveUnlockIdentity (method-agnostic derivation)', () => {
       fixedSecret[index] = (index * 7 + 3) & 0xff
     }
 
-    it('derives different Spaces under PBKDF2 vs HKDF for the same input (equal salts)', async () => {
+    it('derives different Spaces under Argon2id vs HKDF for the same input (equal salts)', async () => {
       const sharedSalt = 'freewallet/test/shared-salt'
-      const pbkdf2 = await deriveUnlockIdentity({
+      const argon2id = await deriveUnlockIdentity({
         secret: fixedSecret,
         kdf: {
           version: 1,
-          algorithm: 'PBKDF2',
-          iterations: 2,
-          hash: 'SHA-256',
+          algorithm: 'Argon2id',
+          memory: 64,
+          passes: 1,
+          parallelism: 1,
           salt: sharedSalt
         }
       })
@@ -2158,7 +2147,7 @@ describe('deriveUnlockIdentity (method-agnostic derivation)', () => {
           info: 'freewallet/test/info'
         }
       })
-      expect(hkdf.spaceId).not.toBe(pbkdf2.spaceId)
+      expect(hkdf.spaceId).not.toBe(argon2id.spaceId)
     })
 
     it('derives different Spaces under two HKDF kdfs differing only in salt', async () => {

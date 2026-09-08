@@ -23,7 +23,7 @@ import { fillSettled, forceRememberBrowser, signupViaWizard } from './helpers'
  * a non-remembered browser is the transient variant, whose cell is pinned in
  * `recovery-transient.spec.ts`.
  *
- * Several PBKDF2 unlock derivations run across the flow on top of a full
+ * Several Argon2id unlock derivations run across the flow on top of a full
  * signup -- hence `test.slow()` and the generous timeouts.
  */
 
@@ -96,7 +96,7 @@ test.describe('Recovery codes', () => {
     page,
     browser
   }, testInfo) => {
-    // Beyond test.slow(): a signup plus five PBKDF2 logins plus the whole
+    // Beyond test.slow(): a signup plus five Argon2id logins plus the whole
     // ceremony run in one spec.
     test.setTimeout(360_000)
 

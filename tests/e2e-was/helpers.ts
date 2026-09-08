@@ -70,7 +70,7 @@ export async function signupViaWizard(
   await page.getByRole('button', { name: 'Next' }).click()
   await expect(page).toHaveURL(/#\/signup\?.*step=storage/)
   await page.getByRole('button', { name: 'Create Wallet' }).click()
-  // Signup binds the keyring (a deliberately slow PBKDF2 derivation) on top of
+  // Signup binds the keyring (a deliberately slow Argon2id derivation) on top of
   // the KMS keystore and did:web/did:webvh provisioning, so the redirect to the
   // dashboard can run past the default 5s assertion timeout.
   await expect(page).toHaveURL(/#\/dashboard/, { timeout: 30_000 })

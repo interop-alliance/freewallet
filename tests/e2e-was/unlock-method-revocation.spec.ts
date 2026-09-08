@@ -25,7 +25,7 @@ import { fillSettled, forceRememberBrowser, signupViaWizard } from './helpers'
  *    client -- whose account's original client key no longer exists -- revokes
  *    the replacement code from its own Settings.
  *
- * A signup, several PBKDF2 unlock derivations, an enrollment ceremony, and a
+ * A signup, several Argon2id unlock derivations, an enrollment ceremony, and a
  * full recovery ceremony run per test, hence the generous per-test timeouts.
  */
 
@@ -209,7 +209,7 @@ test.describe('Unlock-method revocation from another client', () => {
     page,
     browser
   }, testInfo) => {
-    // Beyond test.slow(): a signup, four PBKDF2 logins, a passkey
+    // Beyond test.slow(): a signup, four Argon2id logins, a passkey
     // registration, the enrollment ceremony, and two revocations in one spec.
     test.setTimeout(480_000)
 
@@ -302,7 +302,7 @@ test.describe('Unlock-method revocation from another client', () => {
     page,
     browser
   }, testInfo) => {
-    // A signup, several PBKDF2 logins, the whole recovery ceremony, and the
+    // A signup, several Argon2id logins, the whole recovery ceremony, and the
     // revocation in one spec.
     test.setTimeout(480_000)
 

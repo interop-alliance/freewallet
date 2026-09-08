@@ -17,7 +17,7 @@ import {
  * cascade, the list updates, and the disconnected browser's next login is
  * refused.
  *
- * PBKDF2 unlock derivations run several times across the ceremonies, on top
+ * Argon2id unlock derivations run several times across the ceremonies, on top
  * of a full signup -- hence `test.slow()` and the generous timeouts.
  */
 

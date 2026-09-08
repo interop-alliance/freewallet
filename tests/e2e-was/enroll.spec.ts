@@ -19,7 +19,7 @@ import { fillSettled, forceRememberBrowser, signupViaWizard } from './helpers'
  * world-readable log, and the credential's own inventory stands untouched for
  * the next fresh browser.
  *
- * PBKDF2 unlock derivations run several times across the flow, on top of a
+ * Argon2id unlock derivations run several times across the flow, on top of a
  * full signup -- hence `test.slow()` and the generous timeouts.
  */
 

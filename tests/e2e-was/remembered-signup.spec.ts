@@ -8,7 +8,7 @@
  * a credential stores, and a reload-then-login proves the client-key record
  * persisted (a remembered browser's default login is remembered).
  *
- * PBKDF2 unlock derivations and the four-entry ceremony chain make this a
+ * Argon2id unlock derivations and the four-entry ceremony chain make this a
  * slow spec.
  */
 import { test, expect, type Page } from '@playwright/test'

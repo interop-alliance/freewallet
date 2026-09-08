@@ -22,7 +22,7 @@ import {
  *
  * Lesson from `clients.spec.ts`: `page.reload()` logs out (sessions are
  * in-memory), so panels are remounted by navigating `#/dashboard` and back.
- * PBKDF2 unlock derivations run several times across the ceremonies --
+ * Argon2id unlock derivations run several times across the ceremonies --
  * hence `test.slow()` and the generous timeouts.
  */
 

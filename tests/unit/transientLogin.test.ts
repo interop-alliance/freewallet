@@ -141,7 +141,13 @@ const noStandingIsNotAReason: 'no-standing' extends TransientLoginUnavailableRea
   : true = true
 void noStandingIsNotAReason
 
-const KDF = { algorithm: 'PBKDF2', iterations: 1, version: 1 } as never
+const KDF = {
+  algorithm: 'Argon2id',
+  memory: 64,
+  passes: 1,
+  parallelism: 1,
+  version: 1
+} as never
 const CREDENTIAL = {
   unlock: { spaceId: 'unlock-space-1' },
   standing: {}

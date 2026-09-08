@@ -199,7 +199,8 @@ export const DEFAULT_CLIENT_LABEL = 'Freewallet'
 /**
  * HKDF parameters for the passkey unlock derivation
  * (`unlockSeed = HKDF(prfOutput)`). The WebAuthn PRF output is uniform
- * 32-byte key material, so no PBKDF2-style stretching is needed. The salt
+ * 32-byte key material, so no memory-hard stretching (the passphrase's
+ * Argon2id) is needed. The salt
  * differs from every other unlock method's salt (two methods must never
  * derive the same unlock Space); as with `KEYRING_KDF`, `version` pins the
  * parameter set.
