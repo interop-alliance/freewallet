@@ -4,6 +4,17 @@
 
 ### Changed
 
+- **Breaking:** the passphrase unlock derivation is Argon2id (wallet-core
+  0.70.0's `KEYRING_KDF`: 64 MiB memory, 3 passes, parallelism 1, 32-byte
+  output, salt `freewallet/keyring/unlock/argon2id/v1`, passphrase version 2).
+  PBKDF2-600k is replaced outright, with no try-both locate: a passphrase
+  account bound before this release cannot be entered by passphrase, since
+  its unlock Space is addressed by the PBKDF2-derived identity. Passkeys and
+  recovery codes are unaffected.
+- `PassphraseUnlockMethod` carries a required `kdfVersion`, the `KEYRING_KDF`
+  version the passphrase derives under, stamped by every registry write of
+  the entry (signup, add or change passphrase, the recovery tails, the
+  login-time backfill).
 - The Login Credential's inline context takes its `LoginCredential` and
   `preferredUsername` IRIs from `byoe-context`'s `CONTEXT_V1`
   (`https://w3id.org/byoe#LoginCredential`), retiring the last

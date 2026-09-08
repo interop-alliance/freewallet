@@ -3,7 +3,7 @@ import { fillSettled, forceRememberBrowser, signupViaWizard } from './helpers'
 
 /**
  * Keyring v2 e2e (WAS mode). A login derives an unlock identity from the
- * passphrase (PBKDF2), locates the account-pointer keyring record in the
+ * passphrase (Argon2id), locates the account-pointer keyring record in the
  * unlock identity's own WAS Space, and unwraps this client's LOCAL key set
  * (the `freewallet-session` client-key record) to build the session -- the
  * account is never reconstructed from the passphrase. Signup binds this
@@ -28,10 +28,10 @@ import { fillSettled, forceRememberBrowser, signupViaWizard } from './helpers'
  *    with its change form.
  * 4. Guests are untouched: guest login works and shows no Passphrase section.
  *
- * The PBKDF2 unlock derivation is deliberately slow (see `KEYRING_KDF`), so
- * every login costs a visible fraction of a second on top of the KMS and DID
- * provisioning a signup already does -- hence the generous timeouts and
- * `test.slow()` throughout.
+ * The Argon2id unlock derivation is deliberately memory-hard and slow (see
+ * `KEYRING_KDF`), so every login costs a visible fraction of a second on top
+ * of the KMS and DID provisioning a signup already does -- hence the generous
+ * timeouts and `test.slow()` throughout.
  */
 
 // Matches `playwright.was.config.ts` (APP_PORT). Manually created contexts do
@@ -55,7 +55,7 @@ async function readSpaceId(page: Page): Promise<string | undefined> {
 
 /**
  * Logs in with a passphrase through the standard login form and waits for the
- * dashboard. Generous timeout: the PBKDF2 unlock derivation plus the remote
+ * dashboard. Generous timeout: the Argon2id unlock derivation plus the remote
  * keyring fetch and session provisioning can run past the default assertion
  * timeout under load.
  *

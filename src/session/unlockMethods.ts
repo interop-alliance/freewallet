@@ -80,7 +80,10 @@ import { deleteUnlockLocalState } from '@/lib/sessionKey'
 import { createLogger } from '@/lib/log'
 
 const log = createLogger('fw:session:methods')
-import { deleteUnlockSpaceWithCapability } from '@interop/wallet-core/keyring'
+import {
+  deleteUnlockSpaceWithCapability,
+  KEYRING_KDF
+} from '@interop/wallet-core/keyring'
 import {
   DELETION_ZCAP_TTL_MS,
   mintSpaceVerbCapability
@@ -127,12 +130,15 @@ export interface StandingUnlockFields {
  * bind-time inventory ceremony; a passphrase's `keyAgreement` key is published
  * as a hash commitment (never the key verbatim -- a low-entropy-derived
  * public key in the world-readable document would be an offline grind
- * oracle).
+ * oracle). `kdfVersion` is the `KEYRING_KDF` version the passphrase derives
+ * under (the parameter set, one counter per unlock method), so a reader can
+ * tell the KDF families apart without the parameter object.
  */
 export interface PassphraseUnlockMethod extends StandingUnlockFields {
   type: 'passphrase'
   createdAt: string
   unlockSpaceId: string
+  kdfVersion: number
   manageCapability?: IZcap
 }
 
@@ -1677,15 +1683,19 @@ export function upsertPassphraseUnlockMethod({
       type: _type,
       createdAt: _createdAt,
       unlockSpaceId: _spaceId,
+      kdfVersion: _kdfVersion,
       manageCapability: _manageCapability,
       ...standingMembers
     } = existing
     carried = standingMembers
   }
+  // Every caller either just bound the passphrase under `KEYRING_KDF` or just
+  // derived under it to log in, so the entry always records that set.
   const entry: PassphraseUnlockMethod = {
     type: 'passphrase',
     createdAt: existing?.createdAt ?? new Date().toISOString(),
     unlockSpaceId,
+    kdfVersion: KEYRING_KDF.version,
     ...(manageCapability || keepAbsentManageCapability
       ? { manageCapability }
       : {}),

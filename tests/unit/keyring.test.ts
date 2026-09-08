@@ -2099,16 +2099,18 @@ describe('deriveUnlockIdentity (method-agnostic derivation)', () => {
    * value to blindly update.
    */
   describe('frozen derivation vectors', () => {
-    it('pins the passphrase (PBKDF2) unlock Space under the real KEYRING_KDF', async () => {
+    it('pins the passphrase (Argon2id) unlock Space under the real KEYRING_KDF', async () => {
+      // Re-pinned when passphrase version 2 replaced the PBKDF2-600k set
+      // outright (wallet-core 0.70.0); the version 1 vector is gone with it.
       const { agent, spaceId } = await deriveUnlockIdentity({
         secret: 'freewallet test vector passphrase',
         kdf: KEYRING_KDF
       })
       expect(agent.id).toBe(
-        'did:key:z6Mku4aGYK4PLysHqrpUNzoNbiu4ixzAEUEkefqamgFwY6vD'
+        'did:key:z6MkqojacRDqmQgDi4ESKKhGDqnZx4C6cChAbQZXvnUFX7D7'
       )
-      expect(spaceId).toBe('PVkVUyJ24oyQh2BebkeUOygDfR5opfhJhG4KkMYTlzU')
-    })
+      expect(spaceId).toBe('3KZrAhVTNPi2KpeoT6xuUIMeiePavhtnCRv6fVfIn3U')
+    }, 30_000)
 
     it('pins the passkey (HKDF) unlock Space under the real PASSKEY_KDF', async () => {
       const secret = new Uint8Array(32)

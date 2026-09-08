@@ -1772,6 +1772,7 @@ describe('backfillPassphraseUnlockMethod', () => {
     const existing: PassphraseUnlockMethod = {
       type: 'passphrase',
       createdAt: '2026-01-01T00:00:00.000Z',
+      kdfVersion: 2,
       unlockSpaceId: 'old-ps-space'
     }
     await seedRegistry({
@@ -1803,6 +1804,7 @@ describe('backfillPassphraseUnlockMethod', () => {
     const existing: PassphraseUnlockMethod = {
       type: 'passphrase',
       createdAt: '2026-01-01T00:00:00.000Z',
+      kdfVersion: 2,
       unlockSpaceId: 'ps-space',
       manageCapability: capExpiringIn({ msFromNow: 1000 })
     }
@@ -1841,6 +1843,7 @@ describe('backfillPassphraseUnlockMethod', () => {
           {
             type: 'passphrase',
             createdAt: '2026-01-01T00:00:00.000Z',
+            kdfVersion: 2,
             unlockSpaceId: 'ps-space',
             manageCapability: stored
           }
@@ -1935,6 +1938,7 @@ describe('backfillPassphraseUnlockMethod', () => {
           {
             type: 'passphrase',
             createdAt: '2026-01-01T00:00:00.000Z',
+            kdfVersion: 2,
             unlockSpaceId: 'ps-space',
             manageCapability: capExpiringIn({
               msFromNow: 1000,
@@ -1982,6 +1986,7 @@ describe('backfillPassphraseUnlockMethod', () => {
           {
             type: 'passphrase',
             createdAt: '2026-01-01T00:00:00.000Z',
+            kdfVersion: 2,
             unlockSpaceId: 'ps-space',
             manageCapability: stored
           }
@@ -2057,6 +2062,7 @@ describe('backfillPassphraseUnlockMethod', () => {
           {
             type: 'passphrase',
             createdAt: '2026-01-01T00:00:00.000Z',
+            kdfVersion: 2,
             unlockSpaceId: 'ps-space',
             manageCapability: capExpiringIn({
               msFromNow: 1000,
@@ -2100,6 +2106,7 @@ describe('backfillPassphraseUnlockMethod', () => {
           {
             type: 'passphrase',
             createdAt: '2026-01-01T00:00:00.000Z',
+            kdfVersion: 2,
             unlockSpaceId: 'ps-space',
             manageCapability: stored
           }
@@ -2177,6 +2184,7 @@ describe('backfillPassphraseUnlockMethod', () => {
           {
             type: 'passphrase',
             createdAt: '2026-01-01T00:00:00.000Z',
+            kdfVersion: 2,
             unlockSpaceId: 'ps-space',
             manageCapability: capExpiringIn({
               msFromNow: ONE_YEAR_MS / 2,

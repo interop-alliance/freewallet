@@ -23,7 +23,7 @@ import { signupViaWizard } from './helpers'
  * consent panel then drives the real `approveEnrollment`, and the enrollee
  * completes the ceremony against the published log.
  *
- * PBKDF2 unlock derivations and the two did:webvh log entries run on top of a
+ * Argon2id unlock derivations and the two did:webvh log entries run on top of a
  * full signup -- hence `test.slow()` and the generous timeouts. The card polls
  * the exchange every three seconds, so every assertion that waits on a
  * round trip allows several poll ticks.

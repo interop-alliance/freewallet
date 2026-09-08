@@ -167,6 +167,7 @@ function sampleRecord(): UnlockMethodsRecord {
       {
         type: 'passphrase',
         createdAt: '2026-08-01T00:00:00.000Z',
+        kdfVersion: 2,
         unlockSpaceId: 'unlock-space-abc'
       }
     ]
