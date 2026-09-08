@@ -131,6 +131,13 @@
 
 ### Fixed
 
+- The contacts cipher is was-client's self-refreshing one
+  (`createRefreshingEdvDocCipher`), primed with the descriptor the session
+  already acquired so the build reads nothing. A contacts head conflict is
+  settled inside the sync driver's conflict handler, out of reach of the
+  session's read-level refresh guard, so a side sealed under an epoch another
+  client rotated to counted as undecryptable and was adopted unread. The
+  cipher now re-reads the descriptor once and retries before that verdict.
 - An accepted push writes its acked revision back into the local row, so two
   conditional writes to one row between pulls no longer send a stale
   `If-Match` and draw a spurious conflict. Inherited from the package's push

@@ -34,7 +34,11 @@ import type {
 } from '@interop/data-integrity-core'
 import { generateZcapUri } from '@interop/ezcap'
 import type { ZcapClient } from '@interop/ezcap'
-import type { ContactData, ContactRevisionPayload } from '@interop/social-core'
+import {
+  CONTACTS_COLLECTION,
+  type ContactData,
+  type ContactRevisionPayload
+} from '@interop/social-core'
 import type { RxCollection, RxStorage } from 'rxdb/plugins/core'
 import {
   ValidationError,
@@ -64,6 +68,7 @@ import {
 import type { ControllerProfile, User } from '@/types/auth'
 import { cidFrom } from '@interop/was-client/sync'
 import { classifyDecryptFailure } from '@/lib/decryptFailure'
+import { refreshingCollectionCipher } from '@/stores/refreshingCollectionCipher'
 import {
   ENCRYPTED_STANDARD_COLLECTIONS,
   RP_ZCAP_TTL_MS,
@@ -805,18 +810,26 @@ export class StorageManager {
    *   collection whose descriptor declares a blinded-index key gets its
    *   persisted index schema installed from it, so wallet writes carry the
    *   same blinded `indexed` entries a Collection-handle write does
+   * @param [options.refresh] {object}   the descriptor source and cache the
+   *   contacts cipher's own unknown-epoch refresh re-reads through; absent
+   *   when the session has no remote Space
    * @returns {Promise<Record<string, DocCipher>>}
    */
   static async #buildCiphers({
     keyAgreementKey,
     keyResolver,
     descriptors,
-    metas
+    metas,
+    refresh
   }: {
     keyAgreementKey: IKeyAgreementKey
     keyResolver: IKeyResolver
     descriptors?: Record<string, CollectionEncryption>
     metas?: Record<string, { custom?: unknown }>
+    refresh?: {
+      source?: EncryptionDescriptorSource
+      cache: EncryptionDescriptorCache
+    }
   }) {
     const cipherEntries = await Promise.all(
       ENCRYPTED_STANDARD_COLLECTIONS.map(collection =>
@@ -825,7 +838,8 @@ export class StorageManager {
           keyAgreementKey,
           keyResolver,
           descriptor: descriptors?.[collection.id],
-          meta: metas?.[collection.id]
+          meta: metas?.[collection.id],
+          refresh
         })
       )
     )
@@ -847,6 +861,8 @@ export class StorageManager {
    * @param options.keyResolver {IKeyResolver}
    * @param [options.descriptor] {CollectionEncryption}
    * @param [options.meta] {object}   the collection's stored `/meta` value
+   * @param [options.refresh] {object}   the descriptor source and cache the
+   *   contacts cipher's own unknown-epoch refresh re-reads through
    * @returns {Promise<[string, DocCipher]>}
    */
   static async #buildCipher({
@@ -854,13 +870,18 @@ export class StorageManager {
     keyAgreementKey,
     keyResolver,
     descriptor,
-    meta
+    meta,
+    refresh
   }: {
     collection: (typeof ENCRYPTED_STANDARD_COLLECTIONS)[number]
     keyAgreementKey: IKeyAgreementKey
     keyResolver: IKeyResolver
     descriptor?: CollectionEncryption
     meta?: { custom?: unknown }
+    refresh?: {
+      source?: EncryptionDescriptorSource
+      cache: EncryptionDescriptorCache
+    }
   }): Promise<[string, DocCipher]> {
     // Every encrypted collection carries its key epochs from
     // provisioning, so a missing (or epoch-less) descriptor -- an
@@ -872,6 +893,23 @@ export class StorageManager {
     // whole rebuild throw, taking the healthy collections down with it.
     if (!descriptor?.epochs?.length) {
       return [key, StorageManager.#refusingCipher({ collectionId: id })]
+    }
+    // The contacts head is decrypted inside the sync driver's conflict
+    // handler, out of reach of the session's read-level refresh guard, so
+    // its cipher carries the unknown-epoch refresh itself. It declares no
+    // blinded index, so the index-schema install below has nothing to
+    // apply to it.
+    if (id === CONTACTS_COLLECTION) {
+      const cipher = await refreshingCollectionCipher({
+        collectionId: id,
+        idDerivation,
+        descriptor,
+        keyAgreementKey,
+        keyResolver,
+        ...refresh,
+        onFetchError: warnDescriptorFetchError
+      })
+      return [key, cipher]
     }
     const cipher = await createEdvDocCipher({
       keyAgreementKey,
@@ -960,6 +998,23 @@ export class StorageManager {
   }
 
   /**
+   * The descriptor source and cache a self-refreshing cipher re-reads
+   * through, resolved at each build since a login-time genesis can promote
+   * the account after the session was built. Absent without a remote Space.
+   *
+   * @returns {object | undefined}
+   */
+  #cipherRefresh():
+    | { source?: EncryptionDescriptorSource; cache: EncryptionDescriptorCache }
+    | undefined {
+    if (!this.#descriptorCache) {
+      return undefined
+    }
+    const source = this.#descriptorLogsFor()?.source
+    return { ...(source ? { source } : {}), cache: this.#descriptorCache }
+  }
+
+  /**
    * Rebuilds the per-collection ciphers from the current descriptors and the held
    * vault keys, then swaps them into the local store (and this facade). No-op
    * without vault keys.
@@ -974,7 +1029,8 @@ export class StorageManager {
       keyAgreementKey: this.#vaultKeys.keyAgreementKey,
       keyResolver: this.#vaultKeys.keyResolver,
       descriptors: this.#descriptors,
-      metas: this.#metas
+      metas: this.#metas,
+      refresh: this.#cipherRefresh()
     })
     this.#ciphers = ciphers
     // Swap into the active backend (the local store in the normal case, the
@@ -1015,7 +1071,8 @@ export class StorageManager {
       keyAgreementKey: this.#vaultKeys.keyAgreementKey,
       keyResolver: this.#vaultKeys.keyResolver,
       descriptor: this.#descriptors[collectionId],
-      meta: this.#metas[collectionId]
+      meta: this.#metas[collectionId],
+      refresh: this.#cipherRefresh()
     })
     this.#ciphers = { ...this.#ciphers, [key]: cipher }
     this.#store.setCiphers(this.#ciphers)
@@ -1239,32 +1296,36 @@ export class StorageManager {
         'The account pointer names no did:webvh; encryption descriptors are served from the cache alone'
       )
     }
-    const [descriptors, metas] = remoteStore
-      ? await Promise.all([
-          acquireDescriptors({
-            ...(descriptorLogs ? { source: descriptorLogs.source } : {}),
-            // The same handle-memoized instance the constructor binds below
-            // (one cache pair per session in both variants), seeding the
-            // in-memory pair at login in a transient session.
-            cache: regressionWarningCache(
-              persistence.descriptorCache({ scope: remoteStore.spaceId })
-            ),
-            collectionIds: ENCRYPTED_COLLECTION_IDS,
-            onFetchError: warnDescriptorFetchError
-          }),
-          acquireCollectionMetas({
-            source: remoteStore,
-            cache: persistence.metaCache({ scope: remoteStore.spaceId }),
-            collectionIds: ENCRYPTED_COLLECTION_IDS
-          })
-        ])
-      : [
-          await localOnlyDescriptors({
-            cache: persistence.descriptorCache({ scope: `local:${user.id}` }),
-            keyAgreementKey
-          }),
-          {}
-        ]
+    // The same handle-memoized instance the constructor binds below (one
+    // cache pair per session in both variants), seeding the in-memory pair
+    // at login in a transient session.
+    const descriptorCache = remoteStore
+      ? regressionWarningCache(
+          persistence.descriptorCache({ scope: remoteStore.spaceId })
+        )
+      : undefined
+    const [descriptors, metas] =
+      remoteStore && descriptorCache
+        ? await Promise.all([
+            acquireDescriptors({
+              ...(descriptorLogs ? { source: descriptorLogs.source } : {}),
+              cache: descriptorCache,
+              collectionIds: ENCRYPTED_COLLECTION_IDS,
+              onFetchError: warnDescriptorFetchError
+            }),
+            acquireCollectionMetas({
+              source: remoteStore,
+              cache: persistence.metaCache({ scope: remoteStore.spaceId }),
+              collectionIds: ENCRYPTED_COLLECTION_IDS
+            })
+          ])
+        : [
+            await localOnlyDescriptors({
+              cache: persistence.descriptorCache({ scope: `local:${user.id}` }),
+              keyAgreementKey
+            }),
+            {}
+          ]
 
     // One document cipher per encrypted collection, built from the session's
     // passphrase-derived key material (guests included -- their random secret
@@ -1276,7 +1337,15 @@ export class StorageManager {
       keyAgreementKey,
       keyResolver,
       descriptors,
-      metas
+      metas,
+      ...(descriptorCache
+        ? {
+            refresh: {
+              ...(descriptorLogs ? { source: descriptorLogs.source } : {}),
+              cache: descriptorCache
+            }
+          }
+        : {})
     })
 
     // The local store is the active replica -- for a session on the

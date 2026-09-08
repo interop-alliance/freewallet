@@ -3318,7 +3318,12 @@ cascades, and the permanent wire-level constants.
   around it: the session binding in `stores/syncController.ts` (the gate, the
   port, the status store, the browser reachability source), the contacts
   decision closure in `stores/contactsConflictHandler.ts`, and the writer-id
-  key prefix and storage in `lib/writerId.ts`.
+  key prefix and storage in `lib/writerId.ts`. The driver runs no
+  unknown-epoch refresh of its own, so the contacts cipher the closure reads
+  is was-client's self-refreshing one (`stores/refreshingCollectionCipher.ts`,
+  primed with the descriptor the session acquired at login): a conflict side
+  sealed under an epoch another client rotated to is re-read once before it
+  counts as undecryptable.
 - **`@interop/vh-resource-log`** -- the Resource Log Profile's generic
   client side: chain verification, the chain-head pin port
   (`ResourceLogPinStore`, `ResourceLogHeadPin`, `memoryResourceLogPinStore`)
