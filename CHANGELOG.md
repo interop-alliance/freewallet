@@ -4,6 +4,11 @@
 
 ### Changed
 
+- The `CollectionShare` and `CollectionUnshare` activities come from
+  `@interop/wallet-core`'s `addHistoryCollectionShared` /
+  `addHistoryCollectionUnshared` builders instead of inline literals. The
+  emitted payloads are byte-identical.
+
 - The keyring session functions no longer default `kdf` to `KEYRING_KDF`.
   `bindPassphrase`, `verifyPassphrase`, `deleteKeyring`, and
   `changePassphrase` require it, and `fetchKeyring` / `fetchTransientKeyring`

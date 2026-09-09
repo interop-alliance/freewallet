@@ -129,7 +129,6 @@ import { EXTERNAL_REQUEST_ORIGIN } from '@/lib/walletRequest/externalRequest'
 import type { CredentialActivityVerb } from '@/lib/historyActivity'
 import { uuidv7 } from 'uuidv7'
 import {
-  ACTIVITY_TYPE,
   addHistoryNewAccount as buildHistoryNewAccount,
   addHistorySpaceCreated as buildHistorySpaceCreated,
   addHistoryCredentialCreated as buildHistoryCredentialCreated,
@@ -142,6 +141,8 @@ import {
   addHistoryAgentRevoke as buildHistoryAgentRevoke,
   addHistoryClientRevoked as buildHistoryClientRevoked,
   addHistoryGenerationCollected as buildHistoryGenerationCollected,
+  addHistoryCollectionShared as buildHistoryCollectionShared,
+  addHistoryCollectionUnshared as buildHistoryCollectionUnshared,
   type WalletActivity
 } from '@interop/wallet-core/space'
 import { createLogger, stageTimer } from '@/lib/log'
@@ -3598,21 +3599,18 @@ export class StorageManager {
 
     // Record the share -- the full delegated zcap document is the revocation
     // hook `unshareCollection` reads back.
-    await this.#recordActivity(id => ({
-      id,
-      type: [ACTIVITY_TYPE.CollectionShare],
-      summary: `Shared collection "${collectionId}" with ${controller}.`,
-      actor: { email: user.email },
-      object: {
+    await this.#recordActivity(id =>
+      buildHistoryCollectionShared({
+        user,
         collectionId,
         recipientId: recipient.id,
         controller,
         zcap,
         expires: expiresAt.toISOString(),
-        ...(app && { appName: app.name, appOrigin: app.origin })
-      },
-      created: new Date().toISOString()
-    }))
+        app,
+        id
+      })
+    )
 
     // Update the descriptor cache and rebuild + swap the ciphers under it.
     await this.#adoptCollectionDescriptor({
@@ -3683,14 +3681,9 @@ export class StorageManager {
       revoke
     })
 
-    await this.#recordActivity(id => ({
-      id,
-      type: [ACTIVITY_TYPE.CollectionUnshare],
-      summary: `Stopped sharing collection "${collectionId}".`,
-      actor: { email: user.email },
-      object: { collectionId, recipientId },
-      created: new Date().toISOString()
-    }))
+    await this.#recordActivity(id =>
+      buildHistoryCollectionUnshared({ user, collectionId, recipientId, id })
+    )
 
     await this.#adoptCollectionDescriptor({
       collectionId,
