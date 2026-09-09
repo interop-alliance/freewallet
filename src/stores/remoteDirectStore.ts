@@ -994,24 +994,24 @@ export class RemoteDirectStore implements SyncedCollectionStore {
         writerId,
         contact
       }
-      // Re-encrypt in place through the cipher's update path when the prior
-      // body is an envelope: it keeps the row's existing id verbatim and
-      // advances the EDV `sequence` from the prior envelope. A plaintext
-      // (legacy) prior row falls back to a fresh encrypt written under the
-      // same row id -- `encryptUpdate` needs a prior envelope to advance from.
-      let body: Json
-      let epoch: string | undefined
-      if (cipher.encryptUpdate && isEncryptedEnvelope(data)) {
-        ;({ envelope: body, epoch } = await cipher.encryptUpdate({
-          id,
-          data: head as unknown as Json,
-          current: data
-        }))
-      } else {
-        ;({ envelope: body, epoch } = await cipher.encrypt({
-          data: head as unknown as Json
-        }))
+      // Re-encrypt in place through the cipher's update path: it keeps the
+      // row's existing id verbatim and advances the EDV `sequence` from the
+      // prior envelope. A plaintext (legacy) prior body is refused: a fresh
+      // `encrypt` would mint its own id and bind it as `was.resource` while
+      // the write goes to this row id, an envelope a Collection-handle read
+      // refuses as swapped.
+      if (!cipher.encryptUpdate || !isEncryptedEnvelope(data)) {
+        throw new Error(
+          `Cannot update contact "${id}": its stored head is not an ` +
+            'encrypted envelope, so it cannot be re-encrypted under its own ' +
+            'row id.'
+        )
       }
+      const { envelope: body, epoch } = await cipher.encryptUpdate({
+        id,
+        data: head as unknown as Json,
+        current: data
+      })
       try {
         await this.#remote.putSyncedResource({
           logicalKey: 'contacts',

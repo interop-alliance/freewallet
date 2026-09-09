@@ -1516,28 +1516,36 @@ export class BrowserStore {
     // existing id verbatim (binding the envelope to the true resource id --
     // including a legacy uuid row id) and advances the EDV `sequence` from the
     // prior envelope, then re-stamp the epoch so replication pushes the current
-    // `Key-Epoch` for the rewritten body. A plaintext prior row (or no
-    // cipher) falls back to the inserters' encrypt seam -- `encryptUpdate`
-    // needs a prior envelope to advance from.
-    if (cipherForRead?.encryptUpdate && isEncryptedEnvelope(data)) {
-      const { envelope, epoch } = await cipherForRead.encryptUpdate({
-        id,
-        data: head as unknown as Json,
-        current: data!
-      })
+    // `Key-Epoch` for the rewritten body. With no cipher the head stays
+    // plaintext. A cipher over a plaintext prior row is refused: a fresh
+    // `encrypt` would mint its own id and bind it as `was.resource` while the
+    // write goes to this row id, an envelope a Collection-handle read refuses
+    // as swapped.
+    if (!cipherForRead) {
       await this.#updateDoc({
         logicalKey: 'contacts',
         id,
-        data: envelope,
-        epoch
-      })
-    } else {
-      const { body, epoch } = await this.#encrypt({
-        logicalKey: 'contacts',
         data: head as unknown as Json
       })
-      await this.#updateDoc({ logicalKey: 'contacts', id, data: body, epoch })
+      return { id, contactId, contact, updatedAt }
     }
+    if (!cipherForRead.encryptUpdate || !isEncryptedEnvelope(data)) {
+      throw new Error(
+        `Cannot update contact "${id}": its stored head is not an encrypted ` +
+          'envelope, so it cannot be re-encrypted under its own row id.'
+      )
+    }
+    const { envelope, epoch } = await cipherForRead.encryptUpdate({
+      id,
+      data: head as unknown as Json,
+      current: data!
+    })
+    await this.#updateDoc({
+      logicalKey: 'contacts',
+      id,
+      data: envelope,
+      epoch
+    })
     return { id, contactId, contact, updatedAt }
   }
 

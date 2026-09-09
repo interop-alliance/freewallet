@@ -1014,7 +1014,7 @@ describe('BrowserStore (contacts encryption)', () => {
   it('stamps the key epoch on contact and revision writes (add + update)', async () => {
     const { localStore } = await initLocalStore({
       ciphers: {
-        contacts: makeEpochCipher('did:key:z6EpochOne'),
+        contacts: makeFakeContactsCipher('did:key:z6EpochOne'),
         contactsHistory: makeEpochCipher('did:key:z6EpochOne')
       }
     })
@@ -1061,6 +1061,47 @@ describe('BrowserStore (contacts encryption)', () => {
       contactId: stored.contactId
     })
     expect(revisions).toHaveLength(1)
+  })
+
+  it('refuses to update a legacy plaintext contact head under a cipher', async () => {
+    const { localStore } = await initLocalStore({
+      ciphers: {
+        contacts: makeFakeContactsCipher(),
+        contactsHistory: makeFakeContentCipher()
+      }
+    })
+    // A head row written before the contacts collection was encrypted. A
+    // fresh encrypt would bind its own minted id as `was.resource` while the
+    // write goes to this row id, so the update refuses rather than writing an
+    // envelope a Collection-handle read would reject as swapped.
+    const plaintextHead = {
+      contactId: 'c-legacy',
+      updatedAt: '2026-01-01T00:00:00.000Z',
+      writerId: 'writer-0',
+      contact: { displayName: 'Legacy' }
+    }
+    await localStore.rxCollection('contacts').insert({
+      id: 'legacy-plaintext-head',
+      updatedAt: plaintextHead.updatedAt,
+      version: 1,
+      data: plaintextHead as Json
+    })
+
+    await expect(
+      localStore.updateContact({
+        id: 'legacy-plaintext-head',
+        contact: { displayName: 'Renamed' },
+        writerId: 'writer-1'
+      })
+    ).rejects.toThrow(/not an encrypted envelope/)
+
+    // The row is untouched.
+    const row = (await localStore
+      .rxCollection('contacts')
+      .findOne('legacy-plaintext-head')
+      .exec())!.toMutableJSON()
+    expect(row.data).toEqual(plaintextHead)
+    expect(row.version).toBe(1)
   })
 
   it('tolerates an unknown-epoch contact row rather than throwing', async () => {
@@ -1892,6 +1933,35 @@ describe('RemoteDirectStore contacts', () => {
         writerId: 'writer-a'
       })
     ).rejects.toThrow(/unreadable/)
+  })
+
+  it('refuses to update a legacy plaintext head rather than binding a foreign id', async () => {
+    const { store, collections, versions } = makeContactsStore()
+    const plaintextHead = {
+      contactId: 'c-legacy',
+      updatedAt: '2026-01-01T00:00:00.000Z',
+      writerId: 'writer-0',
+      contact: { displayName: 'Legacy' }
+    }
+    collections.set(
+      'contacts',
+      new Map([['legacy-plaintext-head', plaintextHead as Json]])
+    )
+    versions.set('contacts', new Map([['legacy-plaintext-head', 1]]))
+
+    await expect(
+      store.updateContact({
+        id: 'legacy-plaintext-head',
+        contact: { displayName: 'Renamed' },
+        writerId: 'writer-a'
+      })
+    ).rejects.toThrow(/not an encrypted envelope/)
+
+    // Nothing was written: the head is still the plaintext row at its version.
+    expect(collections.get('contacts')!.get('legacy-plaintext-head')).toEqual(
+      plaintextHead
+    )
+    expect(versions.get('contacts')!.get('legacy-plaintext-head')).toBe(1)
   })
 
   it('treats a transport-retried create reported as 412 as its own successful write', async () => {

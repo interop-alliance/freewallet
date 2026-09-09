@@ -200,6 +200,11 @@
   the grant is minted, rather than parenting a grant whose delegation link
   no longer verifies. The rule is wallet-core's composed `standingZcapStale`
   against the session's memoized verified account document.
+- `updateContact` refuses a head whose stored body is legacy plaintext
+  instead of falling back to a fresh encrypt, on both the local replica and
+  the remote-direct backend. The fallback minted its own EDV id and bound it
+  as `was.resource` while the write went to the old row id, an envelope a
+  Collection-handle read refuses as swapped.
 
 ## 0.49.1 - TBD
 
