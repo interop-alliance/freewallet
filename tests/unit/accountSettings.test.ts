@@ -3230,6 +3230,9 @@ describe('addAccountPasskey', () => {
       standing: { ladderSeed: new Uint8Array(32).fill(4) },
       manageCapability: { id: 'urn:zcap:refetched' }
     }
+    // The record is written before the entry, so a standing record alone
+    // proves only the earlier stage: the document must list the member too.
+    state.passkeyCredentialInDocument = true
     const error = vi.spyOn(console, 'error').mockImplementation(() => {})
     const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
     const { recorded } = await runAddPasskey()
@@ -3247,6 +3250,27 @@ describe('addAccountPasskey', () => {
         manageCapability: expect.objectContaining({ id: 'urn:zcap:refetched' })
       })
     )
+    error.mockRestore()
+    warn.mockRestore()
+  })
+
+  it('does not take the lost-response branch on a standing record the document does not list', async () => {
+    state.registry = registryWithConcurrentEntry()
+    state.standingEstablished = false
+    state.refetchedRecord = {
+      standing: { ladderSeed: new Uint8Array(32).fill(4) },
+      manageCapability: { id: 'urn:zcap:refetched' }
+    }
+    state.passkeyCredentialInDocument = false
+    const error = vi.spyOn(console, 'error').mockImplementation(() => {})
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
+    await expect(runAddPasskey()).rejects.toThrow(PasskeyNotEstablishedError)
+    // The entry never landed: the residue is cleaned rather than recorded
+    // as a completed passkey.
+    expect(vi.mocked(deleteUnlockMethod)).toHaveBeenCalled()
+    expect(
+      lastPut().methods.find(method => method.type === 'passkey')
+    ).toBeUndefined()
     error.mockRestore()
     warn.mockRestore()
   })

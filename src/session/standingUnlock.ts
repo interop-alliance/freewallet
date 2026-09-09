@@ -10,23 +10,32 @@
  * 1. The credential's user-key wrap lands in the `key-map/user-key.jsonl`
  *    roster first (escrow: every epoch, so a later self-enrollment decrypts
  *    pre-bind history), kept alive by rotation fan-out from then on.
- * 2. The document entry: the credential's `keyAgreement` key -- verbatim for
+ * 2. The authorization bridge: a pre-minted PUT-on-`did.jsonl` delegation to
+ *    the credential-derived signing DID, sealed into the unlock record beside
+ *    the update-key ladder seed -- and, when the account document already
+ *    points at an annex generation, the annex-Space sibling delegation
+ *    (GET+PUT over the auxiliary Space's items subtree, to the same signing
+ *    DID). An account with no pointed generation has no auxiliary Space id
+ *    to target yet; the record then binds without a sibling and a later
+ *    re-mint adds one once the pointer exists.
+ * 3. The re-bind: the unlock record is rewritten in the standing layout
+ *    (`wrapUnlockRecord` -- shell, bridge, sibling, ladder, binding MAC),
+ *    superseding the credential's previous record (the plain layout
+ *    survives only on no-WAS deployments, where this ceremony never runs).
+ *    The record is inert until the entry below publishes its ladder VM, and
+ *    it is what makes the seed durable before anything names it.
+ * 4. The document entry: the credential's `keyAgreement` key -- verbatim for
  *    a high-entropy credential (a passkey PRF output), a hash commitment for
  *    a low-entropy-derived one (a passphrase; publishing the key verbatim
  *    would turn the server-gated guessing oracle into a world-readable
  *    offline one) -- and the hash of ladder rung 0 in `nextKeyHashes`.
- * 3. The authorization bridge: a pre-minted PUT-on-`did.jsonl` delegation to
- *    the credential-derived signing DID, sealed into the unlock record beside
- *    the freshly minted update-key ladder seed -- and, when the account
- *    document already points at an annex generation, the annex-Space
- *    sibling delegation (GET+PUT over the auxiliary Space's items subtree,
- *    to the same signing DID). An account with no pointed generation has no
- *    auxiliary Space id to target yet; the record then binds without a
- *    sibling and a later re-mint adds one once the pointer exists.
- * 4. The re-bind: the unlock record is rewritten in the standing layout
- *    (`wrapUnlockRecord` -- shell, bridge, sibling, ladder, binding MAC),
- *    superseding the credential's previous record (the plain layout
- *    survives only on no-WAS deployments, where this ceremony never runs).
+ *
+ * A standing member's rung-0 commitment is stable for its whole standing run:
+ * `publishUnlockKey` refuses a bind naming a different hash. So a re-run of
+ * a torn establishment must reach the entry with the seed that bound the
+ * member, and both branches write the record (the seed's one durable home)
+ * before the entry. A run given no seed reads one back from the record a
+ * prior run sealed for this account before minting a fresh one.
  *
  * On a transient session the acting authority is the login credential's
  * ladder, and the order changes for one reason: a ladder-signed roster
@@ -50,6 +59,7 @@
  * (`unlockLogStore`) lives here too, shared with the recovery continuation's.
  */
 import type { IZcap } from '@interop/data-integrity-core'
+import { equalBytes } from '@noble/ciphers/utils.js'
 import { WasClient } from '@interop/was-client'
 import {
   publishUnlockKey,
@@ -89,6 +99,7 @@ import {
   bindUnlockSecret,
   deriveUnlockCredential,
   fetchKeyring,
+  fetchTransientKeyring,
   unlockManagementGrantee,
   type KeyringFetchResult,
   type PersistableClientKeys,
@@ -193,8 +204,9 @@ export function unlockLogStore({
  * @param [options.ladderSeed] {Uint8Array}   a caller-minted update-key
  *   ladder seed; supplying one lets the caller clean up a torn establishment
  *   by an actual retirement (it holds rung 0 and the attribution seed even
- *   when this ceremony throws before returning). A fresh seed is minted when
- *   absent
+ *   when this ceremony throws before returning). When absent, the seed a
+ *   prior run sealed into the credential's standing record for this account
+ *   is reused, and a fresh one is minted only when no such record stands
  * @param [options.idb] {IDBFactory}
  * @returns {Promise<object>}   the new record's unlock Space id, management
  *   zcap, persist closure (absent on the ladder kind, which writes nothing
@@ -240,7 +252,22 @@ export async function establishStandingUnlock({
   const controller = session.profile.accountController ?? accountController
   const credential = derived ?? (await deriveUnlockCredential({ secret, kdf }))
   const { standing } = credential
-  const ladderSeed = mintedLadderSeed ?? generateLadderSeed()
+  const sealed = await sealedLadderSeed({
+    credential,
+    pointer,
+    accountLogPinStore: session.profile.persistence.logPins
+  })
+  if (mintedLadderSeed && sealed && !equalBytes(mintedLadderSeed, sealed)) {
+    // The record write below is a plain overwrite and precedes the entry's
+    // refusal, so a caller-minted seed that differs from the sealed one
+    // refuses here, before the sealed seed (the one a standing member may
+    // name) is destroyed.
+    throw new Error(
+      "The credential's unlock record already seals a different ladder " +
+        'seed for this account; the establishment refuses to overwrite it.'
+    )
+  }
+  const ladderSeed = mintedLadderSeed ?? sealed ?? generateLadderSeed()
   const rung0 = await ladderRung({ ladderSeed, index: 0 })
   // Invariant 17: every record's bridge and sibling are signed by that
   // record's OWN credential's ladder VM, so a strike of any other
@@ -421,7 +448,35 @@ export async function establishStandingUnlock({
       ownerKeyAgreementKey: ctx.clientKeyAgreementKey
     })
 
-    // 2. The document entry: the keyAgreement publication (commitment for a
+    // 2. The bridge and sibling delegations, signed by the bound
+    // credential's own ladder VM (invariant 17). Inert until the entry
+    // below publishes that VM.
+    const minted = await mintDelegations()
+    delegation = minted.delegation
+    delegatedClients = minted.delegatedClients
+
+    // 3. The record in the standing layout, BEFORE the entry: the seed's one
+    // durable home. A tear here leaves an inert record a re-run with the
+    // same secret reads its seed back from and overwrites; a tear after the
+    // entry leaves a member whose commitment only that seed can extend.
+    bound = await bindUnlockSecret({
+      clientSeed,
+      controller,
+      secret,
+      kdf,
+      email,
+      userKey,
+      webvhUpdateKeys: ctx.clientWebvhKeys,
+      pointer,
+      delegateManagementTo: unlockManagementGrantee({ pointer, controller }),
+      delegation,
+      ...(delegatedClients ? { delegatedClients } : {}),
+      ladderSeed,
+      credential,
+      idb
+    })
+
+    // 4. The document entry: the keyAgreement publication (commitment for a
     // low-entropy credential, verbatim for a high-entropy one) and the hash
     // of ladder rung 0 in `nextKeyHashes`.
     await publishUnlockKey({
@@ -442,13 +497,7 @@ export async function establishStandingUnlock({
     })
     invalidateVerifiedLog({ profile: session.profile })
 
-    // 3. The bridge and sibling delegations, signed by the bound
-    // credential's own ladder VM (invariant 17).
-    const minted = await mintDelegations()
-    delegation = minted.delegation
-    delegatedClients = minted.delegatedClients
-
-    // 3b. The annex rung commit, best-effort: nothing licenses a bind to
+    // 4b. The annex rung commit, best-effort: nothing licenses a bind to
     // mint a generation, and the lockout consequence stands as documented.
     if (minted.clientAnnexDid) {
       try {
@@ -465,24 +514,6 @@ export async function establishStandingUnlock({
         )
       }
     }
-
-    // 4. The re-bind: the unlock record in the standing layout.
-    bound = await bindUnlockSecret({
-      clientSeed,
-      controller,
-      secret,
-      kdf,
-      email,
-      userKey,
-      webvhUpdateKeys: ctx.clientWebvhKeys,
-      pointer,
-      delegateManagementTo: unlockManagementGrantee({ pointer, controller }),
-      delegation,
-      ...(delegatedClients ? { delegatedClients } : {}),
-      ladderSeed,
-      credential,
-      idb
-    })
   }
 
   const delegationKeyId = delegationProofKeyId(delegation)
@@ -538,6 +569,42 @@ class ClientAnnexRungCommitSkipped extends Error {
     super('The acting session carries no ladder seed for the annex commit.')
     this.name = 'ClientAnnexRungCommitSkipped'
   }
+}
+
+/**
+ * The ladder seed a prior run of the establishment sealed into the
+ * credential's unlock record for this account, when a standing record is
+ * there. The read is the transient fetch (nothing browser-local is written),
+ * and a record naming another account (a secret reused across accounts) or a
+ * plain-layout one yields nothing: the bind overwrites those by design.
+ *
+ * @param options {object}
+ * @param options.credential {UnlockCredential}
+ * @param options.pointer {AccountPointer}   the account being bound to
+ * @param options.accountLogPinStore {ResourceLogPinStore}
+ * @returns {Promise<Uint8Array | undefined>}
+ */
+async function sealedLadderSeed({
+  credential,
+  pointer,
+  accountLogPinStore
+}: {
+  credential: UnlockCredential
+  pointer: AccountPointer
+  accountLogPinStore: ResourceLogPinStore
+}): Promise<Uint8Array | undefined> {
+  if (!WAS_SERVER_URL) {
+    return undefined
+  }
+  const found = await fetchTransientKeyring({ credential, accountLogPinStore })
+  const ladderSeed = found?.standing?.ladderSeed
+  if (!ladderSeed || found?.pointer?.did !== pointer.did) {
+    return undefined
+  }
+  log.info(
+    "Reusing the ladder seed a prior run sealed into the credential's unlock record"
+  )
+  return ladderSeed
 }
 
 /**

@@ -497,6 +497,15 @@ built:
   remembered-login sweep, so the only mender is the retire-direction
   convergence of a later ladder-branch ceremony, which the user may never
   run.
+- A standing establishment torn between its record write and its document
+  entry, on the enrolled branch (a passphrase change or add-passphrase run
+  from a remembered session). The new credential's standing record and
+  roster wrap stand with no member naming them, the registry still names
+  the old credential, and a fresh browser's login with that passphrase
+  refuses at the bridge rather than finding nothing. A re-run with the same
+  secret converges (the seed is read back from the record), but nothing
+  else detects the residue: the torn-retirement repair's address gate does
+  not match it.
 - The retired credentials' unlock Spaces on a recovery spend torn between
   the landed registry drop and the deletes. The entries are gone, so nothing
   names the Spaces again. The residue is inert, and is the class the

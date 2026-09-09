@@ -146,6 +146,17 @@
 
 ### Fixed
 
+- A torn standing-credential establishment (add or change passphrase, add
+  passkey) re-runs with the ladder seed that bound the member. The enrolled
+  branch of `establishStandingUnlock` writes the standing-layout unlock
+  record before the document entry, so the seed is durable before anything
+  names it, and a run given no seed reads one back from a standing record at
+  the credential's unlock Space for the same account before minting a fresh
+  one. Previously a retry after a tear between the entry and the record
+  minted a fresh seed and, against wallet-core's `publishUnlockKey`
+  refusal, could never converge. The failed-passkey cleanup treats a
+  standing record as a lost response only when the document also lists the
+  credential.
 - The Applications page no longer marks an app or agent row "Reconnect
   needed" when its grants were minted from a transient session. Such a grant
   is signed by a client-annex per-visit key the account document never

@@ -1308,8 +1308,13 @@ async function recoverFailedPasskeyEstablishment({
     )
     return null
   }
-  if (found?.standing?.ladderSeed) {
-    // The lost-response case: the record is standing, so the establishment
+  if (
+    found?.standing?.ladderSeed &&
+    (await passkeyEntryPublished({ session, context, credential }))
+  ) {
+    // The lost-response case: the record is standing AND the document lists
+    // the credential (the record is written before the entry, so a standing
+    // record alone proves only the earlier stage), so the establishment
     // succeeded server-side after all. Complete the entry from the hit.
     log.warn(
       'The passkey unlock record is standing after all; completing the registry entry'
@@ -1399,6 +1404,54 @@ async function recoverFailedPasskeyEstablishment({
 }
 
 /**
+ * Whether the account document lists the passkey credential's verbatim
+ * `keyAgreement` entry: the establishment's document entry landed. A check
+ * that fails resolves to `false`, so the caller falls through to the cleanup
+ * by retirement, which no-ops over anything never published.
+ *
+ * @param options {object}
+ * @param options.session {Session}
+ * @param options.context {AccountCeremonyContext | null}
+ * @param options.credential {UnlockCredential}
+ * @returns {Promise<boolean>}
+ */
+async function passkeyEntryPublished({
+  session,
+  context,
+  credential
+}: {
+  session: Session
+  context: AccountCeremonyContext | null
+  credential: UnlockCredential
+}): Promise<boolean> {
+  if (!context) {
+    return false
+  }
+  try {
+    // A fresh read: the establishment primed the session's verified-log
+    // memo with the PRE-entry document, so the memo can never show the
+    // entry the torn run itself published.
+    invalidateVerifiedLog({ profile: session.profile })
+    const { doc } = await verifiedAccountLog({
+      profile: session.profile,
+      pointer: context.pointer
+    })
+    return await documentListsCredential({
+      doc,
+      did: context.pointer.did,
+      keyAgreementKeyMultibase: credential.standing.keyAgreementKeyMultibase,
+      published: 'verbatim'
+    })
+  } catch (err) {
+    log.warn(
+      'Could not check whether the passkey establishment published its document entry; cleaning by retirement',
+      { err }
+    )
+    return false
+  }
+}
+
+/**
  * Whether a torn passkey establishment left anything published server-side:
  * the credential's verbatim `keyAgreement` entry in the verified account
  * document, or its wrap in any user-key roster epoch. A check that fails
@@ -1426,6 +1479,8 @@ async function passkeyEstablishmentPublished({
     return false
   }
   try {
+    // A fresh read, for the same reason as `passkeyEntryPublished`.
+    invalidateVerifiedLog({ profile: session.profile })
     const { doc } = await verifiedAccountLog({
       profile: session.profile,
       pointer: context.pointer
