@@ -74,11 +74,10 @@ vi.mock('@interop/wallet-core/keyring', async importOriginal => {
   const actual = await importOriginal<object>()
   return {
     ...actual,
-    getUnlockKeyringWithCapability: vi.fn()
+    getUnlockKeyring: vi.fn()
   }
 })
-const { getUnlockKeyringWithCapability } =
-  await import('@interop/wallet-core/keyring')
+const { getUnlockKeyring } = await import('@interop/wallet-core/keyring')
 
 vi.mock('@interop/wallet-core/recovery', async importOriginal => {
   const actual = await importOriginal<object>()
@@ -854,7 +853,7 @@ describe('forgetThisBrowser (the ceremony grades)', () => {
         }
       ]
     } as never)
-    vi.mocked(getUnlockKeyringWithCapability).mockResolvedValue(
+    vi.mocked(getUnlockKeyring).mockResolvedValue(
       sealedRecord({ keyAgreementKeyMultibase: 'zNewUnlockKak' }) as never
     )
     const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
@@ -878,7 +877,7 @@ describe('forgetThisBrowser (the ceremony grades)', () => {
         }
       ]
     } as never)
-    vi.mocked(getUnlockKeyringWithCapability).mockResolvedValue(
+    vi.mocked(getUnlockKeyring).mockResolvedValue(
       sealedRecord({ keyAgreementKeyMultibase: 'zUnlockKak' }) as never
     )
     await forgetThisBrowser({ session, lastClient: true })
@@ -912,7 +911,7 @@ describe('forgetThisBrowser (the ceremony grades)', () => {
         }
       ]
     } as never)
-    vi.mocked(getUnlockKeyringWithCapability).mockResolvedValue(
+    vi.mocked(getUnlockKeyring).mockResolvedValue(
       sealedRecord({ keyAgreementKeyMultibase: 'zNewUnlockKak' }) as never
     )
     await forgetThisBrowser({ session, lastClient: true })
@@ -937,7 +936,7 @@ describe('forgetThisBrowser (the ceremony grades)', () => {
     // pending entry.
     const record = sealedRecord({ keyAgreementKeyMultibase: 'zUnlockKak' })
     record.encryption.epochs = []
-    vi.mocked(getUnlockKeyringWithCapability).mockResolvedValue(record as never)
+    vi.mocked(getUnlockKeyring).mockResolvedValue(record as never)
     await expect(
       forgetThisBrowser({ session, lastClient: true })
     ).rejects.toThrow(/sign-in record/)
@@ -957,9 +956,7 @@ describe('forgetThisBrowser (the ceremony grades)', () => {
         }
       ]
     } as never)
-    vi.mocked(getUnlockKeyringWithCapability).mockRejectedValue(
-      new Error('503')
-    )
+    vi.mocked(getUnlockKeyring).mockRejectedValue(new Error('503'))
     await expect(
       forgetThisBrowser({ session, lastClient: true })
     ).rejects.toThrow(/sign-in record/)
@@ -980,7 +977,7 @@ describe('forgetThisBrowser (the ceremony grades)', () => {
       ]
     } as never)
     await forgetThisBrowser({ session })
-    expect(vi.mocked(getUnlockKeyringWithCapability)).not.toHaveBeenCalled()
+    expect(vi.mocked(getUnlockKeyring)).not.toHaveBeenCalled()
     expect(vi.mocked(forgetEnrolledClient)).toHaveBeenCalledTimes(1)
   })
 

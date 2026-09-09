@@ -26,7 +26,7 @@
  */
 import type { IZcap } from '@interop/data-integrity-core'
 import type { ZcapClient } from '@interop/ezcap'
-import { getUnlockKeyringWithCapability } from '@interop/wallet-core/keyring'
+import { getUnlockKeyring } from '@interop/wallet-core/keyring'
 import {
   unlockKeyVmId,
   unlockRecordSealedTo
@@ -146,7 +146,7 @@ export async function findPendingPassphraseEntries({
     }
     let sealedToEntry: boolean
     try {
-      const record = await getUnlockKeyringWithCapability({
+      const record = await getUnlockKeyring({
         storageServerUrl: WAS_SERVER_URL ?? host,
         zcapClient: reader.zcapClient,
         spaceId: entry.unlockSpaceId,

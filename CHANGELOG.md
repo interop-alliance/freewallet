@@ -18,6 +18,10 @@
   the rest) move to `@interop/was-client/identity`, following
   `@interop/wallet-core` 0.71.0's removal of its `./identity` subpath. The
   `@interop/wallet-core` dependency bumps to `^0.71.0`.
+- The credential-coverage read and the tap-free unlock Space delete call
+  `getUnlockKeyring` / `deleteUnlockSpace` with a `capability` option,
+  following `@interop/wallet-core` 0.72.0's removal of the `*WithCapability`
+  twins.
 - The request pipeline (classification, matching, VP composition, the App
   Connect app-key credential, the exchange clients) is imported from
   `@interop/wallet-request` 0.2.0; wallet-core 0.70.0 no longer ships the

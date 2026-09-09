@@ -121,7 +121,7 @@ vi.mock('@/stores/wasRemoteStore', () => ({
 
 vi.mock('@interop/wallet-core/keyring', async importOriginal => ({
   ...(await importOriginal<typeof import('@interop/wallet-core/keyring')>()),
-  deleteUnlockSpaceWithCapability: vi.fn(async () => {
+  deleteUnlockSpace: vi.fn(async () => {
     wasState.calls.push('deleteUnlockSpace')
     return { outcome: wasState.deleteOutcome }
   })
@@ -187,7 +187,7 @@ import {
   zcapClientForSigner
 } from '@interop/was-client'
 import { RecordEnvelopeDecryptError } from '@/session/recordEnvelope'
-import { deleteUnlockSpaceWithCapability } from '@interop/wallet-core/keyring'
+import { deleteUnlockSpace } from '@interop/wallet-core/keyring'
 import { rotateOffUnlockCredential } from '@/session/credentialRotation'
 import { browserLocalSessionPersistence } from '@/session/persistence'
 import { rootCapabilityId } from '@interop/was-client/paths'
@@ -337,7 +337,7 @@ function sampleRecord(): UnlockMethodsRecord {
 }
 
 /**
- * A stand-in management zcap. `deleteUnlockSpaceWithCapability` is mocked, so
+ * A stand-in management zcap. `deleteUnlockSpace` is mocked, so
  * the value is only ever passed through and compared by reference -- its shape
  * is never validated.
  */
@@ -661,8 +661,8 @@ describe('revokeUnlockMethod', () => {
 
     // The Space delete was invoked with a DELETE-only CHILD of the entry's
     // capability, never the stored three-verb capability itself.
-    expect(deleteUnlockSpaceWithCapability).toHaveBeenCalledOnce()
-    const args = vi.mocked(deleteUnlockSpaceWithCapability).mock.calls[0][0]
+    expect(deleteUnlockSpace).toHaveBeenCalledOnce()
+    const args = vi.mocked(deleteUnlockSpace).mock.calls[0][0]
     expect(args.spaceId).toBe(entry.unlockSpaceId)
     const child = args.capability as IDelegatedZcap
     expect(child).not.toBe(FAKE_CAP)
@@ -685,7 +685,7 @@ describe('revokeUnlockMethod', () => {
     const entry = passkeyEntry()
 
     await expect(revokeUnlockMethod({ session, entry, idb })).rejects.toThrow()
-    expect(deleteUnlockSpaceWithCapability).not.toHaveBeenCalled()
+    expect(deleteUnlockSpace).not.toHaveBeenCalled()
     // The refusal is read-only and comes BEFORE the retirement: the advice to
     // tap the passkey is only possible while the credential still stands, and
     // a retry must still find a removable entry.
@@ -706,7 +706,7 @@ describe('revokeUnlockMethod', () => {
       /expired-capability/
     )
     expect(vi.mocked(rotateOffUnlockCredential)).not.toHaveBeenCalled()
-    expect(deleteUnlockSpaceWithCapability).not.toHaveBeenCalled()
+    expect(deleteUnlockSpace).not.toHaveBeenCalled()
   })
 
   it('skips the Space delete but still cleans up with no WAS server', async () => {
@@ -730,7 +730,7 @@ describe('revokeUnlockMethod', () => {
 
     await revokeUnlockMethod({ session, entry, idb })
 
-    expect(deleteUnlockSpaceWithCapability).not.toHaveBeenCalled()
+    expect(deleteUnlockSpace).not.toHaveBeenCalled()
     await expect(
       loadKeyringCache({ spaceId: entry.unlockSpaceId, idb })
     ).resolves.toBeNull()
@@ -784,8 +784,8 @@ describe('revokeUnlockMethod on a ladder-anchored session', () => {
       idb
     })
 
-    expect(deleteUnlockSpaceWithCapability).toHaveBeenCalledOnce()
-    const args = vi.mocked(deleteUnlockSpaceWithCapability).mock.calls[0][0]
+    expect(deleteUnlockSpace).toHaveBeenCalledOnce()
+    const args = vi.mocked(deleteUnlockSpace).mock.calls[0][0]
     // Sent by the ladder VM's own bare did:key -- a root-signed DELETE would
     // come back as the server's masked 404 and orphan the Space.
     expect(args.zcapClient).toBe(LADDER_DELETER.invoker)
@@ -808,7 +808,7 @@ describe('revokeUnlockMethod on a ladder-anchored session', () => {
     await expect(revokeUnlockMethod({ session, entry, idb })).rejects.toThrow(
       /foreign-controller/
     )
-    expect(deleteUnlockSpaceWithCapability).not.toHaveBeenCalled()
+    expect(deleteUnlockSpace).not.toHaveBeenCalled()
     expect(vi.mocked(rotateOffUnlockCredential)).not.toHaveBeenCalled()
   })
 
@@ -874,7 +874,7 @@ describe('revokeUnlockMethod on a ladder-anchored session', () => {
       idb
     })
 
-    const args = vi.mocked(deleteUnlockSpaceWithCapability).mock.calls[0][0]
+    const args = vi.mocked(deleteUnlockSpace).mock.calls[0][0]
     expect(args.zcapClient).not.toBe(LADDER_DELETER.invoker)
     const child = args.capability as IDelegatedZcap
     expect(child.controller).toBe(SESSION_CLIENT_DID)
@@ -903,8 +903,8 @@ describe('deleteUnlockMethodSpace', () => {
 
     await deleteUnlockMethodSpace({ session, entry })
 
-    expect(deleteUnlockSpaceWithCapability).toHaveBeenCalledOnce()
-    const args = vi.mocked(deleteUnlockSpaceWithCapability).mock.calls[0][0]
+    expect(deleteUnlockSpace).toHaveBeenCalledOnce()
+    const args = vi.mocked(deleteUnlockSpace).mock.calls[0][0]
     expect(args.spaceId).toBe(entry.unlockSpaceId)
     const child = args.capability as IDelegatedZcap
     // The DELETE-only child: the parent's target unchanged, one action, and
@@ -944,7 +944,7 @@ describe('deleteUnlockMethodSpace', () => {
       unlockSpaceId: entry.unlockSpaceId,
       space: 'no-capability'
     })
-    expect(deleteUnlockSpaceWithCapability).not.toHaveBeenCalled()
+    expect(deleteUnlockSpace).not.toHaveBeenCalled()
   })
 
   it('reports the residue for an entry whose management zcap has expired', async () => {
@@ -962,7 +962,7 @@ describe('deleteUnlockMethodSpace', () => {
     // A child of an expired parent would verify nowhere, so nothing is minted
     // and nothing is sent -- and the walk still continues.
     expect(outcome.space).toBe('expired-capability')
-    expect(deleteUnlockSpaceWithCapability).not.toHaveBeenCalled()
+    expect(deleteUnlockSpace).not.toHaveBeenCalled()
   })
 
   it('refuses a capability naming a delegatee this session cannot act as', async () => {
@@ -981,7 +981,7 @@ describe('deleteUnlockMethodSpace', () => {
     // masked 404, which the walk would read as "already gone" and drop the
     // entry around a Space that still stands. Refused locally instead.
     expect(outcome.space).toBe('foreign-controller')
-    expect(deleteUnlockSpaceWithCapability).not.toHaveBeenCalled()
+    expect(deleteUnlockSpace).not.toHaveBeenCalled()
   })
 
   it("refuses a capability naming another deployment's Space URL", async () => {
@@ -997,7 +997,7 @@ describe('deleteUnlockMethodSpace', () => {
     const outcome = await deleteUnlockMethodSpace({ session, entry })
 
     expect(outcome.space).toBe('stale-target')
-    expect(deleteUnlockSpaceWithCapability).not.toHaveBeenCalled()
+    expect(deleteUnlockSpace).not.toHaveBeenCalled()
   })
 
   it("reports the server's masked 404 as not-found", async () => {
@@ -1034,7 +1034,7 @@ describe('deleteUnlockMethodSpace', () => {
       }
     })
 
-    const args = vi.mocked(deleteUnlockSpaceWithCapability).mock.calls[0][0]
+    const args = vi.mocked(deleteUnlockSpace).mock.calls[0][0]
     const child = args.capability as IDelegatedZcap
     expect(child.controller).toBe(ladderAgent.id)
     expect(child.allowedAction).toEqual(['DELETE'])
@@ -1067,7 +1067,7 @@ describe('deleteUnlockMethodSpace', () => {
       signer: { zcapClient: delegator, invoker, controller: ladderAgent.id }
     })
 
-    const args = vi.mocked(deleteUnlockSpaceWithCapability).mock.calls[0][0]
+    const args = vi.mocked(deleteUnlockSpace).mock.calls[0][0]
     expect(args.zcapClient).toBe(invoker)
     expect(args.zcapClient).not.toBe(delegator)
     // The child is still the delegator's signature, delegated to the invoker.
@@ -1090,7 +1090,7 @@ describe('deleteUnlockMethodSpace', () => {
     // A child of it would verify nowhere, so nothing is minted and nothing is
     // sent; the walk names the Space and carries on.
     expect(outcome.space).toBe('unsupported-capability')
-    expect(deleteUnlockSpaceWithCapability).not.toHaveBeenCalled()
+    expect(deleteUnlockSpace).not.toHaveBeenCalled()
   })
 
   it('skips the server delete with no WAS server configured', async () => {
@@ -1106,7 +1106,7 @@ describe('deleteUnlockMethodSpace', () => {
 
     await deleteUnlockMethodSpace({ session, entry })
 
-    expect(deleteUnlockSpaceWithCapability).not.toHaveBeenCalled()
+    expect(deleteUnlockSpace).not.toHaveBeenCalled()
   })
 
   it('leaves the entry local state for the caller local wipe', async () => {

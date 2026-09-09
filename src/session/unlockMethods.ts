@@ -80,10 +80,7 @@ import { deleteUnlockLocalState } from '@/lib/sessionKey'
 import { createLogger } from '@/lib/log'
 
 const log = createLogger('fw:session:methods')
-import {
-  deleteUnlockSpaceWithCapability,
-  KEYRING_KDF
-} from '@interop/wallet-core/keyring'
+import { deleteUnlockSpace, KEYRING_KDF } from '@interop/wallet-core/keyring'
 import {
   DELETION_ZCAP_TTL_MS,
   mintSpaceVerbCapability
@@ -1362,7 +1359,7 @@ export async function deleteUnlockSpaceForEntry({
     }
     throw err
   }
-  const { outcome } = await deleteUnlockSpaceWithCapability({
+  const { outcome } = await deleteUnlockSpace({
     storageServerUrl: WAS_SERVER_URL,
     zcapClient: invoker,
     spaceId: entry.unlockSpaceId,
