@@ -102,7 +102,6 @@ import {
   unwrapKeyringRecord,
   verifyRecordProof,
   wrapKeyringRecord,
-  KEYRING_KDF,
   type AccountPointer,
   type KeyringRecordContents,
   type UnlockIdentity,
@@ -979,7 +978,9 @@ async function readCachedRecord({
  * @param [options.secret] {string | Uint8Array}   the unlock secret, required
  *   unless an already-derived `credential` is supplied
  * @param [options.idb] {IDBFactory}
- * @param [options.kdf] {UnlockKdf}   the unlock method's KDF parameters
+ * @param [options.kdf] {UnlockKdf}   the unlock method's KDF parameters,
+ *   required beside `secret`; no default, since the salt is what keeps two
+ *   unlock methods from deriving the same unlock identity
  * @param [options.mintManageCapability] {boolean}   also delegate the unlock
  *   Space management zcap to the recovered controller; default false
  * @param [options.credential] {UnlockCredential}   an already-derived unlock
@@ -994,7 +995,7 @@ async function readCachedRecord({
 export async function fetchKeyring({
   secret,
   idb,
-  kdf = KEYRING_KDF,
+  kdf,
   mintManageCapability = false,
   credential: derived,
   accountLogPinStore
@@ -1006,14 +1007,17 @@ export async function fetchKeyring({
   credential?: UnlockCredential
   accountLogPinStore: ResourceLogPinStore
 }): Promise<KeyringFetchResult | null> {
-  if (!derived && secret === undefined) {
-    throw new TypeError('An unlock secret is required.')
+  if (!derived && (secret === undefined || kdf === undefined)) {
+    throw new TypeError(
+      'An unlock secret and its KDF are required when no derived credential ' +
+        'is supplied.'
+    )
   }
   const credential =
     derived ??
     (await deriveUnlockCredential({
       secret: secret as string | Uint8Array,
-      kdf
+      kdf: kdf as UnlockKdf
     }))
   const { unlock } = credential
 
@@ -1170,7 +1174,9 @@ export interface TransientKeyringFetchResult extends KeyringRecordContents {
  *
  * @param options {object}
  * @param [options.secret] {string | Uint8Array}   the unlock secret
- * @param [options.kdf] {UnlockKdf}   the unlock method's KDF parameters
+ * @param [options.kdf] {UnlockKdf}   the unlock method's KDF parameters,
+ *   required beside `secret`; no default, since the salt is what keeps two
+ *   unlock methods from deriving the same unlock identity
  * @param options.accountLogPinStore {ResourceLogPinStore}   the chain-head
  *   pin store a pending-proof settlement's account-log read rides --
  *   caller-supplied, in-memory for a transient login
@@ -1181,7 +1187,7 @@ export interface TransientKeyringFetchResult extends KeyringRecordContents {
  */
 export async function fetchTransientKeyring({
   secret,
-  kdf = KEYRING_KDF,
+  kdf,
   accountLogPinStore,
   credential: derived
 }: {
@@ -1195,14 +1201,17 @@ export async function fetchTransientKeyring({
       'The transient unlock fetch requires a configured WAS server.'
     )
   }
-  if (!derived && secret === undefined) {
-    throw new TypeError('An unlock secret is required.')
+  if (!derived && (secret === undefined || kdf === undefined)) {
+    throw new TypeError(
+      'An unlock secret and its KDF are required when no derived credential ' +
+        'is supplied.'
+    )
   }
   const credential =
     derived ??
     (await deriveUnlockCredential({
       secret: secret as string | Uint8Array,
-      kdf
+      kdf: kdf as UnlockKdf
     }))
   const { unlock, standing: standingClient } = credential
 
@@ -1918,7 +1927,7 @@ export async function bindUnlockSecret({
  * @param [options.refuseCollidingRecord] {boolean | object}   the read-first
  *   collision refusal and served-stamp advance (see `bindUnlockSecret`)
  * @param [options.idb] {IDBFactory}
- * @param [options.kdf] {UnlockKdf}
+ * @param options.kdf {UnlockKdf}
  * @param [options.credential] {UnlockCredential}   an already-derived unlock
  *   credential for the same passphrase (see `bindUnlockSecret`)
  * @returns {Promise<{ unlockSpaceId: string, manageCapability?: IZcap,
@@ -1939,7 +1948,7 @@ export async function bindPassphrase({
   pending,
   refuseCollidingRecord,
   idb,
-  kdf = KEYRING_KDF,
+  kdf,
   credential
 }: {
   clientSeed: Uint8Array
@@ -1956,7 +1965,7 @@ export async function bindPassphrase({
   pending?: ClientKeyRecordPending
   refuseCollidingRecord?: boolean | { accountDoc?: unknown }
   idb?: IDBFactory
-  kdf?: UnlockKdf
+  kdf: UnlockKdf
   credential?: UnlockCredential
 }): Promise<{
   unlockSpaceId: string
@@ -2326,7 +2335,7 @@ export async function verifyUnlockSecret({
  * @param options.controller {string}   the account did:key
  * @param options.passphrase {string}
  * @param [options.idb] {IDBFactory}
- * @param [options.kdf] {UnlockKdf}
+ * @param options.kdf {UnlockKdf}
  * @param [options.credential] {UnlockCredential}   an already-derived
  *   credential for this passphrase
  * @returns {Promise<{ ladderSeed?: Uint8Array }>}   a standing record's
@@ -2336,13 +2345,13 @@ export async function verifyPassphrase({
   controller,
   passphrase,
   idb,
-  kdf = KEYRING_KDF,
+  kdf,
   credential
 }: {
   controller: string
   passphrase: string
   idb?: IDBFactory
-  kdf?: UnlockKdf
+  kdf: UnlockKdf
   credential?: UnlockCredential
 }): Promise<{ ladderSeed?: Uint8Array }> {
   return verifyUnlockSecret({
@@ -2443,7 +2452,7 @@ export async function deleteUnlockMethod({
  * @param options {object}
  * @param options.passphrase {string}
  * @param [options.idb] {IDBFactory}
- * @param [options.kdf] {UnlockKdf}
+ * @param options.kdf {UnlockKdf}
  * @param [options.credential] {UnlockCredential}   an already-derived
  *   credential for this passphrase
  * @returns {Promise<{ unlockSpaceDeleted: boolean }>}
@@ -2451,12 +2460,12 @@ export async function deleteUnlockMethod({
 export async function deleteKeyring({
   passphrase,
   idb,
-  kdf = KEYRING_KDF,
+  kdf,
   credential
 }: {
   passphrase: string
   idb?: IDBFactory
-  kdf?: UnlockKdf
+  kdf: UnlockKdf
   credential?: UnlockCredential
 }): Promise<{ unlockSpaceDeleted: boolean }> {
   return deleteUnlockMethod({ secret: passphrase, kdf, idb, credential })
@@ -2512,7 +2521,7 @@ export async function deleteKeyring({
  * @param [options.ladderSeed] {Uint8Array}   the new passphrase's update-key
  *   ladder seed, for a standing rebind
  * @param [options.idb] {IDBFactory}
- * @param [options.kdf] {UnlockKdf}
+ * @param options.kdf {UnlockKdf}
  * @returns {Promise<{ oldPassphraseRetired: boolean, unlockSpaceId: string,
  *   manageCapability?: IZcap, persistClientKeys: Function }>}
  */
@@ -2529,7 +2538,7 @@ export async function changePassphrase({
   delegatedClients,
   ladderSeed,
   idb,
-  kdf = KEYRING_KDF
+  kdf
 }: {
   clientSeed: Uint8Array
   controller: string
@@ -2543,7 +2552,7 @@ export async function changePassphrase({
   delegatedClients?: IZcap
   ladderSeed?: Uint8Array
   idb?: IDBFactory
-  kdf?: UnlockKdf
+  kdf: UnlockKdf
 }): Promise<{
   oldPassphraseRetired: boolean
   unlockSpaceId: string

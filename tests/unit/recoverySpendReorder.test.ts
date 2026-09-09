@@ -475,6 +475,7 @@ describe('the remembered spend reorder -- the persist hook', () => {
     const found = await fetchKeyring({
       accountLogPinStore: memoryResourceLogPinStore(),
       secret: NEW_PASSPHRASE,
+      kdf: KEYRING_KDF,
       idb
     })
     expect(found?.clientKeys?.userKey).toBeUndefined()
@@ -508,6 +509,7 @@ describe('the remembered spend reorder -- the persist hook', () => {
     const found = await fetchKeyring({
       accountLogPinStore: memoryResourceLogPinStore(),
       secret: NEW_PASSPHRASE,
+      kdf: KEYRING_KDF,
       idb
     })
     expect(found?.clientKeys?.userKey).toBeDefined()
@@ -619,6 +621,7 @@ describe('the remembered spend reorder -- the persist hook', () => {
     const found = await fetchKeyring({
       accountLogPinStore: memoryResourceLogPinStore(),
       secret: NEW_PASSPHRASE,
+      kdf: KEYRING_KDF,
       idb
     })
     expect(found?.clientKeys?.pending?.ceremony).toBe('recovery-spend')
@@ -800,6 +803,7 @@ describe('the standing-establishment success gate', () => {
     const found = await fetchKeyring({
       accountLogPinStore: memoryResourceLogPinStore(),
       secret: NEW_PASSPHRASE,
+      kdf: KEYRING_KDF,
       idb
     })
     expect(found?.clientKeys?.pending?.ceremony).toBe('recovery-spend')

@@ -229,6 +229,7 @@ export async function completeEnrollment({
     clientSeed,
     controller: found.controller,
     passphrase,
+    kdf: KEYRING_KDF,
     email: found.email,
     userKey,
     webvhUpdateKeys,

@@ -454,6 +454,7 @@ export async function signUpWithPassphrase({
     clientSeed: seed,
     controller: session.user.id,
     passphrase,
+    kdf: KEYRING_KDF,
     // Carried inside the wrapped record so any unlock method (a passkey
     // login has no form to ask on) recovers the account email.
     email,

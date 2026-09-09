@@ -4,6 +4,13 @@
 
 ### Changed
 
+- The keyring session functions no longer default `kdf` to `KEYRING_KDF`.
+  `bindPassphrase`, `verifyPassphrase`, `deleteKeyring`, and
+  `changePassphrase` require it, and `fetchKeyring` / `fetchTransientKeyring`
+  refuse a bare secret without one. Each passphrase call site names
+  `KEYRING_KDF` explicitly, so an unlock method that omits its KDF fails
+  instead of deriving the passphrase-salted unlock identity.
+
 - `CapabilityAgent` is imported from `@interop/capability-agent`;
   `@interop/webkms-client` (now 15.0.0) no longer exports it and is kept for
   `KmsClient` / `KeystoreAgent` only.

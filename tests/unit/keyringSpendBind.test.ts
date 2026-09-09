@@ -191,6 +191,7 @@ describe('probeUnlockSpaceCollision', () => {
       clientSeed: new Uint8Array(32).fill(1),
       controller: CONTROLLER,
       passphrase: PASSPHRASE,
+      kdf: KEYRING_KDF,
       pointer: POINTER,
       delegation: DELEGATION,
       ladderSeed: generateLadderSeed(),
@@ -319,6 +320,7 @@ describe('the bind under the spend obligations', () => {
       clientSeed: new Uint8Array(32).fill(1),
       controller: CONTROLLER,
       passphrase: PASSPHRASE,
+      kdf: KEYRING_KDF,
       pointer: POINTER,
       delegation: DELEGATION,
       ladderSeed: generateLadderSeed(),
@@ -335,6 +337,7 @@ describe('the bind under the spend obligations', () => {
     const found = await fetchKeyring({
       accountLogPinStore: memoryResourceLogPinStore(),
       secret: PASSPHRASE,
+      kdf: KEYRING_KDF,
       idb
     })
     expect(Date.parse(found!.createdAt)).toBeGreaterThan(
@@ -353,6 +356,7 @@ describe('the bind under the spend obligations', () => {
       clientSeed: new Uint8Array(32).fill(1),
       controller: CONTROLLER,
       passphrase: PASSPHRASE,
+      kdf: KEYRING_KDF,
       pointer: POINTER,
       delegation: DELEGATION,
       ladderSeed: generateLadderSeed(),
@@ -372,6 +376,7 @@ describe('the bind under the spend obligations', () => {
         clientSeed: new Uint8Array(32).fill(1),
         controller: CONTROLLER,
         passphrase: PASSPHRASE,
+        kdf: KEYRING_KDF,
         pointer: POINTER,
         delegation: DELEGATION,
         ladderSeed: generateLadderSeed(),
@@ -391,6 +396,7 @@ describe('the bind under the spend obligations', () => {
       clientSeed: new Uint8Array(32).fill(2),
       controller: CONTROLLER,
       passphrase: PASSPHRASE,
+      kdf: KEYRING_KDF,
       pointer: POINTER,
       delegation: DELEGATION,
       ladderSeed: generateLadderSeed(),
@@ -401,6 +407,7 @@ describe('the bind under the spend obligations', () => {
     const found = await fetchKeyring({
       accountLogPinStore: memoryResourceLogPinStore(),
       secret: PASSPHRASE,
+      kdf: KEYRING_KDF,
       idb
     })
     expect(found?.clientKeys?.userKey).toBeUndefined()
@@ -432,6 +439,7 @@ describe('the bind under the spend obligations', () => {
         clientSeed: new Uint8Array(32).fill(3),
         controller: CONTROLLER,
         passphrase: PASSPHRASE,
+        kdf: KEYRING_KDF,
         pointer: POINTER,
         delegation: DELEGATION,
         ladderSeed: generateLadderSeed(),

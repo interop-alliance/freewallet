@@ -1478,6 +1478,7 @@ export async function recoverAccountWithCode({
         clientSeed: newClientSeed,
         controller: contents.controller,
         passphrase: newPassphrase,
+        kdf: KEYRING_KDF,
         webvhUpdateKeys: newClientUpdateSeeds,
         pointer,
         delegateManagementTo: unlockManagementGrantee({

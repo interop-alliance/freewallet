@@ -387,6 +387,7 @@ export async function changeAccountPassphrase({
     ;({ ladderSeed: oldLadderSeed } = await verifyPassphrase({
       controller,
       passphrase: oldPassphrase,
+      kdf: KEYRING_KDF,
       credential: oldCredential
     }))
     // The retirement gate, read-only and before the establishment below. A
@@ -536,6 +537,7 @@ export async function changeAccountPassphrase({
     if (context.kind === 'enrolled') {
       const deleted = await deleteKeyring({
         passphrase: oldPassphrase,
+        kdf: KEYRING_KDF,
         credential: oldCredential
       })
       oldPassphraseRetired = deleted.unlockSpaceDeleted
@@ -551,6 +553,7 @@ export async function changeAccountPassphrase({
       clientSeed,
       controller,
       oldPassphrase,
+      kdf: KEYRING_KDF,
       newPassphrase,
       userKey: profile.userKey,
       webvhUpdateKeys: profile.clientWebvhKeys,
