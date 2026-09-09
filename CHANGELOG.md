@@ -193,6 +193,14 @@
   suite, so a type error fails the everyday loop instead of only the
   build.
 
+- The App Connect grant path's renewal trigger (`delegationStale` in
+  `processZcaps`) tests signer rot beside expiry: a generation delegation
+  whose signing key has left the account document's `capabilityDelegation`
+  (a credential retirement landing elsewhere mid-visit) is renewed before
+  the grant is minted, rather than parenting a grant whose delegation link
+  no longer verifies. The rule is wallet-core's composed `standingZcapStale`
+  against the session's memoized verified account document.
+
 ## 0.49.1 - TBD
 
 ### Fixed

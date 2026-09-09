@@ -42,6 +42,57 @@ function delegationExpiringIn(daysOut: number): IZcap {
   } as unknown as IZcap
 }
 
+const ACCOUNT_DID = 'did:webvh:scid:was.example:abc'
+const LADDER_VM = 'z6MkLadderVm'
+const OTHER_VM = 'z6MkOtherVm'
+
+/**
+ * A generation delegation like {@link delegationExpiringIn}, carrying a
+ * delegation proof signed by the given account-document verification method.
+ *
+ * @param options {object}
+ * @param options.daysOut {number}
+ * @param options.signer {string}   the signing key's multibase
+ * @returns {IZcap}
+ */
+function signedDelegation({
+  daysOut,
+  signer
+}: {
+  daysOut: number
+  signer: string
+}): IZcap {
+  return {
+    ...delegationExpiringIn(daysOut),
+    proof: {
+      type: 'DataIntegrityProof',
+      verificationMethod: `${ACCOUNT_DID}#${signer}`,
+      proofPurpose: 'capabilityDelegation'
+    }
+  } as unknown as IZcap
+}
+
+/**
+ * The verified-log memo a session peeks its account document from, holding
+ * a document whose `capabilityDelegation` lists the given keys.
+ *
+ * @param delegationKeys {string[]}   multibases under `capabilityDelegation`
+ * @returns {object}
+ */
+function memoListing(delegationKeys: string[]) {
+  const doc = {
+    id: ACCOUNT_DID,
+    verificationMethod: delegationKeys.map(key => ({
+      id: `${ACCOUNT_DID}#${key}`,
+      type: 'Multikey',
+      controller: ACCOUNT_DID,
+      publicKeyMultibase: key
+    })),
+    capabilityDelegation: delegationKeys.map(key => `${ACCOUNT_DID}#${key}`)
+  }
+  return { peek: () => ({ doc, log: [], updateKeys: [], nextKeyHashes: [] }) }
+}
+
 /**
  * The minimal session `processZcaps` delegates from: `hasZcapStorage` needs
  * `hasRemoteStorage` and a resolved `spaceUrl`; the delegate mock echoes its
@@ -49,11 +100,17 @@ function delegationExpiringIn(daysOut: number): IZcap {
  *
  * @param options {object}
  * @param [options.invocationCapability] {IZcap}
+ * @param [options.verifiedLog] {object}   the verified-log memo, when the
+ *   session has already verified the account document
  * @returns {{ session: Session, delegate: ReturnType<typeof vi.fn> }}
  */
 function fakeSession({
-  invocationCapability
-}: { invocationCapability?: IZcap } = {}) {
+  invocationCapability,
+  verifiedLog
+}: {
+  invocationCapability?: IZcap
+  verifiedLog?: ReturnType<typeof memoListing>
+} = {}) {
   const delegate = vi.fn(async (args: Record<string, unknown>) => ({
     id: 'urn:zcap:delegated',
     ...args
@@ -70,7 +127,13 @@ function fakeSession({
     },
     profile: {
       zcapClient: { delegate },
-      invocationCapability
+      invocationCapability,
+      ...(verifiedLog
+        ? {
+            accountPointer: { did: ACCOUNT_DID, spaceId: 'abc' },
+            verifiedLog
+          }
+        : {})
     }
   } as unknown as Session
   return { session, delegate, listCollectionPublicStates }
@@ -79,6 +142,7 @@ function fakeSession({
 describe('processZcaps delegation parent', () => {
   afterEach(() => {
     vi.useRealTimers()
+    vi.mocked(renewTransientGenerationDelegation).mockClear()
     vi.mocked(renewTransientGenerationDelegation).mockResolvedValue(null)
   })
 
@@ -185,6 +249,61 @@ describe('processZcaps delegation parent', () => {
     expect(
       vi.mocked(renewTransientGenerationDelegation).mock.invocationCallOrder[0]!
     ).toBeLessThan(listCollectionPublicStates.mock.invocationCallOrder[0]!)
+  })
+
+  it('renews an unexpired generation delegation whose signer has left the account document', async () => {
+    // Mid-visit signer rot: a credential retirement landing elsewhere struck
+    // the ladder VM that signed this visit's generation delegation. The
+    // delegation is a year from expiry, so the expiry axis alone would mint
+    // the grant under a parent whose delegation link no longer verifies.
+    vi.useFakeTimers({ now: NOW })
+    const renewed = signedDelegation({ daysOut: 100, signer: OTHER_VM })
+    vi.mocked(renewTransientGenerationDelegation).mockResolvedValue(
+      renewed as never
+    )
+    const { session, delegate } = fakeSession({
+      invocationCapability: signedDelegation({
+        daysOut: 300,
+        signer: LADDER_VM
+      }),
+      verifiedLog: memoListing([OTHER_VM])
+    })
+    await processZcaps({ zcapRequests: [WRITE_DESCRIPTOR], session })
+    expect(renewTransientGenerationDelegation).toHaveBeenCalledWith({ session })
+    expect(delegate.mock.calls[0][0].capability).toBe(renewed)
+  })
+
+  it('mints without renewing when the memoized document still lists the signer', async () => {
+    vi.useFakeTimers({ now: NOW })
+    const invocationCapability = signedDelegation({
+      daysOut: 300,
+      signer: LADDER_VM
+    })
+    const { session, delegate } = fakeSession({
+      invocationCapability,
+      verifiedLog: memoListing([LADDER_VM, OTHER_VM])
+    })
+    await processZcaps({ zcapRequests: [WRITE_DESCRIPTOR], session })
+    expect(renewTransientGenerationDelegation).not.toHaveBeenCalled()
+    expect(delegate.mock.calls[0][0].capability).toBe(invocationCapability)
+  })
+
+  it('refuses when the renewal returns a delegation the document does not back', async () => {
+    vi.useFakeTimers({ now: NOW })
+    vi.mocked(renewTransientGenerationDelegation).mockResolvedValue(
+      signedDelegation({ daysOut: 100, signer: LADDER_VM }) as never
+    )
+    const { session, delegate } = fakeSession({
+      invocationCapability: signedDelegation({
+        daysOut: 300,
+        signer: LADDER_VM
+      }),
+      verifiedLog: memoListing([OTHER_VM])
+    })
+    await expect(
+      processZcaps({ zcapRequests: [WRITE_DESCRIPTOR], session })
+    ).rejects.toBeInstanceOf(GenerationDelegationStaleError)
+    expect(delegate).not.toHaveBeenCalled()
   })
 
   it('delegates off the Space root with the unclamped TTL for a remembered session', async () => {

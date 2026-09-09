@@ -3027,7 +3027,10 @@ A grant delegated from a transient session chains under the session's
 generation delegation (`profile.invocationCapability`) rather than the Space
 root, which would be signed by an annex key the account document never
 lists, and its `expires` is clamped to the parent's. A generation delegation
-that is expired or inside its renewal window runs the blocking renewal stage
+that is expired, inside its renewal window, or signed by a key the session's
+memoized verified account document no longer lists under
+`capabilityDelegation` (wallet-core's composed `standingZcapStale`, the same
+axes the readiness stage tests) runs the blocking renewal stage
 first (`renewTransientGenerationDelegation`): a fresh ladder-signed
 delegation, minted through the credential's sibling delegation, is installed
 in place and adopted by the live session, the profile stamp, the persistence

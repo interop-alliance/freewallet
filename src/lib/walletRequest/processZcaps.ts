@@ -82,8 +82,9 @@ import {
   clampGrantExpires,
   GENERATION_DELEGATION_TTL_MS
 } from '@interop/wallet-core/clientAnnex'
-import { zcapExpiring } from '@interop/wallet-core/webvh'
+import { standingZcapStale } from '@interop/wallet-core/webvh'
 import { renewTransientGenerationDelegation } from '@/session/annexReach'
+import { peekVerifiedAccountLog } from '@/session/verifiedLog'
 import {
   RP_ZCAP_TTL_MS,
   RP_ZCAP_WRITE_TTL_MS,
@@ -416,24 +417,44 @@ export function sessionGrantsAreGenerationScoped(session: Session): boolean {
 }
 
 /**
- * Whether a generation delegation is past its expiry or inside its renewal
- * window. A delegated zcap always carries `expires`; the union type's root
- * half does not, and a root could never sit here.
+ * Whether a generation delegation can no longer parent a grant: past its
+ * expiry, inside its renewal window, or signed by a key the account document
+ * no longer lists under `capabilityDelegation` (signer rot). The rule is
+ * wallet-core's composed `standingZcapStale`, the same axes the readiness
+ * stage and the annex's own renewal test, so this caller cannot drift onto a
+ * staleness rule of its own.
+ *
+ * The signer axis reads the document this session has ALREADY verified
+ * (the verified-log memo, peeked rather than fetched). A cold memo skips
+ * that axis, matching the annex's own opt-out when no document is in hand;
+ * the renewal stage then verifies the log for itself. Mid-visit rot has one
+ * source: a credential retirement landing elsewhere while this visit stands
+ * on a delegation that credential's ladder VM signed. Without this axis the
+ * grant would mint under a parent whose delegation link no longer verifies,
+ * behind a consent screen that read correct.
+ *
+ * A delegated zcap always carries `expires`; the union type's root half does
+ * not, and a root could never sit here.
  *
  * @param options {object}
  * @param options.delegation {IZcap}
+ * @param options.session {Session}
  * @param options.now {number}   epoch milliseconds
  * @returns {boolean}
  */
 function delegationStale({
   delegation,
+  session,
   now
 }: {
   delegation: IZcap
+  session: Session
   now: number
 }): boolean {
-  return zcapExpiring({
-    expires: 'expires' in delegation ? delegation.expires : undefined,
+  const doc = peekVerifiedAccountLog({ profile: session.profile })?.doc
+  return standingZcapStale({
+    zcap: delegation,
+    ...(doc !== undefined ? { doc } : {}),
     now
   })
 }
@@ -480,10 +501,10 @@ export function grantTtlDays({
    * @returns {number}
    */
   function daysFor(ttlMs: number): number {
-    if (!delegation) {
+    if (!delegation || !session) {
       return Math.max(1, Math.round(ttlMs / DAY_MS))
     }
-    const expires = delegationStale({ delegation, now })
+    const expires = delegationStale({ delegation, session, now })
       ? now + Math.min(ttlMs, GENERATION_DELEGATION_TTL_MS)
       : clampGrantExpires({ ttlMs, delegation, now }).getTime()
     // A grant is only ever minted under a parent outside its renewal window,
@@ -1070,7 +1091,7 @@ export async function processZcaps({
 
   if (
     invocationCapability &&
-    delegationStale({ delegation: invocationCapability, now })
+    delegationStale({ delegation: invocationCapability, session, now })
   ) {
     // The blocking renewal stage, ahead of every remote call below: a grant
     // minted under a lapsing parent would either verify nowhere or lapse
@@ -1082,7 +1103,7 @@ export async function processZcaps({
     // only when there is nothing to renew with, or the renewal did not
     // produce a current delegation.
     const renewed = await renewTransientGenerationDelegation({ session })
-    if (!renewed || delegationStale({ delegation: renewed, now })) {
+    if (!renewed || delegationStale({ delegation: renewed, session, now })) {
       throw new GenerationDelegationStaleError()
     }
     invocationCapability = renewed
