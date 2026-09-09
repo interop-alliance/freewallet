@@ -40,12 +40,16 @@ model, and ZCap authorization model.
 
 ## Architecture
 
-The layer map, session and auth flow, storage model (local-first), CHAPI and
-App Connect flows, route map, the shared-logic map (what lives in
-`@interop/wallet-core` and the other `@interop/*` packages rather than
-app-side), domain glossary (VC / VP / DID / Space / Collection / Resource),
-and ZCap authorization structure live in @ARCHITECTURE.md -- read it before
-making changes.
+The layer map, the session, identity, and persistence overviews, the storage
+model (local-first), route map, ceremony inventory, the shared-logic map
+(what lives in `@interop/wallet-core` and the other `@interop/*` packages
+rather than app-side), domain glossary (VC / VP / DID / Space / Collection /
+Resource), and ZCap authorization structure live in @ARCHITECTURE.md -- read
+it before making changes. Each area's full account (every ceremony's stage
+order, refusals, tear points, and menders) lives in one topic doc under
+`docs/architecture/`, indexed by ARCHITECTURE.md's "Topic docs" section.
+Read the topic doc for an area before changing code in it; the ceremony
+inventory table names which doc covers which ceremony.
 
 ## Environment Variables
 

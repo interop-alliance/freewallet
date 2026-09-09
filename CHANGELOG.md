@@ -4,6 +4,10 @@
 
 ### Changed
 
+- ARCHITECTURE.md is a short map again: layer map, overviews, storage model,
+  ceremony inventory, glossary. Each area's full account moved to a topic doc
+  under `docs/architecture/`, with history, roadmap ids, and restated rules
+  dropped along the way.
 - **Breaking:** the passphrase unlock derivation is Argon2id (wallet-core
   0.70.0's `KEYRING_KDF`: 64 MiB memory, 3 passes, parallelism 1, 32-byte
   output, salt `freewallet/keyring/unlock/argon2id/v1`, passphrase version 2).

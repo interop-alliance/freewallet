@@ -18,7 +18,7 @@
 See:
 
 - [Wallet Attached Storage Specification](https://w3c-ccg.github.io/wallet-attached-storage-spec/)
-- [ARCHITECTURE.md](ARCHITECTURE.md) -- layer map, session/auth flow, storage model, CHAPI and App Connect flows, glossary
+- [ARCHITECTURE.md](ARCHITECTURE.md) -- layer map, session/auth, identity, and persistence overviews, storage model, glossary; the per-topic detail is under [docs/architecture/](docs/architecture/)
 - [CONTRIBUTING.md](CONTRIBUTING.md) -- code style, JSDoc, comment, and error-handling conventions
 
 ### Supported Features
