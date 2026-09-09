@@ -3,19 +3,21 @@
  * app-key credentials of the dedicated `app-connections` collection with the
  * latest matching App Connect Login activity (name, grants, last-connected
  * timestamp), skipping rows that do not carry the `AppKeyCredential` marker;
- * `deriveAppGrantsState` reads the recorded delegation signers against the
- * account's current key set (the current-key-set rule); `revokeAppAccess`
+ * `deriveGrantsState` reads the recorded delegation signers against the
+ * account's current key set (the current-key-set rule), deriving a
+ * client-annex signer as unknown rather than orphaned; `revokeAppAccess`
  * deletes the app key from that collection and records the revocation,
- * skipping the pointless per-grant server revocation for an orphaned app.
+ * POSTing every recorded grant's revocation whatever the row derived as.
  */
 import { describe, expect, it, vi } from 'vitest'
 import type { StorageManager } from '@/stores/storageManager'
 import type { StoredCredential } from '@/types/credential'
 import type { User } from '@/types/auth'
 import {
-  deriveAppGrantsState,
+  deriveGrantsState,
   listConnectedApps,
   revokeAppAccess,
+  type AppGrant,
   type ConnectedApp
 } from '@/lib/connectedApps'
 
@@ -423,64 +425,76 @@ describe('listConnectedApps', () => {
   })
 })
 
-describe('deriveAppGrantsState', () => {
-  function appWithSigners(signers: Array<string | undefined>): ConnectedApp {
-    return {
-      cid: 'c-app',
-      name: 'Example App',
-      origin: 'https://app.example',
-      appUrl: 'https://app.example/editor',
-      subjectDid: APP_DID,
-      grants: signers.map((signerKeyId, index) => ({
-        id: `urn:zcap:${index}`,
-        target: 'https://was.example/space/x/app-data',
-        allowedActions: ['GET'],
-        expires: '2027-08-01T00:00:00Z',
-        signerKeyId
-      }))
-    }
+describe('deriveGrantsState', () => {
+  function grantsSignedBy(signers: Array<string | undefined>): AppGrant[] {
+    return signers.map((signerKeyId, index) => ({
+      id: `urn:zcap:${index}`,
+      target: 'https://was.example/space/x/app-data',
+      allowedActions: ['GET'],
+      expires: '2027-08-01T00:00:00Z',
+      signerKeyId
+    }))
+  }
+
+  const ACCOUNT_DID = 'did:webvh:s:h:x'
+  const ANNEX_DID = 'did:webvh:a:h:gen-1'
+  const check = {
+    accountDid: ACCOUNT_DID,
+    currentSigningKeys: new Set(['zKey'])
   }
 
   it('is unknown without a verified key set to check against', () => {
     expect(
-      deriveAppGrantsState({ app: appWithSigners(['did:webvh:s:h:x#zKey']) })
+      deriveGrantsState({ grants: grantsSignedBy([`${ACCOUNT_DID}#zKey`]) })
     ).toBe('unknown')
   })
 
   it('is unknown when no grant recorded a signer (legacy records)', () => {
     expect(
-      deriveAppGrantsState({
-        app: appWithSigners([undefined]),
-        currentSigningKeys: new Set(['zKey'])
+      deriveGrantsState({
+        grants: grantsSignedBy([undefined]),
+        signerCheck: check
       })
     ).toBe('unknown')
   })
 
   it('is active when a signer is in the current key set', () => {
     expect(
-      deriveAppGrantsState({
-        app: appWithSigners(['did:webvh:s:h:x#zGone', 'did:webvh:s:h:x#zKey']),
-        currentSigningKeys: new Set(['zKey'])
+      deriveGrantsState({
+        grants: grantsSignedBy([`${ACCOUNT_DID}#zGone`, `${ACCOUNT_DID}#zKey`]),
+        signerCheck: check
       })
     ).toBe('active')
   })
 
-  it('matches the did:key spelling of a still-enrolled key', () => {
+  it('matches the did:key form of a still-enrolled key', () => {
     expect(
-      deriveAppGrantsState({
-        app: appWithSigners(['did:key:zKey#zKey']),
-        currentSigningKeys: new Set(['zKey'])
+      deriveGrantsState({
+        grants: grantsSignedBy(['did:key:zKey#zKey']),
+        signerCheck: check
       })
     ).toBe('active')
   })
 
   it('is orphaned when no recorded signer is in the current key set', () => {
     expect(
-      deriveAppGrantsState({
-        app: appWithSigners(['did:webvh:s:h:x#zGone']),
-        currentSigningKeys: new Set(['zKey'])
+      deriveGrantsState({
+        grants: grantsSignedBy([`${ACCOUNT_DID}#zGone`]),
+        signerCheck: check
       })
     ).toBe('orphaned')
+  })
+
+  it('is unknown for a grant a transient session minted (annex signer)', () => {
+    // The annex VM is never in the account document, so its absence is not
+    // evidence of a disconnect; only the revocation can say whether the
+    // chain under the generation delegation is still alive.
+    expect(
+      deriveGrantsState({
+        grants: grantsSignedBy([`${ANNEX_DID}#zVisit`]),
+        signerCheck: check
+      })
+    ).toBe('unknown')
   })
 })
 
@@ -524,15 +538,15 @@ describe('revokeAppAccess', () => {
     })
   })
 
-  it('posts the grant revocations for a row that derives as orphaned', async () => {
+  it('posts the grant revocations whatever the row derived as', async () => {
     const storage = fakeStorage({ appKeys: [], history: [] })
 
     const outcome = await revokeAppAccess({ storage, user, app })
 
     // A grant minted in a transient session is signed by an annex key the
-    // account document never lists, so its row derives as orphaned while its
-    // chain is still alive under the generation delegation. The revocations
-    // are POSTed whatever the marker says.
+    // account document never lists, so its row derives as unknown while its
+    // chain may still be alive under the generation delegation. The
+    // revocations are POSTed whatever the marker says.
     expect(outcome).toEqual({ revoked: 1, skipped: 0, rotated: 0 })
     expect(storage.revokeAppGrants).toHaveBeenCalledWith({
       origin: 'https://app.example',

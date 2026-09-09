@@ -17,8 +17,8 @@ import {
  * identity). An app whose
  * grants were signed by a since-disconnected wallet client shows as
  * orphaned -- "reconnect needed", the current-key-set rule already killed
- * its grants -- and revoking it skips the per-grant POSTs while still
- * removing the app key.
+ * its grants -- and revoking it still POSTs the per-grant revocations and
+ * removes the app key.
  *
  * Lesson from `clients.spec.ts`: `page.reload()` logs out (sessions are
  * in-memory), so panels are remounted by navigating `#/dashboard` and back.

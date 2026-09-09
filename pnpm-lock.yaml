@@ -72,11 +72,11 @@ importers:
         specifier: link:../wallet-core
         version: link:../wallet-core
       '@interop/was-client':
-        specifier: link:../was-client
-        version: link:../was-client
+        specifier: ^0.54.0
+        version: 0.54.0(@interop/jsonld-signatures@11.8.5)
       '@interop/was-sync':
-        specifier: ^0.2.1
-        version: 0.2.1(@interop/was-client@was-client)(rxdb@17.5.0(react@19.2.8)(rxjs@7.8.2)(supports-color@7.2.0))
+        specifier: ^0.2.5
+        version: 0.2.5(@interop/was-client@0.54.0(@interop/jsonld-signatures@11.8.5))(rxdb@17.5.0(react@19.2.8)(rxjs@7.8.2)(supports-color@7.2.0))
       '@interop/webkms-client':
         specifier: ^14.7.5
         version: 14.7.5
@@ -594,6 +594,15 @@ packages:
       react-native-get-random-values:
         optional: true
 
+  '@interop/edv-client@17.8.2':
+    resolution: {integrity: sha512-n5a68nUkHtPjOaqR7evIH+Nl9bgF+jkoN9MYPDw8+Hg2IJNKK6SOLZ93yf/LHdKaNBCFJodFZr0sudexaoq5Kg==}
+    engines: {node: '>=24.0'}
+    peerDependencies:
+      react-native-get-random-values: ^2.0.0
+    peerDependenciesMeta:
+      react-native-get-random-values:
+        optional: true
+
   '@interop/ezcap@7.4.6':
     resolution: {integrity: sha512-t5nVS2PA0cQYQGdG4R5feNoMJKlgdcLCTzFYMKHRx+Wp1dhjpCixj2E7nsjrfq3nh28+OS1bBJlFhYflm/qaww==}
     engines: {node: '>=20.0'}
@@ -635,6 +644,10 @@ packages:
     resolution: {integrity: sha512-6c8dnoQNIiL25Q4YovC1a44mREO1lzW3F/lmvdwbAMMbhtGGRoQeqo1H4diwNhBzaxRrUMXrAIwbM26POmI/Yg==}
     engines: {node: '>=24.0'}
 
+  '@interop/minimal-cipher@7.10.0':
+    resolution: {integrity: sha512-p5Y7S7tt2qRhyXHtToQ/GTb4a/+vf0AGXX8N5h3978d1yyKb1wJ22sV6LFF8wMc7GQqCYqflLnI8aNubVAgV0g==}
+    engines: {node: '>=24.0'}
+
   '@interop/security-document-loader@10.1.1':
     resolution: {integrity: sha512-ATCJlFQEPMSBlt9epaou6fazhWqgFLIRF5YwjS1nHFJlTnxsloHNA+BlXyo1TvjxiIM+Pvw3mmVubzVOEmF5fA==}
     engines: {node: '>=24.0'}
@@ -671,11 +684,15 @@ packages:
     resolution: {integrity: sha512-lI2pLNU3Kxm8o1Y7trKBJLi8tCvpr83gMpVkhUq0RIclNtL7fQAxsI1a6zCuFY6qtGZfgwdBJK+Zzsbz3ASxxw==}
     engines: {node: '>=24.0'}
 
-  '@interop/was-sync@0.2.1':
-    resolution: {integrity: sha512-vfRMgP2QVBp6r9iIxwP3t13p12h00SAdNYuhPBdxpHdkRJrAgt5+R/oLAI2dVt2h3LPkygeCj23gRGyFvToXdw==}
+  '@interop/was-client@0.54.0':
+    resolution: {integrity: sha512-tjBkxqIWoLYmTBxDULRHjZIr6nSAe3GunZoFjw9GCd0S5/Wx4mQOkFOiVkpYKjxH36MVvWZ8bARTz6Qi00POeQ==}
+    engines: {node: '>=24.0'}
+
+  '@interop/was-sync@0.2.5':
+    resolution: {integrity: sha512-xowPw0abellRzIKme7E7mU+wAy4UnFmFqihNczXYYMkQN4BMMMwRizBMmr2nCivEyZ4nTMHl1nDCAChtUR1acg==}
     engines: {node: '>=24.0'}
     peerDependencies:
-      '@interop/was-client': ^0.49.0
+      '@interop/was-client': ^0.54.0
       rxdb: ^17.0.0
     peerDependenciesMeta:
       rxdb:
@@ -946,6 +963,30 @@ packages:
 
   '@scure/base@2.4.0':
     resolution: {integrity: sha512-thZ1TuJwFwBblOhgsjDKvvGirBxNp+wSvY/DR6tJBJOTDhdAAcHJ8Vbr2eFnqaxeca4+t0i9KBf+uHYGWwZORg==}
+
+  '@stablelib/aead@2.0.0':
+    resolution: {integrity: sha512-U/RMANRxbT/ahIpYsPSiFwDFNjADHdnCFfmo09MO1ai2XmerPAOPtMl0qmX7XVvygnACC6ijKDyHBoT2rGyElg==}
+
+  '@stablelib/binary@2.0.1':
+    resolution: {integrity: sha512-U9iAO8lXgEDONsA0zPPSgcf3HUBNAqHiJmSHgZz62OvC3Hi2Bhc5kTnQ3S1/L+sthDTHtCMhcEiklmIly6uQ3w==}
+
+  '@stablelib/chacha20poly1305@2.0.1':
+    resolution: {integrity: sha512-kOoBsXbDPVRlelzXl+5WViycgM19lD7lF3Bc3KWI+DzId0Stc2HlxAfSc+Xpn3RgqSCl1ZNTXr33LegqBhBBaw==}
+
+  '@stablelib/chacha@2.0.1':
+    resolution: {integrity: sha512-lS1FqtNqofxe2vLkRsLli2m3x/XanUyAYRphLhdHumKeIsLbjbCXdCq3Pf/eWiO7G3QlSG5ViqnoVjktzfLWMg==}
+
+  '@stablelib/constant-time@2.0.1':
+    resolution: {integrity: sha512-0NWPogffRm+UWBH0+iM5otZmNrVe5OHFIvyoNIVankMAYOQzMwcdVALOVPrB5Ho0dST+Oc3H8/hPh65Z8R/uew==}
+
+  '@stablelib/int@2.0.1':
+    resolution: {integrity: sha512-Ht63fQp3wz/F8U4AlXEPb7hfJOIILs8Lq55jgtD7KueWtyjhVuzcsGLSTAWtZs3XJDZYdF1WcSKn+kBtbzupww==}
+
+  '@stablelib/poly1305@2.0.1':
+    resolution: {integrity: sha512-D8xfZcL/5zeVARJ9I2fZOUCnZvsJx8G4JDQvD+ecsnaCildPtqZDwqqjtOc4cfHAdScrMjOzUVsssjXUTBw3YQ==}
+
+  '@stablelib/wipe@2.0.1':
+    resolution: {integrity: sha512-1eU2K9EgOcV4qc9jcP6G72xxZxEm5PfeI5H55l08W95b4oRJaqhmlWRc4xZAm6IVSKhVNxMi66V67hCzzuMTAg==}
 
   '@standard-schema/spec@1.1.0':
     resolution: {integrity: sha512-l2aFy5jALhniG5HgqrD6jXLi/rUWrKvqN/qJx6yoJsgKhblVd+iqqU4RCXavm/jPityDo5TCvKMnpjKnOriy0w==}
@@ -3012,6 +3053,10 @@ packages:
     resolution: {integrity: sha512-qxQJTx2ryR0Dw0ITYyekNQWpz6f8dGd7vffGNflQQ3Iqj9NJ6qiZ7ELpZsJ/QBhIVAiDfXdag3+Gp8RvWa62AA==}
     engines: {node: '>=12'}
 
+  split-string@6.1.0:
+    resolution: {integrity: sha512-9UBdnmnvx2NLLd4bMs7CEKK+wSzbujVv3ONyorkP1o8M3pVJQtXDO1cN19xD1JJs6ltOrtPrkUND0HzLSinUcA==}
+    engines: {node: '>=8.6'}
+
   stackback@0.0.2:
     resolution: {integrity: sha512-1XMJE5fQo1jGH6Y/7ebnwPOBEkIEnT4QF32d5R1+VXdXveM0IBMJt8zfaxX1P3QhVwrYe+576+jkANtSS2mBbw==}
 
@@ -3888,6 +3933,20 @@ snapshots:
       '@noble/hashes': 2.4.0
       '@scure/base': 2.4.0
 
+  '@interop/edv-client@17.8.2':
+    dependencies:
+      '@interop/data-integrity-core': 8.7.1
+      '@interop/http-client': 1.0.5
+      '@interop/http-signature-zcap-invoke': 6.2.6
+      '@interop/lru-memoize': 4.0.3
+      '@interop/minimal-cipher': 7.10.0
+      '@noble/hashes': 2.4.0
+      '@scure/base': 2.4.0
+      canonicalize: 3.0.0
+      split-string: 6.1.0
+    transitivePeerDependencies:
+      - expo-crypto
+
   '@interop/ezcap@7.4.6':
     dependencies:
       '@interop/data-integrity-core': 8.7.1
@@ -3939,6 +3998,16 @@ snapshots:
   '@interop/lru-memoize@4.0.3':
     dependencies:
       lru-cache: 11.5.2
+
+  '@interop/minimal-cipher@7.10.0':
+    dependencies:
+      '@interop/data-integrity-core': 8.7.1
+      '@interop/ecdsa-multikey': 2.4.0
+      '@noble/ciphers': 2.4.0
+      '@noble/curves': 2.4.0
+      '@scure/base': 2.4.0
+      '@stablelib/chacha': 2.0.1
+      '@stablelib/chacha20poly1305': 2.0.1
 
   '@interop/security-document-loader@10.1.1':
     dependencies:
@@ -4022,10 +4091,29 @@ snapshots:
       '@interop/did-method-webvh': 5.8.0
       '@interop/storage-core': 0.9.1
 
-  '@interop/was-sync@0.2.1(@interop/was-client@was-client)(rxdb@17.5.0(react@19.2.8)(rxjs@7.8.2)(supports-color@7.2.0))':
+  '@interop/was-client@0.54.0(@interop/jsonld-signatures@11.8.5)':
+    dependencies:
+      '@interop/data-integrity-core': 8.7.1
+      '@interop/ed25519-signature': 7.2.1(@interop/jsonld-signatures@11.8.5)
+      '@interop/edv-client': 17.8.2
+      '@interop/ezcap': 7.4.6
+      '@interop/http-client': 1.0.5
+      '@interop/minimal-cipher': 7.10.0
+      '@interop/storage-core': 0.11.0
+      '@interop/vh-resource-log': 0.5.0
+      '@interop/x25519-key-agreement-key': 5.3.0
+      '@noble/hashes': 2.4.0
+      '@scure/base': 2.4.0
+      json-canonicalize: 3.0.0
+    transitivePeerDependencies:
+      - '@interop/jsonld-signatures'
+      - expo-crypto
+      - react-native-get-random-values
+
+  '@interop/was-sync@0.2.5(@interop/was-client@0.54.0(@interop/jsonld-signatures@11.8.5))(rxdb@17.5.0(react@19.2.8)(rxjs@7.8.2)(supports-color@7.2.0))':
     dependencies:
       '@interop/social-core': 0.8.1
-      '@interop/was-client': link:../was-client
+      '@interop/was-client': 0.54.0(@interop/jsonld-signatures@11.8.5)
       json-canonicalize: 3.0.0
       uuidv7: 1.2.1
     optionalDependencies:
@@ -4243,6 +4331,37 @@ snapshots:
   '@rolldown/pluginutils@1.0.1': {}
 
   '@scure/base@2.4.0': {}
+
+  '@stablelib/aead@2.0.0': {}
+
+  '@stablelib/binary@2.0.1':
+    dependencies:
+      '@stablelib/int': 2.0.1
+
+  '@stablelib/chacha20poly1305@2.0.1':
+    dependencies:
+      '@stablelib/aead': 2.0.0
+      '@stablelib/binary': 2.0.1
+      '@stablelib/chacha': 2.0.1
+      '@stablelib/constant-time': 2.0.1
+      '@stablelib/poly1305': 2.0.1
+      '@stablelib/wipe': 2.0.1
+
+  '@stablelib/chacha@2.0.1':
+    dependencies:
+      '@stablelib/binary': 2.0.1
+      '@stablelib/wipe': 2.0.1
+
+  '@stablelib/constant-time@2.0.1': {}
+
+  '@stablelib/int@2.0.1': {}
+
+  '@stablelib/poly1305@2.0.1':
+    dependencies:
+      '@stablelib/constant-time': 2.0.1
+      '@stablelib/wipe': 2.0.1
+
+  '@stablelib/wipe@2.0.1': {}
 
   '@standard-schema/spec@1.1.0': {}
 
@@ -6709,6 +6828,8 @@ snapshots:
   space-separated-tokens@2.0.2: {}
 
   split-on-first@3.0.0: {}
+
+  split-string@6.1.0: {}
 
   stackback@0.0.2: {}
 

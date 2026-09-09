@@ -2434,28 +2434,33 @@ wallet clients, with a cross-pointer in each. Its listing checks each
 recorded App Connect grant's delegation signer against the same verified
 document; the full zcap, proof included, is recorded on the Login activity.
 It uses `currentAccountSigningKeys` (wallet-core's, wrapped in
-`src/session/clients.ts` so a guest degrades rather than throws) plus
-`deriveAppGrantsState`, matched on the key-multibase fragment so a key's
-did:key and promoted did:webvh forms agree. An app whose recorded signers
-have all left the document shows as orphaned; its grants stopped verifying
-at that client's revocation, and reconnecting through the ordinary App
-Connect flow is the recovery path. The marker does not gate the revocation.
-Revoking an app POSTs every recorded revocation, rotates the
-app-provisioned collections' epochs, and deletes the app key. "Signer gone"
-does not mean "chain dead": a grant minted in a transient session is signed
-by an annex key the account document never lists, so it derives as orphaned
-while its chain stays alive under the generation delegation. A genuinely
-dead chain comes back as a skipped revocation. The check is best-effort:
-with no verified document this session (a guest, or the log unreachable) the
-page lists without the marker rather than failing.
+`src/session/clients.ts` so a guest degrades rather than throws, and paired
+there with the account DID) plus wallet-core's `deriveGrantSignerState`,
+matched on the key-multibase fragment so a key's did:key and promoted
+did:webvh forms agree. An app whose recorded signers were enrolled clients
+that have all left the document shows as orphaned; its grants stopped
+verifying at that client's revocation, and reconnecting through the ordinary
+App Connect flow is the recovery path. A grant minted in a transient session
+is signed by an annex key under the annex's own did:webvh, which the account
+document never lists, so the document cannot judge it: such a signer derives
+as unknown, and the row carries no marker. Its chain stays alive under the
+generation delegation until that delegation expires or the generation is
+collected, neither of which the account document records. The marker does
+not gate the revocation. Revoking an app POSTs every recorded revocation,
+rotates the app-provisioned collections' epochs, and deletes the app key. A
+dead chain, whichever way it died, comes back as a skipped revocation, and
+the outcome copy for a row nothing was withdrawn from says the access had
+already ended, naming the disconnect only on an orphaned row. The check is
+best-effort: with no verified document this session (a guest, or the log
+unreachable) the page lists without the marker rather than failing.
 
 The panel's agent rows (see "The interaction-URL request page" above) run
-the identical signer check against `currentAccountSigningKeys`, over the
-recorded grant's `controller` instead of an app-key subject, so an agent
-whose signing client was disconnected shows as orphaned too. The marker is
-display-only on both row kinds, for the reason above: revoking an agent
-always POSTs the recorded revocations, and a dead chain comes back as a
-skipped one.
+the identical signer check, over the recorded grant's `controller` instead
+of an app-key subject, so an agent whose signing client was disconnected
+shows as orphaned too, and one granted from a transient session carries no
+marker. The marker is display-only on both row kinds, for the reason above:
+revoking an agent always POSTs the recorded revocations, and a dead chain
+comes back as a skipped one.
 
 ## Storage model (local-first)
 

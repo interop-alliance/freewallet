@@ -23,6 +23,7 @@
  */
 import type { ZcapClient } from '@interop/ezcap'
 import type { ResourceLogPinStore } from '@interop/vh-resource-log'
+import type { IDID } from '@interop/data-integrity-core'
 import {
   readEtag,
   WasClient,
@@ -111,11 +112,27 @@ export type ICollectionsSet = Map<string, string>
  */
 export { mintSpaceId } from '@interop/wallet-core/genesis'
 
+/**
+ * The one narrowing of a Space controller onto the DID type was-client's
+ * Space Description carries. Every controller this store is handed is a
+ * did:key or a did:webvh, but the pointer and key-agent ids it arrives
+ * through are typed as plain strings upstream.
+ *
+ * @param controller {string}
+ * @returns {IDID}
+ */
+function controllerDid(controller: string): IDID {
+  if (!controller.startsWith('did:')) {
+    throw new Error(`Space controller is not a DID: ${controller}`)
+  }
+  return controller as IDID
+}
+
 export class WASRemoteStore {
   public storageServerUrl: string
   public was: WasClient
   public spaceId: string
-  public controller: string
+  public controller: IDID
 
   public spaceUrl: string
   public collections?: ICollectionsSet
@@ -155,7 +172,7 @@ export class WASRemoteStore {
       encryption: createEdvEncryption({ resolveKeys: async () => null })
     })
     this.spaceId = spaceId
-    this.controller = controller
+    this.controller = controllerDid(controller)
     this.#capability = capability
     this.spaceUrl = new URL(`/space/${spaceId}`, storageServerUrl).toString()
   }
@@ -487,7 +504,7 @@ export class WASRemoteStore {
       controller,
       ...(current !== undefined ? { current } : {})
     })
-    this.controller = controller
+    this.controller = controllerDid(controller)
   }
 
   /**
@@ -514,7 +531,7 @@ export class WASRemoteStore {
       // Mirrors the constructor: no decrypt path lives here.
       encryption: createEdvEncryption({ resolveKeys: async () => null })
     })
-    this.controller = controller
+    this.controller = controllerDid(controller)
   }
 
   /**

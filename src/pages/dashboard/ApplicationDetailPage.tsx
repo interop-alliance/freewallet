@@ -29,7 +29,7 @@ import { showToast } from '@/stores/toastStore'
 import { dashboardStyles, storageStyles } from '@/styles/appStyles'
 import { listApplicationsView, revokeApplication } from '@/session/applications'
 import {
-  deriveAppGrantsState,
+  deriveGrantsState,
   type AppGrant,
   type ConnectedApp
 } from '@/lib/connectedApps'
@@ -74,10 +74,10 @@ export function ApplicationDetailPage() {
       if (!session || !cid) {
         return null
       }
-      const { apps, signingKeys } = await listApplicationsView({ session })
+      const { apps, signerCheck } = await listApplicationsView({ session })
       return {
         app: apps.find(entry => entry.cid === cid) ?? null,
-        signingKeys,
+        signerCheck,
         // Captured once when the app loads, so grant expiry is evaluated
         // against a stable timestamp rather than an impure `Date.now()` call
         // during render.
@@ -94,13 +94,14 @@ export function ApplicationDetailPage() {
   )
 
   const app: ConnectedApp | null = view?.app ?? null
-  // The enrolled clients' signing keys from the verified account log, for the
-  // grant-state check; undefined when the check is unavailable.
-  const signingKeys = view?.signingKeys
+  // The account DID and the enrolled clients' signing keys from the verified
+  // account log, for the grant-state check; undefined when the check is
+  // unavailable.
+  const signerCheck = view?.signerCheck
   const loadedAt = view?.loadedAt ?? 0
 
   const grantsState = app
-    ? deriveAppGrantsState({ app, currentSigningKeys: signingKeys })
+    ? deriveGrantsState({ grants: app.grants, signerCheck })
     : 'unknown'
 
   async function handleRevoke() {
@@ -110,25 +111,12 @@ export function ApplicationDetailPage() {
     setRevoking(true)
     setRevokeError(false)
     try {
-      const { withdrew } = await revokeApplication({
+      const { outcomeKey } = await revokeApplication({
         session,
         app,
-        signingKeys
+        signerCheck
       })
-      showToast({
-        // What actually happened outranks the row's marker: the revocations
-        // are POSTed whatever it says, and a row that derived as orphaned but
-        // still had a live chain (a grant minted in a transient session) reads
-        // as revoked, not as access that had already ended. `withdrew` spans
-        // both stages, so a single app-provisioned collection -- whose pull
-        // grant the rotation revokes, leaving the second stage nothing but an
-        // already-revoked POST -- still reads as revoked.
-        message: withdrew
-          ? t('applications.revokeSuccess')
-          : grantsState === 'orphaned'
-            ? t('applications.revokeSuccessOrphaned')
-            : t('applications.revokeSuccessLegacy')
-      })
+      showToast({ message: t(outcomeKey) })
       navigate('/applications')
     } catch (err) {
       log.error('Could not revoke app access', { err })

@@ -48,7 +48,6 @@ import {
   revokeApplication
 } from '@/session/applications'
 import {
-  deriveAppGrantsState,
   deriveGrantsState,
   type AppGrant,
   type ConnectedAgent,
@@ -121,17 +120,13 @@ export function ApplicationsPage() {
       if (!session) {
         return null
       }
-      const {
-        apps: listed,
-        agents: listedAgents,
-        signingKeys: keys
-      } = await listApplicationsView({ session })
+      const listing = await listApplicationsView({ session })
       if (!isCancelled()) {
         setUndecryptableAppKeys(session.storage.undecryptableAppKeys)
         setNoEpochKeyAppKeys(session.storage.noEpochKeyAppKeys)
         setPurgeError(false)
       }
-      return { apps: listed, agents: listedAgents, signingKeys: keys }
+      return listing
     },
     [session],
     {
@@ -158,9 +153,10 @@ export function ApplicationsPage() {
 
   const apps = view?.apps ?? []
   const agents = view?.agents ?? []
-  // The enrolled clients' signing keys from the verified account log, for the
-  // per-app grant-state check; undefined when the check is unavailable.
-  const signingKeys = view?.signingKeys
+  // The account DID and the enrolled clients' signing keys from the verified
+  // account log, for the per-row grant-state check; undefined when the check
+  // is unavailable.
+  const signerCheck = view?.signerCheck
 
   function openRevokeDialog(app: ConnectedApp) {
     setRevokeError(false)
@@ -174,26 +170,13 @@ export function ApplicationsPage() {
     setRevoking(true)
     setRevokeError(false)
     try {
-      const { grantsState, withdrew } = await revokeApplication({
+      const { outcomeKey } = await revokeApplication({
         session,
         app: revokeTarget,
-        signingKeys
+        signerCheck
       })
       setRevokeTarget(null)
-      showToast({
-        // What actually happened outranks the row's marker: the revocations
-        // are POSTed whatever it says, and a row that derived as orphaned but
-        // still had a live chain (a grant minted in a transient session) reads
-        // as revoked, not as access that had already ended. `withdrew` spans
-        // both stages, so a single app-provisioned collection -- whose pull
-        // grant the rotation revokes, leaving the second stage nothing but an
-        // already-revoked POST -- still reads as revoked.
-        message: withdrew
-          ? t('applications.revokeSuccess')
-          : grantsState === 'orphaned'
-            ? t('applications.revokeSuccessOrphaned')
-            : t('applications.revokeSuccessLegacy')
-      })
+      showToast({ message: t(outcomeKey) })
       await reload()
     } catch (err) {
       log.error('Could not revoke app access', { err })
@@ -309,9 +292,9 @@ export function ApplicationsPage() {
                         >
                           {app.name}
                         </Typography>
-                        {deriveAppGrantsState({
-                          app,
-                          currentSigningKeys: signingKeys
+                        {deriveGrantsState({
+                          grants: app.grants,
+                          signerCheck
                         }) === 'orphaned' && (
                           <Chip
                             size="small"
@@ -361,7 +344,7 @@ export function ApplicationsPage() {
                 const orphaned =
                   deriveGrantsState({
                     grants: agent.grants,
-                    currentSigningKeys: signingKeys
+                    signerCheck
                   }) === 'orphaned'
                 const fingerprint = t('settings.clients.keyFingerprint', {
                   did: agent.controller
@@ -482,10 +465,8 @@ export function ApplicationsPage() {
         appName={revokeTarget?.name ?? ''}
         orphaned={
           !!revokeTarget &&
-          deriveAppGrantsState({
-            app: revokeTarget,
-            currentSigningKeys: signingKeys
-          }) === 'orphaned'
+          deriveGrantsState({ grants: revokeTarget.grants, signerCheck }) ===
+            'orphaned'
         }
         revoking={revoking}
         error={revokeError}

@@ -13,11 +13,15 @@
  * grant summaries, and the last-connected timestamp. The join is on the
  * credential's `appUrl`, which every mint and every connect records, so
  * several apps sharing an origin get their own attribution.
- * `deriveAppGrantsState`
- * then reads each recorded grant's delegation signer against the account
- * document's current key set: a grant signed by a since-disconnected wallet
- * client is already dead (the current-key-set rule), so its app lists as
- * orphaned -- "reconnect to use again" -- rather than as live.
+ * `deriveGrantsState` then reads each recorded grant's delegation signer
+ * against the account
+ * document's current key set (wallet-core's `deriveGrantSignerState`): a grant
+ * signed by a since-disconnected wallet client is already dead (the
+ * current-key-set rule), so its app lists as orphaned -- "reconnect to use
+ * again" -- rather than as live. A grant minted from a transient session is
+ * signed by a client-annex per-visit key the document never lists, so it
+ * derives as unknown rather than orphaned; whether its chain is still alive
+ * is answered by the revocation itself.
  * `revokeAppAccess` retires an app: for each app-provisioned encrypted
  * collection it rotates the epoch to drop the app's recipient key (so the app
  * cannot decrypt future writes) and revokes those pull-axis grants
@@ -37,7 +41,10 @@
  */
 import type { StorageManager } from '@/stores/storageManager'
 import type { User } from '@/types/auth'
-import { multibaseOf } from '@interop/wallet-core/webvh'
+import {
+  deriveGrantSignerState,
+  type GrantSignerState
+} from '@interop/wallet-core/clients'
 import {
   appKeyAppUrl,
   appKeyOrigin,
@@ -64,19 +71,15 @@ export interface AppGrant {
 }
 
 /**
- * Whether a connected app's recorded grants still verify under the
- * current-key-set rule:
- *
- * - `active` -- at least one recorded grant was signed by a verification
- *   method the account's did:webvh document currently publishes.
- * - `orphaned` -- signers were recorded but none is in the current document:
- *   the wallet client that connected the app has since been disconnected, so
- *   every grant already stopped verifying with that document edit. The app
- *   must reconnect through the ordinary App Connect flow to be usable again.
- * - `unknown` -- nothing to check against (no signers recorded, or no
- *   verified document available this session).
+ * What a recorded grant signer is checked against: the account DID an
+ * enrolled client's promoted verification-method id is under, and the
+ * enrolled clients' signing-key multibases from the verified account log.
+ * The members are named as wallet-core's `deriveGrantSignerState` takes them.
  */
-export type AppGrantsState = 'active' | 'orphaned' | 'unknown'
+export interface AccountSignerCheck {
+  accountDid: string
+  currentSigningKeys: Set<string>
+}
 
 /**
  * A connected application, joined from its app-key credential and the latest
@@ -236,77 +239,36 @@ function grantSignerKeyId(zcap: unknown): string | undefined {
 }
 
 /**
- * The key-multibase fragment of a verification-method id -- the part after
- * `#`, which names the same Ed25519 key whether the id is the did:key form
- * (`did:key:<mb>#<mb>`) or the promoted did:webvh form (`<did>#<mb>`). The
- * fragment guard is this module's: `multibaseOf` returns the whole string for
- * an id that carries no fragment, which is never a key multibase here.
- *
- * @param keyId {string}
- * @returns {string | undefined}
- */
-function signerKeyMultibase(keyId: string): string | undefined {
-  return keyId.includes('#') ? multibaseOf(keyId) : undefined
-}
-
-/**
- * Derives a connected app's {@link AppGrantsState} by checking each recorded
- * grant's delegation signer against the signing keys the account's locally
- * verified did:webvh document currently publishes (the current-key-set rule:
- * a delegation verifies iff its verification method is in the resolved
- * document now). Matching is on the key-multibase fragment, so a grant signed
- * under the did:key spelling of a still-enrolled client's key stays active.
- *
- * @param options {object}
- * @param options.app {ConnectedApp}
- * @param [options.currentSigningKeys] {Set<string>}   the enrolled clients'
- *   signing-key multibases, or undefined when no verified document is
- *   available this session
- * @returns {AppGrantsState}
- */
-export function deriveAppGrantsState({
-  app,
-  currentSigningKeys
-}: {
-  app: ConnectedApp
-  currentSigningKeys?: Set<string>
-}): AppGrantsState {
-  return deriveGrantsState({ grants: app.grants, currentSigningKeys })
-}
-
-/**
- * The grant-state check itself, over a bare grant list -- shared by the app
- * rows ({@link deriveAppGrantsState}) and the agent rows, which have no
- * app-key credential to hang the grants off.
+ * Whether a row's recorded grants still verify under the current-key-set
+ * rule (a delegation verifies iff its verification method is in the resolved
+ * account document now), over a bare grant list so the app rows and the agent
+ * rows share it. The rule is wallet-core's `deriveGrantSignerState`; this
+ * binds it to the recorded {@link AppGrant} shape. `orphaned` means the
+ * enrolled client that minted the grants has since been disconnected;
+ * `unknown` covers nothing to check against AND a grant a transient session
+ * minted, whose annex signer the account document never lists.
  *
  * @param options {object}
  * @param options.grants {AppGrant[]}
- * @param [options.currentSigningKeys] {Set<string>}   the enrolled clients'
- *   signing-key multibases, or undefined when no verified document is
- *   available this session
- * @returns {AppGrantsState}
+ * @param [options.signerCheck] {AccountSignerCheck}   the account DID and
+ *   the enrolled clients' signing keys, or undefined when no verified
+ *   document is available this session
+ * @returns {GrantSignerState}
  */
 export function deriveGrantsState({
   grants,
-  currentSigningKeys
+  signerCheck
 }: {
   grants: AppGrant[]
-  currentSigningKeys?: Set<string>
-}): AppGrantsState {
-  if (!currentSigningKeys) {
+  signerCheck?: AccountSignerCheck
+}): GrantSignerState {
+  if (!signerCheck) {
     return 'unknown'
   }
-  const signers = grants
-    .map(grant => grant.signerKeyId)
-    .filter((keyId): keyId is string => !!keyId)
-  if (signers.length === 0) {
-    return 'unknown'
-  }
-  const anyCurrent = signers.some(keyId => {
-    const multibase = signerKeyMultibase(keyId)
-    return !!multibase && currentSigningKeys.has(multibase)
+  return deriveGrantSignerState({
+    signerKeyIds: grants.map(grant => grant.signerKeyId),
+    ...signerCheck
   })
-  return anyCurrent ? 'active' : 'orphaned'
 }
 
 /**
@@ -448,16 +410,14 @@ export async function listConnectedApps({
  * propagates.
  *
  * The recorded revocations are always POSTed, exactly as an agent row's are,
- * including for a row the listing marks `orphaned` (see
- * {@link AppGrantsState}). "Signer gone" does not mean "chain dead" here: a
- * grant minted in a transient session is signed by an annex verification
- * method the account document never lists, so it derives as orphaned while
- * chaining under a generation delegation that stays alive until its own TTL.
- * Skipping the POSTs would report success and leave that capability working.
- * The marker's own derivation is still wrong for such a row -- it claims a
- * signing client was disconnected when it was a per-visit key -- and fixing it
- * is roadmap FW-380; until then this revokes the superset. On a genuinely
- * orphaned row the server answers each POST with a chain-verification refusal,
+ * whatever the listing marks the row (see {@link deriveGrantsState}). The marker
+ * reads the account document alone, and a grant minted in a transient session
+ * is signed by an annex verification method that document never lists, so
+ * its row derives as unknown while chaining under a generation delegation
+ * that stays alive until its own TTL. Only the server can say whether such a
+ * chain still verifies, so the POSTs are what settle it. On a genuinely
+ * orphaned row, and on an annex-signed row whose generation has been
+ * collected, the server answers each POST with a chain-verification refusal,
  * which counts into `skipped`; a transport failure propagates instead, before
  * the credential is deleted, so the row stays listed and a retry re-runs the
  * whole sequence.

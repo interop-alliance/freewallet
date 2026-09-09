@@ -142,6 +142,26 @@
 
 ### Fixed
 
+- The Applications page no longer marks an app or agent row "Reconnect
+  needed" when its grants were minted from a transient session. Such a grant
+  is signed by a client-annex per-visit key the account document never
+  lists, so the row derived as orphaned, and its notice and revoke confirm
+  claimed the wallet that connected it had been disconnected. The grant-state
+  check is now wallet-core's `deriveGrantSignerState`, which judges a signer
+  against the document only when the document could have listed it (the
+  account DID or a did:key) and derives an annex signer as unknown. The
+  revocation still POSTs every recorded capability, and a revoke that
+  withdrew nothing from a row whose grants the server refused (a collected
+  generation, an expired grant) now reads "its storage access had already
+  ended" (`applications.revokeSuccessEnded`) instead of promising that the
+  access will expire on its own; the disconnect is named only on an orphaned
+  row. `listApplicationsView` returns `signerCheck` (the account DID plus the
+  signing keys) in place of `signingKeys`, `revokeApplication` returns the
+  toast's i18n key (`outcomeKey`) in place of the state it was derived from,
+  and `deriveAppGrantsState` is gone in favor of `deriveGrantsState`, which
+  the app rows and the agent rows share. `applications.revokeSuccessLegacy`
+  is dropped: a summary-only record already counted as a refused grant.
+
 - The contacts cipher is was-client's self-refreshing one
   (`createRefreshingEdvDocCipher`), primed with the descriptor the session
   already acquired so the build reads nothing. A contacts head conflict is
@@ -165,6 +185,13 @@
   status store). On a fresh browser the first pull landed moments after the
   mount read, so the credential list stayed empty and a grant's orphaned
   marker stayed off until a manual Sync.
+- `pnpm run typecheck` (and so `pnpm run build`) passes again.
+  `WASRemoteStore.controller` is typed as the DID it always holds
+  (data-integrity-core's `IDID`), narrowed once where the store takes a
+  controller rather than cast where the Space Description is written.
+  `pnpm test` now runs `typecheck` between the formatter and the unit
+  suite, so a type error fails the everyday loop instead of only the
+  build.
 
 ## 0.49.1 - TBD
 
