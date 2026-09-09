@@ -4,6 +4,9 @@
 
 ### Changed
 
+- `CapabilityAgent` is imported from `@interop/capability-agent`;
+  `@interop/webkms-client` (now 15.0.0) no longer exports it and is kept for
+  `KmsClient` / `KeystoreAgent` only.
 - Identity derivation imports (`agentsFromSeed`, `zcapClientForSigner`, and
   the rest) move to `@interop/was-client/identity`, following
   `@interop/wallet-core` 0.71.0's removal of its `./identity` subpath. The

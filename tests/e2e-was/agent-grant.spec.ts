@@ -1,5 +1,5 @@
 import { test, expect } from '@playwright/test'
-import { CapabilityAgent } from '@interop/webkms-client'
+import { CapabilityAgent } from '@interop/capability-agent'
 import { WasClient, type Collection } from '@interop/was-client'
 import {
   composeCapabilityRequest,

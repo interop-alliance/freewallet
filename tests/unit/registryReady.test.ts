@@ -13,7 +13,7 @@
  * derivation runs for real.
  */
 import { beforeEach, describe, expect, it, vi } from 'vitest'
-import { CapabilityAgent } from '@interop/webkms-client'
+import { CapabilityAgent } from '@interop/capability-agent'
 
 const state = vi.hoisted(() => ({
   wasUrl: 'https://was.example.test' as string | undefined,

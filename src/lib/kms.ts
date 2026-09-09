@@ -14,7 +14,7 @@
  * resource-log append authority as the account, nor under `keyAgreement`,
  * where no server-held key may be a wrap target.
  */
-import type { CapabilityAgent } from '@interop/webkms-client'
+import type { CapabilityAgent } from '@interop/capability-agent'
 import { KeystoreAgent, KmsClient } from '@interop/webkms-client'
 import type { ZcapClient } from '@interop/ezcap'
 import type { ISigner } from '@interop/data-integrity-core'

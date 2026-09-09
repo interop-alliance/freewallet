@@ -610,8 +610,9 @@ cascades, and the permanent wire-level constants.
 - **`@interop/social-core`** -- the contacts collection specs and the
   `remotePayloadWins` last-write-wins comparison itself.
 - **`@interop/vc-display`** -- credential display mapping.
-- **`@interop/webkms-client`** and **`@interop/ezcap`** --
-  `CapabilityAgent`, `KmsClient` / `KeystoreAgent`, and `ZcapClient`.
+- **`@interop/capability-agent`** -- `CapabilityAgent`;
+  **`@interop/webkms-client`** -- `KmsClient` / `KeystoreAgent`;
+  **`@interop/ezcap`** -- `ZcapClient`.
 - **`@interop/data-integrity-core`** -- loose VC/VP shape guards and the VPR
   type vocabulary.
 - **`@interop/did-method-webvh`** -- the webvh log primitives (normally
@@ -783,7 +784,7 @@ base64url(SHA-256(unlock did:key))` (a discovery convention).
   `invocationTarget` is the Space's items subtree, so a whole-Space target
   under it is unsatisfiable and every grant's `expires` is limited to its
   own.
-- **CapabilityAgent** -- from `@interop/webkms-client`. Wraps the Ed25519
+- **CapabilityAgent** -- from `@interop/capability-agent`. Wraps the Ed25519
   key pair derived from the passphrase and exposes `getSigner()`.
 - **ZcapClient** -- from `@interop/ezcap`. Wraps the session's root-key
   signer and adds ZCap headers to HTTP requests.

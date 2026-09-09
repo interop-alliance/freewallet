@@ -28,7 +28,7 @@ import type {
   IVerifiableCredential
 } from '@interop/data-integrity-core'
 import { X25519KeyAgreementKey2020 } from '@interop/x25519-key-agreement-key'
-import { CapabilityAgent } from '@interop/webkms-client'
+import { CapabilityAgent } from '@interop/capability-agent'
 import { createEdvDocCipher, type DocCipher } from '@interop/was-client/edv'
 import { mintRecordEncryption } from '@/session/recordEnvelope'
 import { getRxStorageMemory } from 'rxdb/plugins/storage-memory'

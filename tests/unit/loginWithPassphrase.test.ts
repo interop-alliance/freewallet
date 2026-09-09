@@ -12,7 +12,7 @@
  * check exercises the true did:key.
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { CapabilityAgent } from '@interop/webkms-client'
+import { CapabilityAgent } from '@interop/capability-agent'
 
 // The deployment axis: a WAS server or the local-only build. It decides
 // whether a popup's descriptor cache is a cache at all, so the popup tests

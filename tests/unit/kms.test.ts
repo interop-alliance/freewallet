@@ -7,7 +7,8 @@
  * `KmsClient` static.
  */
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { CapabilityAgent, KmsClient } from '@interop/webkms-client'
+import { CapabilityAgent } from '@interop/capability-agent'
+import { KmsClient } from '@interop/webkms-client'
 import type { ZcapClient } from '@interop/ezcap'
 import { ensureKeystore, promoteKeystoreController } from '@/lib/kms'
 

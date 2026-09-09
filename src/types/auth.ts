@@ -25,7 +25,7 @@ import type { VerifiedLogCache } from '@/session/verifiedLog'
 import type { SessionPersistence } from '@/session/persistence'
 
 /**
- * Minimal interface over @interop/webkms-client's CapabilityAgent.
+ * Minimal interface over @interop/capability-agent's CapabilityAgent.
  */
 export interface ICapabilityAgent {
   id: string

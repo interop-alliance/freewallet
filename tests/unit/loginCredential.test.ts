@@ -1,6 +1,6 @@
 // @vitest-environment node
 import { describe, it, expect, beforeAll } from 'vitest'
-import { CapabilityAgent } from '@interop/webkms-client'
+import { CapabilityAgent } from '@interop/capability-agent'
 import * as vc from '@interop/vc'
 import { Ed25519Signature2020 } from '@interop/ed25519-signature'
 import { securityLoader } from '@interop/security-document-loader'

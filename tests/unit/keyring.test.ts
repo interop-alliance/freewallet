@@ -19,7 +19,7 @@
  * frozen-vector block runs; the real EDV cipher and CapabilityAgent / X25519 derivations run unmocked.
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { CapabilityAgent } from '@interop/webkms-client'
+import { CapabilityAgent } from '@interop/capability-agent'
 import { X25519KeyAgreementKey2020 } from '@interop/x25519-key-agreement-key'
 import type {
   IDelegatedZcap,

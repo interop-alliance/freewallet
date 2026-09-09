@@ -19,7 +19,7 @@ import {
   vi
 } from 'vitest'
 import { addSink, captureSink } from '@interop/logger'
-import { CapabilityAgent } from '@interop/webkms-client'
+import { CapabilityAgent } from '@interop/capability-agent'
 import { X25519KeyAgreementKey2020 } from '@interop/x25519-key-agreement-key'
 import type {
   IDelegatedZcap,

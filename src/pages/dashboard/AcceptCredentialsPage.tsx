@@ -10,10 +10,7 @@ import { BsAward } from 'react-icons/bs'
 import { Navigate, useLocation, useNavigate } from 'react-router'
 import { useTranslation } from 'react-i18next'
 import type { IVerifiableCredential } from '@interop/data-integrity-core'
-import {
-  AppKeyRefusedError,
-  presentsAsAppKey
-} from '@interop/wallet-request'
+import { AppKeyRefusedError, presentsAsAppKey } from '@interop/wallet-request'
 import { useAuthStore } from '@/stores/authStore'
 import { showToast } from '@/stores/toastStore'
 import { cidFrom } from '@interop/was-client/sync'

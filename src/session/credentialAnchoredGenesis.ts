@@ -88,6 +88,7 @@ import {
   type PassphraseUnlockMethod
 } from '@/session/unlockMethods'
 import { createLogger, stageMarker, stageSpan, stageTimer } from '@/lib/log'
+import type { StageLabel } from '@/lib/log'
 
 export type { CredentialAnchoredEstablishment, CredentialAnchoredMendReport }
 
@@ -122,7 +123,7 @@ const KMS_AUTHENTICATION_TIMEOUT_MS = 30_000
  * @param options.pointer {AccountPointer}
  * @param [options.email] {string}
  * @param options.logPins {ResourceLogPinStore}
- * @param options.ceremony {string}   the label the caller's own timer uses,
+ * @param options.ceremony {StageLabel}   the label the caller's own timer uses,
  *   so the concurrent KMS stage's measured span is filed under the same
  *   ceremony as the marks around it
  * @param options.mark {Function}   the caller's stage timer. The keystore
@@ -145,7 +146,7 @@ async function establishmentHooks({
   pointer: AccountPointer
   email?: string
   logPins: ResourceLogPinStore
-  ceremony: string
+  ceremony: StageLabel
   mark: (stage: string) => void
 }) {
   const host = pointer.host

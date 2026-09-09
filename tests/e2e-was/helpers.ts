@@ -6,7 +6,7 @@ import {
   type TestInfo
 } from '@playwright/test'
 import { generateParallelDidWeb } from '@interop/did-method-webvh'
-import { CapabilityAgent } from '@interop/webkms-client'
+import { CapabilityAgent } from '@interop/capability-agent'
 import { didKeyZcapClient } from '@interop/wallet-core/webvh'
 
 /**

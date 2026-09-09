@@ -1,6 +1,6 @@
 // @vitest-environment node
 import { describe, it, expect, beforeAll } from 'vitest'
-import { CapabilityAgent } from '@interop/webkms-client'
+import { CapabilityAgent } from '@interop/capability-agent'
 import * as vc from '@interop/vc'
 import { securityLoader } from '@interop/security-document-loader'
 import type { Session } from '@/types/auth'
