@@ -182,12 +182,14 @@ import {
   type PassphraseUnlockMethod,
   type UnlockMethodsRecord
 } from '@/session/unlockMethods'
-import { PreconditionFailedError } from '@interop/was-client'
+import {
+  PreconditionFailedError,
+  zcapClientForSigner
+} from '@interop/was-client'
 import { RecordEnvelopeDecryptError } from '@/session/recordEnvelope'
 import { deleteUnlockSpaceWithCapability } from '@interop/wallet-core/keyring'
 import { rotateOffUnlockCredential } from '@/session/credentialRotation'
 import { browserLocalSessionPersistence } from '@/session/persistence'
-import { zcapClientForSigner } from '@interop/wallet-core/identity'
 import { rootCapabilityId } from '@interop/was-client/paths'
 import { DELETION_ZCAP_TTL_MS } from '@interop/wallet-core/clientAnnex'
 import { mintUserKey, type UserKey } from '@interop/wallet-core/keys'

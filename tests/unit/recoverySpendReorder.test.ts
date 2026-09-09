@@ -350,7 +350,7 @@ async function docPublishingCommitment({
  * @returns {Promise<string>}
  */
 async function keyAgreementMultibase(seedByte: number): Promise<string> {
-  const { agentsFromSeed } = await import('@interop/wallet-core/identity')
+  const { agentsFromSeed } = await import('@interop/was-client/identity')
   const { keyAgreementKey } = await agentsFromSeed({
     seed: new Uint8Array(32).fill(seedByte)
   })

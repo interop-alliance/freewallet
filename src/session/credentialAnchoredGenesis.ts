@@ -418,7 +418,7 @@ export async function establishCredentialAnchoredAccount({
   // One `mark` for the whole establishment: it closes each stage's timing
   // span AND feeds the caller's optional progress notifier (the lobby
   // page's step feed), so the two can never report different stage sets.
-  const ceremony = 'credential-anchored-establishment'
+  const ceremony = 'credential-anchored-genesis'
   const mark = stageMarker({
     log,
     ceremony,

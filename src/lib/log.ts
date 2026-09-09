@@ -29,8 +29,17 @@ import { setLogger, stageNotifier } from '@interop/wallet-core'
 import { setLogger as setRequestLogger } from '@interop/wallet-request'
 import { setLogger as setSyncLogger } from '@interop/was-sync'
 import type { StageNotifier } from '@interop/wallet-core'
+import type { FreewalletCeremonyId } from '../session/ceremonies.js'
 
 export { createLogger }
+
+/**
+ * The label a stage-timing event carries under `ceremony`: a ceremony id
+ * from the typed vocabulary, or the credential-anchored mend, a mender run
+ * with stages of its own but no ceremony id. Typed so the diagnostics
+ * label cannot drift from the vocabulary (nothing stores it).
+ */
+export type StageLabel = FreewalletCeremonyId | 'credential-anchored-mend'
 
 /**
  * A per-stage stopwatch for a ceremony: each `mark(stage)` logs one info
@@ -54,7 +63,7 @@ export { createLogger }
  *
  * @param options {object}
  * @param options.log {Logger}   the calling module's namespaced logger
- * @param options.ceremony {string}   a label naming the timed sequence
+ * @param options.ceremony {StageLabel}   the ceremony (or mend) being timed
  * @returns {(stage: string) => void}
  */
 export function stageTimer({
@@ -62,7 +71,7 @@ export function stageTimer({
   ceremony
 }: {
   log: Logger
-  ceremony: string
+  ceremony: StageLabel
 }): (stage: string) => void {
   const startedAt = performance.now()
   let previous = startedAt
@@ -90,7 +99,7 @@ export function stageTimer({
  *
  * @param options {object}
  * @param options.log {Logger}   the calling module's namespaced logger
- * @param options.ceremony {string}   a label naming the timed sequence
+ * @param options.ceremony {StageLabel}   the ceremony (or mend) being timed
  * @param options.stage {string}   the stage being measured
  * @returns {() => void}   call at the stage's end
  */
@@ -100,7 +109,7 @@ export function stageSpan({
   stage
 }: {
   log: Logger
-  ceremony: string
+  ceremony: StageLabel
   stage: string
 }): () => void {
   const startedAt = performance.now()
@@ -125,7 +134,7 @@ export function stageSpan({
  *
  * @param options {object}
  * @param options.log {Logger}   the calling module's namespaced logger
- * @param options.ceremony {string}   a label naming the timed sequence
+ * @param options.ceremony {StageLabel}   the ceremony (or mend) being timed
  * @param [options.onStage] {StageNotifier}
  * @returns {(stage: string) => void}
  */
@@ -135,7 +144,7 @@ export function stageMarker({
   onStage
 }: {
   log: Logger
-  ceremony: string
+  ceremony: StageLabel
   onStage?: StageNotifier
 }): (stage: string) => void {
   const time = stageTimer({ log, ceremony })

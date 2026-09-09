@@ -9,8 +9,10 @@
  * The shared `composeVp` appends the hosted App Connect context URL
  * (`https://w3id.org/byoe/app-connect/v1`) when grants or the App Connect
  * marker are embedded; the shared document loader re-exported below resolves
- * it from the bundled `byoe-context` document, so no fetch happens at signing
- * time.
+ * it from the bundled `byoe-context` document, so that context is not fetched
+ * at signing time. A credential whose `@context` names a URL the loader does
+ * not bundle is still resolved over a live HTTPS GET through the global
+ * `fetch`.
  */
 import {
   composeVp,
@@ -18,10 +20,7 @@ import {
   didAuthMethodSupported,
   documentLoader
 } from '@interop/wallet-request'
-import type {
-  IVPRQuery,
-  PresentationSigner
-} from '@interop/wallet-request'
+import type { IVPRQuery, PresentationSigner } from '@interop/wallet-request'
 import {
   clientSigningKeyMultibase,
   isWebvhDid,
@@ -41,8 +40,8 @@ import type {
 /**
  * The shared JSON-LD document loader (`@interop/wallet-request`): the
  * standard security contexts plus the BYOE App Connect context, resolved from
- * the bundled `byoe-context` document so nothing is fetched at signing time.
- * Re-exported here so single-VC issuance (`src/lib/loginCredential.ts`) and
+ * the bundled `byoe-context` document. Any other context URL a credential
+ * carries is fetched over HTTPS through the global `fetch`. Re-exported here so single-VC issuance (`src/lib/loginCredential.ts`) and
  * the VP compose path below reach the same context resolution the shared
  * `composeVp` uses.
  */

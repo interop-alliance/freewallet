@@ -149,7 +149,7 @@ async function establishPassphraseAnchoredAccount({
 > {
   const mark = stageMarker({
     log,
-    ceremony: 'credential-anchored-signup',
+    ceremony: 'credential-anchored-genesis',
     ...(onStage ? { onStage } : {})
   })
   // One 600k-iteration derivation for the whole signup.
@@ -408,7 +408,7 @@ export async function signUpWithPassphrase({
   // and the lobby lists a different set (`SETUP_STAGE_LISTS.local`).
   const mark = stageMarker({
     log,
-    ceremony: 'local-signup',
+    ceremony: 'account-genesis',
     ...(onStage ? { onStage } : {})
   })
   // Probe for an existing account first.
@@ -523,7 +523,7 @@ async function signUpCredentialAnchoredWithPasskey({
 }): Promise<{ session: Session }> {
   const mark = stageMarker({
     log,
-    ceremony: 'credential-anchored-signup',
+    ceremony: 'credential-anchored-genesis',
     ...(onStage ? { onStage } : {})
   })
   // The ONE WebAuthn ceremony of the whole signup: the remembered login below
@@ -680,7 +680,7 @@ export async function signUpWithPasskey({
   // local passkey set instead of the WAS one.
   const mark = stageMarker({
     log,
-    ceremony: 'local-signup',
+    ceremony: 'account-genesis',
     ...(onStage ? { onStage } : {})
   })
   const { seed, userKey, webvhUpdateKeys, pointer } = await mintAccountKeySet()

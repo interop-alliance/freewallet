@@ -30,7 +30,7 @@
  * network errors rethrow unchanged so a flap stays distinguishable from a
  * generation lapse.
  */
-import { agentsFromSeed } from '@interop/wallet-core/identity'
+import { agentsFromSeed } from '@interop/was-client/identity'
 import type { UnlockKdf } from '@interop/wallet-core/keyring'
 import {
   clientSigningKeyMultibase,

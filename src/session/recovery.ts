@@ -62,7 +62,7 @@ import {
   standingFieldsOfKeyringHit,
   unlockLogStore
 } from '@/session/standingUnlock'
-import { agentsFromSeed } from '@interop/wallet-core/identity'
+import { agentsFromSeed } from '@interop/was-client/identity'
 import {
   deriveUnlockIdentity,
   deleteUnlockSpace,

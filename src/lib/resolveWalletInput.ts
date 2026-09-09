@@ -96,15 +96,13 @@ export async function resolveWalletInput(
     if (err instanceof WalletInputUnsupportedError) {
       throw err
     }
-    // The shared dispatcher refuses a kind with no handler; everything else is
-    // the resolver's own coded error and passes through untouched.
-    if (
-      err instanceof Error &&
-      err.message.startsWith('Unhandled wallet input of kind')
-    ) {
+    // The shared dispatcher refuses a kind with no handler (dispatch on
+    // `err.name`, the package's stable contract); everything else is the
+    // resolver's own coded error and passes through untouched.
+    if ((err as Error)?.name === 'UnhandledWalletInputError') {
       throw new WalletInputUnsupportedError({
         code: 'unsupported',
-        kind: err.message
+        kind: (err as { kind: string }).kind
       })
     }
     throw err

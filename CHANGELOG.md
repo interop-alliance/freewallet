@@ -4,12 +4,25 @@
 
 ### Changed
 
+- Identity derivation imports (`agentsFromSeed`, `zcapClientForSigner`, and
+  the rest) move to `@interop/was-client/identity`, following
+  `@interop/wallet-core` 0.71.0's removal of its `./identity` subpath. The
+  `@interop/wallet-core` dependency bumps to `^0.71.0`.
 - The request pipeline (classification, matching, VP composition, the App
   Connect app-key credential, the exchange clients) is imported from
-  `@interop/wallet-request` 0.1.0; wallet-core 0.70.0 no longer ships the
+  `@interop/wallet-request` 0.2.0; wallet-core 0.70.0 no longer ships the
   `request` subpath. `resolveWalletInput` hands the classifier wallet-core's
   `isWasLinkPayload` and `isConnectCode` as injected recognizers, and
   `lib/log.ts` wires the package's logger beside wallet-core's.
+  `resolveWalletInput` recognizes the dispatcher's refusal by
+  `err.name === 'UnhandledWalletInputError'` and reads its `kind`, instead of
+  matching the message text.
+- The `ceremony` label on the stage-timing helpers (`stageTimer`,
+  `stageSpan`, `stageMarker` in `lib/log.ts`) is typed as `StageLabel`: a
+  `FreewalletCeremonyId`, or `credential-anchored-mend` for the mender run.
+  The signup and establishment labels now use their ceremony ids
+  (`credential-anchored-genesis`, `account-genesis`) instead of ad-hoc
+  strings. Diagnostics only; nothing stores the label.
 - ARCHITECTURE.md is a short map again: layer map, overviews, storage model,
   ceremony inventory, glossary. Each area's full account moved to a topic doc
   under `docs/architecture/`, with history, roadmap ids, and restated rules

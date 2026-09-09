@@ -80,7 +80,7 @@ import type {
   EnrolledClientForgetResult,
   LastEnrolledClientForgetResult
 } from '@interop/wallet-core/clientAnnex'
-import { agentsFromSeed } from '@interop/wallet-core/identity'
+import { agentsFromSeed } from '@interop/was-client/identity'
 import {
   delegateLogWrite,
   delegationProofKeyId

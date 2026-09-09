@@ -41,7 +41,7 @@
  * transport failure or a continuity refusal at any branch rethrows unchanged
  * (record kept, retried later) -- never a discard, never a wipe.
  */
-import { agentsFromSeed } from '@interop/wallet-core/identity'
+import { agentsFromSeed } from '@interop/was-client/identity'
 import {
   clientSigningKeyMultibase,
   documentKeyMultibases,

@@ -11,7 +11,7 @@
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { memoryResourceLogPinStore } from '@interop/vh-resource-log'
-import { agentsFromSeed } from '@interop/wallet-core/identity'
+import { agentsFromSeed } from '@interop/was-client/identity'
 import {
   assertClientStillEnrolled,
   BrowserForgottenError,

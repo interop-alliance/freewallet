@@ -179,7 +179,7 @@ import {
   RECOVERY_KDF,
   wrapUnlockRecord
 } from '@interop/wallet-core/recovery'
-import { agentsFromSeed } from '@interop/wallet-core/identity'
+import { agentsFromSeed } from '@interop/was-client/identity'
 import { recoverAccountWithCode } from '@/session/recovery'
 import { createFakeSessionIdb } from './fakeSessionIdb'
 

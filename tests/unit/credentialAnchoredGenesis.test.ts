@@ -245,7 +245,7 @@ describe('establishCredentialAnchoredAccount -- the orchestrator binding', () =>
     ).toEqual(['bootstrap-wiring', 'space-provisioning', 'registry-write'])
     for (const event of timings) {
       const data = event.data as { ceremony: string; totalMs: number }
-      expect(data.ceremony).toBe('credential-anchored-establishment')
+      expect(data.ceremony).toBe('credential-anchored-genesis')
       expect(data.totalMs).toBeGreaterThanOrEqual(0)
     }
     removeSink()

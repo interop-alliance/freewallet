@@ -90,7 +90,7 @@ import type {
   WasSyncPort,
   WireDoc
 } from '@interop/wallet-core/sync'
-import { agentsFromSeed } from '@interop/wallet-core/identity'
+import { agentsFromSeed } from '@interop/was-client/identity'
 import { PRIVATE_CREDENTIALS_COLLECTION } from '@interop/wallet-core/space'
 import {
   CONTACTS_COLLECTION,
@@ -447,7 +447,7 @@ describeConformance('cross-replica round-trip conformance', () => {
   let spaceId: string
 
   // One controller identity, derived independently by each replica from the
-  // same seed -- exactly the property `@interop/wallet-core/identity` exists
+  // same seed -- exactly the property `@interop/was-client/identity` exists
   // to guarantee.
   const seed = new Uint8Array(32).fill(7)
 

@@ -252,7 +252,7 @@ import {
   recoveryClientFromCode
 } from '@interop/wallet-core/recovery'
 import { ladderVmAgent } from '@interop/wallet-core/clientAnnex'
-import { agentsFromSeed } from '@interop/wallet-core/identity'
+import { agentsFromSeed } from '@interop/was-client/identity'
 import { issueRecoveryCode, revokeRecoveryCode } from '@/session/recovery'
 import { didWebProjectionStore } from '@/session/annexReach'
 import type { AccountCeremonyContext } from '@/session/accountCeremonyContext'
