@@ -13,7 +13,7 @@ import {
 } from '@/lib/walletRequest'
 // The spec query union (no App Connect member): these fixtures feed the shared
 // classify helpers, which take the spec union.
-import type { IVPRQuery } from '@interop/wallet-core/request'
+import type { IVPRQuery } from '@interop/wallet-request'
 
 const noop = () => {}
 

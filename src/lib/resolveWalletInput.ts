@@ -2,7 +2,7 @@
  * The one door every piece of free-form text enters the wallet through: the
  * Add Credential paste box and the QR scanner. The ordered discrimination
  * itself is shared (`classifyWalletInput` / `handleWalletInput` in
- * `@interop/wallet-core/request`), so a grammar one wallet routes is not a
+ * `@interop/wallet-request`), so a grammar one wallet routes is not a
  * grammar the other silently mis-handles -- a connect code read as a
  * credential URL, say.
  *
@@ -26,7 +26,9 @@
  * CLI prints the `?iuv=1` form.
  */
 import type { IVerifiableCredential } from '@interop/data-integrity-core'
-import { handleWalletInput } from '@interop/wallet-core/request'
+import { isConnectCode } from '@interop/wallet-core/enrollment'
+import { isWasLinkPayload } from '@interop/wallet-core/space'
+import { handleWalletInput } from '@interop/wallet-request'
 import { resolveCredentialsInput } from '@/lib/resolveCredentialsInput'
 
 /**
@@ -75,6 +77,7 @@ export async function resolveWalletInput(
   try {
     return await handleWalletInput<WalletInputOutcome>({
       text,
+      recognizers: { isWasLink: isWasLinkPayload, isConnectCode },
       handlers: {
         credentials: async ({ text: raw }) => ({
           kind: 'credentials',

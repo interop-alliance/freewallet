@@ -133,6 +133,18 @@ export interface StandingUnlockFields {
  * oracle). `kdfVersion` is the `KEYRING_KDF` version the passphrase derives
  * under (the parameter set, one counter per unlock method), so a reader can
  * tell the KDF families apart without the parameter object.
+ *
+ * `pendingEstablishment` is the passphrase change's establishment marker:
+ * written onto the OLD credential's entry before the new passphrase's
+ * standing establishment starts, naming the new credential's unlock Space
+ * and key-agreement multibase, and dropped by the change's final write
+ * (any identity write naming a different credential drops it). It is what
+ * lets the next login with the new passphrase tell a change torn between
+ * the standing record and the document entry apart from an old passphrase
+ * logging in after a change that completed elsewhere -- the registry and
+ * document state of the two is otherwise identical. An index, like the
+ * rest of the entry: the mend it arms re-derives everything from the
+ * sealed record and the account document.
  */
 export interface PassphraseUnlockMethod extends StandingUnlockFields {
   type: 'passphrase'
@@ -140,6 +152,10 @@ export interface PassphraseUnlockMethod extends StandingUnlockFields {
   unlockSpaceId: string
   kdfVersion: number
   manageCapability?: IZcap
+  pendingEstablishment?: {
+    unlockSpaceId: string
+    keyAgreementKeyMultibase: string
+  }
 }
 
 /**
@@ -1651,6 +1667,12 @@ export async function revokeUnlockMethodByCeremony({
  *   fields recorded by the establishment ceremony; when absent, an existing
  *   entry's standing fields are carried forward (a backfill must not erase
  *   them)
+ * @param [options.pendingEstablishment] {object}   the passphrase change's
+ *   establishment marker to stamp on the entry (`{ unlockSpaceId,
+ *   keyAgreementKeyMultibase }` of the credential being established). When
+ *   absent, an existing entry's marker is carried forward only while the
+ *   entry keeps naming the same credential at the same unlock Space; an
+ *   identity write naming another credential, or a repoint, drops it
  * @returns {UnlockMethodsRecord}   the updated registry
  */
 export function upsertPassphraseUnlockMethod({
@@ -1658,13 +1680,18 @@ export function upsertPassphraseUnlockMethod({
   unlockSpaceId,
   manageCapability,
   keepAbsentManageCapability = false,
-  standing
+  standing,
+  pendingEstablishment
 }: {
   record: UnlockMethodsRecord
   unlockSpaceId: string
   manageCapability?: IZcap
   keepAbsentManageCapability?: boolean
   standing?: StandingUnlockFields
+  pendingEstablishment?: {
+    unlockSpaceId: string
+    keyAgreementKeyMultibase: string
+  }
 }): UnlockMethodsRecord {
   const existing = record.methods.find(
     (method): method is PassphraseUnlockMethod => method.type === 'passphrase'
@@ -1674,7 +1701,8 @@ export function upsertPassphraseUnlockMethod({
   // unlock Space (a passphrase change retires the old credential's standing configuration
   // wholesale).
   let carried: StandingUnlockFields | undefined = standing
-  if (!carried && existing && existing.unlockSpaceId === unlockSpaceId) {
+  const sameSpace = !!existing && existing.unlockSpaceId === unlockSpaceId
+  if (!carried && sameSpace) {
     // Everything the entry holds beside its non-standing members IS its
     // standing configuration, so the rest carries forward without restating the
     // interface here (a field added to `StandingUnlockFields` is carried
@@ -1685,10 +1713,22 @@ export function upsertPassphraseUnlockMethod({
       unlockSpaceId: _spaceId,
       kdfVersion: _kdfVersion,
       manageCapability: _manageCapability,
+      pendingEstablishment: _pendingEstablishment,
       ...standingMembers
-    } = existing
+    } = existing!
     carried = standingMembers
   }
+  // The establishment marker carries across a write that keeps the entry on
+  // the same credential at the same Space (a refresh, a backfill, a re-seal),
+  // and is dropped by the write that names another credential or repoints
+  // the entry: that write is the change's completion, or a later change's.
+  const sameCredential =
+    sameSpace &&
+    (standing === undefined ||
+      standing.keyAgreementKeyMultibase === existing!.keyAgreementKeyMultibase)
+  const marker =
+    pendingEstablishment ??
+    (sameCredential ? existing!.pendingEstablishment : undefined)
   // Every caller either just bound the passphrase under `KEYRING_KDF` or just
   // derived under it to log in, so the entry always records that set.
   const entry: PassphraseUnlockMethod = {
@@ -1699,7 +1739,8 @@ export function upsertPassphraseUnlockMethod({
     ...(manageCapability || keepAbsentManageCapability
       ? { manageCapability }
       : {}),
-    ...(carried ?? {})
+    ...(carried ?? {}),
+    ...(marker ? { pendingEstablishment: marker } : {})
   }
   const methods = existing
     ? record.methods.map(method =>
@@ -2011,7 +2052,27 @@ export async function backfillPassphraseUnlockMethod({
       // strictly widens (an entry a past login narrowed). An in-place refresh
       // never narrows a capability that is not expiring. An entry naming
       // another unlock Space is a rebind, whose stored capability belongs to
-      // the retired Space and is replaced wholesale.
+      // the retired Space and is replaced wholesale -- unless the entry
+      // names ANOTHER credential's standing members (a pending retirement,
+      // or a change torn before its document entry, whose establishment
+      // marker the entry carries): those members are that credential's, and
+      // a repoint would drop them, and the marker with them, in the same
+      // chain whose repair could not consume them. The identity guard is
+      // the refresh write's (`refreshTransientManageCapability`).
+      const mine =
+        session.profile.standingUnlock?.standingClient.keyAgreementKeyMultibase
+      const namesAnotherCredential =
+        !!existing &&
+        ((existing.keyAgreementKeyMultibase !== undefined &&
+          existing.keyAgreementKeyMultibase !== mine) ||
+          existing.pendingEstablishment !== undefined)
+      if (
+        existing &&
+        existing.unlockSpaceId !== unlockSpaceId &&
+        namesAnotherCredential
+      ) {
+        return null
+      }
       const changed =
         !existing ||
         existing.unlockSpaceId !== unlockSpaceId ||

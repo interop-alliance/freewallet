@@ -10,7 +10,7 @@ import {
   presentationSuiteFor,
   EDDSA_RDFC_2022
 } from '@/lib/walletRequest/presentationSuite'
-import type { IVPRQuery } from '@interop/wallet-core/request'
+import type { IVPRQuery } from '@interop/wallet-request'
 
 const documentLoader = securityLoader({ fetchRemoteContexts: true }).build()
 

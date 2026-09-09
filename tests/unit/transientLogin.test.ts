@@ -80,7 +80,11 @@ vi.mock('@/session/registryReseal', async importOriginal => ({
 vi.mock('@/session/pendingRetirement', async importOriginal => ({
   ...(await importOriginal<typeof import('@/session/pendingRetirement')>()),
   repairTornPassphraseRetirement: vi.fn(async () => undefined),
-  rebuildBarePasskeyEntry: vi.fn(async () => undefined)
+  rebuildBarePasskeyEntry: vi.fn(async () => undefined),
+  // The composition's own pre-write inventory check. Stubbed at the seam so
+  // the fixture needs no account document: the tests that care about the
+  // refusal drive it directly.
+  documentListsCredential: vi.fn(async () => true)
 }))
 
 vi.mock('@/session/unlockMethods', async importOriginal => ({
@@ -115,6 +119,7 @@ import {
 import { fetchTransientKeyring } from '@/session/keyring'
 import { repairStaleUnlockRegistrySeal } from '@/session/registryReseal'
 import {
+  documentListsCredential,
   rebuildBarePasskeyEntry,
   repairTornPassphraseRetirement
 } from '@/session/pendingRetirement'
@@ -223,6 +228,7 @@ function makeFound(
     },
     standingClient: {
       clientDid: 'did:key:z6MkStandingClient',
+      keyAgreementKeyMultibase: 'z6LSstandingKak',
       agents: {
         zcapClient: { isCredentialZcapClient: true },
         keyAgreementKey: { id: 'did:key:z6MkStandingClient#z6LSkak' }
@@ -289,6 +295,8 @@ function primeHappyPath() {
 beforeEach(() => {
   state.wasUrl = 'https://was.example.test'
   vi.mocked(hasClientKeyRecord).mockResolvedValue(false)
+  // The healthy account: the document lists this credential's inventory.
+  vi.mocked(documentListsCredential).mockResolvedValue(true)
 })
 
 afterEach(() => {
@@ -466,6 +474,45 @@ describe('transientSessionFromKeyringHit -- typed refusals', () => {
     )
     expect((err as TransientLoginUnavailableError).reason).toBe(
       'unpromoted-account'
+    )
+  })
+
+  it('refuses a credential the account document does not list', async () => {
+    // A standing establishment torn between its record and its document
+    // entry: the record locates the account, but nothing in the document
+    // anchors the credential, so every ladder-signed request below would
+    // refuse at the server. Typed here, before the first write.
+    primeHappyPath()
+    vi.mocked(documentListsCredential).mockResolvedValue(false)
+    const found = makeFound()
+    const err = await refusalFor(found)
+    expect((err as TransientLoginUnavailableError).reason).toBe(
+      'credential-not-standing'
+    )
+    // Before anything is written: the annex-generation ensure never runs.
+    expect(ensureCredentialClientAnnexGeneration).not.toHaveBeenCalled()
+    expect(enrollTransientClient).not.toHaveBeenCalled()
+    // A passphrase publishes its key-agreement key as a commitment.
+    expect(documentListsCredential).toHaveBeenCalledWith({
+      doc: { id: POINTER.did },
+      did: POINTER.did,
+      keyAgreementKeyMultibase: found.standingClient.keyAgreementKeyMultibase,
+      published: 'commitment'
+    })
+  })
+
+  it('asks for the verbatim key on a passkey login', async () => {
+    // A passkey publishes its key-agreement key verbatim, so the commitment
+    // form a passphrase stands under would not find it.
+    primeHappyPath()
+    const found = makeFound()
+    await transientSessionFromKeyringHit({
+      found,
+      type: 'passkey',
+      persistence: transientSessionStores()
+    })
+    expect(documentListsCredential).toHaveBeenCalledWith(
+      expect.objectContaining({ published: 'verbatim' })
     )
   })
 

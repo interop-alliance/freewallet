@@ -9,6 +9,7 @@
 import { readFileSync } from 'node:fs'
 import path from 'node:path'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { addSink, captureSink } from '@interop/logger'
 import { base64urlnopad } from '@scure/base'
 
 const state = vi.hoisted(() => ({
@@ -132,6 +133,9 @@ const state = vi.hoisted(() => ({
   // Every record handed to `putUnlockMethods`, newest last -- what the
   // read-first merge is asserted on.
   puts: [] as UnlockRecord[],
+  // Whether the passphrase change's establishment-marker write is refused
+  // (the marker is best-effort: the change proceeds without it).
+  markerWriteThrows: false,
   // The unlock Space the standing establishment reports for the passphrase
   // and passkey add ceremonies.
   boundUnlockSpaceId: 'space-bound',
@@ -562,6 +566,16 @@ vi.mock('@/session/unlockMethods', async importOriginal => {
         const next = await mutate(current)
         if (next === null) {
           return current
+        }
+        if (
+          state.markerWriteThrows &&
+          next.methods.some(
+            method =>
+              (method as { pendingEstablishment?: unknown })
+                .pendingEstablishment !== undefined
+          )
+        ) {
+          throw new Error('the establishment-marker write was refused')
         }
         state.calls.push('putUnlockMethods')
         state.puts.push(next)
@@ -1154,6 +1168,7 @@ beforeEach(() => {
   state.preflightRefuses = false
   state.rotationRefusesByGate = false
   state.puts = []
+  state.markerWriteThrows = false
   state.boundUnlockSpaceId = 'space-bound'
   state.passkeyCredentialId = 'Y3JlZC1uZXc'
   // The deletion walk's seams.
@@ -2438,6 +2453,9 @@ describe('changeAccountPassphrase', () => {
     expect(rotation).toBe('skipped')
     expect(state.calls).toEqual([
       'verifyPassphrase',
+      // The establishment marker, stamped on the old entry before the new
+      // credential's record exists (FW-454).
+      'putUnlockMethods',
       'establishStandingUnlock',
       'adoptPassphraseRebind',
       'deleteKeyring',
@@ -2474,7 +2492,9 @@ describe('changeAccountPassphrase', () => {
     // standing configuration it must name depends on how the retirement ended.
     expect(
       vi.mocked(rotateOffUnlockCredential).mock.invocationCallOrder[0]
-    ).toBeLessThan(vi.mocked(updateUnlockMethods).mock.invocationCallOrder[0])
+    ).toBeLessThan(
+      vi.mocked(updateUnlockMethods).mock.invocationCallOrder.at(-1)!
+    )
     expect(vi.mocked(upsertPassphraseUnlockMethod)).toHaveBeenCalledWith(
       expect.objectContaining({
         unlockSpaceId: 'space-new',
@@ -2486,6 +2506,196 @@ describe('changeAccountPassphrase', () => {
       })
     )
     expect(registry).not.toBeNull()
+  })
+
+  it('stamps the establishment marker before the establishment runs', async () => {
+    // The marker is the change's own index of the credential it is
+    // establishing: a run torn between the new credential's standing record
+    // and its document entry leaves nothing else naming it, so the next
+    // login with the new passphrase reads this to tell that state apart from
+    // an old passphrase logging in after a change that completed elsewhere.
+    state.registry = registryWithPassphraseStanding({
+      keyAgreementKeyMultibase: 'z6LSOldPassphraseKak'
+    })
+
+    await changeAccountPassphrase({
+      session: makeSession(),
+      oldPassphrase: 'old',
+      newPassphrase: 'new'
+    })
+
+    expect(
+      vi.mocked(updateUnlockMethods).mock.invocationCallOrder[0]
+    ).toBeLessThan(
+      vi.mocked(establishStandingUnlock).mock.invocationCallOrder[0]
+    )
+    // It restates the OLD entry's address, and names the NEW credential's
+    // unlock Space and key-agreement multibase.
+    expect(
+      vi.mocked(upsertPassphraseUnlockMethod).mock.calls[0]![0]
+    ).toMatchObject({
+      unlockSpaceId: 'unlock-space-passphrase',
+      pendingEstablishment: {
+        unlockSpaceId: 'space-unlock-new',
+        keyAgreementKeyMultibase: 'z6LSNewPassphraseKak'
+      }
+    })
+    // The marked entry still names the old credential: the marker is an
+    // index beside it, never a replacement for it.
+    expect(state.puts[0]).toMatchObject({
+      methods: [
+        expect.objectContaining({
+          keyAgreementKeyMultibase: 'z6LSOldPassphraseKak',
+          pendingEstablishment: {
+            unlockSpaceId: 'space-unlock-new',
+            keyAgreementKeyMultibase: 'z6LSNewPassphraseKak'
+          }
+        })
+      ]
+    })
+    // And the change's own final write drops it again.
+    expect(state.puts.at(-1)).toMatchObject({
+      methods: [
+        expect.objectContaining({
+          keyAgreementKeyMultibase: 'z6LSNewPassphraseKak'
+        })
+      ]
+    })
+    expect(state.puts.at(-1)!.methods[0]).not.toHaveProperty(
+      'pendingEstablishment'
+    )
+  })
+
+  it('stamps the marker over the FRESH entry, not the pre-flight read', async () => {
+    // The pre-flight read and the write's own read are separated by a whole
+    // establishment's worth of network: the marker restates the entry the
+    // compare-and-swap wrapper hands over, so a concurrent write is merged
+    // rather than reverted.
+    const stale = registryWithPassphraseStanding({
+      keyAgreementKeyMultibase: 'z6LSOldPassphraseKak'
+    })
+    const freshCapability = { id: 'urn:zcap:fresh-manage' }
+    state.registry = stale
+    vi.mocked(getUnlockMethods).mockImplementationOnce(async () => {
+      // The pre-flight sees the stale copy; everything after it sees a
+      // record another writer repointed and re-capabilitied in between.
+      state.registry = {
+        version: 1,
+        webAuthnUserId: 'AAAAAAAAAAAAAAAAAAAAAA',
+        methods: [
+          {
+            ...(stale as { methods: object[] }).methods[0],
+            unlockSpaceId: 'unlock-space-fresh',
+            manageCapability: freshCapability
+          }
+        ]
+      } as never
+      return stale as never
+    })
+
+    await changeAccountPassphrase({
+      session: makeSession(),
+      oldPassphrase: 'old',
+      newPassphrase: 'new'
+    })
+
+    expect(
+      vi.mocked(upsertPassphraseUnlockMethod).mock.calls[0]![0]
+    ).toMatchObject({
+      unlockSpaceId: 'unlock-space-fresh',
+      manageCapability: freshCapability,
+      pendingEstablishment: {
+        unlockSpaceId: 'space-unlock-new',
+        keyAgreementKeyMultibase: 'z6LSNewPassphraseKak'
+      }
+    })
+  })
+
+  it('writes no marker when the fresh entry names another credential', async () => {
+    // A change completed elsewhere between the pre-flight read and this
+    // write: stamping the marker over that entry would drop the credential
+    // it names. The change itself proceeds -- its own mender is a re-run.
+    const stale = registryWithPassphraseStanding({
+      keyAgreementKeyMultibase: 'z6LSOldPassphraseKak'
+    })
+    state.registry = stale
+    vi.mocked(getUnlockMethods).mockImplementationOnce(async () => {
+      state.registry = registryWithPassphraseStanding({
+        keyAgreementKeyMultibase: 'z6LSSomeoneElsesKak'
+      }) as never
+      return stale as never
+    })
+
+    await changeAccountPassphrase({
+      session: makeSession(),
+      oldPassphrase: 'old',
+      newPassphrase: 'new'
+    })
+
+    expect(state.calls).toEqual([
+      'verifyPassphrase',
+      'establishStandingUnlock',
+      'adoptPassphraseRebind',
+      'deleteKeyring',
+      'rotateOffUnlockCredential',
+      // The change's own final write, and the only one.
+      'putUnlockMethods'
+    ])
+    expect(state.puts).toHaveLength(1)
+    expect(state.puts[0]!.methods[0]).not.toHaveProperty('pendingEstablishment')
+  })
+
+  it('writes no marker when the registry is absent', async () => {
+    // Minting the record is the backfill's business, not this marker's; a
+    // change on such an account keeps the re-run as its one mender.
+    state.registry = null
+
+    await changeAccountPassphrase({
+      session: makeSession(),
+      oldPassphrase: 'old',
+      newPassphrase: 'new'
+    })
+
+    expect(state.puts).toEqual([])
+    expect(vi.mocked(upsertPassphraseUnlockMethod)).not.toHaveBeenCalled()
+    expect(state.calls).toContain('establishStandingUnlock')
+  })
+
+  it('logs a refused marker write and changes the passphrase anyway', async () => {
+    // The marker is an index, not a stage: without it the change's one
+    // mender is a retry of the same change, which is still a mender.
+    state.registry = registryWithPassphraseStanding({
+      keyAgreementKeyMultibase: 'z6LSOldPassphraseKak'
+    })
+    state.markerWriteThrows = true
+    const capture = captureSink()
+    const remove = addSink(capture.sink)
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
+
+    const { unlockSpaceId, rotation } = await changeAccountPassphrase({
+      session: makeSession(),
+      oldPassphrase: 'old',
+      newPassphrase: 'new'
+    })
+
+    expect(unlockSpaceId).toBe('space-new')
+    expect(rotation).toBe('skipped')
+    expect(state.calls).toEqual([
+      'verifyPassphrase',
+      'establishStandingUnlock',
+      'adoptPassphraseRebind',
+      'deleteKeyring',
+      'rotateOffUnlockCredential',
+      'putUnlockMethods'
+    ])
+    expect(
+      capture.events.find(
+        event =>
+          event.level === 'warn' && event.msg.includes('establishment marker')
+      )
+    ).toBeDefined()
+    remove()
+    warn.mockRestore()
   })
 
   it("records the standing establishment's wide management zcap, not the bind's", async () => {
@@ -2626,9 +2836,22 @@ describe('changeAccountPassphrase', () => {
     // A `failed` report here would write the entry naming the OLD credential
     // under the NEW unlock Space -- the pending shape that locks the next
     // passphrase change, the last-client transition, and the torn-retirement
-    // repair for good.
-    expect(vi.mocked(upsertPassphraseUnlockMethod)).not.toHaveBeenCalled()
-    expect(state.puts).toEqual([])
+    // repair for good. The establishment marker is the only write, and it
+    // names no standing members at all.
+    expect(
+      vi.mocked(upsertPassphraseUnlockMethod).mock.calls.map(([args]) => args)
+    ).toEqual([
+      {
+        record: expect.anything(),
+        unlockSpaceId: 'unlock-space-passphrase',
+        manageCapability: undefined,
+        pendingEstablishment: {
+          unlockSpaceId: 'space-unlock-new',
+          keyAgreementKeyMultibase: 'z6LSNewPassphraseKak'
+        }
+      }
+    ])
+    expect(state.puts).toHaveLength(1)
   })
 
   it('treats a registry that resolves to null as nothing to retire', async () => {
@@ -2747,10 +2970,33 @@ describe('changeAccountPassphrase', () => {
     ).rejects.toThrow('the passphrase was not changed')
     // Establish-first: the failure lands before the old unlock identity or
     // its standing configuration is touched, so "not changed" is true --
-    // the old record, its Space, and its registry entry all stand.
-    expect(state.calls).toEqual(['verifyPassphrase', 'establishStandingUnlock'])
+    // the old record, its Space, and its registry entry all stand. The
+    // establishment marker is the one thing written, and it changes no
+    // member the old credential is named by.
+    expect(state.calls).toEqual([
+      'verifyPassphrase',
+      'putUnlockMethods',
+      'establishStandingUnlock'
+    ])
     expect(vi.mocked(rotateOffUnlockCredential)).not.toHaveBeenCalled()
-    expect(vi.mocked(upsertPassphraseUnlockMethod)).not.toHaveBeenCalled()
+    expect(vi.mocked(upsertPassphraseUnlockMethod)).toHaveBeenCalledOnce()
+    expect(
+      vi.mocked(upsertPassphraseUnlockMethod).mock.calls[0]![0]
+    ).toMatchObject({
+      unlockSpaceId: 'unlock-space-passphrase',
+      pendingEstablishment: {
+        unlockSpaceId: 'space-unlock-new',
+        keyAgreementKeyMultibase: 'z6LSNewPassphraseKak'
+      }
+    })
+    expect(state.puts[0]).toMatchObject({
+      methods: [
+        expect.objectContaining({
+          unlockSpaceId: 'unlock-space-passphrase',
+          keyAgreementKeyMultibase: 'z6LSOldPassphraseKak'
+        })
+      ]
+    })
     error.mockRestore()
   })
 
@@ -2929,6 +3175,8 @@ describe("changeAccountPassphrase (the ladder branch's unlock-Space stage)", () 
     // session wrote no browser-local state to clear.
     expect(state.calls).toEqual([
       'verifyPassphrase',
+      // No establishment marker on the ladder branch: a transient session
+      // writes nothing browser-local, so no login could consume one.
       'establishStandingUnlock',
       'adoptPassphraseRebind',
       'renewTransientGenerationDelegation',
@@ -2939,6 +3187,33 @@ describe("changeAccountPassphrase (the ladder branch's unlock-Space stage)", () 
     expect(state.calls).not.toContain('deleteKeyring')
     expect(vi.mocked(deleteKeyring)).not.toHaveBeenCalled()
     expect(oldPassphraseRetired).toBe(true)
+  })
+
+  it('writes no establishment marker on the ladder branch', async () => {
+    // A transient session writes nothing browser-local, so no login could
+    // ever consume a marker there; the torn establishment's mender is a
+    // retry of the same change.
+    await changeAccountPassphrase({
+      session: makeSession({ transient: true }),
+      oldPassphrase: 'old',
+      newPassphrase: 'new'
+    })
+
+    // Nothing is written before the establishment, and the one write that
+    // does land is the change's own final entry.
+    expect(state.calls.indexOf('putUnlockMethods')).toBeGreaterThan(
+      state.calls.indexOf('establishStandingUnlock')
+    )
+    expect(state.puts).toHaveLength(1)
+    expect(
+      vi
+        .mocked(upsertPassphraseUnlockMethod)
+        .mock.calls.every(
+          ([args]) =>
+            (args as { pendingEstablishment?: unknown })
+              .pendingEstablishment === undefined
+        )
+    ).toBe(true)
   })
 
   it('signs the delete with the NEW ladder VM, which the bind entry published', async () => {
@@ -3018,6 +3293,8 @@ describe('changeAccountPassphrase (the enrolled branch keeps deleteKeyring)', ()
 
     expect(state.calls).toEqual([
       'verifyPassphrase',
+      // The establishment marker (FW-454).
+      'putUnlockMethods',
       'establishStandingUnlock',
       'adoptPassphraseRebind',
       'deleteKeyring',

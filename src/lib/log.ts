@@ -7,9 +7,9 @@
  * namespaced logger through this module's re-exported {@link createLogger},
  * so importing it anywhere -- the app shell and the CHAPI popup pages
  * alike, which sit outside the shell -- runs the bootstrap wiring exactly
- * once: wallet-core's and was-sync's `setLogger`, and in dev builds the
- * NDJSON dev sink plus the ring buffer behind the `window.__fwLog` devtools
- * handle.
+ * once: the `setLogger` of wallet-core, wallet-request, and was-sync, and in
+ * dev builds the NDJSON dev sink plus the ring buffer behind the
+ * `window.__fwLog` devtools handle.
  *
  * The dev wiring is gated on `import.meta.env.MODE === 'development'`,
  * never bare `DEV` (true under vitest, which would start flush timers and
@@ -26,6 +26,7 @@ import {
 } from '@interop/logger'
 import type { Logger } from '@interop/logger'
 import { setLogger, stageNotifier } from '@interop/wallet-core'
+import { setLogger as setRequestLogger } from '@interop/wallet-request'
 import { setLogger as setSyncLogger } from '@interop/was-sync'
 import type { StageNotifier } from '@interop/wallet-core'
 
@@ -159,6 +160,7 @@ function wireOnce(): void {
   host[WIRED_FLAG] = true
   setLogger(createLogger('wc'))
   setSyncLogger(createLogger('sync'))
+  setRequestLogger(createLogger('request'))
   if (import.meta.env.MODE === 'development') {
     addSink(ndjsonSink({ url: '/__interop-logger' }))
     const { sink, snapshot, clear } = ringBufferSink()

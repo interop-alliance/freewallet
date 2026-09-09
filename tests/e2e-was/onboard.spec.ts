@@ -8,7 +8,7 @@ import {
 import {
   walletOnboardingRequestOf,
   type IVPRQuery
-} from '@interop/wallet-core/request'
+} from '@interop/wallet-request'
 import { signupViaWizard } from './helpers'
 
 /**

@@ -22,11 +22,11 @@ import {
   isInteractionUrl,
   openInteractionRequest,
   presentationEndpointFor
-} from '@interop/wallet-core/request'
+} from '@interop/wallet-request'
 import type {
   FetchLike,
   IVPRDetails as ISpecVPRDetails
-} from '@interop/wallet-core/request'
+} from '@interop/wallet-request'
 import { classifyRequest, queriesOf } from './classify'
 import type { ResolvedGrant } from './processZcaps'
 import type { IVPRDetails, WalletRequestProfile } from './types'

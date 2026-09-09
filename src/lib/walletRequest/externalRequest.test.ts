@@ -7,7 +7,7 @@
  * class allowlist).
  */
 import { describe, expect, it, vi } from 'vitest'
-import { EphemeralExchangeGoneError } from '@interop/wallet-core/request'
+import { EphemeralExchangeGoneError } from '@interop/wallet-request'
 import {
   barredGrants,
   EXTERNAL_REQUEST_ORIGIN,

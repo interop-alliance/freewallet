@@ -49,7 +49,7 @@ import {
   appKeyAppUrl,
   appKeyOrigin,
   presentsAsAppKey
-} from '@interop/wallet-core/request'
+} from '@interop/wallet-request'
 import { subjectId } from '@/lib/vcShape'
 import { EXTERNAL_REQUEST_ORIGIN } from '@/lib/walletRequest/externalRequest'
 

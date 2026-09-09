@@ -42,7 +42,7 @@ import {
   appKeyOrigin,
   appKeySeedBindsSubject,
   presentsAsAppKey
-} from '@interop/wallet-core/request'
+} from '@interop/wallet-request'
 import { isSelfIssued, subjectId } from '@/lib/vcShape'
 import type { IVerifiableCredential } from '@interop/data-integrity-core'
 import type { StorageManager } from '@/stores/storageManager'

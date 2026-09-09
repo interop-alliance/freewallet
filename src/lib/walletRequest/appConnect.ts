@@ -14,7 +14,7 @@ import {
   appKeySubjectDid,
   findAppKeyCredential,
   mintAppKeyCredential
-} from '@interop/wallet-core/request'
+} from '@interop/wallet-request'
 import { composeVP } from './composeVP'
 import { processZcaps } from './processZcaps'
 import type {

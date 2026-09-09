@@ -5,8 +5,8 @@ import {
   composeCapabilityRequest,
   createEphemeralExchange,
   pollEphemeralExchange
-} from '@interop/wallet-core/request'
-import type { IZcap } from '@interop/wallet-core/request'
+} from '@interop/wallet-request'
+import type { IZcap } from '@interop/wallet-request'
 import { externalRequestPath } from '@/lib/walletRequest/externalRequest'
 import { fillSettled, signupViaWizard } from './helpers'
 

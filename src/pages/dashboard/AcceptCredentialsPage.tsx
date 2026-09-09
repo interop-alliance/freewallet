@@ -13,7 +13,7 @@ import type { IVerifiableCredential } from '@interop/data-integrity-core'
 import {
   AppKeyRefusedError,
   presentsAsAppKey
-} from '@interop/wallet-core/request'
+} from '@interop/wallet-request'
 import { useAuthStore } from '@/stores/authStore'
 import { showToast } from '@/stores/toastStore'
 import { cidFrom } from '@interop/was-client/sync'

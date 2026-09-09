@@ -85,7 +85,7 @@ import {
   appKeySubjectDid,
   DEFAULT_PRESENTABLE_DID_METHODS,
   findAppKeyCredential
-} from '@interop/wallet-core/request'
+} from '@interop/wallet-request'
 import { fetchAppManifest } from '@/lib/appManifest'
 import { useAsyncLoad } from '@/hooks/useAsyncLoad'
 import { ZcapGrantsPanel } from './ZcapGrantsPanel'

@@ -93,6 +93,7 @@ import {
   runSharedRegistryPasses
 } from '@/session/registryPasses'
 import { primeVerifiedAccountLog } from '@/session/verifiedLog'
+import { documentListsCredential } from '@/session/pendingRetirement'
 import { refreshDidWebProjection } from '@/session/annexReach'
 import type { Session } from '@/types/auth'
 import type { IZcap } from '@interop/data-integrity-core'
@@ -108,6 +109,12 @@ import type { WebvhIdStore } from '@interop/wallet-core/webvh'
  *   sibling delegation (a recovery-code record, or one minted before the
  *   sibling existed).
  * - `unpromoted-account`: the account pointer names no did:webvh.
+ * - `credential-not-standing`: the account document lists none of this
+ *   credential's inventory (its `keyAgreement` member is absent), so
+ *   nothing signed by its ladder verifies and the visit could write nothing
+ *   through its record. The shape a standing establishment torn between its
+ *   record and its document entry leaves; a login on the browser that ran
+ *   the change finishes it, and a retry of the same change converges.
  * - `no-clientAnnex-generation`: the account document carries no
  *   delegated-clients pointer, or the pointed generation's log is gone (a
  *   GC'd generation nothing re-minted).
@@ -140,6 +147,7 @@ export type TransientLoginUnavailableReason =
   | 'no-was-server'
   | 'no-delegated-clients'
   | 'unpromoted-account'
+  | 'credential-not-standing'
   | 'no-clientAnnex-generation'
   | 'no-generation-delegation'
   | 'no-user-key-roster'
@@ -619,6 +627,29 @@ export async function transientSessionFromKeyringHit({
     pinStore: persistence.logPins,
     ...(seededLog !== undefined ? { published: seededLog } : {})
   })
+
+  // The credential's own inventory, before anything signed by its ladder is
+  // tried: a document listing no `keyAgreement` member of this credential's
+  // (a passphrase's commitment, a passkey's verbatim key) anchors nothing of
+  // its record, so the bridge, the sibling, and the ladder-signed mend below
+  // would all refuse at the server. Typed here instead, as the state a
+  // standing establishment torn between its record and its document entry
+  // leaves.
+  if (
+    !(await documentListsCredential({
+      doc: verified.doc,
+      did: accountDid,
+      keyAgreementKeyMultibase: found.standingClient.keyAgreementKeyMultibase,
+      published: type === 'passkey' ? 'verbatim' : 'commitment'
+    }))
+  ) {
+    throw new TransientLoginUnavailableError({
+      reason: 'credential-not-standing',
+      message:
+        'The account document lists no inventory of this credential; its ' +
+        'standing establishment did not finish.'
+    })
+  }
 
   // The client-annex generation readiness: the ladder-signed ensure first (a
   // no-op on a healthy ladder-anchored account, the mend otherwise), then the

@@ -2241,6 +2241,190 @@ describe('backfillPassphraseUnlockMethod', () => {
     expect(putUnlockMethodsRecord).toHaveBeenCalledOnce()
   })
 
+  it('skips the repoint when the stored entry names another credential', async () => {
+    // A pending retirement: the entry records the credential a torn change
+    // left standing, and a repoint would drop its members in the same chain
+    // whose repair still needs them.
+    const idb = createFakeIdb()
+    const session = await makePassphraseSession({
+      unlockSpaceId: 'new-ps-space',
+      manageCapability: FAKE_CAP,
+      idb
+    })
+    session.profile.standingUnlock = {
+      standingClient: { keyAgreementKeyMultibase: 'z6LSmineKak' }
+    } as never
+    await seedRegistry({
+      session,
+      record: {
+        version: 1,
+        webAuthnUserId: 'AAAAAAAAAAAAAAAAAAAAAA',
+        methods: [
+          {
+            type: 'passphrase',
+            createdAt: '2026-01-01T00:00:00.000Z',
+            kdfVersion: 2,
+            unlockSpaceId: 'old-ps-space',
+            keyAgreementKeyMultibase: 'z6LSanotherKak',
+            updateKeyMultibase: 'z6MkAnotherRung'
+          }
+        ]
+      }
+    })
+    vi.mocked(putUnlockMethodsRecord).mockClear()
+
+    const result = await backfillPassphraseUnlockMethod({ session })
+
+    expect(putUnlockMethodsRecord).not.toHaveBeenCalled()
+    // The record reads back exactly as stored: the address, and the other
+    // credential's members with it.
+    expect(
+      result!.methods.find(
+        (method): method is PassphraseUnlockMethod =>
+          method.type === 'passphrase'
+      )
+    ).toMatchObject({
+      unlockSpaceId: 'old-ps-space',
+      keyAgreementKeyMultibase: 'z6LSanotherKak',
+      updateKeyMultibase: 'z6MkAnotherRung'
+    })
+  })
+
+  it('skips the repoint when the stored entry carries an establishment marker', async () => {
+    // A change torn before its document entry: the marker is what the next
+    // login's repair reads, and a repoint drops it along with the members.
+    const idb = createFakeIdb()
+    const session = await makePassphraseSession({
+      unlockSpaceId: 'new-ps-space',
+      manageCapability: FAKE_CAP,
+      idb
+    })
+    session.profile.standingUnlock = {
+      standingClient: { keyAgreementKeyMultibase: 'z6LSmineKak' }
+    } as never
+    await seedRegistry({
+      session,
+      record: {
+        version: 1,
+        webAuthnUserId: 'AAAAAAAAAAAAAAAAAAAAAA',
+        methods: [
+          {
+            type: 'passphrase',
+            createdAt: '2026-01-01T00:00:00.000Z',
+            kdfVersion: 2,
+            unlockSpaceId: 'old-ps-space',
+            keyAgreementKeyMultibase: 'z6LSmineKak',
+            pendingEstablishment: {
+              unlockSpaceId: 'new-ps-space',
+              keyAgreementKeyMultibase: 'z6LSmarkedKak'
+            }
+          }
+        ]
+      }
+    })
+    vi.mocked(putUnlockMethodsRecord).mockClear()
+
+    const result = await backfillPassphraseUnlockMethod({ session })
+
+    expect(putUnlockMethodsRecord).not.toHaveBeenCalled()
+    expect(
+      result!.methods.find(
+        (method): method is PassphraseUnlockMethod =>
+          method.type === 'passphrase'
+      )
+    ).toMatchObject({
+      unlockSpaceId: 'old-ps-space',
+      pendingEstablishment: {
+        unlockSpaceId: 'new-ps-space',
+        keyAgreementKeyMultibase: 'z6LSmarkedKak'
+      }
+    })
+  })
+
+  it('still repoints an entry naming the credential logging in', async () => {
+    // The ordinary stale-address case the guard must not swallow: the entry
+    // is this credential's own, left at the Space a change moved it off.
+    const idb = createFakeIdb()
+    const session = await makePassphraseSession({
+      unlockSpaceId: 'new-ps-space',
+      manageCapability: FAKE_CAP,
+      idb
+    })
+    session.profile.standingUnlock = {
+      standingClient: { keyAgreementKeyMultibase: 'z6LSmineKak' }
+    } as never
+    await seedRegistry({
+      session,
+      record: {
+        version: 1,
+        webAuthnUserId: 'AAAAAAAAAAAAAAAAAAAAAA',
+        methods: [
+          {
+            type: 'passphrase',
+            createdAt: '2026-01-01T00:00:00.000Z',
+            kdfVersion: 2,
+            unlockSpaceId: 'old-ps-space',
+            keyAgreementKeyMultibase: 'z6LSmineKak',
+            updateKeyMultibase: 'z6MkMineRung'
+          }
+        ]
+      }
+    })
+    vi.mocked(putUnlockMethodsRecord).mockClear()
+
+    const result = await backfillPassphraseUnlockMethod({ session })
+
+    const entry = result!.methods.find(
+      (method): method is PassphraseUnlockMethod => method.type === 'passphrase'
+    )
+    expect(entry!.unlockSpaceId).toBe('new-ps-space')
+    expect(putUnlockMethodsRecord).toHaveBeenCalledOnce()
+  })
+
+  it('still refreshes a foreign entry in place at the same unlock Space', async () => {
+    // The guard is the REPOINT's alone: an entry naming another credential
+    // at the address this session already runs on still gets its expiring
+    // management zcap replaced.
+    const idb = createFakeIdb()
+    const fresh = capExpiringIn({ msFromNow: ONE_YEAR_MS })
+    const session = await makePassphraseSession({
+      unlockSpaceId: 'ps-space',
+      manageCapability: fresh,
+      idb
+    })
+    session.profile.standingUnlock = {
+      standingClient: { keyAgreementKeyMultibase: 'z6LSmineKak' }
+    } as never
+    await seedRegistry({
+      session,
+      record: {
+        version: 1,
+        webAuthnUserId: 'AAAAAAAAAAAAAAAAAAAAAA',
+        methods: [
+          {
+            type: 'passphrase',
+            createdAt: '2026-01-01T00:00:00.000Z',
+            kdfVersion: 2,
+            unlockSpaceId: 'ps-space',
+            keyAgreementKeyMultibase: 'z6LSanotherKak',
+            manageCapability: capExpiringIn({ msFromNow: 1000 })
+          }
+        ]
+      }
+    })
+    vi.mocked(putUnlockMethodsRecord).mockClear()
+
+    const result = await backfillPassphraseUnlockMethod({ session })
+
+    const entry = result!.methods.find(
+      (method): method is PassphraseUnlockMethod => method.type === 'passphrase'
+    )
+    expect(entry!.manageCapability).toEqual(fresh)
+    // The foreign credential's members are carried, not erased.
+    expect(entry!.keyAgreementKeyMultibase).toBe('z6LSanotherKak')
+    expect(putUnlockMethodsRecord).toHaveBeenCalledOnce()
+  })
+
   it('is idempotent: a second call writes nothing', async () => {
     const idb = createFakeIdb()
     const session = await makePassphraseSession({

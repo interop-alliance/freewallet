@@ -13,7 +13,7 @@
  * strand the rest, and a second run finds nothing.
  */
 import { describe, expect, it, vi } from 'vitest'
-import { mintAppKeyCredential } from '@interop/wallet-core/request'
+import { mintAppKeyCredential } from '@interop/wallet-request'
 import type { IVerifiableCredential } from '@interop/data-integrity-core'
 import type { StoredCredential } from '@/types/credential'
 import type { StorageManager } from '@/stores/storageManager'

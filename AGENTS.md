@@ -167,6 +167,10 @@ it locally instead of fetching.)
   `@interop/wallet-core`, the shared wallet layer (see "What lives elsewhere"
   in ARCHITECTURE.md); its own `ARCHITECTURE.md` maps the module layers, key
   hierarchy, and ceremonies.
+- [wallet-request](https://github.com/interop-alliance/wallet-request) --
+  `@interop/wallet-request`, the request pipeline shared with DCW
+  (classification, matching, VP composition, the App Connect app-key
+  credential, the exchange clients); `src/lib/walletRequest/` sits over it.
 - [was-client](https://github.com/interop-alliance/was-client) /
   [was-teaching-server](https://github.com/interop-alliance/was-teaching-server)
   -- the WAS HTTP client (plus the EDV cipher and sync wire contract) and the

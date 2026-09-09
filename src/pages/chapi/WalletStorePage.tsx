@@ -29,7 +29,7 @@ import {
   mapPopupLoginError
 } from '@/session/completePopupLogin'
 import type { Session } from '@/types/auth'
-import { AppKeyRefusedError } from '@interop/wallet-core/request'
+import { AppKeyRefusedError } from '@interop/wallet-request'
 import { credentialTitle } from '@/lib/viewMappers/credentialTitle'
 import { issuerName } from '@/lib/viewMappers/issuerName'
 import { chapiStyles } from '@/styles/appStyles'
@@ -49,7 +49,7 @@ import {
 } from '@/lib/walletRequest'
 // The exchange client's request param is the shared (spec) VPR shape, narrower
 // than Freewallet's local `IVPRDetails` (widened with the App Connect query).
-import type { IVPRDetails as ISpecVPRDetails } from '@interop/wallet-core/request'
+import type { IVPRDetails as ISpecVPRDetails } from '@interop/wallet-request'
 import { RequestSourcePanel } from './RequestSourcePanel'
 import { CHAPILoginForm } from './CHAPILoginForm'
 import { useTranslation } from 'react-i18next'

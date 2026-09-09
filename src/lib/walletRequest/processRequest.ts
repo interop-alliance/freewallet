@@ -1,6 +1,6 @@
 /**
  * Request processing wrapper. The framework-agnostic pipeline (classify,
- * negotiate, delegate, compose) lives in `@interop/wallet-core/request`; this
+ * negotiate, delegate, compose) lives in `@interop/wallet-request`; this
  * wrapper injects Freewallet's app-side side effects (`processZcaps`,
  * `processAppConnect`) and enforces Freewallet's stricter DID Auth rule -- a
  * `domain` is required whenever DID Authentication is requested (the shared
@@ -9,11 +9,11 @@
 import {
   isDIDAuthRequested,
   processRequest as sharedProcessRequest
-} from '@interop/wallet-core/request'
+} from '@interop/wallet-request'
 import type {
   IVPRDetails as ISpecVPRDetails,
   WalletResponse
-} from '@interop/wallet-core/request'
+} from '@interop/wallet-request'
 import type { Session } from '@/types/auth'
 import { queriesOf } from './classify'
 import { presentationSignerFor } from './composeVP'
@@ -21,7 +21,7 @@ import { processAppConnect } from './appConnect'
 import { processZcaps } from './processZcaps'
 import type { IVerifiableCredential, IVPRDetails } from './types'
 
-export { domainMatchesOrigin } from '@interop/wallet-core/request'
+export { domainMatchesOrigin } from '@interop/wallet-request'
 
 /**
  * Processes a Verifiable Presentation Request and composes the wallet's

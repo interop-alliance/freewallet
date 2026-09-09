@@ -63,6 +63,20 @@ describe('loginErrorKey', () => {
     )
   })
 
+  it('maps the torn establishment onto its own not-set-up copy', () => {
+    // The state a standing establishment torn between its record and its
+    // document entry leaves: a retry from a fresh browser re-runs the same
+    // refusal, so it is not the retryable setup-did-not-finish copy.
+    expect(keyFor('credential-not-standing').key).toBe(
+      'auth.errors.transientCredentialNotStanding'
+    )
+    for (const locale of [enLocale, esLocale] as Array<{
+      auth: { errors: Record<string, string> }
+    }>) {
+      expect(locale.auth.errors.transientCredentialNotStanding).toBeTruthy()
+    }
+  })
+
   it('maps the annex-generation family onto the honest refusal', () => {
     for (const reason of [
       'no-delegated-clients',
@@ -82,6 +96,7 @@ describe('loginErrorKey', () => {
       'no-was-server',
       'no-delegated-clients',
       'unpromoted-account',
+      'credential-not-standing',
       'no-clientAnnex-generation',
       'no-generation-delegation',
       'no-user-key-roster',

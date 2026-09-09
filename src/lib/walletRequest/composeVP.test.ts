@@ -2,7 +2,7 @@
 import { describe, it, expect, beforeAll, vi } from 'vitest'
 import { CapabilityAgent } from '@interop/webkms-client'
 import { clientSigningKeyMultibase } from '@interop/wallet-core/webvh'
-import type { IVPRQuery } from '@interop/wallet-core/request'
+import type { IVPRQuery } from '@interop/wallet-request'
 import { memoryResourceLogPinStore } from '@interop/vh-resource-log'
 import type { Session } from '@/types/auth'
 import {

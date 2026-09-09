@@ -216,6 +216,31 @@ The plain rebind survives only where nothing can be standing. A change torn
 between establishment and teardown leaves BOTH passphrases live and
 standing.
 
+Before the establishment starts, the change's enrolled branch stamps an
+establishment marker on the old credential's registry entry, restated at
+that credential's own unlock Space: `pendingEstablishment`, naming the NEW
+credential's unlock Space and key-agreement multibase. The establishment
+writes the new credential's standing record and roster wrap before its
+document entry, and a tear between the two leaves that record with nothing
+else naming it. The restatement comes from the fresh registry read the
+compare-and-swap wrapper hands over, and the write is skipped when that
+fresh entry names a credential other than the typed old passphrase (a change
+that completed elsewhere in between), since stamping over it would drop that
+credential's members. The change's final registry write drops the marker,
+and so does any later write that names another credential or repoints the
+entry. A write that keeps the entry on the same credential at the same Space
+(a refresh, a backfill, a re-seal) carries it forward. The marker is an
+index like the rest of the entry: the mend it arms re-derives everything
+from the sealed record and the account document. Its write is best-effort,
+its detector a retry of the same change, which re-runs it. An account whose
+registry holds no passphrase entry yet gets no marker, that entry being the
+backfill's to write.
+
+The ladder branch stamps none. A transient session's passphrase change
+leaves nothing browser-local, so no later login could hold the new
+credential's client-key record and consume a marker. Its torn establishment
+is mended by a retry of the same change.
+
 The registry's passphrase entry is written only after the retirement
 reports, because the entry's standing configuration depends on how the
 retirement ended. Each degenerate state below has its own detector and
@@ -252,6 +277,55 @@ recorded update key. An entry naming ANOTHER credential with no recorded
 update key is left alone, the repair having no rung to attribute that
 credential's ladder by.
 
+**Establish-first arm.** An entry naming another credential while the login
+credential is NOT in the account document is the change torn before its
+document entry. The new credential's record and roster wrap stand, and the
+entry still names the old credential at the old unlock Space. Registry and
+document state alone cannot tell that state apart from two others: an old
+passphrase logging in after a change that completed elsewhere, and an
+abandoned torn passphrase after a later change succeeded. Establishing on
+either of those readings would retire the account's current passphrase, the
+forbidden direction. The gate is therefore the establishment marker naming
+the credential logging in, at its own unlock Space. The address gate it
+replaces asked whether the entry sat at the login credential's own unlock
+Space, which the torn change does not satisfy, so nothing detected that
+residue.
+
+The arm carries a second gate. The entry's OWN credential must still be
+listed in the account document, which the marker-armed state holds by
+construction, the change tearing before its retirement. A marker over an
+entry whose credential a later ceremony retired (a recovery spend whose
+registry write tore, say) is stale, and firing there would reinstate an
+abandoned passphrase over the account's current one.
+
+The arm establishes the login credential from the record the torn change
+sealed. `establishStandingUnlock` reads the ladder seed back from that
+record, so the document entry names the rung the record already holds. The
+live profile is then swapped onto the re-bound record, the retirement above
+runs, and the entry is rewritten, which drops the marker. A bare entry
+carrying the marker takes the same arm, on an account whose registry named
+no passphrase members: establish first, then record the entry from that
+establishment. The old credential in the bare case stays standing with
+nothing naming it, the pre-existing bare-entry residue.
+
+**A credential the document does not list.** A transient login verifies the
+account log and then checks the credential's own inventory. A document
+listing no `keyAgreement` member of this credential's (a passphrase's
+commitment, a passkey's verbatim key) anchors nothing of its record, so the
+bridge, the sibling delegation, and the ladder-signed mend would each refuse
+at the server. The login raises the typed `credential-not-standing` refusal
+there instead, before any ladder-signed request is tried, and the page
+renders `auth.errors.transientCredentialNotStanding`. That is the state a
+standing establishment torn before its document entry leaves for a browser
+holding no client-key record for the new credential.
+
+Two variants of that tear have a converging re-run as their only mender: a
+passphrase change run from a transient session, which stamps no marker, and
+an add-a-passphrase run torn at the same point, which stamps none either
+since no entry names anything to mark. A retry of the same change with the
+same secret converges, the sealed ladder seed being read back from the
+record.
+
 **Bare passkey entry.** A passkey login runs the sibling repair,
 `rebuildBarePasskeyEntry`, on its own present-but-bare entry, matched by
 unlock Space and rebuilt from the keyring hit once the account document
@@ -278,9 +352,14 @@ Each rides the visit's generation delegation and unwraps with the
 credential's standing key. The user key sweep and the annex GC stay
 remembered-only, neither having a ladder-anchored branch yet. The re-seal
 repair runs first, since every registry writer downstream reads the record
-and a stale seal would make each warn and skip. The sweep is early because
-its roster convergence may rotate the key and re-seal the registry, and a
-read-modify-write racing that re-seal would undo it within one login.
+and a stale seal would make each warn and skip. The backfill carries the
+refresh write's identity guard: it does not repoint the passphrase entry to
+the login credential's unlock Space while that entry names another
+credential's standing members or carries an establishment marker, so a
+backfill running after a failed repair in the same chain cannot drop them.
+The sweep is early because its roster convergence may rotate the key and
+re-seal the registry, and a read-modify-write racing that re-seal would undo
+it within one login.
 
 Navigation to the dashboard waits only on storage provisioning
 (`session.storageReady`). The chain runs after navigation, on a separate

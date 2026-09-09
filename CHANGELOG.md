@@ -4,6 +4,12 @@
 
 ### Changed
 
+- The request pipeline (classification, matching, VP composition, the App
+  Connect app-key credential, the exchange clients) is imported from
+  `@interop/wallet-request` 0.1.0; wallet-core 0.70.0 no longer ships the
+  `request` subpath. `resolveWalletInput` hands the classifier wallet-core's
+  `isWasLinkPayload` and `isConnectCode` as injected recognizers, and
+  `lib/log.ts` wires the package's logger beside wallet-core's.
 - ARCHITECTURE.md is a short map again: layer map, overviews, storage model,
   ceremony inventory, glossary. Each area's full account moved to a topic doc
   under `docs/architecture/`, with history, roadmap ids, and restated rules
@@ -142,10 +148,49 @@
 
 ### Added
 
+- `PassphraseUnlockMethod.pendingEstablishment`, the passphrase change's
+  establishment marker: the unlock Space id and key-agreement multibase of
+  the credential being established. The change's enrolled branch stamps it
+  on the old credential's entry before the new credential's establishment
+  starts, restating that entry from the fresh registry read the
+  compare-and-swap wrapper hands over and writing nothing when that fresh
+  entry names another credential. The change's final registry write drops
+  it. `upsertPassphraseUnlockMethod` carries it forward only while a write
+  keeps the entry on the same credential at the same unlock Space; an
+  identity write naming another credential, or a repoint, drops it. The
+  marker write is best-effort, and an absent registry gets none. The ladder
+  branch stamps no marker, a transient session leaving nothing browser-local
+  for a later login to consume one with; its torn establishment is mended by
+  a retry of the same change.
+- A `credential-not-standing` transient-login refusal
+  (`auth.errors.transientCredentialNotStanding`), raised right after the
+  first account-log verification when the document lists none of the
+  credential's `keyAgreement` inventory (a passphrase's commitment, a
+  passkey's verbatim key), before any ladder-signed request is tried.
 - Dependency: `@interop/was-sync` `^0.1.0`.
 
 ### Fixed
 
+- A passphrase change torn between the new credential's standing record and
+  its document entry is finished at the next login with that passphrase.
+  The establish-first arm of `repairTornPassphraseRetirement` is gated on
+  the establishment marker naming the credential logging in at its own
+  unlock Space, replacing the address gate, which could not tell that tear
+  apart from an old passphrase logging in after a change that completed
+  elsewhere. The arm also requires the entry's own credential to still be
+  listed in the account document, so a stale marker over an entry whose
+  credential a later ceremony retired reinstates nothing. It establishes the
+  login credential from its sealed record, swaps the live profile onto the
+  re-bound record, then retires the entry's named credential and rewrites
+  the entry. `rebuildBareEntry` gained the same marker-gated arm for a bare
+  entry on an account whose registry named no passphrase members. The
+  login-time registry backfill (`backfillPassphraseUnlockMethod`) carries
+  the refresh write's identity guard with it: it no longer repoints the
+  passphrase entry to the login credential's unlock Space while that entry
+  names another credential's standing members or carries the marker, so a
+  backfill running after a failed repair in the same login chain cannot drop
+  them. Previously nothing detected the residue, and a fresh browser's login
+  with the new passphrase failed with a raw bridge authorization error.
 - A torn standing-credential establishment (add or change passphrase, add
   passkey) re-runs with the ladder seed that bound the member. The enrolled
   branch of `establishStandingUnlock` writes the standing-layout unlock

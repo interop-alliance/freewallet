@@ -26,7 +26,7 @@ queries is rejected at classification time (the shared
 The wire contract is normative in the **App Connect companion spec**
 (<https://github.com/interop-alliance/app-connect-spec>; local checkout
 `../app-connect-spec`). The app-key module is
-`@interop/wallet-core/request`'s `appKey.ts`, shared with DCW: wire
+`@interop/wallet-request`'s `appKey.ts`, shared with DCW: wire
 constants, match and mint paths, and the store-time refusal policy.
 Freewallet's half is consent UI, credential storage, and delegation
 machinery.

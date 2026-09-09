@@ -3,7 +3,7 @@ import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { CapabilityAgent } from '@interop/webkms-client'
 import type { Session } from '@/types/auth'
 import type { StoredCredential } from '@/types/credential'
-import { mintAppKeyCredential } from '@interop/wallet-core/request'
+import { mintAppKeyCredential } from '@interop/wallet-request'
 import {
   AppKeysUnreadableError,
   appConnectZcapRequests,

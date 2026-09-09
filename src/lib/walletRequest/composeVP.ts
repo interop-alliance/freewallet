@@ -1,6 +1,6 @@
 /**
  * Composes a Verifiable Presentation to send back to a requester. The signing
- * itself lives in the shared `@interop/wallet-core/request` `composeVp`; this
+ * itself lives in the shared `@interop/wallet-request` `composeVp`; this
  * wrapper resolves Freewallet's signer + holder from the `Session` and the
  * request's own queries (the three-way holder dispatch below), and enforces
  * Freewallet's stricter DID Auth rule (a `domain` is required, where the
@@ -17,11 +17,11 @@ import {
   DEFAULT_PRESENTABLE_DID_METHODS,
   didAuthMethodSupported,
   documentLoader
-} from '@interop/wallet-core/request'
+} from '@interop/wallet-request'
 import type {
   IVPRQuery,
   PresentationSigner
-} from '@interop/wallet-core/request'
+} from '@interop/wallet-request'
 import {
   clientSigningKeyMultibase,
   isWebvhDid,
@@ -39,7 +39,7 @@ import type {
 } from './types'
 
 /**
- * The shared JSON-LD document loader (`@interop/wallet-core/request`): the
+ * The shared JSON-LD document loader (`@interop/wallet-request`): the
  * standard security contexts plus the BYOE App Connect context, resolved from
  * the bundled `byoe-context` document so nothing is fetched at signing time.
  * Re-exported here so single-VC issuance (`src/lib/loginCredential.ts`) and

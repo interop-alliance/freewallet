@@ -4,8 +4,8 @@
  * the security-critical part and lives here rather than in the popup page, so
  * it is stated once and exercisable without a DOM.
  */
-import type { WalletResponse } from '@interop/wallet-core/request'
-import type { IVPRDetails as ISpecVPRDetails } from '@interop/wallet-core/request'
+import type { WalletResponse } from '@interop/wallet-request'
+import type { IVPRDetails as ISpecVPRDetails } from '@interop/wallet-request'
 import type { Session } from '@/types/auth'
 import { deliverPresentation } from './vcApiExchange'
 import { processRequest } from './processRequest'

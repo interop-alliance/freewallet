@@ -37,7 +37,7 @@ import {
   AppKeyMintInvariantError,
   AppKeyRefusedError,
   mintAppKeyCredential
-} from '@interop/wallet-core/request'
+} from '@interop/wallet-request'
 import { browserLocalSessionPersistence } from '@/session/persistence'
 import { BrowserStore } from './browserStore'
 import { StorageManager } from './storageManager'

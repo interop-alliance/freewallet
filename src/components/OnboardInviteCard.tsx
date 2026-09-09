@@ -30,7 +30,7 @@ import {
   composeWalletOnboardingRequest,
   createEphemeralExchange,
   pollEphemeralExchange
-} from '@interop/wallet-core/request'
+} from '@interop/wallet-request'
 import {
   ONBOARDING_INVITE_TTL_MS,
   parseOnboardingResponse,

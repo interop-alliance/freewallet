@@ -2,7 +2,7 @@
  * Classification of incoming VC API messages. The CHAPI-event wrapping, the
  * query-normalization helpers, the DID-Auth detection, and the App Connect
  * query validation (`appConnectRequestOf`) all live in
- * `@interop/wallet-core/request` and are re-exported here. This module keeps
+ * `@interop/wallet-request` and are re-exported here. This module keeps
  * only Freewallet's App Connect-aware `classifyRequest` / `isDidAuthOnly`,
  * which carry the App Connect axis the shared profile does not have.
  */
@@ -12,11 +12,11 @@ import {
   queriesOf as sharedQueriesOf,
   requestingAgentOf,
   zcapQueriesOf
-} from '@interop/wallet-core/request'
+} from '@interop/wallet-request'
 import type {
   IVPRDetails as ISpecVPRDetails,
   IVPRQuery as ISpecVPRQuery
-} from '@interop/wallet-core/request'
+} from '@interop/wallet-request'
 import type {
   IQueryByExample,
   IVPRDetails,
@@ -34,7 +34,7 @@ export {
   requestingAgentOf,
   zcapQueriesOf,
   didAuthMethodSupported
-} from '@interop/wallet-core/request'
+} from '@interop/wallet-request'
 
 /**
  * Normalizes a VPR's `query` to an array of typed query objects. Bridges

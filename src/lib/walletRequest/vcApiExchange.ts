@@ -1,5 +1,5 @@
 /**
- * VC API exchange client moved to `@interop/wallet-core/request` (with the
+ * VC API exchange client moved to `@interop/wallet-request` (with the
  * network transport injectable, defaulting to `globalThis.fetch` -- the same
  * transport this module used directly). The exports are re-pointed here so
  * `@/lib/walletRequest` importers are unaffected.
@@ -12,5 +12,5 @@ export {
   deliverPresentation,
   collectIssuedPresentation,
   presentationEndpointFor
-} from '@interop/wallet-core/request'
-export type { VCAPIExchangeResponse } from '@interop/wallet-core/request'
+} from '@interop/wallet-request'
+export type { VCAPIExchangeResponse } from '@interop/wallet-request'

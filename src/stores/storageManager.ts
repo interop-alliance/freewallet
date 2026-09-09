@@ -79,7 +79,7 @@ import {
 import {
   assertMintedAppKey,
   assertStorableAppKey
-} from '@interop/wallet-core/request'
+} from '@interop/wallet-request'
 import { credentialTitle } from '@/lib/viewMappers/credentialTitle'
 import { didWebFromSpace } from '@/lib/didWeb'
 import { ensureKmsAuthentication } from '@/lib/kms'
@@ -1417,7 +1417,7 @@ export class StorageManager {
    * grants on it are read-only), and each of those clients enforces this same
    * refusal at its own door; the pulled bodies are also EDV envelopes the
    * sync layer could not inspect. The match-time seed binding in
-   * `@interop/wallet-core/request` remains the backstop for anything that
+   * `@interop/wallet-request` remains the backstop for anything that
    * slips past.
    *
    * @param options {object}
@@ -1442,7 +1442,7 @@ export class StorageManager {
    * would refuse -- external ingest never stores a marker credential, so the
    * one legitimate producer gets its own entry point instead of a bypass flag
    * on the shared one. Still asserts the mint invariants (`assertMintedAppKey`
-   * in `@interop/wallet-core/request`: marker present, subject DID derived
+   * in `@interop/wallet-request`: marker present, subject DID derived
    * from the carried seed) so this door cannot be misused to store a foreign
    * app key either.
    *

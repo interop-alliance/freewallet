@@ -407,6 +407,66 @@ export async function changeAccountPassphrase({
         ...(oldLadderSeed ? { ladderSeed: oldLadderSeed } : {})
       }
     })
+    // The establishment marker, written BEFORE the establishment on the
+    // ENROLLED branch: the old credential's entry restated (or a bare entry
+    // at its unlock Space when the registry names no passphrase yet),
+    // stamped with the NEW credential's unlock Space and key-agreement
+    // multibase. The establishment writes the new record before its
+    // document entry, and a tear between the two leaves the new credential
+    // unnamed by anything but this marker: the next login with the new
+    // passphrase on this browser (the one holding the client-key record the
+    // enrolled bind wrote) reads it and finishes the change
+    // (`repairTornPassphraseRetirement`). The ladder branch writes nothing
+    // browser-local, so no login could ever consume a marker there; its
+    // torn establishment is mended by a retry of the same change, which is
+    // also this write's detector when the write itself fails. The final
+    // registry write below drops the marker.
+    //
+    // The entry is restated from the FRESH read the compare-and-swap wrapper
+    // hands over, not from the pre-flight's read: a change completed
+    // elsewhere in between leaves an entry naming another credential, and
+    // stamping the marker over it would drop that credential's members.
+    if (context.kind === 'enrolled') {
+      try {
+        await updateUnlockMethods({
+          session,
+          // An absent registry is the backfill's to mint, not this marker's;
+          // a change on such an account keeps the re-run as its one mender.
+          mutate: current => {
+            if (!current) {
+              return null
+            }
+            const fresh = current.methods.find(
+              (method): method is PassphraseUnlockMethod =>
+                method.type === 'passphrase'
+            )
+            if (
+              fresh?.keyAgreementKeyMultibase !== undefined &&
+              fresh.keyAgreementKeyMultibase !==
+                oldCredential.standing.keyAgreementKeyMultibase
+            ) {
+              return null
+            }
+            return upsertPassphraseUnlockMethod({
+              record: current,
+              unlockSpaceId:
+                fresh?.unlockSpaceId ?? oldCredential.unlock.spaceId,
+              manageCapability: fresh?.manageCapability,
+              pendingEstablishment: {
+                unlockSpaceId: newCredential.unlock.spaceId,
+                keyAgreementKeyMultibase:
+                  newCredential.standing.keyAgreementKeyMultibase
+              }
+            })
+          }
+        })
+      } catch (err) {
+        log.warn(
+          'Could not record the establishment marker; a change torn before its document entry is finished only by a retry of the same change',
+          { err }
+        )
+      }
+    }
     // The establishment, first and fatal (roster wrap, commitment document
     // entry, bridge delegation, standing-layout record at the new unlock
     // Space): a failure leaves the old credential fully intact -- record,
@@ -836,6 +896,7 @@ async function standingConfiguration({
     createdAt: _createdAt,
     unlockSpaceId: _unlockSpaceId,
     manageCapability: _manageCapability,
+    pendingEstablishment: _pendingEstablishment,
     ...standingMembers
   } = entry
   return { fields: standingMembers, registryAbsent, entry }

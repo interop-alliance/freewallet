@@ -228,6 +228,13 @@ export function transientRefusalKey(
     // credential, so the copy is its own.
     case 'no-user-key-wrap':
       return 'auth.errors.transientNoUserKeyWrap'
+    // The document lists none of this credential's inventory: a standing
+    // establishment (a passphrase change, an added method) torn between its
+    // record and its document entry. A retry from a fresh browser re-runs
+    // the same refusal; the browser that ran the change finishes it at its
+    // next login, and a retry of the same change converges.
+    case 'credential-not-standing':
+      return 'auth.errors.transientCredentialNotStanding'
     // The roster reads as absent but the mend's mint preconditions refused
     // to create one (a held roster-epoch pin, or key-agreement entries this
     // credential does not own). A retry re-runs the same refused

@@ -131,7 +131,9 @@ vi.mock('@/session/verifiedLog', () => ({
   })
 }))
 
-vi.mock('@/session/unlockMethods', () => {
+vi.mock('@/session/unlockMethods', async importOriginal => {
+  const actual =
+    await importOriginal<typeof import('@/session/unlockMethods')>()
   const read = async () => {
     state.calls.push('getUnlockMethods')
     if (!state.registry) {
@@ -163,10 +165,14 @@ vi.mock('@/session/unlockMethods', () => {
         return next
       }
     ),
-    upsertPassphraseUnlockMethod: vi.fn(
-      ({ record }: { record: never }) => record
-    ),
-    upsertPasskeyUnlockMethod: vi.fn(({ record }: { record: never }) => record)
+    // The real upsert, so the entry a repair actually writes -- including
+    // whether it still carries the establishment marker -- is the one
+    // production produces rather than a stand-in's echo.
+    upsertPassphraseUnlockMethod: vi.fn(actual.upsertPassphraseUnlockMethod),
+    upsertPasskeyUnlockMethod: vi.fn(({ record }: { record: never }) => record),
+    // The live-profile swap the establish-first arm runs; real, since it is
+    // pure session mutation.
+    adoptPassphraseRebind: vi.fn(actual.adoptPassphraseRebind)
   }
 })
 
@@ -267,6 +273,52 @@ function bareEntry(): object {
     unlockSpaceId: 'unlock-space-new',
     manageCapability: { id: 'urn:zcap:stored-manage' }
   }
+}
+
+/**
+ * The passphrase change's establishment marker, naming the credential
+ * logging in at its own unlock Space -- the one shape that arms the
+ * establish-first arm.
+ */
+const LOGIN_MARKER = {
+  unlockSpaceId: 'unlock-space-new',
+  keyAgreementKeyMultibase: MY_KAK
+}
+
+/**
+ * The registry state a passphrase change torn between the new credential's
+ * standing record and its document entry leaves: the entry still names the
+ * OLD credential at the OLD unlock Space, stamped with the marker the change
+ * wrote before its establishment started.
+ *
+ * @param [options] {object}
+ * @param [options.pendingEstablishment] {object}   the marker to stamp;
+ *   omitted leaves the entry unmarked
+ * @returns {object}
+ */
+function tornChangeEntry({
+  pendingEstablishment = LOGIN_MARKER
+}: {
+  pendingEstablishment?: object
+} = {}): object {
+  return {
+    ...entryFor({ keyAgreementKeyMultibase: OTHER_KAK }),
+    unlockSpaceId: 'unlock-space-old',
+    pendingEstablishment
+  }
+}
+
+/**
+ * The passphrase entry the repair's registry write produced, read off the
+ * real upsert's return value.
+ *
+ * @returns {object | undefined}
+ */
+function writtenPassphraseEntry(): object | undefined {
+  const results = vi.mocked(upsertPassphraseUnlockMethod).mock.results
+  const record = results.at(-1)?.value as
+    { methods: Array<{ type: string }> } | undefined
+  return record?.methods.find(method => method.type === 'passphrase')
 }
 
 function makeSession(type: 'passphrase' | 'passkey' = 'passphrase'): Session {
@@ -400,12 +452,13 @@ describe('repairTornPassphraseRetirement', () => {
     expect(state.calls).not.toContain('putUnlockMethods')
   })
 
-  it('establishes the login credential first when the change withheld the retirement', async () => {
-    // The pending state: the entry sits at the LOGIN credential's own unlock
-    // Space naming the OLD credential's members, and the login credential is
-    // not in the document -- its establishment is exactly what failed when
-    // the change withheld the retirement.
+  it('establishes the login credential first when the change tore before its entry', async () => {
+    // The torn state: the entry still names the OLD credential at the OLD
+    // unlock Space, the login credential is not in the document, and the
+    // change's establishment marker names the credential logging in -- the
+    // one reading under which the establishment is what failed.
     state.loginCredentialStanding = false
+    state.entry = tornChangeEntry()
     const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
     const session = makeSession()
     await repairTornPassphraseRetirement({
@@ -454,16 +507,62 @@ describe('repairTornPassphraseRetirement', () => {
     warn.mockRestore()
   })
 
-  it('never establishes toward an entry at another unlock Space', async () => {
-    // The forbidden direction: an OLD passphrase logging in after a change
-    // that completed elsewhere finds the entry at the NEW credential's
-    // unlock Space, not its own address, so the establish-first arm must
-    // not fire even with the secret in hand.
+  it('drops the establishment marker from the entry it writes', async () => {
+    // The change's final write is what clears the marker; when the change
+    // never got there, this repair's write is. An entry left marked would
+    // re-arm the arm on every later login.
     state.loginCredentialStanding = false
-    state.entry = {
-      ...entryFor({ keyAgreementKeyMultibase: OTHER_KAK }),
-      unlockSpaceId: 'unlock-space-other'
-    }
+    state.entry = tornChangeEntry()
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
+    await repairTornPassphraseRetirement({
+      session: makeSession(),
+      found: makeFound(),
+      credential: { secret: 'new-pass' }
+    })
+    expect(writtenPassphraseEntry()).toMatchObject({
+      unlockSpaceId: 'unlock-space-new',
+      keyAgreementKeyMultibase: MY_KAK
+    })
+    expect(writtenPassphraseEntry()).not.toHaveProperty('pendingEstablishment')
+    warn.mockRestore()
+  })
+
+  it('refuses a stale marker whose own entry left the document', async () => {
+    // The marker-armed state holds the entry's credential standing by
+    // construction (the change tears before its retirement). Once that
+    // credential is out of the document, establishing the marked one would
+    // reinstate an abandoned passphrase over the account's current one.
+    state.loginCredentialStanding = false
+    state.namedCredentialStanding = false
+    state.entry = tornChangeEntry()
+    const capture = captureSink()
+    const remove = addSink(capture.sink)
+
+    await repairTornPassphraseRetirement({
+      session: makeSession(),
+      found: makeFound(),
+      credential: { secret: 'new-pass' }
+    })
+
+    expect(state.calls).toEqual(['getUnlockMethods', 'verifiedAccountLog'])
+    expect(vi.mocked(establishStandingUnlock)).not.toHaveBeenCalled()
+    expect(state.calls).not.toContain('putUnlockMethods')
+    expect(
+      capture.events.find(
+        event => event.level === 'warn' && event.msg.includes('marker is stale')
+      )
+    ).toBeDefined()
+    remove()
+  })
+
+  it('never establishes toward an unmarked entry', async () => {
+    // The forbidden direction, and the reading that shares the whole
+    // registry and document state with the torn change: an OLD passphrase
+    // (its unlock Space delete lost) logging in after a change that
+    // completed elsewhere. The completed change dropped the marker, so the
+    // arm must not fire even with the secret in hand.
+    state.loginCredentialStanding = false
+    state.entry = entryFor({ keyAgreementKeyMultibase: OTHER_KAK })
     await repairTornPassphraseRetirement({
       session: makeSession(),
       found: makeFound(),
@@ -475,8 +574,49 @@ describe('repairTornPassphraseRetirement', () => {
     expect(state.calls).not.toContain('putUnlockMethods')
   })
 
+  it('never establishes toward a marker naming another credential', async () => {
+    // A later change's marker, or one this login is not the subject of: the
+    // credential being established is not the one logging in.
+    state.loginCredentialStanding = false
+    state.entry = tornChangeEntry({
+      pendingEstablishment: {
+        unlockSpaceId: 'unlock-space-new',
+        keyAgreementKeyMultibase: OTHER_KAK
+      }
+    })
+    await repairTornPassphraseRetirement({
+      session: makeSession(),
+      found: makeFound(),
+      credential: { secret: 'old-pass' }
+    })
+    expect(state.calls).toEqual(['getUnlockMethods', 'verifiedAccountLog'])
+    expect(vi.mocked(establishStandingUnlock)).not.toHaveBeenCalled()
+    expect(state.calls).not.toContain('putUnlockMethods')
+  })
+
+  it('never establishes toward a marker at another unlock Space', async () => {
+    // The multibase matches but the address does not: whatever that marker
+    // names, it is not the record this login just read.
+    state.loginCredentialStanding = false
+    state.entry = tornChangeEntry({
+      pendingEstablishment: {
+        unlockSpaceId: 'unlock-space-other',
+        keyAgreementKeyMultibase: MY_KAK
+      }
+    })
+    await repairTornPassphraseRetirement({
+      session: makeSession(),
+      found: makeFound(),
+      credential: { secret: 'old-pass' }
+    })
+    expect(state.calls).toEqual(['getUnlockMethods', 'verifiedAccountLog'])
+    expect(vi.mocked(establishStandingUnlock)).not.toHaveBeenCalled()
+    expect(state.calls).not.toContain('putUnlockMethods')
+  })
+
   it('leaves the pending state untouched when the establishment fails again', async () => {
     state.loginCredentialStanding = false
+    state.entry = tornChangeEntry()
     state.establishThrows = true
     const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
     await expect(
@@ -533,6 +673,75 @@ describe('repairTornPassphraseRetirement', () => {
       found: makeFound()
     })
     expect(state.calls).toEqual(['getUnlockMethods', 'verifiedAccountLog'])
+    expect(state.calls).not.toContain('putUnlockMethods')
+  })
+
+  it('establishes and records a bare entry the change marked', async () => {
+    // The same torn change on an account whose registry named no passphrase
+    // members yet: nothing to retire, but the marker says the credential
+    // logging in is the one the change was establishing.
+    state.entry = { ...bareEntry(), ...tornChangeEntry() }
+    delete (state.entry as { keyAgreementKeyMultibase?: string })
+      .keyAgreementKeyMultibase
+    delete (state.entry as { updateKeyMultibase?: string }).updateKeyMultibase
+    state.loginCredentialStanding = false
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
+    const session = makeSession()
+
+    await repairTornPassphraseRetirement({
+      session,
+      found: makeFound(),
+      credential: { secret: 'new-pass' }
+    })
+
+    expect(state.calls).toEqual([
+      'getUnlockMethods',
+      'verifiedAccountLog',
+      'establishStandingUnlock',
+      // The write's own fresh read inside the compare-and-swap wrapper.
+      'getUnlockMethods',
+      'putUnlockMethods'
+    ])
+    expect(vi.mocked(rotateOffUnlockCredential)).not.toHaveBeenCalled()
+    // The session adopts the established record, as the change ceremony does.
+    expect(session.profile.unlockMethod).toEqual({
+      type: 'passphrase',
+      unlockSpaceId: 'unlock-space-new',
+      manageCapability: { id: 'urn:zcap:established-manage' }
+    })
+    expect(session.profile.persistClientKeys).toBeTypeOf('function')
+    expect(session.profile.ladderSeed).toBeInstanceOf(Uint8Array)
+    // The entry records the establishment's own standing fields at its own
+    // unlock Space, not ones rebuilt from the pre-establishment keyring hit.
+    expect(vi.mocked(upsertPassphraseUnlockMethod)).toHaveBeenCalledWith({
+      record: expect.anything(),
+      unlockSpaceId: 'unlock-space-new',
+      manageCapability: { id: 'urn:zcap:established-manage' },
+      standing: {
+        keyAgreementKeyMultibase: MY_KAK,
+        updateKeyMultibase: 'z6MkEstablishedRung0'
+      }
+    })
+    expect(writtenPassphraseEntry()).not.toHaveProperty('pendingEstablishment')
+    warn.mockRestore()
+  })
+
+  it('leaves a marked bare entry alone with no credential in hand', async () => {
+    // The marker arms the arm; the typed secret is what runs it. An
+    // unattended login without one leaves the state for the next.
+    state.entry = { ...bareEntry(), ...tornChangeEntry() }
+    delete (state.entry as { keyAgreementKeyMultibase?: string })
+      .keyAgreementKeyMultibase
+    delete (state.entry as { updateKeyMultibase?: string }).updateKeyMultibase
+    state.loginCredentialStanding = false
+
+    await repairTornPassphraseRetirement({
+      session: makeSession(),
+      found: makeFound()
+    })
+
+    expect(state.calls).toEqual(['getUnlockMethods', 'verifiedAccountLog'])
+    expect(vi.mocked(establishStandingUnlock)).not.toHaveBeenCalled()
     expect(state.calls).not.toContain('putUnlockMethods')
   })
 

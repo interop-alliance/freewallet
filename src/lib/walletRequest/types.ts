@@ -1,11 +1,11 @@
 /**
  * Wallet-request message types for Freewallet. The core VPR vocabulary, the
  * CHAPI event shapes, and the wallet-response shape now live in
- * `@interop/wallet-core/request` (this module was the extraction seed); they are
+ * `@interop/wallet-request` (this module was the extraction seed); they are
  * re-exported here so existing `@/lib/walletRequest` importers are unaffected.
  *
  * The App Connect protocol extension -- its `app` block, query, and classified
- * request -- now lives in `@interop/wallet-core/request` too and is re-exported
+ * request -- now lives in `@interop/wallet-request` too and is re-exported
  * here. This file keeps only the widened query union / request profile that
  * carry it (the shared vocabulary's own union covers just the three VPR-spec
  * query types).
@@ -19,7 +19,7 @@ import type {
   IQueryByExample,
   IVPRInteract,
   IVPRQuery as ISpecVPRQuery
-} from '@interop/wallet-core/request'
+} from '@interop/wallet-request'
 
 // Re-export the shared VPR vocabulary + CHAPI event / response shapes so
 // existing importers keep their `@/lib/walletRequest` import site. `IVPRDetails`
@@ -46,7 +46,7 @@ export type {
   IAppConnectCapabilityQuery,
   IAppConnectQuery,
   IAppConnectRequest
-} from '@interop/wallet-core/request'
+} from '@interop/wallet-request'
 
 /**
  * The query union Freewallet dispatches on: the three VPR-spec query types
