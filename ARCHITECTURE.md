@@ -54,7 +54,7 @@ src/stores/         Global state
   browserStore.ts   BrowserStore -- the local RxDB active replica
   remoteDirectStore.ts   The replica-less backend (transient and popup sessions)
   wasRemoteStore.ts WASRemoteStore -- the remote WAS backend
-  syncController.ts Background replication lifecycle (start/stop/reSync)
+  syncController.ts Background replication lifecycle (restart/stop/reSync)
   setupStore.ts     The one in-flight signup ceremony's step feed and
                     outcome, read by the lobby page (in-memory only)
   toastStore.ts     Transient success/info messages (`showToast`), rendered
@@ -77,10 +77,12 @@ src/session/        Session bootstrap and the account ceremonies -- the
                     unlockMethods.ts, clients.ts, shares.ts, applications.ts
   Ceremonies        recovery.ts, revocation.ts, forget.ts, wipe.ts,
                     ceremonies.ts
-  Repairs / sweeps  pendingEnrollment.ts, pendingRetirement.ts,
+  Repairs / sweeps  registryPasses.ts (the login-time registry chain),
+                    pendingEnrollment.ts, pendingRetirement.ts,
                     registryReseal.ts, userKeyAdoption.ts, userKeyCascade.ts,
-                    appKeySweep.ts, clientAnnexGc.ts
-  Shared parts      rosterStore.ts, annexReach.ts, recordEnvelope.ts,
+                    appKeySweep.ts, clientAnnexGc.ts, credentialCoverage.ts
+  Shared parts      rosterStore.ts, collectionLogStore.ts, annexReach.ts,
+                    recordEnvelope.ts,
                     accountCeremonyContext.ts, completeAppLogin.ts (the
                     page-level post-login sequence), completePopupLogin.ts,
                     walletLoginActivity.ts
@@ -1209,7 +1211,8 @@ That path is now the no-WAS deployment's plain signup plus the login-time
 heal for any account this ceremony provisioned. `ensureAccountGenesis` is
 called with `promoteController: false`, and `ensurePromotedController`
 promotes and heals on that reduced path. The plain passphrase signup's own
-`userExists` probe and its pointer-backfill step are gone. The
+`userExists` probe and its pointer-backfill step are gone from the WAS
+path; the no-WAS plain signup keeps the probe. The
 establishment's create-nothing probe (`fetchTransientKeyring`) is the one
 signup-time existence check left on a WAS deployment.
 
@@ -1356,8 +1359,8 @@ record's own `delegatedClients` sibling delegation and the pointed
 generation's embedded delegation.
 
 The per-visit key enrolls through whichever sibling delegation the readiness
-stage produced (wallet-core's `enrollClientAnnexTransientClient`, the loud
-entry before any authority, with the GC-race re-read built in). The
+stage produced (wallet-core's `enrollTransientClient`, the loud entry
+before any authority, with the GC-race re-read built in). The
 generation delegation is the embedded one, or the one the readiness stage
 returned when it just installed or renewed one. The enrollment's first
 attempt builds on the verified generation head the readiness stage stood on,
@@ -2157,9 +2160,10 @@ so for a recovery code this check is the whole remedy: the code is re-issued
 and its replacement's bridge is signed by that code's own ladder VM. A
 standing passphrase or passkey refreshes its own bridge at its own login,
 on the same three staleness axes. The shared predicates
-(`delegationKeyInDocument`, `zcapExpiring`) and the delegation builder live
-in `@interop/wallet-core/recovery`; `src/session/recovery.ts` binds them to
-the session's signers, the storage URL, and the registry.
+(`delegationKeyInDocument` from `@interop/wallet-core/webvh`, `zcapExpiring`)
+and the delegation builder live in `@interop/wallet-core/recovery`;
+`src/session/recovery.ts` binds them to the session's signers, the storage
+URL, and the registry.
 
 Two standing boundary rules. First, the hash-commitment rule: **a
 low-entropy-derived public key is never published in the world-readable
@@ -2496,9 +2500,11 @@ the verified head of the collection's own governing log rather than from a
 Description member the host serves (see "Per-collection descriptor logs").
 
 When `VITE_WAS_SERVER_URL` is set and the session is not a guest, a remote
-WAS Space is attached as a **sync target**. `SyncController`
-(`src/stores/syncController.ts`) replicates every synced local collection to
-its remote WAS Collection counterpart in the background, through the
+WAS Space is attached as a **sync target**. The sync controller
+(`SessionSyncController` in `src/stores/syncController.ts`, over
+`@interop/was-sync/rxdb`'s `SyncController` core) replicates every synced
+local collection to its remote WAS Collection counterpart in the
+background, through the
 collection-agnostic driver in `@interop/was-sync`, which ships stored bodies
 (plaintext or envelope) verbatim and never touches keys. That module is the
 session binding around the package's controller core: it owns the gate (a
@@ -2550,7 +2556,7 @@ Flow:
 
 1. On login, `registerWallet()` (`src/lib/registerWallet.ts`) registers
    `/wallet/get` and `/wallet/store` as this wallet's handler URLs with the
-   CHAPI mediator (`authn.io`), through the credential-handler-polyfill's
+   CHAPI mediator (`authn.io`), through web-credential-handler's
    `installHandler()`.
 2. A third-party site's `navigator.credentials.get/store()` opens
    `/wallet/get` or `/wallet/store` in a CHAPI-managed popup iframe, outside
@@ -2961,8 +2967,8 @@ both callers route to the page.
 
 The page (`src/pages/external/ExternalRequestPage.tsx`) is the
 `WalletGetPage` shape minus CHAPI: it opens the exchange with wallet-core's
-`openInteractionRequest`, classifies the VPR with the shared
-`classifyRequest`, renders the storage-access consent panel, delegates
+`openInteractionRequest`, classifies the VPR with Freewallet's
+`classifyRequest` (`src/lib/walletRequest/classify.ts`), renders the storage-access consent panel, delegates
 through the ordinary grant engine, and POSTs the unsigned zcap-only
 presentation back through `composeAndDeliverResponse` with the exchange URL.
 A live app session is used directly; otherwise the page runs the ordinary
@@ -3114,7 +3120,8 @@ today.
 
 ## Route map
 
-Every row below `/external/request` is protected. `DocsPage` renders
+Every row from `/dashboard` through `/settings` is protected;
+`/docs/:fileName` and the catch-all are not. `DocsPage` renders
 `public/docs/*.md`.
 
 | Path                                                       | Component                |
@@ -3165,7 +3172,7 @@ account that may never run one is an open gap instead, listed below.
 | Credential-anchored genesis               | every WAS signup, remembered or not (the default)               | `src/session/credentialAnchoredGenesis.ts`                        | `/clientAnnex`              | re-run; the transient login's heal branch                                                                                                                 |
 | Recovery spend (remembered and transient) | `/recover`                                                      | `src/session/recovery.ts`                                         | `/recovery`, `/clientAnnex` | remembered: pending record pre-pivot + spend resume; transient: re-run, open gaps (below)                                                                 |
 | Self-enrollment at login                  | remembered login on a fresh browser                             | `src/session/initSession.ts` + `src/session/pendingEnrollment.ts` | `/clientAnnex`              | pending record pre-pivot; the next remembered login's resume                                                                                              |
-| Client enrollment (two-party)             | Settings > Connected wallets, any session type                  | `src/components/EnrolledClientsSection.tsx`                       | `/enrollment`               | re-run with the same connect code; the escrow-direction convergence of any later ladder-branch ceremony                                                   |
+| Client enrollment (two-party)             | Settings > Connected wallets, any session type                  | `src/lib/enrollment.ts` (UI in `EnrolledClientsSection.tsx`)      | `/enrollment`               | re-run with the same connect code; the escrow-direction convergence of any later ladder-branch ceremony                                                   |
 | Client revocation + epoch cascade         | Settings > Connected wallets, any session type                  | `src/session/revocation.ts`                                       | `/clients`                  | re-run; the cascade-completion sweep; on the ladder branch, the retire-direction convergence of any later ladder-branch ceremony (open gap below)         |
 | Recovery-code issuance                    | Settings > Recovery codes, any session type                     | `src/session/recovery.ts`                                         | `/recovery`                 | re-run with the same code (every stage detects its own completion); a tear after the document entry has no mender                                         |
 | Recovery-code revocation                  | Settings > Recovery codes, any session type                     | `src/session/recovery.ts`                                         | `/recovery`                 | re-run; the cascade-completion sweep                                                                                                                      |
@@ -3290,7 +3297,9 @@ cascades, and the permanent wire-level constants.
 
 - **`@interop/wallet-core`** -- the correctness-critical logic shared with
   the DCW mobile wallet, imported by subpath. The sections above name each
-  subpath where it surfaces; the full set:
+  subpath where it surfaces; the set this app uses:
+  - the root entry (the ceremony-id vocabulary, and the stage-notifier and
+    logger seams)
   - `/webvh` (the did:webvh log, the document halves of the ceremonies)
   - `/clientAnnex` (the ladder, the annex log and its GC, and the
     ladder-anchored ceremonies: credential-anchored genesis, self-enrollment,
@@ -3336,14 +3345,17 @@ cascades, and the permanent wire-level constants.
   client side: chain verification, the chain-head pin port
   (`ResourceLogPinStore`, `ResourceLogHeadPin`, `memoryResourceLogPinStore`)
   with its host-free slot keys, and the continuity/integrity refusal
-  classes. Freewallet imports the pin port and refusal classes directly; the
-  did:webvh controller adapter stays on `@interop/wallet-core/resourceLog`.
-- **`@interop/was-client`** (+ `/edv`, `/sync`, `/paths`) -- the WAS HTTP
+  classes. Freewallet imports the pin port directly and matches the
+  refusals by `err.name` rather than by class, since a duplicate package
+  copy would break `instanceof`; the did:webvh controller adapter stays on
+  `@interop/wallet-core/resourceLog`.
+- **`@interop/was-client`** (+ `/edv`, `/sync`, `/paths`, `/log`) -- the WAS HTTP
   client, the sync wire contract the RxDB driver speaks, its error classes
   and the `err.name` predicates that classify them (`isUnknownEpochError`,
   `isSyncConflictError`, `isSyncAuthError`), the EDV envelope cipher and
   key-epoch construction (`createEdvDocCipher`, `x25519RecipientFromDidKey`),
-  and the descriptor-store seam.
+  the descriptor-store seam, and on `/log` the generic resource-log store
+  (`resourceLogStore`) the per-collection descriptor logs ride.
 - **`@interop/social-core`** -- the contacts collection specs and the
   `remotePayloadWins` last-write-wins comparison itself.
 - **`@interop/vc-display`** -- credential display mapping.
