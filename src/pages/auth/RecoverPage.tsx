@@ -20,9 +20,7 @@ import { loginWithPassphrase } from '@/session/initSession'
 import {
   locateRecoveryAccount,
   recoverAccountWithCode,
-  RecoveryCodeInvalidError,
   RecoveryCodeNotFoundError,
-  RecoveryKeyNotCommittedError,
   RecoveryUnavailableError,
   updateRegistryAfterRecovery,
   type RecoveryOutcome
@@ -31,6 +29,7 @@ import { isStorageUnreachable } from '@/lib/storageErrors'
 import { forcedRememberBrowser } from '@/lib/e2eSeams'
 import { RecoveryCodeDisplay } from '@/components/RecoveryCodeDisplay'
 import { createLogger } from '@/lib/log'
+import { errorNameOf } from '@interop/wallet-core/menders'
 
 const log = createLogger('fw:ui:recover')
 
@@ -72,13 +71,16 @@ export function RecoverPage() {
    * its own message), and everything else.
    */
   const errorKeyFor = (err: unknown): string => {
-    if (err instanceof RecoveryCodeInvalidError) {
+    // The wallet-core refusals are matched on `name` rather than
+    // `instanceof`: a linked or duplicated copy of the package makes the
+    // class identity differ. The classes defined in this app keep `instanceof`.
+    if (errorNameOf(err) === 'RecoveryCodeInvalidError') {
       return 'auth.recover.errors.invalidCode'
     }
     if (err instanceof RecoveryCodeNotFoundError) {
       return 'auth.recover.errors.noMatch'
     }
-    if (err instanceof RecoveryKeyNotCommittedError) {
+    if (errorNameOf(err) === 'RecoveryKeyNotCommittedError') {
       return 'auth.recover.errors.revoked'
     }
     if (err instanceof RecoveryUnavailableError) {

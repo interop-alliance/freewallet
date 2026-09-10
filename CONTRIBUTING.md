@@ -84,6 +84,13 @@ whenever possible.
 - Handle specific error codes explicitly (e.g. `err.code === 'ENOENT'`) before
   re-throwing
 - Prefer `new Error(message, { cause })` over mutating an error's `.cause`
+- Match an error class imported from another package (`@interop/*`) on its
+  `name`, through `errorNameOf` from `@interop/wallet-core/menders`, and
+  not by `instanceof`: a linked or duplicated copy of the package gives the
+  thrower a different class object, and the check silently misses. A
+  subclass overrides `name`, so a site that must catch a subtype names
+  every concrete subclass. Errors defined in this app keep `instanceof`.
+  `src/lib/errorName.test.ts` enforces the rule over `src/`.
 
 ## Comments
 

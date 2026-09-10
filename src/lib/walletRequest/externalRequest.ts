@@ -18,7 +18,6 @@
  * `interact.service` endpoint on another origin than the exchange.
  */
 import {
-  EphemeralExchangeGoneError,
   isInteractionUrl,
   openInteractionRequest,
   presentationEndpointFor
@@ -27,6 +26,7 @@ import type {
   FetchLike,
   IVPRDetails as ISpecVPRDetails
 } from '@interop/wallet-request'
+import { errorNameOf } from '@interop/wallet-core/menders'
 import { classifyRequest, queriesOf } from './classify'
 import type { ResolvedGrant } from './processZcaps'
 import type { IVPRDetails, WalletRequestProfile } from './types'
@@ -174,10 +174,7 @@ export async function openExternalRequest({
   } catch (err) {
     // Dispatch on the name: the class may come from a second copy of
     // wallet-core in a linked install.
-    if (
-      err instanceof EphemeralExchangeGoneError ||
-      (err instanceof Error && err.name === 'EphemeralExchangeGoneError')
-    ) {
+    if (errorNameOf(err) === 'EphemeralExchangeGoneError') {
       throw new ExternalRequestRefusedError('gone', { cause: err })
     }
     if (err instanceof ExchangeNetworkError) {

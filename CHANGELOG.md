@@ -38,6 +38,18 @@
 
 ### Changed
 
+- The remaining `instanceof` checks against error classes imported from
+  `@interop/*` packages match on the error's `name` instead, through
+  wallet-core's `errorNameOf`: `EnrollmentPendingError`,
+  `AppKeyRefusedError`, `RecoveryCodeInvalidError`,
+  `RecoveryKeyNotCommittedError`, `ValidationError`, `WasServerError`,
+  `WasError`, `PreconditionFailedError`, `EphemeralExchangeGoneError`, and
+  `ResolveCredentialsInputError`. `isPreconditionFailed` now also matches
+  the `WasSyncConflictError` subclass by name, and `isStorageUnreachable`
+  matches the base `WasError` alone on its no-status arm, so a pre-request
+  encryption failure no longer reads as an unreachable server. A unit test
+  (`src/lib/errorName.test.ts`) fails on any new `instanceof` against a
+  class this app does not define; the rule is in CONTRIBUTING.md.
 - `session.registryReady` now settles when the registry-writing
   registrations have reported (through the generation-delegation heal on the
   remembered chain, through the management-zcap refresh on the transient

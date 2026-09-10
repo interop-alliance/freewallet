@@ -4,6 +4,7 @@ import {
   resolveCredentialsInput
 } from '@/lib/resolveCredentialsInput'
 import { MAX_CREDENTIAL_JSON_FILE_BYTES } from '@/app.config'
+import { errorNameOf } from '@interop/wallet-core/menders'
 
 export function isJsonCredentialFile(file: File): boolean {
   if (file.name.toLowerCase().endsWith('.json')) {
@@ -60,8 +61,10 @@ export async function resolveCredentialsFromJsonFiles(
       const resolved = await resolveCredentialsInput(text)
       credentials.push(...resolved)
     } catch (err) {
+      // The vc-display class is matched on `name`, since a duplicated copy
+      // of the package would make `instanceof` miss it.
       if (
-        err instanceof ResolveCredentialsInputError ||
+        errorNameOf(err) === 'ResolveCredentialsInputError' ||
         err instanceof CredentialJsonFileTooLargeError
       ) {
         throw err

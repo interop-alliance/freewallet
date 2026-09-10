@@ -29,7 +29,7 @@ import {
   mapPopupLoginError
 } from '@/session/completePopupLogin'
 import type { Session } from '@/types/auth'
-import { AppKeyRefusedError } from '@interop/wallet-request'
+import { errorNameOf } from '@interop/wallet-core/menders'
 import { credentialTitle } from '@/lib/viewMappers/credentialTitle'
 import { issuerName } from '@/lib/viewMappers/issuerName'
 import { chapiStyles } from '@/styles/appStyles'
@@ -322,7 +322,7 @@ export function WalletStorePage() {
         err
       })
       const detail =
-        err instanceof AppKeyRefusedError
+        errorNameOf(err) === 'AppKeyRefusedError'
           ? t('common.appKeyRefused')
           : err instanceof Error
             ? err.message

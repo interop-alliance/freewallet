@@ -10,7 +10,8 @@ import { BsAward } from 'react-icons/bs'
 import { Navigate, useLocation, useNavigate } from 'react-router'
 import { useTranslation } from 'react-i18next'
 import type { IVerifiableCredential } from '@interop/data-integrity-core'
-import { AppKeyRefusedError, presentsAsAppKey } from '@interop/wallet-request'
+import { presentsAsAppKey } from '@interop/wallet-request'
+import { errorNameOf } from '@interop/wallet-core/menders'
 import { useAuthStore } from '@/stores/authStore'
 import { showToast } from '@/stores/toastStore'
 import { cidFrom } from '@interop/was-client/sync'
@@ -110,7 +111,7 @@ export function AcceptCredentialsPage() {
     } catch (err) {
       log.error('Error storing credentials', { err })
       setStoreError(
-        err instanceof AppKeyRefusedError
+        errorNameOf(err) === 'AppKeyRefusedError'
           ? t('common.appKeyRefused')
           : t('acceptCredentials.storeError')
       )

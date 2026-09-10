@@ -2,12 +2,16 @@
  * Helpers for classifying errors thrown by the WAS storage client, so the UI
  * can distinguish "the storage server could not be reached" from ordinary
  * application errors and show an appropriate on-screen message.
+ *
+ * Every was-client class here is matched on its `name` rather than by
+ * `instanceof`: in a dependency tree that resolves was-client twice (a
+ * linked checkout, or a duplicate through the tree) the class object
+ * differs, and an `instanceof` check silently takes the wrong branch. A
+ * subclass overrides `name`, so a check that must catch a subtype names
+ * every concrete subclass. `src/lib/errorName.test.ts` holds the rule for
+ * the whole app.
  */
-import {
-  PreconditionFailedError,
-  WasError,
-  WasServerError
-} from '@interop/was-client'
+import { errorNameOf } from '@interop/wallet-core/menders'
 
 /**
  * Returns true when the given error indicates the remote WAS storage server
@@ -34,12 +38,18 @@ export function isStorageUnreachable(err: unknown): boolean {
       break
     }
     seen.add(current)
-    if (current instanceof WasServerError) {
+    const name = errorNameOf(current)
+    if (name === 'WasServerError') {
       return true
     }
     // A base WasError with no HTTP status means the request never reached the
     // server (network failure, CORS block, DNS error, connection refused).
-    if (current instanceof WasError && current.status === undefined) {
+    // The subclasses (a 404, a 412, a pre-request encryption failure) each
+    // carry their own name, so only the base class matches here.
+    if (
+      name === 'WasError' &&
+      (current as { status?: number }).status === undefined
+    ) {
       return true
     }
     current = current instanceof Error ? current.cause : undefined
@@ -49,17 +59,14 @@ export function isStorageUnreachable(err: unknown): boolean {
 
 /**
  * Whether `err` is the compare-and-swap conflict a conditional PUT raises
- * (`PreconditionFailedError`, 412). Matched by `name` as well as
- * `instanceof`: in a dependency tree that resolves was-client twice the class
- * object differs, and an `instanceof`-only check would turn every lost race
- * into a hard failure instead of a rebase.
+ * (`PreconditionFailedError`, 412), or its sync-driver subclass
+ * `WasSyncConflictError`. An `instanceof`-only check would turn every lost
+ * race into a hard failure instead of a rebase under a duplicated was-client.
  *
  * @param err {unknown}   the caught error
  * @returns {boolean}
  */
 export function isPreconditionFailed(err: unknown): boolean {
-  return (
-    err instanceof PreconditionFailedError ||
-    (err instanceof Error && err.name === 'PreconditionFailedError')
-  )
+  const name = errorNameOf(err)
+  return name === 'PreconditionFailedError' || name === 'WasSyncConflictError'
 }

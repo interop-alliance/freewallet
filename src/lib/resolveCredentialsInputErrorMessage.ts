@@ -1,5 +1,6 @@
 import type { TFunction } from 'i18next'
-import { ResolveCredentialsInputError } from '@/lib/resolveCredentialsInput'
+import type { ResolveCredentialsInputError } from '@/lib/resolveCredentialsInput'
+import { errorNameOf } from '@interop/wallet-core/menders'
 import { WalletInputUnsupportedError } from '@/lib/resolveWalletInput'
 import {
   CredentialJsonFileError,
@@ -19,14 +20,17 @@ export function resolveCredentialsInputErrorMessage(
     )
   }
 
-  if (err instanceof ResolveCredentialsInputError) {
+  // The vc-display class is matched on `name`: a duplicated copy of the
+  // package would make `instanceof` miss it.
+  if (errorNameOf(err) === 'ResolveCredentialsInputError') {
+    const { code } = err as ResolveCredentialsInputError
     const keys = {
       empty: 'addCredential.errors.empty',
       invalid_input: 'addCredential.errors.invalidInput',
       none_found: 'addCredential.errors.noneFound',
       vpqr_unsupported: 'addCredential.errors.vpqrUnsupported'
     } as const
-    return translate(keys[err.code])
+    return translate(keys[code])
   }
 
   if (err instanceof CredentialJsonFileTooLargeError) {

@@ -40,11 +40,10 @@ import {
   type ContactRevisionPayload
 } from '@interop/social-core'
 import type { RxCollection, RxStorage } from 'rxdb/plugins/core'
-import {
-  ValidationError,
-  type CollectionEncryption,
-  type IDelegatedZcap,
-  type SpaceDescription
+import type {
+  CollectionEncryption,
+  IDelegatedZcap,
+  SpaceDescription
 } from '@interop/was-client'
 import {
   acquireDescriptor,
@@ -3117,7 +3116,8 @@ export class StorageManager {
           await space.revoke(zcap)
           return { id: zcap.id }
         } catch (err) {
-          if (err instanceof ValidationError) {
+          // Matched on `name`: was-client may resolve twice in the tree.
+          if (errorNameOf(err) === 'ValidationError') {
             // Already revoked, expired, or foreign -- treat as a no-op.
             return { skipped: true }
           }

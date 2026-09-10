@@ -26,10 +26,8 @@ import { loginErrorKey } from '@/session/loginErrorKey'
 import { completeAppLogin } from '@/session/completeAppLogin'
 import { showToast } from '@/stores/toastStore'
 import type { ClientWebvhUpdateKeys } from '@interop/wallet-core/webvh'
-import {
-  EnrollmentPendingError,
-  mintEnrollmentRequest
-} from '@interop/wallet-core/enrollment'
+import { mintEnrollmentRequest } from '@interop/wallet-core/enrollment'
+import { errorNameOf } from '@interop/wallet-core/menders'
 import { completeEnrollment } from '@/lib/enrollment'
 import {
   forgetBrowserWalletData,
@@ -284,7 +282,9 @@ export function LoginPage() {
       })
       await completeAppLogin({ session, t, navigate })
     } catch (err) {
-      if (err instanceof EnrollmentPendingError) {
+      // Matched on `name`: the class is wallet-core's, and a linked or
+      // duplicated copy of the package would make `instanceof` miss it.
+      if (errorNameOf(err) === 'EnrollmentPendingError') {
         setEnrollErrorKey('auth.enroll.pending')
       } else {
         log.error('Connecting this browser failed', { err })
