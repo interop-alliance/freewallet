@@ -14,7 +14,8 @@ the wrapped client-key record, so nothing live is written unwrapped and a
 reload drops the session. The vault is unlocked while a session exists and
 gone once it ends; there is no "locked vault" state. Navigation to the
 dashboard is gated on `session.storageReady` alone, and the login-time
-registry passes run afterward on `session.registryReady`.
+mender block runs afterward, settling `session.registryReady` and then
+`session.mends`.
 
 **The persistence strategy** (`src/session/persistence.ts`). Which storage
 tier a session may write to is decided once at login, by the typed
@@ -170,16 +171,18 @@ It runs as the LAST stage of the registry chain below, since it
 compare-and-swaps the same entry those passes rewrite. A CHAPI popup visit
 skips it.
 
-**The login-time registry chain.** The visit runs four of the login-time
-registry passes on its own `session.registryReady` promise after navigation:
+**The login-time mender block.** The visit runs four of the login-time
+registry passes as its own block after navigation, in registration order:
 the stale-seal repair, the torn-retirement repair, the bare-passkey rebuild,
 and the registry backfill, with the management-zcap refresh above as the
-last stage (the chain's ordering is under "Session & auth flow" in session-and-auth.md). Each rides
+last registration (the ordering is under "Session & auth flow" in session-and-auth.md). Each rides
 the visit's generation delegation and unwraps with the credential's standing
-key, each failure is logged and skipped, and the chain is not awaited. A
-CHAPI popup visit skips it, and the user key sweep and the annex generation
-GC do not run here. Nothing in the registry's write protocol turns on the
-session tier.
+key, each failure is logged and reported, and the block is not awaited.
+`session.registryReady` and `session.mends` settle together here, every
+registration being registry-writing. In a CHAPI popup every one of them
+declares itself off the route, so the block runs empty and both promises
+settle at once. The user key sweep and the annex generation GC do not run
+here. Nothing in the registry's write protocol turns on the session tier.
 
 The tears a torn credential-anchored signup can leave are mended by
 wallet-core's `mendCredentialAnchoredAccount`; the app binding sits beside

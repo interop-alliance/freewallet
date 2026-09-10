@@ -37,6 +37,7 @@
  */
 import { WasClient } from '@interop/was-client'
 import type { EncryptionDescriptorStore } from '@interop/was-client/edv'
+import type { SealableEncryptionDescriptorStore } from '@interop/wallet-core/keys'
 import {
   establishCredentialAnchoredAccount as runEstablishment,
   ladderVmAgent,
@@ -62,6 +63,12 @@ import type { ResourceLogPinStore } from '@interop/vh-resource-log'
 import type { KeystoreAgent } from '@interop/webkms-client'
 import type { StageNotifier } from '@interop/wallet-core'
 import {
+  errorNameOf,
+  type MendOutcome,
+  type MendReportAccumulator
+} from '@interop/wallet-core/menders'
+import type { FreewalletCeremonyId } from '@/session/ceremonies'
+import {
   DID_KEYS_RESOURCE,
   ENCRYPTED_STANDARD_COLLECTIONS,
   KEY_MAP_COLLECTION,
@@ -80,7 +87,10 @@ import {
   type UnlockCredential
 } from '@/session/keyring'
 import { accountRosterStore } from '@/session/rosterStore'
-import { accountCollectionStores } from '@/session/collectionLogStore'
+import {
+  accountCollectionStores,
+  type CollectionStoreFor
+} from '@/session/collectionLogStore'
 import {
   emptyUnlockMethodsRegistry,
   updateUnlockMethodsWithClient,
@@ -91,6 +101,70 @@ import { createLogger, stageMarker, stageSpan, stageTimer } from '@/lib/log'
 import type { StageLabel } from '@/lib/log'
 
 export type { CredentialAnchoredEstablishment, CredentialAnchoredMendReport }
+
+/**
+ * Reports one credential-anchored mend run into a login's mend report: one
+ * entry per arm, in the arms' own order. The run is the routing site of four
+ * invariants, so the report says what each arm made true rather than that
+ * "the mend ran". An arm that did not run this time reports a no-op.
+ *
+ * @param options {object}
+ * @param options.report {CredentialAnchoredMendReport}   the run's report
+ * @param options.mends {MendReportAccumulator}   the login's accumulator
+ * @returns {void}
+ */
+export function reportCredentialAnchoredMend({
+  report,
+  mends
+}: {
+  report: CredentialAnchoredMendReport
+  mends: MendReportAccumulator<FreewalletCeremonyId>
+}): void {
+  const outcomeOf = (arm?: {
+    converged: boolean
+    outcome?: string
+    skipped?: string
+    error?: unknown
+  }): MendOutcome => {
+    if (!arm) {
+      return { outcome: 'noop', detail: { reason: 'arm-did-not-run' } }
+    }
+    if (arm.converged) {
+      return {
+        outcome: 'clean',
+        ...(arm.outcome ? { detail: { outcome: arm.outcome } } : {})
+      }
+    }
+    if (arm.error !== undefined) {
+      return {
+        outcome: 'failed',
+        errorName: errorNameOf(arm.error),
+        ...(arm.outcome ? { detail: { outcome: arm.outcome } } : {})
+      }
+    }
+    const reason = arm.skipped ?? arm.outcome
+    return {
+      outcome: 'refused',
+      ...(reason ? { detail: { reason } } : {})
+    }
+  }
+  mends.report({
+    invariant: 'unlock-record-points-at-the-account-did',
+    ...outcomeOf(report.establishment)
+  })
+  mends.report({
+    invariant: 'space-controller-is-the-account-did',
+    ...outcomeOf(report.promotion)
+  })
+  mends.report({
+    invariant: 'roster-and-collection-epochs-exist',
+    ...outcomeOf(report.rosterEpochs)
+  })
+  mends.report({
+    invariant: 'registry-records-the-establishing-credential',
+    ...outcomeOf(report.registry)
+  })
+}
 
 const log = createLogger('fw:session:genesis')
 
@@ -545,6 +619,86 @@ export function passphraseRegistryUpsertHook({
         { err }
       )
     }
+  }
+}
+
+/**
+ * The ladder kind's authorities from bare parts, for the transient
+ * composition's own mend, which runs before a `Session` exists. It is the
+ * bare-parts half of the two-builder split `rosterStore.ts` and
+ * `collectionLogStore.ts` keep -- a live session's ladder ceremonies resolve
+ * the profile builders through `accountCeremonyContext` instead, which
+ * carries the verified-log memo, the remote store's collection handles, and
+ * the capability the session renews mid-run -- and the members it hands back
+ * are the ones {@link mendCredentialAnchoredAccount} takes.
+ *
+ * @param options {object}
+ * @param options.pointer {AccountPointer & { did: string }}   the promoted
+ *   account pointer
+ * @param options.ladderSeed {Uint8Array}   the acting credential's ladder
+ *   seed, whose VM signs every governed append
+ * @param options.zcapClient {ZcapClient}   the visit's annex-VM client, the
+ *   identity every request is invoked as
+ * @param options.capability {IZcap}   the generation delegation every
+ *   request rides
+ * @param options.pinStore {ResourceLogPinStore}   the visit's chain-head pins
+ * @param options.registry {CredentialAnchoredRegistryContext}   the acting
+ *   credential's registry members: its unlock Space, the bridge and sibling
+ *   delegations, and its unlock key-agreement identifiers
+ * @param [options.log] {DIDLog}   the account log this visit already
+ *   verified, which the roster store resolves its controller view from
+ * @returns {Promise<object>}   the invocation authority, the ladder-signed
+ *   roster and collection stores, and the registry context
+ */
+export async function ladderMendAuthority({
+  pointer,
+  ladderSeed,
+  zcapClient,
+  capability,
+  pinStore,
+  registry,
+  log
+}: {
+  pointer: AccountPointer & { did: string }
+  ladderSeed: Uint8Array
+  zcapClient: ZcapClient
+  capability: IZcap
+  pinStore: ResourceLogPinStore
+  registry: CredentialAnchoredRegistryContext
+  log?: DIDLog
+}): Promise<{
+  invocation: { was: WasClient; zcapClient: ZcapClient; capability: IZcap }
+  rosterStore: SealableEncryptionDescriptorStore
+  collectionStore: CollectionStoreFor
+  registry: CredentialAnchoredRegistryContext
+}> {
+  const keyAgent = await ladderVmAgent({ ladderSeed })
+  return {
+    invocation: {
+      was: new WasClient({ serverUrl: pointer.host, zcapClient }),
+      zcapClient,
+      capability
+    },
+    // Ladder-signed appends, invoked as the annex VM under the generation
+    // delegation, anchored at the log this composition already verified.
+    rosterStore: accountRosterStore({
+      zcapClient,
+      keyAgent,
+      pointer,
+      pinStore,
+      capability,
+      ...(log ? { log } : {})
+    }),
+    // The controller view is verified fresh here rather than seeded: a mend
+    // arm may have moved the head this visit stood on.
+    collectionStore: accountCollectionStores({
+      zcapClient,
+      keyAgent,
+      pointer,
+      pinStore,
+      capability
+    }),
+    registry
   }
 }
 

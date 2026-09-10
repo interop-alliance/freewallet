@@ -82,11 +82,17 @@ export interface CeremonyInvoker {
  * did:key, which resolves from its own bytes and so outlives the Space.
  */
 export interface LadderDeleter {
-  /** the delegating signer: the ladder VM under `<accountDid>#<multibase>` */
+  /**
+   * the delegating signer: the ladder VM under `<accountDid>#<multibase>`
+   */
   zcapClient: ZcapClient
-  /** the delegatee and invoker: the ladder VM's own bare did:key */
+  /**
+   * the delegatee and invoker: the ladder VM's own bare did:key
+   */
   invoker: ZcapClient
-  /** the delegatee DID */
+  /**
+   * the delegatee DID
+   */
   controller: string
 }
 
@@ -98,9 +104,13 @@ interface CeremonyContextBase {
   pointer: AccountPointer & { did: string }
   controller: string
   signer: AccountLogSigner
-  /** built on first read: a UI gate resolves the context without one */
+  /**
+   * built on first read: a UI gate resolves the context without one
+   */
   readonly idStore: WebvhIdStore
-  /** built on first read, for the same reason */
+  /**
+   * built on first read, for the same reason
+   */
   readonly rosterStore: SealableEncryptionDescriptorStore
   /**
    * Each encrypted collection's log-governed descriptor store, signed by the
@@ -143,7 +153,9 @@ export interface LadderCeremonyContext extends CeremonyContextBase {
    * no account document.
    */
   ladderDeleter: LadderDeleter
-  /** the remote-only unlock-record binder: nothing lands on this browser */
+  /**
+   * the remote-only unlock-record binder: nothing lands on this browser
+   */
   bindRecord: RemoteUnlockRecordBind
   /**
    * The account Space's `id` collection as a did:web projection store, built
@@ -152,13 +164,21 @@ export interface LadderCeremonyContext extends CeremonyContextBase {
    * through this immediately before its own entry.
    */
   readonly projectionStore: DelegatedWebvhLogStore
-  /** the record's `delegatedClients` sibling: the one path into the annex */
+  /**
+   * the record's `delegatedClients` sibling: the one path into the annex
+   */
   sibling?: IZcap
-  /** the acting credential's unlock-Space management zcap */
+  /**
+   * the acting credential's unlock-Space management zcap
+   */
   manageCapability?: IZcap
-  /** the acting credential's unlock Space id, the registry's match key */
+  /**
+   * the acting credential's unlock Space id, the registry's match key
+   */
   unlockSpaceId: string
-  /** the standing key-agreement key every roster and registry unwrap needs */
+  /**
+   * the standing key-agreement key every roster and registry unwrap needs
+   */
   standingKeyAgreementKey: IKeyAgreementKey
   /**
    * Renews the generation delegation in place and adopts it into the live
@@ -341,17 +361,55 @@ export function canRunAccountCeremonies({
   if (enrolledCeremonyContext({ session })) {
     return true
   }
-  const reach = resolveAccountReach({ session })
-  if ('missing' in reach) {
+  if (sessionAuthorityKind({ session }) !== 'ladder') {
     return false
   }
-  const { ladderSeed, standingUnlock } = session.profile
-  return !!ladderSeed && !!standingUnlock
+  return !('missing' in resolveAccountReach({ session }))
+}
+
+/**
+ * The authority kind this session HOLDS, whether or not the account
+ * preconditions a full resolution adds are met. It is the mender registry's
+ * fallback when {@link accountCeremonyContext} resolves nothing: the
+ * preconditions the resolution adds beyond this key material -- a promoted
+ * account pointer, a configured storage server with a remote store -- are
+ * exactly the states a login chain's identity repairs converge, so a held
+ * set computed from the resolution alone would stand those repairs down on
+ * the state they exist to fix.
+ *
+ * @param options {object}
+ * @param options.session {Session}
+ * @returns {'enrolled' | 'ladder' | undefined}
+ */
+export function sessionAuthorityKind({
+  session
+}: {
+  session: Session
+}): 'enrolled' | 'ladder' | undefined {
+  if (session.isGuest) {
+    return undefined
+  }
+  const { profile } = session
+  if (
+    profile.clientWebvhKeys &&
+    profile.clientKeyAgreementKey &&
+    profile.keyAgent
+  ) {
+    return 'enrolled'
+  }
+  if (profile.ladderSeed && profile.standingUnlock) {
+    return 'ladder'
+  }
+  return undefined
 }
 
 /**
  * The account-ceremony context for this session, bound to whichever kind it
  * is, or `null` when neither kind's authorities exist.
+ *
+ * Which kind is {@link sessionAuthorityKind}'s decision alone: the branch
+ * below adds the account preconditions a resolution needs, and tests no key
+ * material of its own.
  *
  * @param options {object}
  * @param options.session {Session}
@@ -362,19 +420,22 @@ export async function accountCeremonyContext({
 }: {
   session: Session
 }): Promise<AccountCeremonyContext | null> {
-  const enrolled = enrolledCeremonyContext({ session })
-  if (enrolled) {
-    return enrolled
+  const kind = sessionAuthorityKind({ session })
+  if (kind === 'enrolled') {
+    return enrolledCeremonyContext({ session })
+  }
+  if (kind !== 'ladder') {
+    return null
   }
   const reach = resolveAccountReach({ session })
   if ('missing' in reach) {
     return null
   }
   const { profile } = session
-  const { ladderSeed, standingUnlock } = profile
-  if (!ladderSeed || !standingUnlock) {
-    return null
-  }
+  // The kind above is what tested these two, so the assertions restate no
+  // check of their own.
+  const ladderSeed = profile.ladderSeed!
+  const standingUnlock = profile.standingUnlock!
   const accountDid = reach.pointer.did
   const delegationSigner = await ladderVmZcapClient({ accountDid, ladderSeed })
   const agent = await ladderVmAgent({ ladderSeed })

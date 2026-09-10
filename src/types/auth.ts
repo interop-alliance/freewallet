@@ -19,8 +19,8 @@ import type { UserKey } from '@interop/wallet-core/keys'
 import type { StandingUnlockClient } from '@interop/wallet-core/unlock'
 import type { AccountPointer } from '@interop/wallet-core/keyring'
 import type { PersistableClientKeys } from '@/session/keyring'
-import type { ClientAnnexGcReport } from '@interop/wallet-core/clientAnnex'
-import type { UserKeyCascadeResult } from '@/session/userKeyCascade'
+import type { MendReport } from '@interop/wallet-core/menders'
+import type { FreewalletCeremonyId } from '@/session/ceremonies'
 import type { VerifiedLogCache } from '@/session/verifiedLog'
 import type { SessionPersistence } from '@/session/persistence'
 
@@ -230,40 +230,25 @@ export interface Session {
   // Absent on the new-wallet flows (signup, guest), whose provisioning is
   // owned by `provisionNewWallet` in a deliberate order.
   storageReady?: Promise<void>
-  // The login-time pass chain: the user-key sweep fold, then the re-seal
-  // repair, the torn-retirement repair, the bare-passkey rebuild, the
-  // registry backfill, the standing-delegation refresh, the ladder-rung
-  // refresh, the did:webvh pointer heal, and the generation-delegation
-  // self-heal -- serialized in that order (the single total order among
-  // the registry writers) behind storage provisioning. Never rejects
-  // (every stage is best-effort). Navigation does not wait on it; tests
-  // and the Settings-entered ceremonies that write the unlock-methods
-  // registry await it so they cannot race the passes' read-modify-writes.
-  // Absent on transient, guest, and new-wallet sessions; on a
-  // remote-direct popup it carries only the sweep fold.
+  // The login-time mender block's registry-writing part: the provisioning
+  // seed, then the user key sweep, the four shared registry passes, the
+  // standing-delegation refresh, the ladder-rung refresh, the did:webvh
+  // pointer heal, and the generation-delegation self-heal -- run in that
+  // order (the single total order among the registry writers). Never
+  // rejects (every registration is best-effort). Navigation does not wait
+  // on it; tests and the Settings-entered ceremonies that write the
+  // unlock-methods registry await it so they cannot race the passes'
+  // read-modify-writes. Absent on the new-wallet flows; on a remote-direct
+  // popup it settles behind the registrations that route admits, which are
+  // the sweep, the two refreshes, and the pointer heal.
   registryReady?: Promise<void>
-  // The cascade-completion sweep fired by session creation when the login's
-  // roster read succeeded and a remote store is attached: re-runs the
-  // collection fan-out of the user key cascade (staleness detected from durable
-  // state alone), so a cascade another client crashed partway completes on
-  // the next login. Chained behind `storageReady`, strictly best-effort --
-  // resolves `null` when the sweep itself failed (never rejects) -- and
-  // absent when there was nothing to sweep from (guest, no WAS, no roster).
-  userKeySweep?: Promise<UserKeyCascadeResult | null>
-  // The app-key sweep fired by session creation: deletes app keys stranded in
-  // `private-credentials` by a version that stored them there, now that they
-  // live in `app-connections`. Chained behind `storageReady`, strictly
-  // best-effort -- resolves the counts of private rows deleted and orphaned
-  // public copies retracted, or `null` when the sweep itself failed (it never
-  // rejects) -- and absent on the flows that own their own provisioning.
-  appKeySweep?: Promise<{ deleted: number; retracted: number } | null>
-  // The annex GC sweep fired by the keyring logins: the quarterly
-  // generation swap (when due and the pointed generation is GC-quiet) plus
-  // the collect fan-out over every non-pointed `gen-` collection. Chained
-  // behind `storageReady` (remembered sessions only), strictly best-effort --
-  // resolves wallet-core's per-pass report, or `null` when the session
-  // cannot run it or the pass itself failed (it never rejects).
-  clientAnnexGcSweep?: Promise<ClientAnnexGcReport | null>
+  // This login's mend report: one entry per invariant a mender reported,
+  // in report order -- the routing entries this login fired, then every
+  // registration of its chain's block. It settles when the whole block has
+  // run, the app-key sweep and the annex GC included, so it settles behind
+  // `registryReady` rather than with it. In memory only, scalar detail
+  // only, and it never rejects.
+  mends?: Promise<MendReport<FreewalletCeremonyId>>
   // Settles when the credential-anchored signup's best-effort
   // welcome-content seeding finishes (success, failure, or timeout -- it
   // never rejects); the dashboard shows a "generating welcome credentials"

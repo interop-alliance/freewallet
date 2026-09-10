@@ -389,8 +389,9 @@ export function WalletGetPage() {
       // them and a provisioning failure surfaces here rather than as an
       // unhandled rejection. In a pathological half-provisioned state the
       // concurrent read can surface an error here -- an accepted trade-off.
-      // The background chain (on `session.registryReady`, just the user-key
-      // sweep fold in remote-direct mode) is deliberately not waited on.
+      // The background mender block (on `session.registryReady` and
+      // `session.mends`, the registrations this route admits) is
+      // deliberately not waited on.
       // The credential list feeds the generic-VC selection only. An App
       // Connect request never reads it -- it matches over the dedicated
       // `app-connections` collection below -- so listing and decrypting every

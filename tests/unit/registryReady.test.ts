@@ -1,15 +1,20 @@
 // @vitest-environment node
 /**
- * Unit tests for the FW-300 split in `src/session/initSession.ts`: the
- * login-time registry passes ride `session.registryReady` -- one ordered
- * promise chain seeded behind storage provisioning -- while
- * `session.storageReady` stays the raw provisioning promise, so a login
- * page can navigate as soon as the collections are ready. The chain keeps
- * the FW-296 total order (the user-key sweep fold first, then the re-seal
- * repair, the torn-retirement repair, the bare-passkey rebuild, the
- * backfill), is skipped outright when provisioning itself failed (the
- * session is abandoned), and never rejects.
- * The keyring and every remote/durable seam are mocked; the seed-to-identity
+ * Unit tests for the remembered login's mender block
+ * (`src/session/menders/`, started from `src/session/initSession.ts`): the
+ * registry-writing registrations settle `session.registryReady` while
+ * `session.storageReady` stays the raw provisioning promise, so a login page
+ * can navigate as soon as the collections are ready. The block keeps one
+ * total order (the provisioning seed, the user key sweep, the four shared
+ * registry passes, the standing-delegation refresh, the ladder-rung
+ * refresh, the pointer heal, the generation-delegation heal, then the
+ * keystore report, the app-key sweep and the annex GC), is abandoned when
+ * provisioning itself
+ * failed, and neither promise rejects. The order pin reads
+ * `session.mends`, which carries one entry per invariant every registration
+ * reported, so it covers the whole block rather than the passes that
+ * happen to log.
+ * The keyring and every remote seam are mocked; the seed-to-identity
  * derivation runs for real.
  */
 import { beforeEach, describe, expect, it, vi } from 'vitest'
@@ -78,7 +83,13 @@ vi.mock('@/session/unlockMethods', async importOriginal => ({
 vi.mock('@/session/clientAnnexGc', () => ({
   sweepClientAnnexGenerations: vi.fn(async () => {
     state.events.push('annex-gc')
-    return null
+    return { skipped: 'not-enrolled' }
+  })
+}))
+vi.mock('@/session/appKeySweep', () => ({
+  sweepStrandedAppKeys: vi.fn(async () => {
+    state.events.push('app-key-sweep')
+    return { deleted: 0, retracted: 0 }
   })
 }))
 
@@ -123,6 +134,7 @@ import { fetchKeyring } from '@/session/keyring'
 import { routeUnlockLogin } from '@/session/transientLogin'
 import { StorageManager } from '@/stores/storageManager'
 import { loginWithPassphrase } from '@/session/initSession'
+import { sweepStrandedAppKeys } from '@/session/appKeySweep'
 import { mintUserKey } from '@interop/wallet-core/keys'
 import type { WASRemoteStore } from '@/stores/wasRemoteStore'
 
@@ -149,6 +161,15 @@ function makeFakeStorage() {
     ensureUserCollections: vi.fn(() => provisioning),
     refreshEncryptedDescriptors: vi.fn(async () => undefined),
     adoptRotatedVaultKeys: vi.fn(async () => undefined),
+    // The promotion hands back the keystore promotion it fired, which the
+    // pointer heal reports beside the two Space-side predicates.
+    ensurePromotedController: vi.fn(async () => ({
+      promoted: true,
+      keystorePromotion: Promise.resolve({ outcome: 'clean' as const })
+    })),
+    // Where the real manager keeps the promotion storage provisioning fired,
+    // read by the block's tail when the pointer heal fired none.
+    keystorePromotion: undefined as Promise<{ outcome: string }> | undefined,
     remoteStore: { isFakeRemoteStore: true } as unknown as WASRemoteStore
   } as unknown as StorageManager
   return { storage, resolveProvisioning, rejectProvisioning }
@@ -233,6 +254,47 @@ async function arrangeEnrolledLogin() {
   return fake
 }
 
+/**
+ * The unpromoted account the pointer heal converges: an unlock record still
+ * serving the signup-time did:key, with the account DID landing on the
+ * profile at provisioning (where the log is published or adopted).
+ */
+async function arrangeUnpromotedLogin() {
+  const clientSeed = randomSeed()
+  const controller = await didFromSeed(clientSeed)
+  const userKey = await mintUserKey()
+  const persistAccountPointer = vi.fn(async () => undefined)
+  const stale = { ...POINTER, did: controller }
+  vi.mocked(fetchKeyring).mockResolvedValue({
+    controller,
+    pointer: stale,
+    persistAccountPointer,
+    clientKeys: {
+      clientSeed,
+      userKey,
+      webvhUpdateKeys: { updateSeed: randomSeed(), stagedSeed: randomSeed() },
+      controller,
+      pointerDid: stale.did
+    },
+    unlockSpaceId: 'unlock-space-test',
+    createdAt: new Date().toISOString()
+  } as never)
+  const fake = makeFakeStorage()
+  vi.mocked(fake.storage.ensureUserCollections).mockImplementation((({
+    profile
+  }: {
+    profile: { didWebvh?: { did: string } }
+  }) => {
+    profile.didWebvh = { did: POINTER.did }
+    return Promise.resolve()
+  }) as never)
+  vi.mocked(StorageManager.initStorageClients).mockResolvedValue({
+    storage: fake.storage,
+    userExists: true
+  } as never)
+  return { fake, stale, persistAccountPointer }
+}
+
 beforeEach(() => {
   vi.clearAllMocks()
   state.wasUrl = 'https://was.example.test'
@@ -242,6 +304,10 @@ beforeEach(() => {
   vi.mocked(repairStaleUnlockRegistrySeal).mockImplementation(async () => {
     state.events.push('reseal')
     return 'ok'
+  })
+  vi.mocked(sweepStrandedAppKeys).mockImplementation(async () => {
+    state.events.push('app-key-sweep')
+    return { deleted: 0, retracted: 0 }
   })
   vi.mocked(routeUnlockLogin).mockImplementation((async ({
     credential
@@ -282,36 +348,195 @@ describe('the FW-300 storageReady / registryReady split', () => {
     expect(backfillPassphraseUnlockMethod).toHaveBeenCalledOnce()
   })
 
-  it('keeps the FW-296 order on registryReady: sweep, re-seal repair, torn-retirement, bare-passkey, backfill, annex GC', async () => {
+  it('keeps one total order over the whole block, and every registration reports', async () => {
     const fake = await arrangeEnrolledLogin()
 
     const { session } = await loginWithPassphrase({ passphrase: PASSPHRASE })
     fake.resolveProvisioning()
     await session!.registryReady
-    await session!.clientAnnexGcSweep
+    const report = (await session!.mends)!
 
+    // The passes that log, in the order the block ran them.
     expect(state.events).toEqual([
       'user-key-sweep',
       'reseal',
       'torn-retirement',
       'bare-passkey',
       'backfill',
+      'app-key-sweep',
       'annex-gc'
     ])
+    // The routing entry the login fired, then every registration of the
+    // block, by the invariants it reports: the provisioning seed, the sweep's two, the four shared passes, the two
+    // standing refreshes, the pointer heal's two, the generation-delegation
+    // heal, then the tail -- the keystore report and the two sweeps. A
+    // registration that stopped reporting would drop its ids from this
+    // list.
+    expect(report.map(entry => entry.invariant)).toEqual([
+      // The routing entry this login fired: the forgotten-browser detector
+      // stood down on a log it could not verify (nothing serves one here).
+      'this-browser-is-still-an-enrolled-client',
+      'standard-collections-are-provisioned',
+      'roster-wraps-exactly-the-document-key-set',
+      'collection-epochs-name-the-current-user-key',
+      'unlock-registry-opens-under-the-current-user-key',
+      'registry-passphrase-entry-names-the-standing-credential',
+      'passkey-entry-carries-its-standing-configuration',
+      'registry-lists-the-passphrase-method',
+      'standing-delegations-verify-under-the-current-document',
+      'registry-records-the-committed-ladder-rung',
+      'account-pointer-names-the-account-did',
+      'space-controller-is-the-account-did',
+      'generation-delegation-is-current',
+      'keystore-controller-is-the-account-did',
+      'app-keys-live-only-in-app-connections',
+      'no-annex-generation-outlives-its-pointer'
+    ])
+    // `registryReady` settles at the registry-writing registrations' last
+    // entry, and `mends` behind the two tail sweeps.
+    expect(
+      report.findIndex(
+        entry => entry.invariant === 'generation-delegation-is-current'
+      )
+    ).toBeLessThan(
+      report.findIndex(
+        entry => entry.invariant === 'app-keys-live-only-in-app-connections'
+      )
+    )
   })
 
-  it('skips the chain but still settles registryReady when provisioning failed', async () => {
+  it('settles registryReady before the tail sweeps have run', async () => {
+    const fake = await arrangeEnrolledLogin()
+    let releaseSweep!: () => void
+    vi.mocked(sweepStrandedAppKeys).mockImplementation(
+      () =>
+        new Promise<{ deleted: number; retracted: number }>(resolve => {
+          releaseSweep = () => {
+            state.events.push('app-key-sweep')
+            resolve({ deleted: 0, retracted: 0 })
+          }
+        })
+    )
+
+    const { session } = await loginWithPassphrase({ passphrase: PASSPHRASE })
+    fake.resolveProvisioning()
+    await session!.registryReady
+    expect(await settled(session!.mends)).toBe(false)
+    expect(state.events).not.toContain('app-key-sweep')
+
+    releaseSweep()
+    await session!.mends
+    expect(state.events).toContain('annex-gc')
+  })
+
+  it('runs the pointer heal on an unpromoted account, and reports its predicates', async () => {
+    const { stale, persistAccountPointer } = await arrangeUnpromotedLogin()
+
+    const { session } = await loginWithPassphrase({ passphrase: PASSPHRASE })
+    await session!.registryReady
+    const report = (await session!.mends)!
+
+    expect(persistAccountPointer).toHaveBeenCalledWith({
+      ...stale,
+      did: POINTER.did
+    })
+    expect(session!.storage.ensurePromotedController).toHaveBeenCalledWith({
+      profile: session!.profile
+    })
+    for (const invariant of [
+      'account-pointer-names-the-account-did',
+      'space-controller-is-the-account-did',
+      'keystore-controller-is-the-account-did'
+    ]) {
+      expect(
+        report.find(entry => entry.invariant === invariant),
+        invariant
+      ).toMatchObject({ outcome: 'clean' })
+    }
+  })
+
+  it('settles registryReady without waiting on the keystore promotion', async () => {
+    const { fake } = await arrangeUnpromotedLogin()
+    // A KMS round trip that never answers: the keystore report sits in the
+    // block's tail, so `registryReady` (which every Settings ceremony
+    // awaits) settles regardless, and `session.mends` is what waits.
+    let releaseKeystore!: () => void
+    vi.mocked(fake.storage.ensurePromotedController).mockResolvedValue({
+      promoted: true,
+      keystorePromotion: new Promise(resolve => {
+        releaseKeystore = () => resolve({ outcome: 'clean' as const })
+      })
+    } as never)
+
+    const { session } = await loginWithPassphrase({ passphrase: PASSPHRASE })
+    fake.resolveProvisioning()
+    await session!.registryReady
+    expect(await settled(session!.mends)).toBe(false)
+
+    releaseKeystore()
+    const report = (await session!.mends)!
+    expect(
+      report.find(
+        entry => entry.invariant === 'keystore-controller-is-the-account-did'
+      )
+    ).toMatchObject({ outcome: 'clean' })
+  })
+
+  it('reports the promotion provisioning fired when the pointer heal fired none', async () => {
+    const fake = await arrangeEnrolledLogin()
+    // A promoted pointer: the heal is a no-op and hands the block nothing,
+    // while provisioning's own `ensurePromotedController` fired the keystore
+    // promotion and the manager kept it.
+    ;(
+      fake.storage as unknown as {
+        keystorePromotion?: Promise<{ outcome: string }>
+      }
+    ).keystorePromotion = Promise.resolve({ outcome: 'clean' })
+
+    const { session } = await loginWithPassphrase({ passphrase: PASSPHRASE })
+    fake.resolveProvisioning()
+    const report = (await session!.mends)!
+
+    expect(
+      report.find(
+        entry => entry.invariant === 'keystore-controller-is-the-account-did'
+      )
+    ).toMatchObject({ outcome: 'clean' })
+  })
+
+  it('reports no promotion when neither the heal nor provisioning ran one', async () => {
+    const fake = await arrangeEnrolledLogin()
+
+    const { session } = await loginWithPassphrase({ passphrase: PASSPHRASE })
+    fake.resolveProvisioning()
+    const report = (await session!.mends)!
+
+    expect(
+      report.find(
+        entry => entry.invariant === 'keystore-controller-is-the-account-did'
+      )
+    ).toMatchObject({ outcome: 'noop', detail: { reason: 'no-promotion' } })
+  })
+
+  it('abandons the block but still settles both promises when provisioning failed', async () => {
     const fake = await arrangeEnrolledLogin()
 
     const { session } = await loginWithPassphrase({ passphrase: PASSPHRASE })
     session!.storageReady!.catch(() => {})
     fake.rejectProvisioning(new Error('provisioning exploded'))
 
-    // The rejection propagates through every stage's `.then` (skipping it)
-    // and the trailing catch settles the chain for its awaiters.
+    // The seed's failure aborts the block, and both promises settle for
+    // their awaiters. The two tail sweeps are behind that gate now, so a
+    // session whose provisioning was refused runs neither.
     await expect(session!.registryReady).resolves.toBeUndefined()
     expect(repairStaleUnlockRegistrySeal).not.toHaveBeenCalled()
     expect(backfillPassphraseUnlockMethod).not.toHaveBeenCalled()
+    expect(state.events).toEqual([])
+    expect((await session!.mends)!.map(entry => entry.outcome)).toEqual([
+      // The detector's stand-down, then the seed's failure.
+      'refused',
+      'failed'
+    ])
     await expect(session!.storageReady).rejects.toThrow('provisioning exploded')
   })
 })

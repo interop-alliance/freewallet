@@ -284,6 +284,28 @@ function ceremonyDriving({
 }
 
 /**
+ * The ceremony's one ceremony-tail mend entry, over the annex strike-or-swap
+ * stage's invariant.
+ *
+ * @param outcome {object}   the reported outcome, its scalar detail, and the
+ *   error class name where the stage caught one
+ * @returns {Array<object>}   the whole `mended` report
+ */
+function annexMend(outcome: {
+  outcome: string
+  detail?: Record<string, string>
+  errorName?: string
+}) {
+  return [
+    {
+      invariant: 'retired-credential-leaves-no-annex-inventory',
+      ceremonies: ['unlock-credential-rotation'],
+      ...outcome
+    }
+  ]
+}
+
+/**
  * The visit's in-memory roster-epoch pin, stubbed so the ceremony's read
  * and the adoption callback's write are both observable in `state.calls`.
  */
@@ -496,7 +518,8 @@ describe('the ceremony hand-off', () => {
         outcomes: { 'private-credentials': 'rotated' },
         failed: []
       },
-      userKey: FRESH_USER_KEY
+      userKey: FRESH_USER_KEY,
+      mended: annexMend({ outcome: 'noop' })
     })
     expect(epochPinSave).toHaveBeenCalledWith(
       expect.objectContaining({
@@ -532,13 +555,13 @@ describe('the ceremony hand-off', () => {
     expect(session.profile.persistClientKeys).not.toHaveBeenCalled()
   })
 
-  it('leaves the annex stage out of the outcome when it reports nothing', async () => {
+  it('reports the annex stage as a no-op when it reports nothing', async () => {
     const outcome = await rotateOffUnlockCredential({
       session: sessionWith(),
       method: PASSPHRASE_METHOD,
       verb: 'changing the passphrase'
     })
-    expect(outcome).not.toHaveProperty('clientAnnex')
+    expect(outcome?.mended).toEqual(annexMend({ outcome: 'noop' }))
   })
 
   it('propagates a failed ceremony, memo dropped either way', async () => {
@@ -696,7 +719,9 @@ describe('the annex strike-or-swap stage', () => {
       survivingLadderSeed: SURVIVING_SEED
     })
 
-    expect(outcome?.clientAnnex).toEqual({ action: 'struck' })
+    expect(outcome?.mended).toEqual(
+      annexMend({ outcome: 'clean', detail: { action: 'struck' } })
+    )
     expect(vi.mocked(retireClientAnnexRung)).toHaveBeenCalledWith(
       expect.objectContaining({
         store: { isClientAnnexLogStore: true },
@@ -724,7 +749,9 @@ describe('the annex strike-or-swap stage', () => {
       retiredLadderSeed: RETIRED_SEED,
       survivingLadderSeed: SURVIVING_SEED
     })
-    expect(outcome?.clientAnnex).toEqual({ action: 'clean' })
+    expect(outcome?.mended).toEqual(
+      annexMend({ outcome: 'clean', detail: { action: 'clean' } })
+    )
   })
 
   it('falls through to a generation swap when no rung can sign the strike', async () => {
@@ -737,7 +764,9 @@ describe('the annex strike-or-swap stage', () => {
       survivingLadderSeed: SURVIVING_SEED
     })
 
-    expect(outcome?.clientAnnex).toEqual({ action: 'swapped' })
+    expect(outcome?.mended).toEqual(
+      annexMend({ outcome: 'clean', detail: { action: 'swapped' } })
+    )
     expect(state.calls).toContain('retireClientAnnexRung')
     expect(vi.mocked(swapClientAnnexGeneration)).toHaveBeenCalledWith(
       expect.objectContaining({
@@ -765,20 +794,24 @@ describe('the annex strike-or-swap stage', () => {
       survivingLadderSeed: SURVIVING_SEED,
       pointed: false
     })
-    expect(outcome?.clientAnnex).toEqual({
-      action: 'skipped',
-      reason: 'no-pointer'
-    })
+    expect(outcome?.mended).toEqual(
+      annexMend({
+        outcome: 'refused',
+        detail: { action: 'skipped', reason: 'no-pointer' }
+      })
+    )
     expect(vi.mocked(retireClientAnnexRung)).not.toHaveBeenCalled()
     expect(vi.mocked(swapClientAnnexGeneration)).not.toHaveBeenCalled()
   })
 
   it('skips with no-ladder-seed when no seed survives the retirement', async () => {
     const outcome = await retire({ retiredLadderSeed: RETIRED_SEED })
-    expect(outcome?.clientAnnex).toEqual({
-      action: 'skipped',
-      reason: 'no-ladder-seed'
-    })
+    expect(outcome?.mended).toEqual(
+      annexMend({
+        outcome: 'refused',
+        detail: { action: 'skipped', reason: 'no-ladder-seed' }
+      })
+    )
 
     // The retired credential's own seed is not a survivor, even when the
     // session and the caller both still carry it.
@@ -787,10 +820,12 @@ describe('the annex strike-or-swap stage', () => {
       survivingLadderSeed: new Uint8Array(32).fill(3),
       sessionLadderSeed: new Uint8Array(32).fill(3)
     })
-    expect(sameBytes?.clientAnnex).toEqual({
-      action: 'skipped',
-      reason: 'no-ladder-seed'
-    })
+    expect(sameBytes?.mended).toEqual(
+      annexMend({
+        outcome: 'refused',
+        detail: { action: 'skipped', reason: 'no-ladder-seed' }
+      })
+    )
     expect(vi.mocked(retireClientAnnexRung)).not.toHaveBeenCalled()
     expect(vi.mocked(swapClientAnnexGeneration)).not.toHaveBeenCalled()
   })
@@ -798,7 +833,9 @@ describe('the annex strike-or-swap stage', () => {
   it('swaps outright when the retired credential has no seed in hand', async () => {
     const outcome = await retire({ survivingLadderSeed: SURVIVING_SEED })
     expect(vi.mocked(retireClientAnnexRung)).not.toHaveBeenCalled()
-    expect(outcome?.clientAnnex).toEqual({ action: 'swapped' })
+    expect(outcome?.mended).toEqual(
+      annexMend({ outcome: 'clean', detail: { action: 'swapped' } })
+    )
   })
 
   it('reports a hard failure as skipped, the rotation still done', async () => {
@@ -813,10 +850,13 @@ describe('the annex strike-or-swap stage', () => {
     // Best-effort by the ceremony's contract: the roster rotation -- the
     // retirement's essential remedy -- still ran.
     expect(outcome?.rotated).toBe(true)
-    expect(outcome?.clientAnnex).toEqual({
-      action: 'skipped',
-      reason: 'failed'
-    })
+    expect(outcome?.mended).toEqual(
+      annexMend({
+        outcome: 'failed',
+        detail: { action: 'skipped' },
+        errorName: 'Error'
+      })
+    )
     expect(vi.mocked(swapClientAnnexGeneration)).not.toHaveBeenCalled()
     warn.mockRestore()
   })
@@ -825,10 +865,13 @@ describe('the annex strike-or-swap stage', () => {
     const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
     state.swapError = new Error('log conflict')
     const outcome = await retire({ survivingLadderSeed: SURVIVING_SEED })
-    expect(outcome?.clientAnnex).toEqual({
-      action: 'skipped',
-      reason: 'failed'
-    })
+    expect(outcome?.mended).toEqual(
+      annexMend({
+        outcome: 'failed',
+        detail: { action: 'skipped' },
+        errorName: 'Error'
+      })
+    )
     expect(outcome?.rotated).toBe(true)
     warn.mockRestore()
   })
@@ -952,7 +995,9 @@ describe('the annex strike-or-swap stage', () => {
         }
       })
 
-      expect(outcome?.clientAnnex).toEqual({ action: 'struck' })
+      expect(outcome?.mended).toEqual(
+        annexMend({ outcome: 'clean', detail: { action: 'struck' } })
+      )
       // The strike invokes the sibling delegation under the surviving
       // credential's own client, never this visit's per-visit annex key,
       // which the annex Space's controller does not list.
@@ -1025,7 +1070,9 @@ describe('the annex strike-or-swap stage', () => {
         }
       })
 
-      expect(outcome?.clientAnnex).toEqual({ action: 'struck' })
+      expect(outcome?.mended).toEqual(
+        annexMend({ outcome: 'clean', detail: { action: 'struck' } })
+      )
       expect(vi.mocked(clientAnnexLogStore)).toHaveBeenCalledWith(
         expect.objectContaining({
           capability: ACTING_SIBLING,
@@ -1063,10 +1110,12 @@ describe('the annex strike-or-swap stage', () => {
       const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
       const outcome = await retireOnLadder({ context: ladderContext() })
 
-      expect(outcome?.clientAnnex).toEqual({
-        action: 'skipped',
-        reason: 'no-ladder-seed'
-      })
+      expect(outcome?.mended).toEqual(
+        annexMend({
+          outcome: 'refused',
+          detail: { action: 'skipped', reason: 'no-ladder-seed' }
+        })
+      )
       expect(vi.mocked(clientAnnexLogStore)).not.toHaveBeenCalled()
       expect(vi.mocked(retireClientAnnexRung)).not.toHaveBeenCalled()
       // The rotation -- the retirement's essential remedy -- still ran.
@@ -1132,10 +1181,12 @@ describe('the ladder-seed settlement (the login seed with no retired seed in han
 
     expect(vi.mocked(swapClientAnnexGeneration)).not.toHaveBeenCalled()
     expect(vi.mocked(retireClientAnnexRung)).not.toHaveBeenCalled()
-    expect(outcome?.clientAnnex).toEqual({
-      action: 'skipped',
-      reason: 'no-ladder-seed'
-    })
+    expect(outcome?.mended).toEqual(
+      annexMend({
+        outcome: 'refused',
+        detail: { action: 'skipped', reason: 'no-ladder-seed' }
+      })
+    )
     // The identification also hands the document edit the retired seed.
     expect(ceremonyLadderSeed).toBe(LOGIN_SEED)
     // Settled against a fresh pre-edit read: the memo is dropped first, so
@@ -1161,10 +1212,12 @@ describe('the ladder-seed settlement (the login seed with no retired seed in han
     })
 
     expect(vi.mocked(swapClientAnnexGeneration)).not.toHaveBeenCalled()
-    expect(outcome?.clientAnnex).toEqual({
-      action: 'skipped',
-      reason: 'no-ladder-seed'
-    })
+    expect(outcome?.mended).toEqual(
+      annexMend({
+        outcome: 'refused',
+        detail: { action: 'skipped', reason: 'no-ladder-seed' }
+      })
+    )
     expect(ceremonyLadderSeed).toBe(LOGIN_SEED)
   })
 
@@ -1183,7 +1236,9 @@ describe('the ladder-seed settlement (the login seed with no retired seed in han
     expect(vi.mocked(swapClientAnnexGeneration)).toHaveBeenCalledWith(
       expect.objectContaining({ ladderSeed: LOGIN_SEED })
     )
-    expect(outcome?.clientAnnex).toEqual({ action: 'swapped' })
+    expect(outcome?.mended).toEqual(
+      annexMend({ outcome: 'clean', detail: { action: 'swapped' } })
+    )
     expect(ceremonyLadderSeed).toBeUndefined()
   })
 
@@ -1197,10 +1252,12 @@ describe('the ladder-seed settlement (the login seed with no retired seed in han
     })
 
     expect(vi.mocked(swapClientAnnexGeneration)).not.toHaveBeenCalled()
-    expect(outcome?.clientAnnex).toEqual({
-      action: 'skipped',
-      reason: 'no-ladder-seed'
-    })
+    expect(outcome?.mended).toEqual(
+      annexMend({
+        outcome: 'refused',
+        detail: { action: 'skipped', reason: 'no-ladder-seed' }
+      })
+    )
     expect(ceremonyLadderSeed).toBeUndefined()
     // The attribution warn specifically: the in-band adoption warns too on
     // this fixture's storage-less session.
@@ -1223,10 +1280,12 @@ describe('the ladder-seed settlement (the login seed with no retired seed in han
     })
 
     expect(outcome?.rotated).toBe(true)
-    expect(outcome?.clientAnnex).toEqual({
-      action: 'skipped',
-      reason: 'no-ladder-seed'
-    })
+    expect(outcome?.mended).toEqual(
+      annexMend({
+        outcome: 'refused',
+        detail: { action: 'skipped', reason: 'no-ladder-seed' }
+      })
+    )
     expect(ceremonyLadderSeed).toBeUndefined()
     warn.mockRestore()
   })

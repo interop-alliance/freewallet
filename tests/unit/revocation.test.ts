@@ -145,6 +145,28 @@ const POINTED_DOCUMENT = {
 }
 
 /**
+ * The cascade's one ceremony-tail mend entry, over the generation-delegation
+ * re-mint stage's invariant.
+ *
+ * @param outcome {object}   the reported outcome, its scalar detail, and the
+ *   error class name where the stage caught one
+ * @returns {Array<object>}   the whole `mended` report
+ */
+function generationMend(outcome: {
+  outcome: string
+  detail?: Record<string, string>
+  errorName?: string
+}) {
+  return [
+    {
+      invariant: 'generation-delegation-is-current',
+      ceremonies: ['client-revocation'],
+      ...outcome
+    }
+  ]
+}
+
+/**
  * A stand-in for the shared orchestrator that drives its callbacks in the
  * documented order, so the freewallet-side stages are exercised exactly where
  * the real cascade runs them.
@@ -423,7 +445,10 @@ describe('the cascade, rotated path', () => {
         },
         failed: []
       },
-      generation: { renewed: false, skipped: 'no-pointer' }
+      mended: generationMend({
+        outcome: 'refused',
+        detail: { reason: 'no-pointer' }
+      })
     })
   })
 
@@ -532,7 +557,10 @@ describe('the cascade, rotated path', () => {
     expect(outcome).toEqual({
       rotated: false,
       collections: { outcomes: {}, failed: [] },
-      generation: { renewed: false, skipped: 'no-pointer' }
+      mended: generationMend({
+        outcome: 'refused',
+        detail: { reason: 'no-pointer' }
+      })
     })
     expect(session.storage.addHistoryClientRevoked).toHaveBeenCalledOnce()
   })
@@ -647,7 +675,7 @@ describe('the generation-delegation re-mint stage', () => {
   it('re-mints the delegation against the post-edit document', async () => {
     const outcome = await revokeWith({ ladderSeed: LADDER_SEED })
 
-    expect(outcome.generation).toEqual({ renewed: true })
+    expect(outcome.mended).toEqual(generationMend({ outcome: 'clean' }))
     expect(vi.mocked(ensureGenerationDelegationCurrent)).toHaveBeenCalledWith(
       expect.objectContaining({
         store: { isClientAnnexLogStore: true },
@@ -673,7 +701,7 @@ describe('the generation-delegation re-mint stage', () => {
   it('reports a healthy delegation as not renewed', async () => {
     state.renewed = false
     const outcome = await revokeWith({ ladderSeed: LADDER_SEED })
-    expect(outcome.generation).toEqual({ renewed: false })
+    expect(outcome.mended).toEqual(generationMend({ outcome: 'noop' }))
   })
 
   it('skips with no-pointer when the document names no annex', async () => {
@@ -681,19 +709,20 @@ describe('the generation-delegation re-mint stage', () => {
       document: DOCUMENT,
       ladderSeed: LADDER_SEED
     })
-    expect(outcome.generation).toEqual({
-      renewed: false,
-      skipped: 'no-pointer'
-    })
+    expect(outcome.mended).toEqual(
+      generationMend({ outcome: 'refused', detail: { reason: 'no-pointer' } })
+    )
     expect(vi.mocked(ensureGenerationDelegationCurrent)).not.toHaveBeenCalled()
   })
 
   it('skips with no-ladder-seed when the session carries no seed', async () => {
     const outcome = await revokeWith()
-    expect(outcome.generation).toEqual({
-      renewed: false,
-      skipped: 'no-ladder-seed'
-    })
+    expect(outcome.mended).toEqual(
+      generationMend({
+        outcome: 'refused',
+        detail: { reason: 'no-ladder-seed' }
+      })
+    )
     expect(vi.mocked(ensureGenerationDelegationCurrent)).not.toHaveBeenCalled()
   })
 
@@ -704,7 +733,9 @@ describe('the generation-delegation re-mint stage', () => {
     const outcome = await revokeWith({ ladderSeed: LADDER_SEED })
 
     // Best-effort by the cascade's contract: the login-time self-heal retries.
-    expect(outcome.generation).toEqual({ renewed: false, skipped: 'failed' })
+    expect(outcome.mended).toEqual(
+      generationMend({ outcome: 'failed', errorName: 'Error' })
+    )
     expect(outcome.rotated).toBe(true)
     warn.mockRestore()
   })

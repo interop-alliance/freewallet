@@ -259,10 +259,9 @@ async function unlockFor(passphrase: string) {
     handle: 'unlock',
     keyName: 'unlock-key'
   })
-  const keyAgreementKey =
-    X25519KeyAgreementKey2020.fromEd25519VerificationKey2020({
-      keyPair: agent.getVerificationKeyPair()
-    })
+  const keyAgreementKey = X25519KeyAgreementKey2020.fromEd25519(
+    agent.getVerificationKeyPair()
+  )
   const keyResolver = async () => ({
     id: keyAgreementKey.id,
     type: keyAgreementKey.type,

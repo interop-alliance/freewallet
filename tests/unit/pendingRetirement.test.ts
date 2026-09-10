@@ -42,7 +42,10 @@ const state = vi.hoisted(() => ({
   // Whether the retirement refuses on the ladder-VM gate (WC-187) rather
   // than tearing on transport.
   rotationRefusesByGate: false,
-  establishThrows: false
+  establishThrows: false,
+  // The tail entries the retirement's outcome carries, which the repair
+  // hands the ceremony-tail reporter.
+  rotationMended: [] as Array<Record<string, unknown>>
 }))
 
 vi.mock('@/session/accountCeremonyContext', () => ({
@@ -87,7 +90,8 @@ vi.mock('@/session/credentialRotation', () => ({
     return {
       rotated: true,
       collections: { outcomes: {}, failed: [] },
-      userKey: FRESH_USER_KEY
+      userKey: FRESH_USER_KEY,
+      mended: state.rotationMended
     }
   })
 }))
@@ -189,6 +193,7 @@ import {
   rebuildBarePasskeyEntry,
   repairTornPassphraseRetirement
 } from '@/session/pendingRetirement'
+import { MENDER_WARNINGS } from '@/session/menders/warnings'
 import type { KeyringFetchResult } from '@/session/keyring'
 import type { Session } from '@/types/auth'
 
@@ -353,6 +358,7 @@ beforeEach(() => {
   state.rotationThrows = false
   state.rotationRefusesByGate = false
   state.establishThrows = false
+  state.rotationMended = []
   vi.clearAllMocks()
 })
 
@@ -392,6 +398,43 @@ describe('repairTornPassphraseRetirement', () => {
         keyAgreementKeyMultibase: MY_KAK,
         updateKeyMultibase: 'z6MkMyRung0'
       }
+    })
+  })
+
+  it("reports the retirement's ceremony-tail entries", async () => {
+    state.rotationMended = [
+      {
+        invariant: 'retired-credential-leaves-no-annex-inventory',
+        ceremonies: ['unlock-credential-rotation'],
+        outcome: 'failed',
+        errorName: 'TypeError'
+      }
+    ]
+    const capture = captureSink()
+    const remove = addSink(capture.sink)
+    try {
+      await repairTornPassphraseRetirement({
+        session: makeSession(),
+        found: makeFound()
+      })
+    } finally {
+      remove()
+    }
+
+    const warned = capture.events.filter(
+      event =>
+        event.level === 'warn' &&
+        (event.data as { trigger?: string } | undefined)?.trigger ===
+          'ceremony-tail'
+    )
+    expect(warned).toHaveLength(1)
+    expect(warned[0]?.msg).toBe(
+      MENDER_WARNINGS['retired-credential-leaves-no-annex-inventory']
+    )
+    expect(warned[0]?.data).toMatchObject({
+      invariant: 'retired-credential-leaves-no-annex-inventory',
+      outcome: 'failed',
+      errorName: 'TypeError'
     })
   })
 
@@ -625,7 +668,7 @@ describe('repairTornPassphraseRetirement', () => {
         found: makeFound(),
         credential: { secret: 'new-pass' }
       })
-    ).resolves.toBeUndefined()
+    ).resolves.toBe('noop')
     expect(state.calls).toEqual([
       'getUnlockMethods',
       'verifiedAccountLog',
@@ -854,7 +897,7 @@ describe('repairTornPassphraseRetirement', () => {
         session: makeSession(),
         found: makeFound()
       })
-    ).resolves.toBeUndefined()
+    ).resolves.toBe('noop')
 
     expect(state.calls).toEqual([
       'getUnlockMethods',

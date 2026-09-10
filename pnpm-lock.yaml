@@ -24,8 +24,8 @@ importers:
         specifier: ^5.3.0
         version: 5.3.0
       '@interop/capability-agent':
-        specifier: ^0.1.0
-        version: 0.1.0
+        specifier: ^0.1.1
+        version: 0.1.1
       '@interop/data-integrity-core':
         specifier: ^8.7.1
         version: 8.7.1
@@ -78,17 +78,17 @@ importers:
         specifier: ^0.3.0
         version: 0.3.0(@interop/jsonld-signatures@11.8.5)
       '@interop/was-client':
-        specifier: ^0.56.0
-        version: 0.56.0(@interop/jsonld-signatures@11.8.5)
+        specifier: ^0.56.1
+        version: 0.56.1(@interop/jsonld-signatures@11.8.5)
       '@interop/was-sync':
         specifier: ^0.2.5
-        version: 0.2.5(@interop/was-client@0.56.0(@interop/jsonld-signatures@11.8.5))(rxdb@17.5.0(react@19.2.8)(rxjs@7.8.2)(supports-color@7.2.0))
+        version: 0.2.5(@interop/was-client@0.56.1(@interop/jsonld-signatures@11.8.5))(rxdb@17.5.0(react@19.2.8)(rxjs@7.8.2)(supports-color@7.2.0))
       '@interop/webkms-client':
         specifier: ^15.0.0
         version: 15.0.0
       '@interop/x25519-key-agreement-key':
-        specifier: ^5.3.0
-        version: 5.3.0
+        specifier: ^5.4.0
+        version: 5.4.0
       '@mui/lab':
         specifier: 9.0.0-beta.8
         version: 9.0.0-beta.8(@emotion/react@11.14.0(@types/react@19.2.18)(react@19.2.8)(supports-color@7.2.0))(@emotion/styled@11.14.1(@emotion/react@11.14.0(@types/react@19.2.18)(react@19.2.8)(supports-color@7.2.0))(@types/react@19.2.18)(react@19.2.8)(supports-color@7.2.0))(@mui/material@9.4.0(@emotion/react@11.14.0(@types/react@19.2.18)(react@19.2.8)(supports-color@7.2.0))(@emotion/styled@11.14.1(@emotion/react@11.14.0(@types/react@19.2.18)(react@19.2.8)(supports-color@7.2.0))(@types/react@19.2.18)(react@19.2.8)(supports-color@7.2.0))(@types/react@19.2.18)(react-dom@19.2.8(react@19.2.8))(react@19.2.8))(@types/react@19.2.18)(react-dom@19.2.8(react@19.2.8))(react@19.2.8)
@@ -545,8 +545,8 @@ packages:
       react-native-get-random-values:
         optional: true
 
-  '@interop/capability-agent@0.1.0':
-    resolution: {integrity: sha512-ecIOjVI68EjCwJ4a63+WMCgCXhL65jTnZOg7oS2QnwP/Wp9DjhIP3dxSi0Z0s2khaw1ILckma71UCSZ2MFq/vg==}
+  '@interop/capability-agent@0.1.1':
+    resolution: {integrity: sha512-1qGbdIhw/sLK65FCqr9blfJDVvW7uXsML6sRpiiledRBt/xhSskHBVQ4QzHYOvxDCYW6p1KPy/jPIGz6CqwIjA==}
     engines: {node: '>=24.0'}
 
   '@interop/data-integrity-core@8.7.1':
@@ -604,8 +604,8 @@ packages:
       react-native-get-random-values:
         optional: true
 
-  '@interop/edv-client@17.8.2':
-    resolution: {integrity: sha512-n5a68nUkHtPjOaqR7evIH+Nl9bgF+jkoN9MYPDw8+Hg2IJNKK6SOLZ93yf/LHdKaNBCFJodFZr0sudexaoq5Kg==}
+  '@interop/edv-client@17.8.3':
+    resolution: {integrity: sha512-ZFXa99CV3RpbUDyiALzMsAPML3+PIRZuD5STvUWwo3+tKn1s1lNGyDx0ff1t6ufcjslNp8paKZLd8hUx60GapQ==}
     engines: {node: '>=24.0'}
     peerDependencies:
       react-native-get-random-values: ^2.0.0
@@ -654,8 +654,8 @@ packages:
     resolution: {integrity: sha512-6c8dnoQNIiL25Q4YovC1a44mREO1lzW3F/lmvdwbAMMbhtGGRoQeqo1H4diwNhBzaxRrUMXrAIwbM26POmI/Yg==}
     engines: {node: '>=24.0'}
 
-  '@interop/minimal-cipher@7.10.0':
-    resolution: {integrity: sha512-p5Y7S7tt2qRhyXHtToQ/GTb4a/+vf0AGXX8N5h3978d1yyKb1wJ22sV6LFF8wMc7GQqCYqflLnI8aNubVAgV0g==}
+  '@interop/minimal-cipher@7.10.1':
+    resolution: {integrity: sha512-/qpVpUzJQXagW1KkgXxuHjO8Nvp1C74gs+peYuf0YDktXXH9Ydw5lJtwIWmP30e50K02RTKVGJCBTWQ0uHCkhw==}
     engines: {node: '>=24.0'}
 
   '@interop/security-document-loader@10.1.1':
@@ -698,8 +698,8 @@ packages:
     resolution: {integrity: sha512-McOQyTipwzayJbqEpQ3setNDGfUvgXvNq9CS/Wy+s5Kw6c52X1Bb9FLpF4NawIu0ttW0OQ5StXLqwjsLA2X3mA==}
     engines: {node: '>=24.0'}
 
-  '@interop/was-client@0.56.0':
-    resolution: {integrity: sha512-A9fXk6qosb5pEjsY2HRsHoxVqtWcee03BE4pXEFK3EMXYZKbIyEKVoRHtKfXqKZJjMFksd1Mh9XYTRmyOxXN7A==}
+  '@interop/was-client@0.56.1':
+    resolution: {integrity: sha512-cWCRxKZbB9BBHxNs/5vwdNCLcNPWTCNw5Gz7zE+xWqB6IWzco+Vr6Ly/4aNjie31oeGomrWgAJkGgI7sdUIc5g==}
     engines: {node: '>=24.0'}
 
   '@interop/was-sync@0.2.5':
@@ -716,8 +716,8 @@ packages:
     resolution: {integrity: sha512-h1G7O8r9vd7Wksm94AjK8J5HDoO7ZVeexTHT3/v88+d3dvRoTePPBd32ZUpWwCT1HalyHU3sNW+CsNOV6LNkYA==}
     engines: {node: '>=24.0'}
 
-  '@interop/x25519-key-agreement-key@5.3.0':
-    resolution: {integrity: sha512-c/DXLw0kBGICScAw/5Pk6rn9dzjk9tl6Jl9f6yoOle5I7+8998TqaDkVQkMO0TsEf2/XAPcu61VThnJCC++zFQ==}
+  '@interop/x25519-key-agreement-key@5.4.0':
+    resolution: {integrity: sha512-67xKx0LF1F6iQK8GQzk//XDdWB4cd2FUZtRqKWfMZih5ufMWG51Y/UYPhgEwOVmpbhE62NgS8SeE1SEa7Cgsdg==}
     engines: {node: '>=24.0'}
 
   '@interop/zcap@11.1.0':
@@ -3869,7 +3869,7 @@ snapshots:
     dependencies:
       '@scure/base': 2.4.0
 
-  '@interop/capability-agent@0.1.0':
+  '@interop/capability-agent@0.1.1':
     dependencies:
       '@interop/data-integrity-core': 8.7.1
       '@interop/ed25519-verification-key': 8.1.0
@@ -3897,7 +3897,7 @@ snapshots:
       '@interop/data-integrity-core': 8.7.1
       '@interop/did-io': 4.1.1
       '@interop/ed25519-verification-key': 8.1.0
-      '@interop/x25519-key-agreement-key': 5.3.0
+      '@interop/x25519-key-agreement-key': 5.4.0
     transitivePeerDependencies:
       - react-native-get-random-values
 
@@ -3954,13 +3954,13 @@ snapshots:
       '@noble/hashes': 2.4.0
       '@scure/base': 2.4.0
 
-  '@interop/edv-client@17.8.2':
+  '@interop/edv-client@17.8.3':
     dependencies:
       '@interop/data-integrity-core': 8.7.1
       '@interop/http-client': 1.0.5
       '@interop/http-signature-zcap-invoke': 6.2.6
       '@interop/lru-memoize': 4.0.3
-      '@interop/minimal-cipher': 7.10.0
+      '@interop/minimal-cipher': 7.10.1
       '@noble/hashes': 2.4.0
       '@scure/base': 2.4.0
       canonicalize: 3.0.0
@@ -4020,7 +4020,7 @@ snapshots:
     dependencies:
       lru-cache: 11.5.2
 
-  '@interop/minimal-cipher@7.10.0':
+  '@interop/minimal-cipher@7.10.1':
     dependencies:
       '@interop/data-integrity-core': 8.7.1
       '@interop/ecdsa-multikey': 2.4.0
@@ -4114,7 +4114,7 @@ snapshots:
 
   '@interop/wallet-request@0.3.0(@interop/jsonld-signatures@11.8.5)':
     dependencies:
-      '@interop/capability-agent': 0.1.0
+      '@interop/capability-agent': 0.1.1
       '@interop/data-integrity-core': 8.7.1
       '@interop/data-integrity-proof': 3.4.5
       '@interop/ed25519-signature': 7.2.1(@interop/jsonld-signatures@11.8.5)
@@ -4126,18 +4126,18 @@ snapshots:
       - '@interop/jsonld-signatures'
       - react-native-get-random-values
 
-  '@interop/was-client@0.56.0(@interop/jsonld-signatures@11.8.5)':
+  '@interop/was-client@0.56.1(@interop/jsonld-signatures@11.8.5)':
     dependencies:
-      '@interop/capability-agent': 0.1.0
+      '@interop/capability-agent': 0.1.1
       '@interop/data-integrity-core': 8.7.1
       '@interop/ed25519-signature': 7.2.1(@interop/jsonld-signatures@11.8.5)
-      '@interop/edv-client': 17.8.2
+      '@interop/edv-client': 17.8.3
       '@interop/ezcap': 7.4.6
       '@interop/http-client': 1.0.5
-      '@interop/minimal-cipher': 7.10.0
+      '@interop/minimal-cipher': 7.10.1
       '@interop/storage-core': 0.11.0
       '@interop/vh-resource-log': 0.5.0
-      '@interop/x25519-key-agreement-key': 5.3.0
+      '@interop/x25519-key-agreement-key': 5.4.0
       '@noble/hashes': 2.4.0
       '@scure/base': 2.4.0
       json-canonicalize: 3.0.0
@@ -4146,10 +4146,10 @@ snapshots:
       - expo-crypto
       - react-native-get-random-values
 
-  '@interop/was-sync@0.2.5(@interop/was-client@0.56.0(@interop/jsonld-signatures@11.8.5))(rxdb@17.5.0(react@19.2.8)(rxjs@7.8.2)(supports-color@7.2.0))':
+  '@interop/was-sync@0.2.5(@interop/was-client@0.56.1(@interop/jsonld-signatures@11.8.5))(rxdb@17.5.0(react@19.2.8)(rxjs@7.8.2)(supports-color@7.2.0))':
     dependencies:
       '@interop/social-core': 0.8.1
-      '@interop/was-client': 0.56.0(@interop/jsonld-signatures@11.8.5)
+      '@interop/was-client': 0.56.1(@interop/jsonld-signatures@11.8.5)
       json-canonicalize: 3.0.0
       uuidv7: 1.2.1
     optionalDependencies:
@@ -4157,7 +4157,7 @@ snapshots:
 
   '@interop/webkms-client@15.0.0':
     dependencies:
-      '@interop/capability-agent': 0.1.0
+      '@interop/capability-agent': 0.1.1
       '@interop/data-integrity-core': 8.7.1
       '@interop/http-client': 1.0.5
       '@interop/http-signature-zcap-invoke': 6.2.6
@@ -4167,7 +4167,7 @@ snapshots:
       - expo-crypto
       - react-native-get-random-values
 
-  '@interop/x25519-key-agreement-key@5.3.0':
+  '@interop/x25519-key-agreement-key@5.4.0':
     dependencies:
       '@interop/data-integrity-core': 8.7.1
       '@noble/curves': 2.4.0

@@ -32,6 +32,11 @@ const state = vi.hoisted(() => ({
   /** whether the generation-delegation replacement fails */
   renewFails: false,
   /**
+   * What the replacement installs: a freshly minted delegation, the one the
+   * visit already invokes (the policy left it standing), or nothing at all.
+   */
+  renewInstalls: 'fresh' as 'fresh' | 'healthy' | 'none',
+  /**
    * The capability the visit rides right now. The live session's stamp, which
    * the renewal below replaces exactly as the real adoption does.
    */
@@ -110,6 +115,16 @@ vi.mock('@/session/annexReach', () => ({
     state.calls.push('renewTransientGenerationDelegation')
     if (state.renewFails) {
       throw new Error('the sibling delegation is unreachable')
+    }
+    if (state.renewInstalls === 'none') {
+      // What the real renewal does when it installs nothing: it logs its own
+      // reason and resolves with `null` rather than throwing.
+      return null
+    }
+    if (state.renewInstalls === 'healthy') {
+      // The policy found the embedded delegation standing, so the same
+      // delegation comes back and nothing was renewed.
+      return state.invocationCapability
     }
     const fresh = { id: 'urn:zcap:generation-fresh' }
     if (state.renewSwaps) {
@@ -364,6 +379,14 @@ function transientSession(): Session {
         epochPins: {
           load: epochPinLoad,
           saveFromDescriptor: async () => undefined
+        },
+        // The visit's annex identity, which is what makes a generation
+        // delegation renewable at all.
+        clientAnnex: {
+          clientAnnexDid: 'did:webvh:annex',
+          get invocationCapability() {
+            return state.invocationCapability
+          }
         }
       }
     }
@@ -409,6 +432,7 @@ beforeEach(() => {
   state.registryCapabilities = []
   state.pendingEntry = false
   state.renewFails = false
+  state.renewInstalls = 'fresh'
   state.renewSwaps = false
   state.invocationCapability = GENERATION_DELEGATION
   state.adoptedCapabilities = []
@@ -469,7 +493,8 @@ describe('the pre-pivot stage order', () => {
   it('proceeds when the delegation replacement fails', async () => {
     // Best-effort: the visit may lose its authority when the revoked key
     // leaves the document, which a re-run or the next visit's readiness
-    // stage mends. The disconnect itself is not held up.
+    // stage mends. The disconnect itself is not held up, and the tail entry
+    // is what says the replacement did not land.
     state.renewFails = true
     const outcome = await revokeEnrolledClient({
       session: transientSession(),
@@ -477,6 +502,50 @@ describe('the pre-pivot stage order', () => {
     })
     expect(outcome.rotated).toBe(true)
     expect(vi.mocked(revokeAccountClient)).toHaveBeenCalledOnce()
+    expect(outcome.mended).toEqual([
+      {
+        invariant: 'generation-delegation-is-current',
+        ceremonies: ['client-revocation'],
+        outcome: 'failed',
+        errorName: 'Error'
+      }
+    ])
+  })
+
+  it('grades a replacement that installed nothing as failed', async () => {
+    // The renewal swallows its own failures and resolves with `null`, so a
+    // visit that still points at an annex generation and got no delegation
+    // back is a stage that did not run to its end.
+    state.renewInstalls = 'none'
+    const outcome = await revokeEnrolledClient({
+      session: transientSession(),
+      client: REVOKED
+    })
+    expect(outcome.mended).toEqual([
+      {
+        invariant: 'generation-delegation-is-current',
+        ceremonies: ['client-revocation'],
+        outcome: 'failed'
+      }
+    ])
+  })
+
+  it('grades a session with no annex generation as refused', async () => {
+    // Nothing to replace: the session points at no generation, which is the
+    // one reading `no-pointer` states.
+    state.renewInstalls = 'none'
+    const session = transientSession()
+    delete (session.profile.persistence as unknown as { clientAnnex?: unknown })
+      .clientAnnex
+    const outcome = await revokeEnrolledClient({ session, client: REVOKED })
+    expect(outcome.mended).toEqual([
+      {
+        invariant: 'generation-delegation-is-current',
+        ceremonies: ['client-revocation'],
+        outcome: 'refused',
+        detail: { reason: 'no-pointer' }
+      }
+    ])
   })
 })
 
@@ -586,10 +655,30 @@ describe('the options the ladder branch hands over, and the ones it withholds', 
     })
 
     expect(outcome.rotated).toBe(true)
-    expect(outcome.generation).toEqual({
-      renewed: false,
-      skipped: 'no-pointer'
+    // The ladder branch passes no re-mint closure at all, so its tail entry
+    // reports the PRE-entry replacement instead: this run minted one.
+    expect(outcome.mended).toEqual([
+      {
+        invariant: 'generation-delegation-is-current',
+        ceremonies: ['client-revocation'],
+        outcome: 'clean'
+      }
+    ])
+  })
+
+  it('grades a delegation the policy left standing as a no-op', async () => {
+    state.renewInstalls = 'healthy'
+    const outcome = await revokeEnrolledClient({
+      session: transientSession(),
+      client: REVOKED
     })
+    expect(outcome.mended).toEqual([
+      {
+        invariant: 'generation-delegation-is-current',
+        ceremonies: ['client-revocation'],
+        outcome: 'noop'
+      }
+    ])
   })
 })
 

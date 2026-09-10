@@ -262,6 +262,7 @@ import {
   UnlockSpaceCollisionError
 } from '@/session/keyring'
 import type { KeyringFetchResult } from '@/session/keyring'
+import { getUnlockMethodsWithClient } from '@/session/unlockMethods'
 import { createFakeSessionIdb } from './fakeSessionIdb'
 
 const POINTER: AccountPointer = {
@@ -1285,5 +1286,94 @@ describe('resumeRecoverySpend -- the spend-completion resume', () => {
     await expect(
       resumeRecoverySpend({ pinStore: memoryResourceLogPinStore(), found })
     ).rejects.toBe(refusal)
+  })
+
+  it('reports what it landed: the registry written, the confirm still owed', async () => {
+    const { found, standingClient } = await makeSpendFound()
+    state.rosterRecipients = [
+      'everyone-already-escrowed',
+      standingClient.recipientKid
+    ]
+    state.registryRecord = null
+
+    const result = await resumeRecoverySpend({
+      pinStore: memoryResourceLogPinStore(),
+      found
+    })
+
+    expect(result.spendResume).toEqual({
+      standing: 'established',
+      registry: 'landed',
+      completion: 'confirm-pending'
+    })
+  })
+
+  it('reports a swallowed registry backfill as skipped, never as landed', async () => {
+    // The write is the stage the step swallows: the entries the tail owed
+    // are still missing, so the resume must not read as complete.
+    const { found, standingClient } = await makeSpendFound()
+    state.rosterRecipients = [
+      'everyone-already-escrowed',
+      standingClient.recipientKid
+    ]
+    state.registryRecord = null
+    state.failNextRegistryWrite = true
+
+    const result = await resumeRecoverySpend({
+      pinStore: memoryResourceLogPinStore(),
+      found
+    })
+
+    expect(state.calls).toContain('registryMutation')
+    expect(result.spendResume.registry).toBe('skipped')
+    expect(result.spendResume.completion).toBe('confirm-pending')
+  })
+
+  it('reports a skipped backfill when preparing the registry step throws', async () => {
+    const { found, standingClient } = await makeSpendFound()
+    state.rosterRecipients = [
+      'everyone-already-escrowed',
+      standingClient.recipientKid
+    ]
+    vi.mocked(getUnlockMethodsWithClient).mockRejectedValueOnce(
+      new Error('registry read failed (simulated)')
+    )
+
+    const result = await resumeRecoverySpend({
+      pinStore: memoryResourceLogPinStore(),
+      found
+    })
+
+    // The prepare is swallowed with its own warn, so no step ran at all.
+    expect(state.calls).not.toContain('registryMutation')
+    expect(result.spendResume.registry).toBe('skipped')
+  })
+
+  it('reports the completion as landed when no show-once code is owed', async () => {
+    // A pending record carrying no replacement code: the resume owes no
+    // registry write, completes the record itself, and leaves nothing
+    // outstanding -- the one shape the login grades clean.
+    const { found, persistClientKeys, standingClient } = await makeSpendFound()
+    delete (found.clientKeys!.pending as { replacementCode?: Uint8Array })
+      .replacementCode
+    state.rosterRecipients = [
+      'everyone-already-escrowed',
+      standingClient.recipientKid
+    ]
+
+    const result = await resumeRecoverySpend({
+      pinStore: memoryResourceLogPinStore(),
+      found
+    })
+
+    expect(result.recoverySpendPrompt).toBeUndefined()
+    expect(persistClientKeys).toHaveBeenCalledWith(
+      expect.objectContaining({ pending: null })
+    )
+    expect(result.spendResume).toEqual({
+      standing: 'established',
+      registry: 'not-owed',
+      completion: 'landed'
+    })
   })
 })

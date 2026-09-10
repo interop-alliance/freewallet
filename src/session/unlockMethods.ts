@@ -69,6 +69,7 @@ import {
   rotateOffUnlockCredential,
   type CredentialRotationOutcome
 } from '@/session/credentialRotation'
+import { reportCeremonyTail } from '@/session/menders/ceremonyTail'
 import { userKeyVaultKeys, type UserKey } from '@interop/wallet-core/keys'
 import {
   RecordEnvelopeDecryptError,
@@ -1454,6 +1455,12 @@ export async function revokeUnlockMethod({
           verb
         })
       : null
+  // The retirement's ceremony-tail entry, reported from the ceremony's own
+  // call site: it carries no registration, so no login chain's runner ever
+  // sees it.
+  if (rotation) {
+    reportCeremonyTail({ mended: rotation.mended })
+  }
   if (WAS_SERVER_URL) {
     const outcome = await deleteUnlockSpaceForEntry({
       session,
@@ -1627,6 +1634,9 @@ export async function revokeUnlockMethodByCeremony({
     method,
     verb
   })
+  if (rotation) {
+    reportCeremonyTail({ mended: rotation.mended })
+  }
   await deleteUnlockMethod({
     secret: prfOutput,
     kdf: PASSKEY_KDF,

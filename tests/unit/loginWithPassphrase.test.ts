@@ -52,7 +52,8 @@ vi.mock('@/session/credentialAnchoredGenesis', () => ({
     reenter: true,
     establishment: { converged: true, outcome: 'established' }
   })),
-  passphraseRegistryUpsertHook: vi.fn(() => vi.fn())
+  passphraseRegistryUpsertHook: vi.fn(() => vi.fn()),
+  reportCredentialAnchoredMend: vi.fn()
 }))
 vi.mock('@/stores/storageManager', () => ({
   StorageManager: { initStorageClients: vi.fn() }
@@ -89,6 +90,7 @@ import {
 } from '@/session/standingUnlock'
 import {
   isPendingKeyringHit,
+  PendingEnrollmentDiscardedError,
   PendingEnrollmentError,
   resumePendingEnrollment
 } from '@/session/pendingEnrollment'
@@ -613,6 +615,74 @@ describe('loginWithPassphrase -- self-enrolling standing credential', () => {
 })
 
 describe('loginWithPassphrase -- pending-record resume routing (FW-280)', () => {
+  const BUILT_ON_HEAD = { scid: 'QmScidForTests', versionId: '2-head' }
+
+  /**
+   * Runs a login over a spend-written pending record whose resume returns
+   * the given report, and hands back this login's settled mend report.
+   *
+   * @param options {object}
+   * @param [options.spendResume] {object}   what the resume claims it
+   *   landed; absent, the resume returns no report at all
+   * @returns {Promise<Array>}   the settled report entries
+   */
+  async function gradedSpendResume({
+    spendResume
+  }: {
+    spendResume?: {
+      standing: 'established' | 'pending'
+      registry: 'landed' | 'skipped' | 'not-owed'
+      completion: 'landed' | 'confirm-pending'
+    }
+  }) {
+    const clientSeed = randomSeed()
+    const controller = await didFromSeed(clientSeed)
+    vi.mocked(fetchKeyring).mockResolvedValue({
+      controller,
+      pointer: POINTER,
+      clientKeys: {
+        clientSeed,
+        controller,
+        pending: { ceremony: 'recovery-spend', builtOnHead: BUILT_ON_HEAD }
+      },
+      unlockSpaceId: 'unlock-space-test',
+      createdAt: new Date().toISOString()
+    } as never)
+    vi.mocked(isPendingKeyringHit).mockReturnValue(true)
+    const userKey = await mintUserKey()
+    vi.mocked(resumePendingEnrollment).mockResolvedValue({
+      clientKeys: { clientSeed, userKey, controller },
+      persistClientKeys: vi.fn(async () => {}),
+      ...(spendResume?.completion === 'confirm-pending'
+        ? {
+            recoverySpendPrompt: {
+              replacementCode: 'zReplacementCode',
+              standing: spendResume.standing,
+              complete: vi.fn(async () => {})
+            }
+          }
+        : {}),
+      ...(spendResume ? { spendResume } : {})
+    } as never)
+
+    const { session } = await loginWithPassphrase({ passphrase: PASSPHRASE })
+    return (await session!.mends) ?? []
+  }
+
+  /**
+   * The one report entry for an invariant.
+   *
+   * @param report {Array}
+   * @param invariant {string}
+   * @returns {object | undefined}
+   */
+  function entryFor(
+    report: ReadonlyArray<{ invariant: string }>,
+    invariant: string
+  ) {
+    return report.find(entry => entry.invariant === invariant)
+  }
+
   it('routes a pending-shape record to the resume, not the detector, and builds the session from its result', async () => {
     const clientSeed = randomSeed()
     const controller = await didFromSeed(clientSeed)
@@ -658,6 +728,98 @@ describe('loginWithPassphrase -- pending-record resume routing (FW-280)', () => 
     ).rejects.toMatchObject({ name: 'PendingEnrollmentError' })
     // Fail-closed: session construction (seed-derived vault keys) was never
     // reached with a userKey-less record on a promoted account.
+    expect(StorageManager.initStorageClients).not.toHaveBeenCalled()
+  })
+
+  it("grades a spend resume by what it landed, not by the record's ceremony marker", async () => {
+    // The show-once confirm is still owed, so neither the spend nor the
+    // pending record is finished: `partial`, with the detail naming what
+    // the resume left outstanding.
+    const report = await gradedSpendResume({
+      spendResume: {
+        standing: 'established',
+        registry: 'landed',
+        completion: 'confirm-pending'
+      }
+    })
+
+    expect(entryFor(report, 'recovery-spend-is-completed')).toMatchObject({
+      outcome: 'partial',
+      detail: {
+        completion: 'confirm-pending',
+        standing: 'established',
+        registry: 'landed'
+      }
+    })
+    // The pending carrier clears inside that same confirm-gated completion.
+    expect(
+      entryFor(report, 'no-client-key-record-stays-pending')
+    ).toMatchObject({ outcome: 'partial' })
+  })
+
+  it('grades a swallowed registry backfill partial even once the record is complete', async () => {
+    const report = await gradedSpendResume({
+      spendResume: {
+        standing: 'established',
+        registry: 'skipped',
+        completion: 'landed'
+      }
+    })
+
+    expect(entryFor(report, 'recovery-spend-is-completed')).toMatchObject({
+      outcome: 'partial',
+      detail: { registry: 'skipped' }
+    })
+    // The record itself is no longer pending: only the spend is unfinished.
+    expect(
+      entryFor(report, 'no-client-key-record-stays-pending')
+    ).toMatchObject({ outcome: 'clean' })
+  })
+
+  it('grades a fully completed spend clean', async () => {
+    const report = await gradedSpendResume({
+      spendResume: {
+        standing: 'established',
+        registry: 'not-owed',
+        completion: 'landed'
+      }
+    })
+
+    expect(entryFor(report, 'recovery-spend-is-completed')).toMatchObject({
+      outcome: 'clean'
+    })
+  })
+
+  it('grades noop when the resume finished no spend stage', async () => {
+    const report = await gradedSpendResume({})
+
+    expect(entryFor(report, 'recovery-spend-is-completed')).toMatchObject({
+      outcome: 'noop'
+    })
+  })
+
+  it('claims nothing on the discard arm: no session, so no report at all', async () => {
+    // The wipe and the two discards throw out of the resume, so the login
+    // never reaches the grading block -- the state they leave is claimed
+    // clean by nothing.
+    vi.mocked(fetchKeyring).mockResolvedValue({
+      controller: 'did:key:z6MkDataControllerForTests',
+      pointer: POINTER,
+      clientKeys: {
+        clientSeed: randomSeed(),
+        pending: { ceremony: 'recovery-spend', builtOnHead: BUILT_ON_HEAD }
+      },
+      unlockSpaceId: 'unlock-space-test',
+      createdAt: new Date().toISOString()
+    } as never)
+    vi.mocked(isPendingKeyringHit).mockReturnValue(true)
+    vi.mocked(resumePendingEnrollment).mockRejectedValue(
+      new PendingEnrollmentDiscardedError()
+    )
+
+    await expect(
+      loginWithPassphrase({ passphrase: PASSPHRASE })
+    ).rejects.toMatchObject({ name: 'PendingEnrollmentDiscardedError' })
     expect(StorageManager.initStorageClients).not.toHaveBeenCalled()
   })
 
@@ -1041,10 +1203,12 @@ describe('loginWithPassphrase -- login routing glue', () => {
       persistence,
       // The credential rides along so the composition can arm the torn
       // credential-anchored-signup heal (the establishment re-run needs it),
-      // and the popup marker so the composition can skip its registry
-      // refresh in the partitioned iframe.
+      // and the popup marker so the composition can stand its registry
+      // registrations down in the partitioned iframe. The report the
+      // routing already wrote into rides with them.
       credential: CREDENTIAL,
-      popup: false
+      popup: false,
+      mends: expect.objectContaining({ report: expect.any(Function) })
     })
   })
 

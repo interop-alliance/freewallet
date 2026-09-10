@@ -1136,7 +1136,8 @@ async function deleteRetiredCredentialSpaces({
  *   step is drop-only
  * @param options.spaces {object}   the Space deletes' signer set
  *   (`deleteRetiredCredentialSpaces`'s options, minus `entries`)
- * @returns {Promise<void>}
+ * @returns {Promise<'written' | 'not-owed' | 'failed'>}   what the registry
+ *   write did, for the resume's own report
  */
 async function retireCredentialsFromRegistry({
   stage,
@@ -1158,10 +1159,14 @@ async function retireCredentialsFromRegistry({
     record: UnlockMethodsRecord
   ) => UnlockMethodsRecord | Promise<UnlockMethodsRecord>
   spaces: Omit<Parameters<typeof deleteRetiredCredentialSpaces>[0], 'entries'>
-}): Promise<void> {
+}): Promise<'written' | 'not-owed' | 'failed'> {
   // Filled by the mutation, consumed by the Space deletes only once the
   // write has landed.
   let retired: UnlockMethod[] = []
+  // What the write did, for the caller that reports on it. The failure is
+  // swallowed here, so a caller reading the resolved call alone could not
+  // tell a landed registry from a warned-and-skipped one.
+  let outcome: 'written' | 'not-owed' | 'failed' = 'written'
   try {
     await updateUnlockMethodsWithClient({
       ...registry,
@@ -1180,6 +1185,7 @@ async function retireCredentialsFromRegistry({
         if ((existing?.methods.length ?? 0) === base.record.methods.length) {
           // Nothing to drop and no successor owed: no write.
           retired = []
+          outcome = 'not-owed'
           return null
         }
         log.info(
@@ -1195,12 +1201,14 @@ async function retireCredentialsFromRegistry({
     // Space: nothing is deleted here. A later registry pass (the spend
     // resume's, or another ceremony's own read) finds the entries again.
     retired = []
+    outcome = 'failed'
     log.warn('Could not update the unlock-methods registry during recovery', {
       stage,
       err
     })
   }
   await deleteRetiredCredentialSpaces({ entries: retired, ...spaces })
+  return outcome
 }
 
 /**
@@ -1984,6 +1992,37 @@ export interface RecoverySpendPrompt {
 }
 
 /**
+ * What one spend resume actually landed, for the caller that grades the
+ * `recovery-spend-is-completed` invariant. Every member is read off the
+ * resume's own run rather than off the pending record's ceremony marker,
+ * since the two best-effort stages are swallowed and the completion is
+ * confirm-gated.
+ */
+export interface RecoverySpendResumeReport {
+  /**
+   * The standing backfill: 'established' when both halves (the roster wrap
+   * and the document commitment) are confirmed or completed, 'pending'
+   * when the backfill could not finish them or the hit carried no standing
+   * members to finish them with.
+   */
+  standing: 'established' | 'pending'
+  /**
+   * The registry backfill: 'landed' when the one registry step left the
+   * registry recording what the tail owed, 'skipped' when preparing or
+   * writing it threw and was swallowed (the next resume retries it),
+   * 'not-owed' when the record carries no replacement code and the resume
+   * owes no registry write at all.
+   */
+  registry: 'landed' | 'skipped' | 'not-owed'
+  /**
+   * The record completion: 'landed' when the pending carrier is already
+   * cleared, 'confirm-pending' when it waits on the show-once
+   * "I saved this code" confirm the returned prompt carries.
+   */
+  completion: 'landed' | 'confirm-pending'
+}
+
+/**
  * The spend-completion resume: finishes a remembered recovery spend whose
  * add-and-retire entry landed but whose tail was torn, from the pending
  * client-key record alone, at the new passphrase's next login (the
@@ -2025,7 +2064,8 @@ export interface RecoverySpendPrompt {
  * @param options.pinStore {ResourceLogPinStore}   the login's chain-head
  *   pins, which every log read and store here rides
  * @returns {Promise<object>}   the completed key set, its persist closure,
- *   and the show-once prompt while the confirm is still owed
+ *   what this run landed, and the show-once prompt while the confirm is
+ *   still owed
  */
 export async function resumeRecoverySpend({
   found,
@@ -2039,6 +2079,7 @@ export async function resumeRecoverySpend({
   clientKeys: ClientKeyRecord
   persistClientKeys: (changes: PersistableClientKeys) => Promise<void>
   recoverySpendPrompt?: RecoverySpendPrompt
+  spendResume: RecoverySpendResumeReport
 }> {
   const clientKeys = found.clientKeys
   const pending = clientKeys?.pending
@@ -2301,7 +2342,10 @@ export async function resumeRecoverySpend({
   // registry write failed left them named, with their Spaces still standing.
   // Each arm names what the one registry step writes past the drop; the
   // step then deletes the dropped entries' Spaces once that write lands.
+  // A record with no replacement code owes no registry write here.
+  let registryStatus: RecoverySpendResumeReport['registry'] = 'not-owed'
   if (replacement) {
+    registryStatus = 'skipped'
     let step:
       | Pick<
           Parameters<typeof retireCredentialsFromRegistry>[0],
@@ -2417,7 +2461,7 @@ export async function resumeRecoverySpend({
       )
     }
     if (step && retirement) {
-      await retireCredentialsFromRegistry({
+      const written = await retireCredentialsFromRegistry({
         stage: 'resume',
         registry: {
           zcapClient: newZcapClient,
@@ -2434,6 +2478,10 @@ export async function resumeRecoverySpend({
         // Spaces: the resume runs on the remembered browser.
         spaces: { zcapClient: newZcapClient, clearLocalState: true }
       })
+      // A swallowed write is a skipped backfill: the entries the tail owed
+      // are still missing (or the retired ones still named), and the next
+      // resume retries it.
+      registryStatus = written === 'failed' ? 'skipped' : 'landed'
     }
   }
 
@@ -2458,19 +2506,29 @@ export async function resumeRecoverySpend({
       'Recovery-spend resume: record completed; the pending carrier is cleared'
     )
   }
+  const standing = standingEstablished ? 'established' : 'pending'
   if (pending.replacementCode) {
     return {
       clientKeys: completedClientKeys,
       persistClientKeys,
       recoverySpendPrompt: {
         replacementCode: base58.encode(pending.replacementCode),
-        standing: standingEstablished ? 'established' : 'pending',
+        standing,
         complete
+      },
+      spendResume: {
+        standing,
+        registry: registryStatus,
+        completion: 'confirm-pending'
       }
     }
   }
   await complete()
-  return { clientKeys: completedClientKeys, persistClientKeys }
+  return {
+    clientKeys: completedClientKeys,
+    persistClientKeys,
+    spendResume: { standing, registry: registryStatus, completion: 'landed' }
+  }
 }
 
 /**

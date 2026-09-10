@@ -344,8 +344,9 @@ Best-effort, and read-only when nothing is stale.
 At a remembered login the user key sweep, the re-seal repair, the
 torn-retirement repair, the bare-passkey rebuild, the registry backfill, the
 standing-delegation self-refresh, the ladder-rung refresh, the did:webvh
-pointer heal, and the generation-delegation self-heal run on one ordered
-promise chain; the annex GC sweep forks off its tail. A transient login runs
+pointer heal, and the generation-delegation self-heal run in that order as
+the block's registry-writing registrations; the keystore report, the app-key
+sweep, and the annex GC follow in its tail. A transient login runs
 four of those passes on an ordered chain of its own: the re-seal repair, the
 torn-retirement repair, the bare-passkey rebuild, and the registry backfill.
 Each rides the visit's generation delegation and unwraps with the
@@ -362,16 +363,38 @@ re-seal the registry, and a read-modify-write racing that re-seal would undo
 it within one login.
 
 Navigation to the dashboard waits only on storage provisioning
-(`session.storageReady`). The chain runs after navigation, on a separate
-`session.registryReady` promise that never rejects; a failed stage is logged
-and skipped. Both session types set that promise. A Settings-entered
-ceremony that writes the unlock-methods registry (passphrase change,
-passphrase or passkey add, rename, or remove, account deletion, client
-disconnect, the forget ceremony, recovery-code issuance and revocation)
-awaits `session.registryReady` at its own entry rather than racing the
-chain's writes. So do update-key rotation, the Settings registry load, and
-the recovery-codes health check. When storage provisioning fails, the login
-page abandons the session, but `registryReady` still settles.
+(`session.storageReady`). The passes run after navigation as one mender
+block, in registration order: the runner
+(`@interop/wallet-core/menders`) takes the registrations this chain lists
+(`src/session/menders/registrations.ts`) and holds the try, warn, and skip
+discipline once, so a failed registration is logged and the block carries
+on. Only the block's seed aborts it, and the seed is storage provisioning:
+when that fails the login page abandons the session, and neither of the
+block's promises hangs.
+
+Two promises settle it, and both session types set both.
+`session.registryReady` settles when the registry-writing registrations have
+reported. The keystore promotion is not among them: the pointer heal fires
+it and the block's tail reports it, so no `registryReady` awaiter waits on a
+KMS round trip. A Settings-entered ceremony that writes the unlock-methods
+registry (passphrase change, passphrase or passkey add, rename, or remove,
+account deletion, client disconnect, the forget ceremony, recovery-code
+issuance and revocation) awaits it at its own entry rather than racing those
+writes; so do update-key rotation, the Settings registry load, and the
+recovery-codes health check. `session.mends` settles when the whole block
+has run -- the keystore report, the app-key sweep, and the annex GC behind
+it included -- and behind any report the composition fired beside the block,
+which today is the transient login's did:web projection mend. It carries the
+login's mend report: one entry per invariant a mender reported, the routing
+entries this login fired first and the block's registrations after them. The
+e2e login-chain seam waits on it.
+
+The CHAPI popup route is declared rather than guarded: each declaration
+carries a `when(route)` predicate, and the four shared passes, the
+generation-delegation heal, the management-zcap refresh, and the annex GC
+declare themselves off the popup. The standing-delegation refresh, the
+ladder-rung refresh, the pointer heal, and the app-key sweep keep running
+there.
 
 Every registry PUT is also a compare-and-swap on the ETag of the fresh read
 it was based on, with a bounded re-read retry on a lost race. A concurrent

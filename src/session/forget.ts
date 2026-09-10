@@ -631,7 +631,10 @@ async function rebindLoginCredentialRecord({
  *
  * Returns the verification it performed, so the session being built can
  * seed its verified-log memo with it instead of fetching and re-verifying
- * the same log moments later; `undefined` means detection was skipped.
+ * the same log moments later. `'unverified'` means the log could not be
+ * verified and the detector stood down, which the login reports as a
+ * refusal rather than as a check that held; `undefined` means the record is
+ * not the shape the detector reads.
  *
  * @param options {object}
  * @param options.found {KeyringFetchResult}   a hit carrying `clientKeys`
@@ -639,7 +642,7 @@ async function rebindLoginCredentialRecord({
  *   pins; this read establishes or checks the account log's slot, and the
  *   session built afterwards reads under the same store
  * @param [options.idb] {IDBFactory}
- * @returns {Promise<VerifiedAccountLog | undefined>}
+ * @returns {Promise<VerifiedAccountLog | 'unverified' | undefined>}
  */
 export async function assertClientStillEnrolled({
   found,
@@ -649,7 +652,7 @@ export async function assertClientStillEnrolled({
   found: KeyringFetchResult
   pinStore: ResourceLogPinStore
   idb?: IDBFactory
-}): Promise<VerifiedAccountLog | undefined> {
+}): Promise<VerifiedAccountLog | 'unverified' | undefined> {
   const { clientKeys, pointer } = found
   if (!clientKeys || !pointer || !isWebvhDid(pointer.did)) {
     return undefined
@@ -681,8 +684,9 @@ export async function assertClientStillEnrolled({
   } catch {
     // Unverifiable is not "forgotten": a flap, a missing log, and a
     // continuity refusal all fall through to the ordinary login, whose own
-    // policy (and error mapping) applies.
-    return undefined
+    // policy (and error mapping) applies. The login reports the stand-down,
+    // so a skipped detector reads differently from one that never ran.
+    return 'unverified'
   }
   const vmId = `${pointer.did}#${signingKeyMultibase}`
   const doc = verified.doc as { verificationMethod?: unknown }

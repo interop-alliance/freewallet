@@ -1,9 +1,119 @@
 # History
 
-## 0.50.0 - TBD
+## 0.51.0 - TBD
+
+### Added
+
+- Both login chains run through the mender runner
+  (`@interop/wallet-core/menders`) over the registration lists in
+  `src/session/menders/registrations.ts`: registration order is execution
+  order, and the runner owns the try, warn, and skip discipline once. The
+  remembered block is the provisioning seed, the user key sweep, the four
+  shared registry passes, the standing-delegation refresh, the ladder-rung
+  refresh, the pointer heal, the generation-delegation heal, then the
+  keystore report, the app-key sweep, and the annex GC; the transient block
+  is the four shared passes and the management-zcap refresh.
+- `session.mends`, this login's mend report: one entry per invariant a
+  mender reported, keyed by invariant id with the ceremony as an attribute.
+  It carries the routing entries a login fired (the stale-record wipe, the
+  forgotten-browser detector, the pending and recovery-spend resumes, the
+  credential-anchored mend's four arms) followed by every registration of
+  its chain's block, and it settles when the whole block has run and any
+  report fired beside it (the transient login's did:web projection mend) has
+  landed. In memory only, with scalar detail and error names alone.
+- Each invariant declaration carries a `when(route)` predicate for the popup
+  axis: the four shared registry passes, the generation-delegation heal, the
+  management-zcap refresh, and the annex GC declare themselves off the CHAPI
+  popup route, which replaces the `!popup` guards inside the passes. The
+  standing-delegation refresh, the ladder-rung refresh, the pointer heal, and
+  the app-key sweep keep running in the popup, as they always have.
+- `promoteAccountKeystore` (`src/stores/storageManager.ts`), the keystore
+  half of controller promotion, is exported and returns its outcome;
+  `ensurePromotedController` hands its fired promise back, and the pointer
+  heal leaves it for the block's tail to report with no second KMS round
+  trip. The keystore report sits in the tail beside the app-key sweep and
+  the annex GC, so `session.registryReady` does not wait on a KMS round
+  trip; `session.mends` carries the entry. The gap allowlist's row for it
+  moves from kind `none` to `unreachable`, as does the pointer heal's own.
 
 ### Changed
 
+- `session.registryReady` now settles when the registry-writing
+  registrations have reported (through the generation-delegation heal on the
+  remembered chain, through the management-zcap refresh on the transient
+  one). Its fifteen production awaiters see the same meaning. A transient
+  session in the CHAPI popup carries a settled `registryReady` in place of
+  none, since the block runs with every registration declared off that route.
+- The user key sweep, the app-key sweep, and the annex GC are registrations
+  of the remembered block rather than promises fired beside it. Three
+  behavior deltas follow: none of the three runs when provisioning failed (a
+  seed failure aborts the block), the app-key sweep is serialized into the
+  block instead of racing the user key sweep, and both it and the annex GC
+  settle under `session.mends` rather than under `registryReady`.
+- `publishLoginChainSeam` (`src/stores/authStore.ts`) and the e2e
+  `awaitLoginChain` helper wait on `session.mends`, which settles behind the
+  whole block. The ad-hoc `session.userKeySweep`, `session.appKeySweep`, and
+  `session.clientAnnexGcSweep` members are gone, with no compatibility shim.
+- The login-chain stage helpers `chainRegistryStage` and
+  `chainPromotedAccountStage` are gone. The closures they wrapped are
+  exported functions: `sweepUserKeyToDocument` and `convergeRosterToDocument`
+  (`src/session/userKeySweep.ts`), `refreshStandingDelegations` and
+  `refreshCommittedLadderRung` (`src/session/standingDelegationRefresh.ts`),
+  `healAccountPointer` (`src/session/pointerHeal.ts`), and
+  `ensureClientAnnexGenerationReady` (`src/session/transientLogin.ts`).
+- The transient login's mend authority comes from `ladderMendAuthority`
+  (`src/session/accountCeremonyContext.ts`), the bare-parts sibling of the
+  account-ceremony context, instead of being assembled at the call site.
+  `accountRosterStore` gained the invocation-capability option that seam
+  needs, and now resolves its controller view on the first operation rather
+  than at construction.
+- `repairTornPassphraseRetirement`, `rebuildBarePasskeyEntry`,
+  `sweepClientAnnexGenerations`, and `refreshDidWebProjection` return graded
+  outcomes in place of `void` or a bare `null`, so each reports whether it
+  mended, refused, or did nothing.
+- Three report entries grade more precisely. The pointer heal reports the
+  pointer `clean` and the Space controller `failed` when the promotion alone
+  tore, and the controller `noop` when no promotion ran at all. The
+  forgotten-browser detector reports `refused` when it stood down on a log
+  it could not verify, so a skipped detector reads differently from one that
+  never ran. `promoteAccountKeystore` reports `noop` when the keystore
+  already named the account.
+- The standing-delegation refresh decides `expiring` from the in-hand zcaps
+  before any account-log read, so an expiring bridge or sibling delegation
+  is renewed even when `did.jsonl` cannot be read or verified.
+- Mend grades follow what mended: the user key sweep reports `clean` on a
+  completed escrow or a roster seal, the transient login's two
+  annex-readiness entries report `noop` on a healthy visit, the recovery
+  spend resume reports `partial` while its confirm or a swallowed backfill
+  is still owed, and the keystore report covers the promotion provisioning
+  fired.
+- Ceremony-tail entries (`RevocationOutcome.mended`,
+  `CredentialRotationOutcome.mended`) are reported from every call site
+  through `reportCeremonyTail`; the ladder-branch disconnect carries its
+  delegation replacement's real outcome.
+- The four shared registry passes are four registrations under the runner's
+  discipline, one registry read per block, one authority-kind decision in
+  `accountCeremonyContext`, and one `startLoginMenderBlock`.
+
+## 0.50.0 - TBD
+
+### Added
+
+- The mender registry's first stage under `src/session/menders/`, over
+  `@interop/wallet-core/menders`: the 34-invariant declaration table, the
+  registration-site index, and the declared gap allowlist. Audit tests pin
+  the transient-reachable set, hold the derived gaps inside the declared
+  allowlist, and hold the allowlist equal to the open-gaps list in
+  ARCHITECTURE.md. Nothing executes through the registry yet, and every
+  existing call site stands.
+
+### Changed
+
+- The remembered login's promoted-account registry stages (the
+  standing-delegation refresh, the ladder-rung refresh, and the
+  generation-delegation heal) ride one `chainPromotedAccountStage` helper
+  that holds the promoted-pointer guard and hands each stage the session's
+  memoized verified account log, so no stage verifies the log on its own.
 - The `CollectionShare` and `CollectionUnshare` activities come from
   `@interop/wallet-core`'s `addHistoryCollectionShared` /
   `addHistoryCollectionUnshared` builders instead of inline literals. The

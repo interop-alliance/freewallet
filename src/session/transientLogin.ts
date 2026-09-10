@@ -53,25 +53,24 @@ import {
   readUserKeyRoster,
   userKeyRosterDescriptorStore,
   userKeyRosterLogSigner,
-  type SealableEncryptionDescriptorStore,
-  type UserKeyRosterReadResult
+  type SealableEncryptionDescriptorStore
 } from '@interop/wallet-core/keys'
 import {
   didKeyZcapClient,
   type ICapabilityAgent,
   type PublishedWebvhLog
 } from '@interop/wallet-core/webvh'
-import { ladderVmAgent } from '@interop/wallet-core/clientAnnex'
 import { webvhResourceLogController } from '@interop/wallet-core/resourceLog'
 import { WasClient } from '@interop/was-client'
 import { WAS_SERVER_URL } from '@/app.config'
 import { hasClientKeyRecord } from '@/lib/sessionKey'
 import { isStorageUnreachable } from '@/lib/storageErrors'
-import { accountCollectionStores } from '@/session/collectionLogStore'
 import { createLogger } from '@/lib/log'
 import {
+  ladderMendAuthority,
   mendCredentialAnchoredAccount,
   passphraseRegistryUpsertHook,
+  reportCredentialAnchoredMend,
   type CredentialAnchoredMendReport
 } from '@/session/credentialAnchoredGenesis'
 import {
@@ -87,11 +86,15 @@ import {
   type TransientKeyringFetchResult,
   type UnlockCredential
 } from '@/session/keyring'
-import { refreshTransientManageCapability } from '@/session/unlockMethods'
 import {
-  chainRegistryStage,
-  runSharedRegistryPasses
-} from '@/session/registryPasses'
+  mendReportAccumulator,
+  type MendReportAccumulator
+} from '@interop/wallet-core/menders'
+import type { FreewalletCeremonyId } from '@/session/ceremonies'
+import {
+  blockCeremonyContext,
+  startLoginMenderBlock
+} from '@/session/menders/run'
 import { primeVerifiedAccountLog } from '@/session/verifiedLog'
 import { documentListsCredential } from '@/session/pendingRetirement'
 import { refreshDidWebProjection } from '@/session/annexReach'
@@ -355,7 +358,9 @@ function refuseMissingGeneration(
  * @returns {Promise<object>}   `{ outcome }` on a completed ensure, or
  *   `{ unavailable }` carrying wallet-core's typed refusal
  */
-async function ensureClientAnnexGenerationReady({
+// Exported for the mender registry, which names it as the converger of the
+// three invariants this routing site reports.
+export async function ensureClientAnnexGenerationReady({
   found,
   standing,
   pointer,
@@ -475,8 +480,8 @@ async function ensureClientAnnexGenerationReady({
  *   credential-anchored-signup heal (the establishment re-run needs the unlock
  *   identity, not just the record)
  * @param [options.popup] {boolean}   this visit runs in the CHAPI popup's
- *   partitioned iframe, which skips the management-zcap registry refresh
- *   below, the guard the login-time registry passes carry
+ *   partitioned iframe. Every registration of the block below declares
+ *   itself off that route, so the block runs empty there
  * @param [options.healAttempted] {boolean}   internal: the re-entry marker of
  *   the unpromoted-account heal, so a heal that did not converge refuses
  *   instead of looping
@@ -485,6 +490,9 @@ async function ensureClientAnnexGenerationReady({
  *   re-bound record left the registry arm unfired (its root window is
  *   permanently closed), so the re-entry's mend must run the completion arms
  *   under the visit's post-promotion authority even with no tear of its own
+ * @param [options.mends] {MendReportAccumulator}   this login's report,
+ *   which the routing entries above report into and the session carries;
+ *   built here when the caller supplies none
  * @param [options.accountLog] {PublishedWebvhLog}   an account-log head this
  *   same visit already read or published (a signup's establishment, entering
  *   the account it just established), reused for the first-contact
@@ -501,7 +509,8 @@ export async function transientSessionFromKeyringHit({
   popup = false,
   healAttempted = false,
   repairShaped = false,
-  accountLog
+  accountLog,
+  mends: suppliedMends
 }: {
   found: TransientKeyringFetchResult
   type: 'passphrase' | 'passkey'
@@ -512,7 +521,9 @@ export async function transientSessionFromKeyringHit({
   healAttempted?: boolean
   repairShaped?: boolean
   accountLog?: PublishedWebvhLog
+  mends?: MendReportAccumulator<FreewalletCeremonyId>
 }): Promise<{ session: Session; userExists: boolean }> {
+  const mends = suppliedMends ?? mendReportAccumulator<FreewalletCeremonyId>()
   const standing = found.standing
   if (!standing?.ladderSeed) {
     // Invariant, not a user state: a standing record is the only record a
@@ -560,6 +571,7 @@ export async function transientSessionFromKeyringHit({
             }
           : {})
       })
+      reportCredentialAnchoredMend({ report, mends })
       if (report.reenter) {
         const refreshed = await fetchTransientKeyring({
           credential,
@@ -574,7 +586,8 @@ export async function transientSessionFromKeyringHit({
             credential,
             popup,
             healAttempted: true,
-            repairShaped: report.reenterRepairShaped === true
+            repairShaped: report.reenterRepairShaped === true,
+            mends
           })
         }
       }
@@ -663,6 +676,48 @@ export async function transientSessionFromKeyringHit({
     pointer: accountPointer,
     account: { did: accountDid, doc: verified.doc, log: verified.log },
     persistence
+  })
+  // The readiness stage is the routing site of three invariants: the
+  // generation it readies, the standing delegations it may have renewed and
+  // re-sealed, and the generation delegation it installs.
+  mends.report({
+    invariant: 'annex-generation-is-reachable',
+    ...(readiness.outcome
+      ? readiness.outcome.generationMinted || readiness.outcome.spaceMinted
+        ? { outcome: 'clean' as const }
+        : { outcome: 'noop' as const }
+      : {
+          outcome: 'refused' as const,
+          detail: { reason: 'generation-unavailable' }
+        })
+  })
+  // Either re-mint counts as a mend: a fresh sibling is re-sealed into the
+  // record just as a fresh bridge is, and grading on the bridge alone would
+  // report a sibling-only re-mint as a no-op.
+  mends.report({
+    invariant: 'standing-delegations-verify-under-the-current-document',
+    ...(readiness.outcome?.bridgeResealError !== undefined
+      ? { outcome: 'partial' as const, detail: { reason: 'bridge-reseal' } }
+      : readiness.outcome &&
+          (readiness.outcome.siblingReminted ||
+            readiness.outcome.bridgeReminted)
+        ? { outcome: 'clean' as const }
+        : { outcome: 'noop' as const })
+  })
+  // Graded on what the ensure DID, not on what it handed back: the outcome
+  // always carries a generation delegation, so only a renewal or a freshly
+  // minted generation (which installs one with its genesis) is a mend.
+  mends.report({
+    invariant: 'generation-delegation-is-current',
+    ...(readiness.outcome
+      ? readiness.outcome.delegationRenewed ||
+        readiness.outcome.generationMinted
+        ? { outcome: 'clean' as const }
+        : { outcome: 'noop' as const }
+      : {
+          outcome: 'refused' as const,
+          detail: { reason: 'generation-unavailable' }
+        })
   })
   const healedGenerationDelegation = readiness.outcome?.generationDelegation
   // The bridge this visit may still write the log through: the renewed one
@@ -879,44 +934,39 @@ export async function transientSessionFromKeyringHit({
       ...(standing.delegatedClients
         ? { delegatedClients: standing.delegatedClients }
         : {}),
-      invocation: {
-        was: new WasClient({
-          serverUrl: accountHost,
-          zcapClient: transientZcapClient
-        }),
-        zcapClient: transientZcapClient,
-        capability: generationDelegation
-      },
-      rosterStore: rosterStoreSignedBy(await ladderVmAgent({ ladderSeed })),
-      // The collection stores the roster-and-epochs arm installs epoch[0]
-      // through: ladder-signed appends, invoked as the annex VM under the
-      // generation delegation, the controller view verified fresh under the
-      // visit's pins (the arm may have moved the head this visit stood on).
-      collectionStore: accountCollectionStores({
-        zcapClient: transientZcapClient,
-        keyAgent: await ladderVmAgent({ ladderSeed }),
+      // The visit's ladder authority, from the one seam that resolves it:
+      // the annex VM invokes under the generation delegation, the ladder VM
+      // signs the governed appends, and the registry members are the acting
+      // credential's. The collection stores verify their controller view
+      // fresh rather than from the head this visit stood on, since an arm
+      // may have moved it.
+      ...(await ladderMendAuthority({
         pointer: {
           did: accountDid,
           spaceId: accountSpaceId,
           host: accountHost
         },
+        ladderSeed,
+        zcapClient: transientZcapClient,
+        capability: generationDelegation,
         pinStore: persistence.logPins,
-        capability: generationDelegation
-      }),
-      registry: {
-        unlockSpaceId: found.unlockSpaceId,
-        delegation: usableBridge,
-        delegatedClients: siblingDelegation,
-        ...(found.unlockKeyAgreementKeyId
-          ? { unlockKeyAgreementKeyId: found.unlockKeyAgreementKeyId }
-          : {}),
-        ...(found.unlockKeyAgreementKeyMultibase
-          ? {
-              unlockKeyAgreementKeyMultibase:
-                found.unlockKeyAgreementKeyMultibase
-            }
-          : {})
-      },
+        // The roster store anchors at the log this composition verified.
+        log: verified.log,
+        registry: {
+          unlockSpaceId: found.unlockSpaceId,
+          delegation: usableBridge,
+          delegatedClients: siblingDelegation,
+          ...(found.unlockKeyAgreementKeyId
+            ? { unlockKeyAgreementKeyId: found.unlockKeyAgreementKeyId }
+            : {}),
+          ...(found.unlockKeyAgreementKeyMultibase
+            ? {
+                unlockKeyAgreementKeyMultibase:
+                  found.unlockKeyAgreementKeyMultibase
+              }
+            : {})
+        }
+      })),
       ...(type === 'passphrase'
         ? {
             beforePromotion: passphraseRegistryUpsertHook({
@@ -936,6 +986,7 @@ export async function transientSessionFromKeyringHit({
         collectionIds: epochsFailed.map(({ collectionId }) => collectionId)
       })
     }
+    reportCredentialAnchoredMend({ report, mends })
     return report
   }
   let rosterRead
@@ -1054,7 +1105,8 @@ export async function transientSessionFromKeyringHit({
     userKey: rosterRead.userKey,
     accountPointer: pointer,
     email: email ?? found.email,
-    persistence: sessionPersistence
+    persistence: sessionPersistence,
+    mends
   })
   // Seed the session-lifetime memo with the latest head this composition
   // itself verified (the enrollment's re-read when one happened, the
@@ -1066,6 +1118,10 @@ export async function transientSessionFromKeyringHit({
   // behind the pin the mend advanced. Every ceremony that extends the
   // account log drops the memo, so nothing this session can run reads it
   // stale.
+  // The projection mend's report, awaited by the block's settle point alone
+  // (below), so `session.mends` carries its entry even in the popup, where
+  // the block itself runs empty and settles in the same tick.
+  let projectionReported: Promise<void> | undefined
   if (mendReport === undefined) {
     primeVerifiedAccountLog({
       profile: session.profile,
@@ -1075,9 +1131,11 @@ export async function transientSessionFromKeyringHit({
     // The did:web projection mend, over that same head. It sits after the
     // enrollment because its PUT invokes as the visit's annex verification
     // method under the generation delegation, and that method must stand in
-    // the annex document first. Deliberately not awaited: the session is
+    // the annex document first. The login does not await it: the session is
     // complete without it and the helper holds its own catch-and-warn, so
-    // the floating promise can never reject. Deliberately NOT skipped in the
+    // the promise can never reject. The block's settle point does await it,
+    // so its entry rides `session.mends` rather than landing after the
+    // report was assembled. Deliberately NOT skipped in the
     // CHAPI popup either, unlike the registry refresh below -- it is a
     // revocation-bypass repair costing one GET, and it writes nothing
     // browser-local.
@@ -1088,7 +1146,7 @@ export async function transientSessionFromKeyringHit({
     // pin to, and a projection re-derived from that document would undo the
     // mend's own republication. The next visit, which mends nothing, is that
     // account's mender.
-    void refreshDidWebProjection({
+    projectionReported = refreshDidWebProjection({
       host: accountHost,
       spaceId: accountSpaceId,
       did: accountDid,
@@ -1096,6 +1154,11 @@ export async function transientSessionFromKeyringHit({
       pinStore: persistence.logPins,
       delegation: generationDelegation,
       zcapClient: transientZcapClient
+    }).then(outcome => {
+      mends.report({
+        invariant: 'did-web-projection-matches-the-log',
+        ...outcome
+      })
     })
   }
   // Stamp what the remembered tail stamps, minus what a transient session
@@ -1124,15 +1187,16 @@ export async function transientSessionFromKeyringHit({
       ? { rebindRecord: found.rebindStandingRecord }
       : {})
   }
-  // The login-time registry chain, on a transient session too: one ordered
-  // promise that never rejects, run after the login page has navigated. Five
+  // The login-time mender block, on a transient session too: one ordered
+  // run that never rejects, started after the login page has navigated. Five
   // passes ride it -- the stale-seal repair first (every writer below reads
   // the record, and a stale seal would make each warn and skip on a registry
   // this same visit can mend), then the torn-retirement repair, the bare
   // passkey rebuild, the registry backfill, and last the acting credential's
   // management-zcap refresh. Each rides the visit's generation delegation and
-  // unwraps with the credential's standing key. A CHAPI popup skips them, the
-  // guard the remembered chain's passes carry.
+  // unwraps with the credential's standing key. A CHAPI popup runs none of
+  // them: each declares itself off that route, so the block runs empty and
+  // both of its promises settle at once.
   //
   // The refresh is last rather than parallel: it compare-and-swaps the same
   // registry entry the passes above rewrite, and two writers racing one entry
@@ -1144,49 +1208,20 @@ export async function transientSessionFromKeyringHit({
   //
   // The user key sweep and the annex GC stay remembered-only: neither has a
   // ladder-anchored branch yet.
-  if (!popup) {
-    // Typed once here rather than at each closure below: the declaration is
-    // an evolving `let` the arms above assign, and the chain's stages read it
-    // after every one of them has run.
-    const loginRosterRead: UserKeyRosterReadResult = rosterRead
-    session.registryReady = Promise.resolve()
-    chainRegistryStage({
+  const { context } = blockCeremonyContext({ session })
+  startLoginMenderBlock({
+    accumulator: mends,
+    route: { popup },
+    ...(projectionReported ? { pendingReports: [projectionReported] } : {}),
+    deps: {
+      chain: 'transient',
       session,
-      warn: 'Could not run the login-time registry passes; the next login retries',
-      run: () =>
-        runSharedRegistryPasses({
-          session,
-          found,
-          rosterRead: loginRosterRead,
-          ...(credential ? { credential: { derived: credential } } : {})
-        })
-    })
-    chainRegistryStage({
-      session,
-      warn: "Could not refresh the acting credential's management zcap; the next login retries",
-      run: async () => {
-        if (!found.manageCapability) {
-          return
-        }
-        await refreshTransientManageCapability({
-          zcapClient: transientZcapClient,
-          spaceId: accountSpaceId,
-          userKey: loginRosterRead.userKey,
-          // The capability the visit rides now, not the one it started on:
-          // a stage above may have renewed the generation delegation.
-          capability:
-            session.profile.invocationCapability ?? generationDelegation,
-          unlockSpaceId: found.unlockSpaceId,
-          manageCapability: found.manageCapability,
-          ...(found.standingClient?.keyAgreementKeyMultibase
-            ? {
-                keyAgreementKeyMultibase:
-                  found.standingClient.keyAgreementKeyMultibase
-              }
-            : {})
-        })
-      }
-    })
-  }
+      found,
+      context,
+      rosterRead,
+      generationDelegation,
+      ...(credential ? { credential } : {})
+    }
+  })
   return { session, userExists }
 }

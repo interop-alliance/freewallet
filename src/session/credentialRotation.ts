@@ -38,6 +38,11 @@ import type {
   StandingUnlockKeys
 } from '@interop/wallet-core/unlock'
 import type { UserKey } from '@interop/wallet-core/keys'
+import {
+  errorNameOf,
+  type MendReport,
+  type MendReportEntry
+} from '@interop/wallet-core/menders'
 import { keyAgreementCommitment } from '@interop/wallet-core/webvh'
 import {
   attributeLadderRung,
@@ -49,6 +54,7 @@ import {
 import type { IKeyAgreementKey, IZcap } from '@interop/data-integrity-core'
 import type { ZcapClient } from '@interop/ezcap'
 import type { Session } from '@/types/auth'
+import type { FreewalletCeremonyId } from '@/session/ceremonies'
 import {
   clientAnnexReachFor,
   standingClientAnnexReachFor
@@ -75,13 +81,59 @@ const log = createLogger('fw:session:rotation')
 /**
  * What a completed retirement reports: whether the roster actually rotated on
  * this run (a re-run of an already-complete retirement reports `false`), the
- * per-collection fan-out outcomes, and the rotated key when there was one.
+ * per-collection fan-out outcomes, the rotated key when there was one, and
+ * the ceremony-tail mend report -- one entry, the annex strike-or-swap
+ * stage's.
  */
 export interface CredentialRotationOutcome {
   rotated: boolean
   collections: UserKeyCascadeResult
   userKey?: UserKey
-  clientAnnex?: ClientAnnexInventoryRetirement
+  mended: MendReport<FreewalletCeremonyId>
+}
+
+/**
+ * The retirement's one ceremony-tail mend entry: what the annex
+ * strike-or-swap stage made of
+ * `retired-credential-leaves-no-annex-inventory`. A strike, a swap, and a
+ * generation that held no inventory all report `clean`, the action itself
+ * riding as `detail.action`; a stage that could not run reports `refused`
+ * with its reason, and a caught failure `failed` with the error's class name
+ * (never its message, which may carry a DID or a Space id). A ceremony that
+ * reported no stage at all reports `noop`.
+ *
+ * @param [retirement] {object}   the stage's report, carrying the error
+ *   class name this module's own catch recorded; absent when the ceremony
+ *   reported no stage
+ * @returns {MendReportEntry<FreewalletCeremonyId>}
+ */
+function annexInventoryEntry(
+  retirement?: ClientAnnexInventoryRetirement & { errorName?: string }
+): MendReportEntry<FreewalletCeremonyId> {
+  const reported = {
+    invariant: 'retired-credential-leaves-no-annex-inventory',
+    ceremonies: ['unlock-credential-rotation']
+  } as const
+  if (!retirement) {
+    return { ...reported, outcome: 'noop' }
+  }
+  const { action, reason, errorName } = retirement
+  if (action !== 'skipped') {
+    return { ...reported, outcome: 'clean', detail: { action } }
+  }
+  if (reason === 'failed') {
+    return {
+      ...reported,
+      outcome: 'failed',
+      detail: { action },
+      ...(errorName ? { errorName } : {})
+    }
+  }
+  return {
+    ...reported,
+    outcome: 'refused',
+    detail: { action, ...(reason ? { reason } : {}) }
+  }
 }
 
 /**
@@ -355,7 +407,7 @@ export async function rotateOffUnlockCredential({
     rotated: result.rotated,
     collections: result.collections,
     ...(result.userKey ? { userKey: result.userKey } : {}),
-    ...(result.clientAnnex ? { clientAnnex: result.clientAnnex } : {})
+    mended: [annexInventoryEntry(result.clientAnnex)]
   }
 }
 
@@ -504,7 +556,9 @@ async function standingKeyAgreementOf({
  * @param options.remoteStore {object}   the session's remote store
  * @param [options.standingReach] {object}   the client identity and sibling
  *   delegation the ladder branch reaches the annex log through
- * @returns {Promise<ClientAnnexInventoryRetirement>}
+ * @returns {Promise<ClientAnnexInventoryRetirement & { errorName?: string }>}
+ *   the stage's report, carrying the caught error's class name so the
+ *   ceremony's mend entry can report it
  */
 async function retireClientAnnexInventoryStage({
   session,
@@ -527,7 +581,7 @@ async function retireClientAnnexInventoryStage({
     standingClient: { agents: { zcapClient: ZcapClient } }
     delegatedClients: IZcap
   }
-}): Promise<ClientAnnexInventoryRetirement> {
+}): Promise<ClientAnnexInventoryRetirement & { errorName?: string }> {
   try {
     const doc = document as Parameters<typeof clientAnnexReachFor>[0]['doc']
     // The annex Space answers to the account did:webvh, which a transient
@@ -621,7 +675,11 @@ async function retireClientAnnexInventoryStage({
       "Could not retire the credential's annex inventory; the retired rung stands until the next generation swap",
       { err }
     )
-    return { action: 'skipped', reason: 'failed' }
+    return {
+      action: 'skipped',
+      reason: 'failed',
+      errorName: errorNameOf(err)
+    }
   }
 }
 

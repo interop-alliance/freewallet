@@ -33,7 +33,8 @@ import { RecordEnvelopeDecryptError } from '@/session/recordEnvelope'
 import {
   getUnlockMethods,
   rewrapUnlockMethodsRecord,
-  UnlockRegistryStaleSealError
+  UnlockRegistryStaleSealError,
+  type UnlockMethodsRecord
 } from '@/session/unlockMethods'
 import { type AccountCeremonyContext } from '@/session/accountCeremonyContext'
 import { createLogger } from '@/lib/log'
@@ -71,6 +72,9 @@ const log = createLogger('fw:session:reseal')
  *   ceremony context: its invoker (the generation delegation on the ladder
  *   branch) and, there, the standing key the escrows unwrap with. `null`
  *   resolves `ok` with nothing read
+ * @param [options.readRegistry] {Function}   the detection read. A login
+ *   block hands its shared registry read here, so the passes behind this one
+ *   ride the same fetch; omitted, the registry is read directly
  * @returns {Promise<'ok' | 'repaired' | 'unrepaired' | 'reseal-failed'>}
  *   `ok` when the registry opened (or none exists), `repaired` when a
  *   superseded generation opened it and it was re-sealed, `unrepaired` when
@@ -80,11 +84,13 @@ const log = createLogger('fw:session:reseal')
 export async function repairStaleUnlockRegistrySeal({
   session,
   rosterRead,
-  context
+  context,
+  readRegistry
 }: {
   session: Session
   rosterRead: UserKeyRosterReadResult
   context: AccountCeremonyContext | null
+  readRegistry?: () => Promise<UnlockMethodsRecord | null>
 }): Promise<'ok' | 'repaired' | 'unrepaired' | 'reseal-failed'> {
   const pointer = session.profile.accountPointer
   const spaceId = session.storage.spaceId
@@ -108,7 +114,7 @@ export async function repairStaleUnlockRegistrySeal({
     return 'ok'
   }
   try {
-    await getUnlockMethods({ session })
+    await (readRegistry ? readRegistry() : getUnlockMethods({ session }))
     return 'ok'
   } catch (err) {
     if (!(err instanceof UnlockRegistryStaleSealError)) {

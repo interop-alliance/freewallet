@@ -108,6 +108,7 @@ import {
   preflightCredentialRetirement,
   rotateOffUnlockCredential
 } from '@/session/credentialRotation'
+import { reportCeremonyTail } from '@/session/menders/ceremonyTail'
 import { adoptRotatedUserKey } from '@/session/userKeyAdoption'
 import {
   invalidateVerifiedLog,
@@ -670,6 +671,12 @@ export async function changeAccountPassphrase({
           : {}),
         verb: 'changing the passphrase'
       })
+      // The retirement's ceremony-tail entry, reported from the ceremony's
+      // own call site: it carries no registration, so no login chain's
+      // runner ever sees it.
+      if (outcome) {
+        reportCeremonyTail({ mended: outcome.mended })
+      }
       if (outcome?.rotated && outcome.userKey) {
         rotation = 'rotated'
         // The retirement re-sealed the registry to the fresh key in band and
@@ -1416,6 +1423,9 @@ async function recoverFailedPasskeyEstablishment({
         },
         verb: 'cleaning up a failed passkey addition'
       })
+      if (rotation) {
+        reportCeremonyTail({ mended: rotation.mended })
+      }
       if (rotation?.rotated && rotation.userKey) {
         await adoptRotatedUserKey({
           session,
@@ -1998,11 +2008,17 @@ export interface SpaceDeletionReport {
   kind: 'annex' | 'unlock' | 'acting-unlock' | 'account'
   spaceId: string
   outcome: 'deleted' | 'unconfirmed' | 'unreachable'
-  /** the unlock method the Space belongs to, when it belongs to one */
+  /**
+   * the unlock method the Space belongs to, when it belongs to one
+   */
   method?: string
-  /** the method's display label, when it carries one */
+  /**
+   * the method's display label, when it carries one
+   */
   label?: string
-  /** why an `unreachable` Space was not deleted */
+  /**
+   * why an `unreachable` Space was not deleted
+   */
   reason?: string
 }
 
@@ -2015,7 +2031,9 @@ export interface SpaceDeletionReport {
  */
 export interface UnnamedUnlockSpace {
   reason: 'pending-entry' | 'unrecorded-credential'
-  /** the pending entry's method type, where an entry names one */
+  /**
+   * the pending entry's method type, where an entry names one
+   */
   method?: string
 }
 
@@ -2038,11 +2056,17 @@ export type AccountDeletionPhase =
  */
 export interface AccountDeletionOutcome {
   result: AccountDeletionResult
-  /** set when `result` is `refused` */
+  /**
+   * set when `result` is `refused`
+   */
   refusal?: AccountDeletionRefusalReason
-  /** one entry per Space the walk named */
+  /**
+   * one entry per Space the walk named
+   */
   spaces: SpaceDeletionReport[]
-  /** unlock Spaces the walk could not name */
+  /**
+   * unlock Spaces the walk could not name
+   */
   unnamed: UnnamedUnlockSpace[]
   /**
    * The KMS keystore stage. Shipped skipped and reported: a keystore's

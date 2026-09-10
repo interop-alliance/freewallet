@@ -27,15 +27,16 @@ function publishStorageSeam(session: Session | null): void {
 
 /**
  * E2E test seam. Navigation to the dashboard waits on storage provisioning
- * alone, so the login-time pass chain (`session.registryReady`) and the annex
- * GC sweep forked off its tail (`session.clientAnnexGcSweep`) are still in
- * flight when a spec's fixture reaches the dashboard. A fixture that closes
- * its browser context there aborts the chain wherever it happens to be, and
- * the account it leaves behind depends on which pass got in first. In
+ * alone, so the login-time mender block is still in flight when a spec's
+ * fixture reaches the dashboard. A fixture that closes its browser context
+ * there aborts the block wherever it happens to be, and the account it
+ * leaves behind depends on which registration got in first. In
  * non-production builds only, publish a waiter on
  * `window.__E2E_LOGIN_CHAIN_SETTLED__` so a Playwright fixture can let the
- * chain finish before it tears the context down. Neither promise rejects.
- * Cleared on logout. No-op in production.
+ * block finish before it tears the context down. It waits on
+ * `session.mends`, which settles when the whole block has run -- the
+ * app-key sweep and the annex GC included -- and never rejects. Cleared on
+ * logout. No-op in production.
  */
 function publishLoginChainSeam(session: Session | null): void {
   if (import.meta.env.MODE === 'production') {
@@ -47,8 +48,7 @@ function publishLoginChainSeam(session: Session | null): void {
     }
   ).__E2E_LOGIN_CHAIN_SETTLED__ = session
     ? async () => {
-        await session.registryReady
-        await session.clientAnnexGcSweep
+        await session.mends
       }
     : undefined
 }

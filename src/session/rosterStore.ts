@@ -81,6 +81,9 @@ import { verifiedAccountLog } from '@/session/verifiedLog'
  *   member so this log's continuity is checked alongside the account log's
  * @param [options.log] {DIDLog}   the account log this run already stands on
  *   (a ceremony's own published or adopted head), used in place of the fetch
+ * @param [options.capability] {IZcap}   an invocation capability every
+ *   request rides (a transient visit's generation delegation, the only
+ *   authority that visit holds); the root capability is invoked otherwise
  * @returns {SealableEncryptionDescriptorStore}
  */
 export function accountRosterStore({
@@ -88,34 +91,39 @@ export function accountRosterStore({
   keyAgent,
   pointer,
   pinStore,
-  log
+  log,
+  capability
 }: {
   zcapClient: ZcapClient
   keyAgent: ICapabilityAgent
   pointer: AccountLogPointer
   pinStore?: ResourceLogPinStore
   log?: DIDLog
+  capability?: IZcap
 }): SealableEncryptionDescriptorStore {
   const pins = pinStore ?? memoryResourceLogPinStore()
   // A seeded head resolves the controller view once, for the life of this
   // store: it is what the run itself published or adopted, so re-reading
-  // `did.jsonl` could only serve something the run has not built on.
-  let pending: Promise<WebvhResourceLogController> | undefined = log
-    ? Promise.resolve(webvhResourceLogController({ did: pointer.did, log }))
-    : undefined
+  // `did.jsonl` could only serve something the run has not built on. Built
+  // on the first operation rather than here, so a store handed to a run that
+  // never reads or appends resolves nothing.
+  let pending: Promise<WebvhResourceLogController> | undefined
   return userKeyRosterDescriptorStore({
     storageServerUrl: pointer.host,
     zcapClient,
     spaceId: pointer.spaceId,
     resolveController: async () => {
-      pending ??= verifyAccountLog({
-        did: pointer.did,
-        spaceId: pointer.spaceId,
-        host: pointer.host,
-        pinStore: pins
-      }).then(
-        ({ log: served }) =>
-          webvhResourceLogController({ did: pointer.did, log: served }),
+      pending ??= (
+        log
+          ? Promise.resolve(log)
+          : verifyAccountLog({
+              did: pointer.did,
+              spaceId: pointer.spaceId,
+              host: pointer.host,
+              pinStore: pins
+            }).then(({ log: served }) => served)
+      ).then(
+        served => webvhResourceLogController({ did: pointer.did, log: served }),
         err => {
           pending = undefined
           throw err
@@ -124,7 +132,8 @@ export function accountRosterStore({
       return await pending
     },
     pinStore: pins,
-    signer: userKeyRosterLogSigner({ keyAgent })
+    signer: userKeyRosterLogSigner({ keyAgent }),
+    ...(capability ? { capability } : {})
   })
 }
 

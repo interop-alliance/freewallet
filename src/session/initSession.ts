@@ -17,30 +17,21 @@
  * the standing layout before the Space exists -- still surfaces the
  * not-enrolled state and the connect-another-wallet ceremony.
  */
-import type { CollectionEncryption } from '@interop/was-client'
-import type { IKeyAgreementKey, IZcap } from '@interop/data-integrity-core'
+import type { IKeyAgreementKey } from '@interop/data-integrity-core'
 import type { ZcapClient } from '@interop/ezcap'
 import type { DIDLog } from '@interop/did-method-webvh'
 import { agentsFromSeed } from '@interop/was-client/identity'
 import type { ControllerProfile, Session, User } from '@/types/auth'
 import { KMS_SERVER_URL, PASSKEY_KDF, WAS_SERVER_URL } from '@/app.config'
 import { ensureKeystore } from '@/lib/kms'
-import { zcapExpires } from '@/lib/zcap'
 import { assertPasskeyPrf } from '@/lib/passkey'
 import {
-  delegationKeyInDocument,
   isWebvhDid,
   webvhCapabilityAgent,
   webvhZcapClient,
   type ClientWebvhUpdateKeys,
-  type ICapabilityAgent,
-  type PublishedKeyDocument
+  type ICapabilityAgent
 } from '@interop/wallet-core/webvh'
-import {
-  attributeLadderRung,
-  delegatedClientsDelegationSpaceId,
-  mintDelegatedClientsDelegation
-} from '@interop/wallet-core/clientAnnex'
 import {
   mintUserKey,
   userKeyVaultKeys,
@@ -49,15 +40,7 @@ import {
   type UserKeyRosterReadResult
 } from '@interop/wallet-core/keys'
 import { accountRosterStore } from '@/session/rosterStore'
-import { sessionCollectionStores } from '@/session/collectionLogStore'
-import {
-  checkUserKeyRosterAtLogin as sharedCheckUserKeyRosterAtLogin,
-  convergeUserKeyRosterToAccount
-} from '@interop/wallet-core/clients'
-import { adoptRotatedUserKeyInBand } from '@/session/userKeyAdoption'
-import { cascadeCollectionsToUserKey } from '@/session/userKeyCascade'
-import { sweepStrandedAppKeys } from '@/session/appKeySweep'
-import { sweepClientAnnexGenerations } from '@/session/clientAnnexGc'
+import { checkUserKeyRosterAtLogin as sharedCheckUserKeyRosterAtLogin } from '@interop/wallet-core/clients'
 import {
   browserLocalSessionPersistence,
   isBrowserLocalSession,
@@ -74,7 +57,8 @@ import {
 } from '@/session/keyring'
 import {
   mendCredentialAnchoredAccount,
-  passphraseRegistryUpsertHook
+  passphraseRegistryUpsertHook,
+  reportCredentialAnchoredMend
 } from '@/session/credentialAnchoredGenesis'
 import { KEYRING_KDF, type UnlockKdf } from '@interop/wallet-core/keyring'
 import {
@@ -90,29 +74,24 @@ import {
   PendingEnrollmentError,
   resumePendingEnrollment
 } from '@/session/pendingEnrollment'
-import type { RecoverySpendPrompt } from '@/session/recovery'
+import type {
+  RecoverySpendPrompt,
+  RecoverySpendResumeReport
+} from '@/session/recovery'
 import {
   assertClientStillEnrolled,
   wipeStaleClientResidue
 } from '@/session/forget'
 import {
-  delegateLogWrite,
-  delegationProofKeyId,
-  zcapExpiring
-} from '@interop/wallet-core/recovery'
+  mendReportAccumulator,
+  type MendReportAccumulator
+} from '@interop/wallet-core/menders'
+import type { FreewalletCeremonyId } from '@/session/ceremonies'
 import {
-  ensureGenerationDelegation,
-  pointedClientAnnexReach
-} from '@/session/annexReach'
-import { refreshStandingDelegationFields } from '@/session/unlockMethods'
-import {
-  chainRegistryStage,
-  runSharedRegistryPasses
-} from '@/session/registryPasses'
-import {
-  primeVerifiedAccountLog,
-  verifiedAccountLog
-} from '@/session/verifiedLog'
+  blockCeremonyContext,
+  startLoginMenderBlock
+} from '@/session/menders/run'
+import { primeVerifiedAccountLog } from '@/session/verifiedLog'
 import type { AccountPointer } from '@interop/wallet-core/keyring'
 import type {
   KeyringFetchResult,
@@ -184,11 +163,11 @@ export async function initGuestSession() {
  * `ensureUserCollections` is *fired but not awaited* and its promise exposed as
  * `session.storageReady`, so a caller can run a hot read concurrently with
  * provisioning yet still `await session.storageReady` when it needs the
- * collections ready. On the same seam, when the login's roster read
- * succeeded and a remote store is attached, the cascade-completion sweep is
- * fired behind provisioning and exposed as `session.userKeySweep` (best-effort;
- * see the Session type). The new-wallet flows (signup, guest) pass
- * `provisionStorage: false`: their provisioning is a deliberately ordered
+ * collections ready. Provisioning is also the login-time mender block's
+ * seed, and the block is the caller's to start: this seam returns the
+ * login's roster read and the store it came through, which the block's
+ * cascade-completion sweep runs on. The new-wallet flows (signup, guest)
+ * pass `provisionStorage: false`: their provisioning is a deliberately ordered
  * sequence owned by `provisionNewWallet` (signup must bind the passphrase
  * before the data Space is created), so session creation must not fire it.
  *
@@ -232,6 +211,10 @@ export async function initGuestSession() {
  *   verified for the same pointer (the forgotten-browser detector's read),
  *   handed to the login-time roster read in place of a second fetch and
  *   verification of the same `did.jsonl`
+ * @param [options.mends] {MendReportAccumulator}   the login's report
+ *   accumulator, which the routing entries have already reported into. The
+ *   session's `mends` resolves from it; a caller supplying none gets a
+ *   settled empty report
  * @param [options.persistence] {SessionPersistence}   the typed persistence
  *   strategy for this session; defaults to the browser-local variant built
  *   over `idb` (with cache persistence off for guests). A transient login
@@ -243,10 +226,10 @@ export async function initGuestSession() {
  *   in-memory variant also skips the KMS keystore, the login-time roster
  *   read (the standing-wrap read already happened), `profile.clientSeed`,
  *   provisioning and the login-time sweeps.
- * @returns {Promise<{ session: Session, userExists: boolean,
- *   rosterRead: UserKeyRosterReadResult | null }>}   `rosterRead` is this
- *   login's verified roster read, which the caller's registry re-seal repair
- *   takes its escrowed user key generations from
+ * @returns {Promise<object>}   the session, whether the account exists, and
+ *   this login's verified roster read with the store it came through --
+ *   what the caller's cascade-completion sweep and registry re-seal repair
+ *   run on
  */
 export async function initSessionFromSeed({
   seed,
@@ -260,6 +243,7 @@ export async function initSessionFromSeed({
   provisionStorage = true,
   idb,
   accountLog,
+  mends: accumulator,
   persistence: suppliedPersistence
 }: {
   seed: Uint8Array
@@ -273,6 +257,7 @@ export async function initSessionFromSeed({
   provisionStorage?: boolean
   idb?: IDBFactory
   accountLog?: DIDLog
+  mends?: MendReportAccumulator<FreewalletCeremonyId>
   persistence?: SessionPersistence
 }) {
   // A popup's localStorage cache pair is suppressed -- but only where the
@@ -466,204 +451,24 @@ export async function initSessionFromSeed({
   // configured, provisions the remote Space / did:web -- so it is correct for
   // guests (local only) and returning logins alike. The new-wallet flows opt
   // out (`provisionStorage: false`) and provision explicitly.
-  // A transient session skips provisioning and every login-time sweep: the
-  // sweeps perform governed writes (roster convergence, epoch rotation, the
-  // app-key deletes) a transient session must not run, and provisioning's
-  // bare-Space-URL reads and promotion PUTs belong to the remembered
-  // login's account bootstrap.
+  // A transient session skips provisioning: its bare-Space-URL reads and
+  // promotion PUTs belong to the remembered login's account bootstrap, and
+  // the sweeps the remembered block runs behind it (roster convergence,
+  // epoch rotation, the app-key deletes) are governed writes a transient
+  // session must not run.
   if (provisionStorage && isBrowserLocalSession(persistence)) {
-    const storageReady = storage.ensureUserCollections({ user, profile, idb })
-    session.storageReady = storageReady
-
-    // The app-key sweep: app keys now live in their own `app-connections`
-    // collection, so any left in `private-credentials` by an earlier version
-    // are deleted here rather than migrated -- their seeds must not stay
-    // reachable from the credential-wide surfaces (a public link, a share of
-    // the credentials collection). A second pass retracts the world-readable
-    // copies left with no private row behind them. Chained behind provisioning and strictly
-    // best-effort, like the cascade sweep below: a failed sweep never fails
-    // the login, and the next login runs it again.
-    session.appKeySweep = storageReady
-      .catch(() => {})
-      .then(() => sweepStrandedAppKeys({ storage }))
-      .catch((err): null => {
-        log.warn('The stranded app-key sweep failed', { err })
-        return null
-      })
-
-    // The cascade-completion sweep: with the roster in hand (the direct read
-    // above) and a remote store attached, re-run the collection fan-out of
-    // the user key cascade in the background. A collection is stale exactly when
-    // its current epoch names a non-current user key generation -- durable state
-    // alone -- so a cascade another client crashed partway is completed
-    // here, and a healthy account's sweep reads descriptors and writes
-    // nothing. Chained behind provisioning (so freshly ensured collections
-    // are visible) and strictly best-effort: a failed sweep never fails the
-    // login, and the next login (or revocation) converges the same branch.
-    const remoteStore = storage.remoteStore
-    if (rosterRead && loginRosterStore && activeUserKey && remoteStore) {
-      const loginUserKey = activeUserKey
-      const loginRead = rosterRead
-      const rosterStore = loginRosterStore
-      session.userKeySweep = storageReady
-        .catch(() => {})
-        .then(async () => {
-          // The roster stage first: a disconnect torn between the document
-          // edit and the roster rotation leaves the roster still wrapping the
-          // CURRENT key to a recipient the document no longer keys -- durable
-          // and silent, since the disconnected client's document edit will
-          // never be re-run. Converging it here before the fan-out is what
-          // makes the collections below take a key the disconnected client
-          // cannot open.
-          const { userKey: sweepUserKey, rosterDescriptor } =
-            await convergeRosterToDocument({
-              session,
-              pointer: accountPointer,
-              store: rosterStore,
-              userKey: loginUserKey,
-              read: loginRead,
-              clientKeyAgreementKey: keyAgreementKey,
-              persistence
-            })
-          const result = await cascadeCollectionsToUserKey({
-            remoteStore,
-            storeFor: sessionCollectionStores({
-              profile: session.profile,
-              remoteStore,
-              keyAgent
-            }),
-            rosterDescriptor,
-            clientKeyAgreementKey: keyAgreementKey,
-            userKey: sweepUserKey
-          })
-          // The session's ciphers were built before the sweep ran, and the
-          // sweep's own adoption deliberately leaves them alone (the
-          // collections still carried the pre-rotation epochs then). Refresh
-          // the descriptors and ciphers when the sweep adopted a rotated key,
-          // or when the fan-out moved any collection's current epoch
-          // (`rotated`; the rotation-only cascade never installs epochs --
-          // provisioning does -- and an escrow leaves the current epoch in
-          // place), so the rest of the session seals writes under the fresh
-          // epoch instead of the retired one.
-          if (
-            sweepUserKey.id !== loginUserKey.id ||
-            Object.values(result.outcomes).some(
-              outcome => outcome === 'rotated'
-            )
-          ) {
-            await storage.refreshEncryptedDescriptors()
-          }
-          return result
-        })
-        .catch((err): null => {
-          log.warn('The user key cascade-completion sweep failed', { err })
-          return null
-        })
-    }
+    session.storageReady = storage.ensureUserCollections({ user, profile, idb })
   }
 
-  return { session, userExists, rosterRead }
-}
-
-/**
- * The roster stage of the cascade-completion sweep: converges the wrap-set
- * roster onto the account's locally verified did:webvh document, so a
- * revocation torn between its document edit and its roster rotation is
- * finished here rather than leaving the current per-user key wrapped to a
- * client the document no longer keys.
- *
- * When the convergence rotates, the fresh key is read back and adopted the
- * ordinary way -- persisted into this client's client-key record, pinned, and
- * swapped into the live session's vault keys and storage ciphers -- and
- * handed back for the collection fan-out to run against. A healthy account
- * reads the descriptor and writes nothing; a document that cannot be fetched
- * or verified (offline, an unpromoted account) leaves the login's own roster
- * read in place, since the sweep is best-effort by design.
- *
- * The sweep writes through the store instance the login read came through,
- * seeded with that read's validator, so a convergence that rotates or
- * escrows acquires the roster log no second time: on a log-governed store
- * every acquisition is a hash-chain walk with per-entry proof and
- * chain-head-pin verification.
- *
- * @param options {object}
- * @param options.session {Session}   the live session, whose vault keys and
- *   ciphers adopt a rotation
- * @param [options.pointer] {AccountPointer}
- * @param options.store {SealableEncryptionDescriptorStore}   the roster store
- *   the login read came through
- * @param options.userKey {UserKey}   the login's current per-user key
- * @param options.read {UserKeyRosterReadResult}   the login's roster read
- * @param options.clientKeyAgreementKey {IKeyAgreementKey}   this client's own
- *   (identity) KAK -- its roster entry
- * @param options.persistence {SessionPersistence}   the session's persistence
- *   strategy (the pins ride it)
- * @returns {Promise<{ userKey: UserKey, rosterDescriptor: CollectionEncryption }>}
- *   the key and roster descriptor the collection fan-out should use
- */
-async function convergeRosterToDocument({
-  session,
-  pointer,
-  store,
-  userKey,
-  read,
-  clientKeyAgreementKey,
-  persistence
-}: {
-  session: Session
-  pointer?: AccountPointer
-  store: SealableEncryptionDescriptorStore
-  userKey: UserKey
-  read: UserKeyRosterReadResult
-  clientKeyAgreementKey: IKeyAgreementKey
-  persistence: SessionPersistence
-}): Promise<{ userKey: UserKey; rosterDescriptor: CollectionEncryption }> {
-  const { keyAgent } = session.profile
-  const descriptor = read.descriptor
-  if (!pointer || !isWebvhDid(pointer.did) || !WAS_SERVER_URL || !keyAgent) {
-    return { userKey, rosterDescriptor: descriptor }
+  // A session whose caller builds no mender block still carries a settled
+  // report, so every reader has one shape to read.
+  const mends = accumulator ?? mendReportAccumulator<FreewalletCeremonyId>()
+  session.mends = mends.settled
+  if (!accumulator) {
+    mends.settle()
   }
-  // The did:webvh check above is what makes the pins' account DID available:
-  // the roster-epoch pin is keyed by it, and an unpromoted account returned
-  // early.
-  const accountDid = pointer.did
-  const { userKey: convergedUserKey, descriptor: convergedDescriptor } =
-    await convergeUserKeyRosterToAccount({
-      pointer: {
-        did: accountDid,
-        spaceId: pointer.spaceId,
-        host: pointer.host
-      },
-      store,
-      userKey,
-      descriptor,
-      ...(read.etag !== undefined ? { etag: read.etag } : {}),
-      clientKeyAgreementKey,
-      pinnedEpochId: await persistence.epochPins.load({ accountDid }),
-      accountLogPinStore: persistence.logPins,
-      // Adoption is app-side and in band: the unlock-methods registry is
-      // re-sealed to the adopted key first (while this browser's local
-      // copy of the pre-rotation one still exists), then the key is
-      // persisted for the next login, pinned, and swapped into the live
-      // session -- all before the collection fan-out runs against it. A
-      // failed re-seal leaves the session on the pre-rotation keys and no
-      // backstop runs here (the sweep has no post-ceremony adoption step);
-      // the next login's re-seal repair is the mender.
-      onUserKeyAdopted: async ({
-        userKey: adopted,
-        latestEpochId,
-        descriptor: read
-      }) =>
-        await adoptRotatedUserKeyInBand({
-          session,
-          spaceId: pointer.spaceId,
-          accountDid,
-          userKey: adopted,
-          latestEpochId,
-          descriptor: read
-        })
-    })
-  return { userKey: convergedUserKey, rosterDescriptor: convergedDescriptor }
+
+  return { session, userExists, rosterRead, rosterStore: loginRosterStore }
 }
 
 /**
@@ -790,6 +595,8 @@ async function checkUserKeyRosterAtLogin({
  *   login's persistence strategy; the mend and the re-fetch read under its
  *   chain-head pins
  * @param [options.idb] {IDBFactory}
+ * @param options.mends {MendReportAccumulator}   this login's report, which
+ *   the mend's four arms report into from here
  * @returns {Promise<KeyringFetchResult>}   the refreshed hit, or the
  *   original when the re-fetch missed
  */
@@ -799,7 +606,8 @@ async function healUnpromotedRememberedAccount({
   type,
   email,
   persistence,
-  idb
+  idb,
+  mends
 }: {
   found: KeyringFetchResult
   credential: UnlockCredential
@@ -807,6 +615,7 @@ async function healUnpromotedRememberedAccount({
   email?: string
   persistence: BrowserLocalSessionPersistence
   idb?: IDBFactory
+  mends: MendReportAccumulator<FreewalletCeremonyId>
 }): Promise<KeyringFetchResult> {
   const ladderSeed = found.standing?.ladderSeed
   const pointer = found.pointer
@@ -837,6 +646,7 @@ async function healUnpromotedRememberedAccount({
         }
       : {})
   })
+  reportCredentialAnchoredMend({ report, mends })
   // A `reenterRepairShaped` report needs no re-entry glue here: the
   // remembered login continues into the self-enrollment, whose own
   // login-time registry backfill records the passphrase entry the arm left
@@ -1053,6 +863,10 @@ async function loginWithUnlockCredential({
   persistence?: BrowserLocalSessionPersistence
 }): Promise<{ session: Session | null; userExists: boolean }> {
   let derived = credential
+  // One report per login attempt loop, so the routing entries a re-routed
+  // attempt already reported (the stale-record wipe) stay in the report the
+  // session finally carries.
+  const mends = mendReportAccumulator<FreewalletCeremonyId>()
   for (let staleRetries = 0; ; staleRetries++) {
     const routed = await routeUnlockLogin({
       ...(secret !== undefined ? { secret } : {}),
@@ -1075,7 +889,8 @@ async function loginWithUnlockCredential({
         email,
         persistence: routed.persistence,
         credential: routed.credential,
-        popup
+        popup,
+        mends
       })
     }
     derived = routed.credential ?? derived
@@ -1127,7 +942,8 @@ async function loginWithUnlockCredential({
         type,
         email,
         persistence,
-        idb
+        idb,
+        mends
       })
     }
 
@@ -1140,6 +956,7 @@ async function loginWithUnlockCredential({
         provisionStorage,
         persistence,
         idb,
+        mends,
         ...(loginCredential
           ? {
               loginCredential: {
@@ -1208,7 +1025,8 @@ async function sessionFromKeyringHit({
   provisionStorage = true,
   persistence,
   idb,
-  loginCredential
+  loginCredential,
+  mends
 }: {
   found: KeyringFetchResult
   type: 'passphrase' | 'passkey'
@@ -1218,6 +1036,7 @@ async function sessionFromKeyringHit({
   persistence: BrowserLocalSessionPersistence
   idb?: IDBFactory
   loginCredential?: { secret: string | Uint8Array; derived?: UnlockCredential }
+  mends: MendReportAccumulator<FreewalletCeremonyId>
 }): Promise<{ session: Session | null; userExists: boolean }> {
   // The three-way record routing, keyed on `userKey` presence: a record
   // holding a user key proceeds through the detector and the ordinary login;
@@ -1280,7 +1099,19 @@ async function sessionFromKeyringHit({
         'Stale client-key record: bound to a different account than the unlock record points at; wiping its residue and treating this browser as not remembered',
         { unlockSpaceId: found.unlockSpaceId }
       )
-      await wipeStaleClientResidue({ found, idb })
+      const wiped = await wipeStaleClientResidue({ found, idb })
+      mends.report({
+        invariant: 'client-key-record-matches-the-pointed-account',
+        outcome:
+          wiped.failed.length + wiped.unverified.length > 0
+            ? 'partial'
+            : 'clean',
+        // The Space ids ride the wipe's own logger; a report carries counts.
+        detail: {
+          failed: wiped.failed.length,
+          unverified: wiped.unverified.length
+        }
+      })
       throw new StaleClientKeyRecordError()
     }
   }
@@ -1294,35 +1125,103 @@ async function sessionFromKeyringHit({
   // published-then-removed branch hands the genuine removal back to the same
   // wipe).
   const pinStore = persistence.logPins
-  const detectorLog =
+  const detected =
     found.clientKeys && !pendingResume
       ? await assertClientStillEnrolled({ found, pinStore, idb })
       : undefined
+  const detectorLog = detected === 'unverified' ? undefined : detected
+  if (detectorLog) {
+    // The detector refuses by throwing, so a return means the predicate
+    // holds and nothing was mended.
+    mends.report({
+      invariant: 'this-browser-is-still-an-enrolled-client',
+      outcome: 'noop'
+    })
+  } else if (detected === 'unverified') {
+    // The detector stood down on a log it could not verify, which is a
+    // different state from one it never ran on.
+    mends.report({
+      invariant: 'this-browser-is-still-an-enrolled-client',
+      outcome: 'refused',
+      detail: { reason: 'unverified' }
+    })
+  }
   const enrolled = !found.clientKeys
     ? await selfEnrollStandingClient({ found, pinStore })
     : pendingResume
       ? await resumePendingEnrollment({ found, pinStore, idb })
       : undefined
+  if (pendingResume) {
+    // Both entries below are graded from what the resume RETURNED rather
+    // than from the record's ceremony marker: a spend resume's two
+    // best-effort stages are swallowed on failure, and its record
+    // completion is gated on the show-once confirm the returned prompt
+    // carries. The arms that finish no ceremony -- the removed-client wipe
+    // and the two discards -- throw out of the resume, so this block never
+    // runs on them and neither entry is reported at all.
+    const spendResume = (
+      enrolled as { spendResume?: RecoverySpendResumeReport } | undefined
+    )?.spendResume
+    // The pending carrier clears inside the spend's confirm-gated
+    // completion, so a record still owing that confirm is still pending.
+    const confirmOwed = spendResume?.completion === 'confirm-pending'
+    mends.report({
+      invariant: 'no-client-key-record-stays-pending',
+      outcome: confirmOwed ? 'partial' : 'clean',
+      ...(confirmOwed ? { detail: { owed: 'save-code-confirm' } } : {})
+    })
+    if (found.clientKeys?.pending?.ceremony === 'recovery-spend') {
+      // `clean` only where the resume observed every stage landed. The
+      // confirm-gated completion cannot report the closing entry itself:
+      // `session.mends` resolves from an accumulator this login settles at
+      // the end of the mender block, and a report from `complete()` -- a
+      // user click later -- would land in no report at all. So `partial`
+      // at login is the honest outcome, and the next login's resume grades
+      // the invariant again.
+      const outstanding =
+        !spendResume ||
+        confirmOwed ||
+        spendResume.standing === 'pending' ||
+        spendResume.registry === 'skipped'
+      mends.report({
+        invariant: 'recovery-spend-is-completed',
+        // No spend stage ran at all: the marker says the record was
+        // spend-written, and the resume reported nothing.
+        outcome: !spendResume ? 'noop' : outstanding ? 'partial' : 'clean',
+        ...(spendResume
+          ? {
+              detail: {
+                completion: spendResume.completion,
+                standing: spendResume.standing,
+                registry: spendResume.registry
+              }
+            }
+          : {})
+      })
+    }
+  }
   const clientKeys = enrolled?.clientKeys ?? found.clientKeys!
   const persistClientKeys =
     enrolled?.persistClientKeys ?? found.persistClientKeys
-  const { session, userExists, rosterRead } = await initSessionFromSeed({
-    seed: clientKeys.clientSeed,
-    userKey: clientKeys.userKey,
-    webvhUpdateKeys: clientKeys.webvhUpdateKeys,
-    persistClientKeys,
-    accountPointer: found.pointer,
-    email: email ?? found.email,
-    popup,
-    provisionStorage,
-    persistence,
-    idb,
-    // The detector above verified this account's log for the same pointer,
-    // moments ago and freshest in this sequence: the login-time roster read
-    // resolves its controller view from that head rather than fetching and
-    // verifying the same `did.jsonl` again.
-    ...(detectorLog ? { accountLog: detectorLog.log } : {})
-  })
+  const { session, userExists, rosterRead, rosterStore } =
+    await initSessionFromSeed({
+      seed: clientKeys.clientSeed,
+      userKey: clientKeys.userKey,
+      webvhUpdateKeys: clientKeys.webvhUpdateKeys,
+      persistClientKeys,
+      accountPointer: found.pointer,
+      email: email ?? found.email,
+      popup,
+      provisionStorage,
+      persistence,
+      idb,
+      mends,
+      // The detector above verified this account's log for the same pointer,
+      // moments ago and freshest in this sequence: the login-time roster read
+      // resolves its controller view from that head rather than fetching and
+      // verifying the same `did.jsonl` again.
+      ...(detectorLog ? { accountLog: detectorLog.log } : {})
+    })
   // The detector above already verified this account's log; seed the memo
   // with it so the tails below read it instead of verifying it again.
   if (detectorLog && found.pointer?.did) {
@@ -1398,327 +1297,41 @@ async function sessionFromKeyringHit({
     }
   }
 
-  // Every registry pass below rides `session.registryReady` -- one ordered
-  // promise chain seeded behind storage provisioning, kept OFF
-  // `session.storageReady` so the login pages can navigate as soon as the
-  // collections are provisioned while the single total order among the
-  // registry writers is preserved (FW-300). The chain starts by folding in
-  // the login's user key sweep, not merely provisioning: the sweep's roster
-  // convergence may rotate the user key and re-seal the registry to the
-  // fresh one, and a registry read-modify-write racing that re-seal would
-  // rewrite the record under the pre-rotation keys and undo it within one
-  // login. The seed propagates a provisioning rejection, so every stage is
-  // skipped when provisioning itself failed -- the login page surfaces that
-  // failure and the session is abandoned, and none of the chain's registry,
-  // bridge, or promotion writes are wanted on it. The trailing catch after
-  // the last append keeps `registryReady` settling for its awaiters. The
-  // sweep promise never rejects (it resolves null on failure), so the fold
-  // only orders the two, and a session with no sweep chains behind nothing.
-  if (session.storageReady) {
-    session.registryReady = session.storageReady.then(
-      async () => void (await session.userKeySweep)
-    )
+  // The login-time mender block: every pass below is a registration of the
+  // remembered chain's list, run by the mender runner in registration order
+  // (`src/session/menders/`). The runner owns the try, warn, and skip
+  // discipline once. Its seed is storage provisioning, whose failure aborts
+  // the block: the login page surfaces that failure and the session is
+  // abandoned, and none of the block's registry, bridge, or promotion
+  // writes is wanted on it. `session.registryReady` settles when the
+  // registry-writing registrations have reported, and `session.mends` when
+  // the whole block has, the app-key sweep and the annex GC included.
+  // No provisioning, no block: the signup existence probe logs in with
+  // `provisionStorage: false` and discards the session at once, and none of
+  // the block's registry, bridge, or promotion writes is wanted on its
+  // behalf.
+  if (!session.storageReady) {
+    mends.settle()
+    return { session, userExists }
   }
-
-  // The four passes both compositions share, in the one order they depend
-  // on: the re-seal repair (a registry left sealed to a superseded user key
-  // generation, re-opened from this login's roster escrow -- first, because
-  // every writer after it reads the record), the torn-retirement repair and
-  // the bare-passkey rebuild (each settles which credential an entry names),
-  // and the registry backfill (which only refreshes fields on whatever they
-  // left standing). The stale-seal pass is skipped when the login's roster
-  // read did not succeed: that read is where the superseded generations come
-  // from. The remote-direct popup is excluded, as it always was. A transient
-  // login runs the same four on the chain it builds in `transientLogin.ts`;
-  // this site is the remembered path's.
-  chainRegistryStage({
-    session,
-    when: !popup,
-    warn: 'Could not run the login-time registry passes; the next login retries',
-    run: () =>
-      runSharedRegistryPasses({
-        session,
-        found,
-        ...(rosterRead ? { rosterRead } : {}),
-        ...(loginCredential ? { credential: loginCredential } : {})
-      })
-  })
-  // The standing-delegation self-refresh: a standing credential's own login
-  // re-mints its bridge delegation -- and the annex-Space sibling, where
-  // the record carries one -- when either is stale on either axis: expired
-  // or inside the renewal window (the same annual clock and shared predicate
-  // as the recovery delegations), or its signer no longer listed under
-  // `capabilityDelegation` in the verified account document (the relation a
-  // delegation proof verifies against). A self-enrollment leaves every
-  // ladder VM standing, so the rot this predicate catches comes from
-  // elsewhere -- a credential retirement strikes its own ladder VM. One
-  // pass reseals both. Best-effort, behind provisioning.
-  const rebindStandingRecord = found.rebindStandingRecord
-  const standingDelegation = found.standing?.delegation
-  const standingDelegatedClients = found.standing?.delegatedClients
-  const standingClientDid = found.standingClient?.clientDid
-  // This credential's key-agreement multibase, the identity every registry
-  // write below matches the entry on beside its unlock Space id.
-  const standingKeyAgreementKeyMultibase =
-    found.standingClient?.keyAgreementKeyMultibase
-  {
-    const unlockSpaceId = found.unlockSpaceId
-    chainRegistryStage({
+  const { context, refreshContext } = blockCeremonyContext({ session })
+  startLoginMenderBlock({
+    accumulator: mends,
+    route: { popup },
+    deps: {
+      chain: 'remembered',
       session,
-      warn: 'Could not refresh the expiring standing delegations; the next login retries',
-      run: async () => {
-        const pointer = session.profile.accountPointer
-        if (
-          !rebindStandingRecord ||
-          !standingDelegation ||
-          !standingClientDid ||
-          !pointer ||
-          !isWebvhDid(pointer.did)
-        ) {
-          return
-        }
-        const expiring =
-          zcapExpiring({
-            expires: zcapExpires(standingDelegation)
-          }) ||
-          (!!standingDelegatedClients &&
-            zcapExpiring({
-              expires: zcapExpires(standingDelegatedClients)
-            }))
-        if (!expiring) {
-          const { doc } = await verifiedAccountLog({
-            profile: session.profile,
-            pointer
-          })
-          const rotted = (member: IZcap) =>
-            !delegationKeyInDocument({
-              doc: doc as PublishedKeyDocument,
-              delegationKeyId: delegationProofKeyId(member)
-            })
-          if (
-            !rotted(standingDelegation) &&
-            (!standingDelegatedClients || !rotted(standingDelegatedClients))
-          ) {
-            return
-          }
-        }
-        const delegation = await delegateLogWrite({
-          zcapClient: session.profile.zcapClient,
-          pointer,
-          recoveryClientDid: standingClientDid
-        })
-        // The sibling reseals in the same pass; its target auxiliary Space
-        // id rides in the old delegation (the id's one carrier).
-        let delegatedClients
-        if (standingDelegatedClients) {
-          const clientAnnexSpaceId = delegatedClientsDelegationSpaceId({
-            delegation: standingDelegatedClients
-          })
-          if (clientAnnexSpaceId) {
-            delegatedClients = await mintDelegatedClientsDelegation({
-              zcapClient: session.profile.zcapClient,
-              wasServerUrl: pointer.host,
-              clientAnnexSpaceId,
-              controller: standingClientDid
-            })
-          }
-        }
-        await rebindStandingRecord({
-          delegation,
-          ...(delegatedClients ? { delegatedClients } : {})
-        })
-        // The live session acts through the members it carries, so the
-        // refreshed ones replace the stale pair there too (a forget run
-        // later this session signs through the delegation that verifies).
-        if (session.profile.standingUnlock) {
-          session.profile.standingUnlock = {
-            ...session.profile.standingUnlock,
-            delegation,
-            ...(delegatedClients ? { delegatedClients } : {})
-          }
-        }
-        await refreshStandingDelegationFields({
-          session,
-          unlockSpaceId,
-          // The entry may still record an earlier credential's standing configuration (a
-          // pending retirement); these members are this credential's.
-          ...(standingKeyAgreementKeyMultibase
-            ? {
-                keyAgreementKeyMultibase: standingKeyAgreementKeyMultibase
-              }
-            : {}),
-          delegationKeyId: delegationProofKeyId(delegation),
-          delegationExpires: zcapExpires(delegation),
-          ...(delegatedClients
-            ? {
-                delegatedClientsKeyId: delegationProofKeyId(delegatedClients),
-                delegatedClientsExpires: zcapExpires(delegatedClients)
-              }
-            : {})
-        })
-      }
-    })
-  }
-
-  // The login credential's ladder seed, shared by the three best-effort
-  // ceremonies below (the ladder-rung refresh, the generation-delegation
-  // heal, and the annex GC sweep) -- already stamped on `profile.ladderSeed`
-  // above.
-  const ladderSeed = found.standing?.ladderSeed
-
-  // After a self-enrollment climbed the update-key ladder, refresh the
-  // registry entry's recorded rung to the freshly committed one, so the
-  // revocation edit's latent-hash attribution stays answerable. Best-effort:
-  // a stale rung only makes that attribution fail closed later, never
-  // silently misattribute.
-  const enrolledLadderSeed = enrolled ? ladderSeed : undefined
-  {
-    const unlockSpaceId = found.unlockSpaceId
-    chainRegistryStage({
-      session,
-      warn: 'Could not refresh the recorded ladder rung after self-enrolling; a later disconnect attribution fails closed instead',
-      run: async () => {
-        const pointer = session.profile.accountPointer
-        if (!enrolledLadderSeed || !pointer || !isWebvhDid(pointer.did)) {
-          return
-        }
-        const published = await verifiedAccountLog({
-          profile: session.profile,
-          pointer
-        })
-        const { rung, state } = await attributeLadderRung({
-          ladderSeed: enrolledLadderSeed,
-          published
-        })
-        if (state === 'committed') {
-          await refreshStandingDelegationFields({
-            session,
-            unlockSpaceId,
-            ...(standingKeyAgreementKeyMultibase
-              ? {
-                  keyAgreementKeyMultibase: standingKeyAgreementKeyMultibase
-                }
-              : {}),
-            updateKeyMultibase: rung.keyMultibase
-          })
-        }
-      }
-    })
-  }
-
-  // The did:webvh heal path: an account whose signup-time backfill never ran
-  // (a KMS or WAS hiccup -- the pointer still names a did:key) re-attempts
-  // the pointer backfill and controller promotion behind provisioning, which
-  // is where `ensureDidWebvh` publishes (or adopts) the log and sets
-  // `profile.didWebvh`. Signup was previously the ONLY site that ran these,
-  // so one transient provisioning failure left the account permanently
-  // unpromoted -- enrollment, recovery codes, and client revocation all
-  // refused forever. Best-effort like the signup original: a failed heal
-  // warns and the next login retries from durable state.
-  const persistAccountPointer = found.persistAccountPointer
-  {
-    const staleServerPointer = found.pointer
-    chainRegistryStage({
-      session,
-      warn: 'Could not backfill the did:webvh pointer and promote the controller; the next login retries',
-      run: async () => {
-        if (
-          !persistAccountPointer ||
-          !staleServerPointer ||
-          isWebvhDid(staleServerPointer.did)
-        ) {
-          return
-        }
-        const did = session.profile.didWebvh?.did
-        if (!did || !isWebvhDid(did)) {
-          return
-        }
-        const fullPointer = { ...staleServerPointer, did }
-        await persistAccountPointer(fullPointer)
-        session.profile.accountPointer = fullPointer
-        await session.storage.ensurePromotedController({
-          profile: session.profile
-        })
-      }
-    })
-  }
-
-  // The generation-delegation self-heal: the pointed generation's embedded
-  // delegation is renewed when it is expiring OR its signer has left the
-  // verified account document -- the rot a credential retirement's
-  // ladder-VM strike inflicts on a ladder-VM-signed delegation, and the
-  // standing backstop for a revocation cascade whose own re-mint stage was
-  // skipped. Signed by the login credential's static
-  // annex rung 0; a healthy delegation is one no-op read. Best-effort: a
-  // rung the generation does not commit (a credential bound mid-generation)
-  // skips quietly, everything else warns and the next login retries.
-  chainRegistryStage({
-    session,
-    when: !popup,
-    warn: 'Could not heal the generation delegation; the next login retries',
-    run: async () => {
-      const pointer = session.profile.accountPointer
-      if (!ladderSeed || !pointer || !isWebvhDid(pointer.did)) {
-        return
-      }
-      const reach = await pointedClientAnnexReach({ session, pointer })
-      if (reach === null) {
-        return
-      }
-      try {
-        await ensureGenerationDelegation({
-          session,
-          pointer,
-          reach,
-          ladderSeed,
-          accountDoc: reach.doc as PublishedKeyDocument
-        })
-      } catch (err) {
-        // A rung the generation does not commit (a credential bound
-        // mid-generation) skips quietly; everything else rides the stage's
-        // own warn.
-        if (
-          (err as { name?: string }).name !== 'ClientAnnexRungUncommittedError'
-        ) {
-          throw err
-        }
-      }
+      found,
+      context,
+      refreshContext,
+      keystorePromotion: {},
+      selfEnrolled: !!enrolled,
+      ...(rosterRead ? { rosterRead } : {}),
+      ...(rosterStore ? { rosterStore } : {}),
+      ...(loginCredential ? { loginCredential } : {})
     }
   })
 
-  // The annex GC sweep: the quarterly generation swap (when due and the
-  // pointed generation is GC-quiet) plus the collect fan-out over every
-  // non-pointed `gen-` collection -- revoke, digest, delete. Chained behind
-  // the registryReady tail (so a sibling re-mint above lands first),
-  // remembered-only for free (`registryReady` only exists then), and
-  // strictly best-effort like the sweeps beside it: a failed pass never
-  // fails the login, and the next remembered login resumes from durable
-  // state alone. The remote-direct popup deliberately does not run it: a
-  // popup visit is a constrained, latency-sensitive context, and the next
-  // top-level remembered login sweeps the same durable state.
-  if (session.registryReady && !popup) {
-    session.clientAnnexGcSweep = session.registryReady
-      .catch(() => {})
-      .then(() =>
-        sweepClientAnnexGenerations({
-          session,
-          ...(ladderSeed !== undefined ? { ladderSeed } : {})
-        })
-      )
-      .catch((err): null => {
-        log.warn('The annex GC sweep failed', { err })
-        return null
-      })
-  }
-
-  // Settle the chain for its awaiters: a provisioning rejection skipped
-  // every stage above (the rejection propagated through their `.then`s),
-  // and this catch keeps `registryReady` itself from rejecting, so a gated
-  // ceremony on an abandoned session resolves instead of hanging on an
-  // unsettled rejection.
-  if (session.registryReady) {
-    session.registryReady = session.registryReady.catch(() => {})
-  }
   return { session, userExists }
 }
 

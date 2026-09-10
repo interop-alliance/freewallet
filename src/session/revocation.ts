@@ -44,7 +44,13 @@ import {
 } from '@interop/wallet-core/webvh'
 import { revokeAccountClient } from '@interop/wallet-core/clients'
 import type { GenerationDelegationRemint } from '@interop/wallet-core/clients'
+import {
+  errorNameOf,
+  type MendReport,
+  type MendReportEntry
+} from '@interop/wallet-core/menders'
 import type { Session } from '@/types/auth'
+import type { FreewalletCeremonyId } from '@/session/ceremonies'
 import {
   clientAnnexReachFor,
   ensureGenerationDelegation,
@@ -80,12 +86,52 @@ export type { RevokedClientKeys } from '@interop/wallet-core/webvh'
  * What a completed revocation cascade reports: whether the roster actually
  * rotated on this run (a naive re-run of an already-complete revocation
  * reports `false` everywhere), the per-collection outcomes, and the
- * generation-delegation re-mint.
+ * ceremony-tail mend report -- one entry, the generation delegation's: the
+ * enrolled branch's post-entry re-mint stage, or the ladder branch's
+ * pre-entry replacement. The entry carries no registration, so the caller
+ * reports it (`reportCeremonyTail`).
  */
 export interface RevocationOutcome {
   rotated: boolean
   collections: UserKeyCascadeResult
-  generation: GenerationDelegationRemint
+  mended: MendReport<FreewalletCeremonyId>
+}
+
+/**
+ * The cascade's one ceremony-tail mend entry: what this run's generation
+ * delegation stage made of `generation-delegation-is-current`. A renewal
+ * reports `clean`, a delegation the stage found healthy `noop`, a stage that
+ * could not run `refused` with its reason, and a caught failure `failed`
+ * with the error's class name (never its message, which may carry a DID or a
+ * Space id).
+ *
+ * @param remint {object}   the stage's report -- the enrolled branch's
+ *   re-mint or the ladder branch's pre-entry replacement -- carrying the
+ *   error class name this module's own catch recorded
+ * @returns {MendReportEntry<FreewalletCeremonyId>}
+ */
+function generationDelegationEntry(
+  remint: GenerationDelegationRemint & { errorName?: string }
+): MendReportEntry<FreewalletCeremonyId> {
+  const reported = {
+    invariant: 'generation-delegation-is-current',
+    ceremonies: ['client-revocation']
+  } as const
+  if (remint.skipped === 'failed') {
+    return {
+      ...reported,
+      outcome: 'failed',
+      ...(remint.errorName ? { errorName: remint.errorName } : {})
+    }
+  }
+  if (remint.skipped) {
+    return {
+      ...reported,
+      outcome: 'refused',
+      detail: { reason: remint.skipped }
+    }
+  }
+  return { ...reported, outcome: remint.renewed ? 'clean' : 'noop' }
 }
 
 /**
@@ -213,6 +259,12 @@ export async function revokeEnrolledClient({
   // and again after, so neither a concurrent surface nor a later one sees the
   // revoked client still listed.
   invalidateVerifiedLog({ profile: session.profile })
+  // What this branch's own pre-entry replacement made of
+  // `generation-delegation-is-current`. The cascade below runs no re-mint
+  // stage on the ladder branch, so this stage is what the ceremony-tail
+  // entry reports there.
+  let ladderRenewal:
+    (GenerationDelegationRemint & { errorName?: string }) | undefined
   if (ladder) {
     // The rule for a struck signer: the removal entry takes the revoked
     // client's account key out of the document, and on an account whose
@@ -221,12 +273,31 @@ export async function revokeEnrolledClient({
     // by the acting credential's ladder VM, which stands throughout, and is
     // adopted into the live session before the entry lands. A delegation the
     // policy leaves standing costs one read.
+    const invoked = session.profile.invocationCapability?.id
     try {
-      await renewTransientGenerationDelegation({
+      const replacement = await renewTransientGenerationDelegation({
         session,
         retiringKeyMultibases: [client.signingKeyMultibase]
       })
+      // The renewal resolves with the delegation the generation now embeds:
+      // an id this visit was not already invoking is one it minted, the id it
+      // was invoking is one the policy left standing, and `null` is a
+      // replacement it did not install -- a session pointing at no annex
+      // generation, or a renewal that failed inside (it logs its own reason
+      // there rather than throwing).
+      if (replacement) {
+        ladderRenewal = { renewed: replacement.id !== invoked }
+      } else if ('clientAnnex' in session.profile.persistence) {
+        ladderRenewal = { renewed: false, skipped: 'failed' }
+      } else {
+        ladderRenewal = { renewed: false, skipped: 'no-pointer' }
+      }
     } catch (err) {
+      ladderRenewal = {
+        renewed: false,
+        skipped: 'failed',
+        errorName: errorNameOf(err)
+      }
       log.warn(
         'Could not replace the generation delegation before the removal ' +
           "entry; the visit may lose its authority when the revoked client's " +
@@ -353,10 +424,18 @@ export async function revokeEnrolledClient({
     log.warn('Could not record the client-revocation activity', { err })
   }
 
+  // The ladder branch passes no re-mint closure (it replaced the delegation
+  // before the removal entry instead), so the cascade reports no stage there
+  // and the pre-entry replacement's own report stands in its place. The
+  // fallback, neither branch reporting a stage, is an account with no annex
+  // generation to renew.
+  const remint: GenerationDelegationRemint & { errorName?: string } =
+    result.generation ??
+      ladderRenewal ?? { renewed: false, skipped: 'no-pointer' }
   return {
     rotated: result.rotated,
     collections: result.collections,
-    generation: result.generation ?? { renewed: false, skipped: 'no-pointer' }
+    mended: [generationDelegationEntry(remint)]
   }
 }
 
@@ -383,7 +462,9 @@ export async function revokeEnrolledClient({
  * @param options.session {Session}
  * @param options.document {PublishedKeyDocument}   the post-edit account
  *   document, from the cascade's stage 1
- * @returns {Promise<GenerationDelegationRemint>}
+ * @returns {Promise<GenerationDelegationRemint & { errorName?: string }>}
+ *   the stage's report, carrying the caught error's class name so the
+ *   cascade's mend entry can report it
  */
 async function remintGenerationDelegation({
   session,
@@ -391,7 +472,7 @@ async function remintGenerationDelegation({
 }: {
   session: Session
   document: PublishedKeyDocument
-}): Promise<GenerationDelegationRemint> {
+}): Promise<GenerationDelegationRemint & { errorName?: string }> {
   try {
     const pointer = session.profile.accountPointer
     const reach =
@@ -422,6 +503,10 @@ async function remintGenerationDelegation({
       'Could not re-mint the generation delegation after the revocation; the next login retries',
       { err }
     )
-    return { renewed: false, skipped: 'failed' }
+    return {
+      renewed: false,
+      skipped: 'failed',
+      errorName: errorNameOf(err)
+    }
   }
 }

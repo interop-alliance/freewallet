@@ -152,7 +152,9 @@ describe('sweepClientAnnexGenerations -- the preconditions', () => {
         }
       })
     })
-    await expect(sweepClientAnnexGenerations({ session })).resolves.toBeNull()
+    await expect(sweepClientAnnexGenerations({ session })).resolves.toEqual(
+      expect.objectContaining({ skipped: expect.any(String) })
+    )
     expect(runClientAnnexGc).not.toHaveBeenCalled()
     expect(enrolledCeremonyContext).not.toHaveBeenCalled()
   })
@@ -160,7 +162,9 @@ describe('sweepClientAnnexGenerations -- the preconditions', () => {
   it('skips a session that cannot act as the account', async () => {
     vi.mocked(enrolledCeremonyContext).mockReturnValue(null)
     const session = makeSession()
-    await expect(sweepClientAnnexGenerations({ session })).resolves.toBeNull()
+    await expect(sweepClientAnnexGenerations({ session })).resolves.toEqual(
+      expect.objectContaining({ skipped: expect.any(String) })
+    )
     expect(runClientAnnexGc).not.toHaveBeenCalled()
     expect(verifiedAccountLog).not.toHaveBeenCalled()
   })
@@ -172,7 +176,9 @@ describe('sweepClientAnnexGenerations -- the preconditions', () => {
       clientWebvhKeys: CLIENT_WEBVH_KEYS
     } as never)
     const session = makeSession()
-    await expect(sweepClientAnnexGenerations({ session })).resolves.toBeNull()
+    await expect(sweepClientAnnexGenerations({ session })).resolves.toEqual(
+      expect.objectContaining({ skipped: expect.any(String) })
+    )
     expect(runClientAnnexGc).not.toHaveBeenCalled()
     expect(verifiedAccountLog).not.toHaveBeenCalled()
   })
@@ -185,7 +191,9 @@ describe('sweepClientAnnexGenerations -- the preconditions', () => {
       nextKeyHashes: []
     } as never)
     const session = makeSession()
-    await expect(sweepClientAnnexGenerations({ session })).resolves.toBeNull()
+    await expect(sweepClientAnnexGenerations({ session })).resolves.toEqual(
+      expect.objectContaining({ skipped: expect.any(String) })
+    )
     expect(verifiedAccountLog).toHaveBeenCalledWith({
       profile: session.profile,
       pointer: POINTER
@@ -200,9 +208,9 @@ describe('sweepClientAnnexGenerations -- the pass', () => {
     const session = makeSession({ persistence })
     const ladderSeed = new Uint8Array(32).fill(7)
 
-    const report = await sweepClientAnnexGenerations({ session, ladderSeed })
+    const swept = await sweepClientAnnexGenerations({ session, ladderSeed })
 
-    expect(report).toBe(REPORT)
+    expect(swept).toEqual({ report: REPORT })
     expect(runClientAnnexGc).toHaveBeenCalledTimes(1)
     const options = gcOptions()
     expect(options.wasServerUrl).toBe(POINTER.host)

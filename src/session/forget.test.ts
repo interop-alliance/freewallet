@@ -467,16 +467,18 @@ describe('assertClientStillEnrolled (the forgotten-browser detector)', () => {
     expect(deleted).toEqual([])
   })
 
-  it('skips detection when the log cannot be verified', async () => {
+  it('reports the stand-down when the log cannot be verified', async () => {
     const { deleted } = stubIndexedDb({ names: ['x-wallet-db'] })
     stubLocalStorage({ entries: {} })
     vi.mocked(verifyAccountLog).mockRejectedValue(new Error('network down'))
+    // The login distinguishes a detector that stood down from one that
+    // never ran, so the skip carries a value of its own.
     await expect(
       assertClientStillEnrolled({
         pinStore: memoryResourceLogPinStore(),
         found: hit()
       })
-    ).resolves.toBeUndefined()
+    ).resolves.toBe('unverified')
     expect(deleted).toEqual([])
   })
 

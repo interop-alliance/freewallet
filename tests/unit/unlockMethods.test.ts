@@ -144,8 +144,24 @@ vi.mock('@/session/credentialRotation', () => ({
   }),
   rotateOffUnlockCredential: vi.fn(async () => {
     wasState.calls.push('rotateOffUnlockCredential')
-    return { rotated: true, collections: { outcomes: {}, failed: [] } }
+    return {
+      rotated: true,
+      collections: { outcomes: {}, failed: [] },
+      // The retirement's ceremony-tail entry, which the caller reports.
+      mended: [
+        {
+          invariant: 'retired-credential-leaves-no-annex-inventory',
+          ceremonies: ['unlock-credential-rotation'],
+          outcome: 'clean',
+          detail: { action: 'struck' }
+        }
+      ]
+    }
   })
+}))
+
+vi.mock('@/session/menders/ceremonyTail', () => ({
+  reportCeremonyTail: vi.fn()
 }))
 
 vi.mock('@/lib/passkey', () => ({
@@ -189,6 +205,7 @@ import {
 import { RecordEnvelopeDecryptError } from '@/session/recordEnvelope'
 import { deleteUnlockSpace } from '@interop/wallet-core/keyring'
 import { rotateOffUnlockCredential } from '@/session/credentialRotation'
+import { reportCeremonyTail } from '@/session/menders/ceremonyTail'
 import { browserLocalSessionPersistence } from '@/session/persistence'
 import { rootCapabilityId } from '@interop/was-client/paths'
 import { DELETION_ZCAP_TTL_MS } from '@interop/wallet-core/clientAnnex'
@@ -294,10 +311,9 @@ async function makeSession(idb?: IDBFactory): Promise<Session> {
     handle: 'test-data',
     keyName: 'test-data-key'
   })
-  const keyAgreementKey =
-    X25519KeyAgreementKey2020.fromEd25519VerificationKey2020({
-      keyPair: agent.getVerificationKeyPair()
-    })
+  const keyAgreementKey = X25519KeyAgreementKey2020.fromEd25519(
+    agent.getVerificationKeyPair()
+  )
   const keyResolver = async () => ({
     id: keyAgreementKey.id,
     type: keyAgreementKey.type,
@@ -1521,9 +1537,23 @@ describe('the credential rotation inside a revocation', () => {
     expect(vi.mocked(rotateOffUnlockCredential)).toHaveBeenCalledWith(
       expect.objectContaining({ method: entry, verb: 'removing a passkey' })
     )
+    // The retirement's ceremony-tail entry reaches the mender registry's
+    // warn discipline from here, its own call site: it carries no
+    // registration, so no login chain's runner ever reports it.
+    expect(vi.mocked(reportCeremonyTail)).toHaveBeenCalledWith({
+      mended: outcome?.mended
+    })
     expect(outcome).toEqual({
       rotated: true,
-      collections: { outcomes: {}, failed: [] }
+      collections: { outcomes: {}, failed: [] },
+      mended: [
+        {
+          invariant: 'retired-credential-leaves-no-annex-inventory',
+          ceremonies: ['unlock-credential-rotation'],
+          outcome: 'clean',
+          detail: { action: 'struck' }
+        }
+      ]
     })
   })
 
@@ -2550,10 +2580,9 @@ describe('rewrapUnlockMethodsRecord', () => {
       handle: `test-rewrap-${fillByte}`,
       keyName: 'test-rewrap-key'
     })
-    const keyAgreementKey =
-      X25519KeyAgreementKey2020.fromEd25519VerificationKey2020({
-        keyPair: agent.getVerificationKeyPair()
-      })
+    const keyAgreementKey = X25519KeyAgreementKey2020.fromEd25519(
+      agent.getVerificationKeyPair()
+    )
     const keyResolver = async () => ({
       id: keyAgreementKey.id,
       type: keyAgreementKey.type,
@@ -2622,10 +2651,9 @@ describe('the registry compare-and-swap (FW-299)', () => {
       handle: `test-cas-${fillByte}`,
       keyName: 'test-cas-key'
     })
-    const keyAgreementKey =
-      X25519KeyAgreementKey2020.fromEd25519VerificationKey2020({
-        keyPair: agent.getVerificationKeyPair()
-      })
+    const keyAgreementKey = X25519KeyAgreementKey2020.fromEd25519(
+      agent.getVerificationKeyPair()
+    )
     const keyResolver = async () => ({
       id: keyAgreementKey.id,
       type: keyAgreementKey.type,

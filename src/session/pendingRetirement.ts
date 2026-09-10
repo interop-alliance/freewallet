@@ -74,6 +74,7 @@ import {
   isUnclaimedLadderVmRefusal,
   rotateOffUnlockCredential
 } from '@/session/credentialRotation'
+import { reportCeremonyTail } from '@/session/menders/ceremonyTail'
 import { adoptRotatedUserKey } from '@/session/userKeyAdoption'
 import {
   establishStandingUnlock,
@@ -109,30 +110,39 @@ const log = createLogger('fw:session:retirement')
  *   passphrase derives -- the secret and, when the login already ran the
  *   KDF, the derived bundle. Only the establish-first arm consumes it;
  *   absent, that arm skips and every other shape mends as before
- * @returns {Promise<void>}
+ * @param [options.readRegistry] {Function}   the registry read. A login
+ *   block hands its shared read here, so the passes beside this one ride the
+ *   same fetch; omitted, the registry is read directly
+ * @returns {Promise<'noop' | 'repaired'>}   `repaired` when the pass wrote
+ *   the registry (a rebuild, a retirement, or both); `noop` when it read and
+ *   left everything as it stands
  */
 export async function repairTornPassphraseRetirement({
   session,
   found,
-  credential
+  credential,
+  readRegistry
 }: {
   session: Session
   found: KeyringFetchResult
   credential?: { secret?: string | Uint8Array; derived?: UnlockCredential }
-}): Promise<void> {
+  readRegistry?: () => Promise<UnlockMethodsRecord | null>
+}): Promise<'noop' | 'repaired'> {
   if (session.profile.unlockMethod?.type !== 'passphrase') {
-    return
+    return 'noop'
   }
   const context = await accountCeremonyContext({ session })
   const standingClient = found.standingClient
   if (!context || !standingClient) {
-    return
+    return 'noop'
   }
-  const registry = await getUnlockMethods({ session })
+  const registry = await (readRegistry
+    ? readRegistry()
+    : getUnlockMethods({ session }))
   if (!registry) {
     // No registry at all is the backfill's business, not a repair's: it
     // creates the record, and the login after that finds an entry here.
-    return
+    return 'noop'
   }
   const entry = registry.methods.find(
     (method): method is PassphraseUnlockMethod => method.type === 'passphrase'
@@ -148,7 +158,7 @@ export async function repairTornPassphraseRetirement({
     // is the same damage in a narrower form, and is rebuilt here too.
     // Nothing names another credential in either case, so nothing is
     // retired.
-    await rebuildBareEntry({
+    return await rebuildBareEntry({
       session,
       found,
       context,
@@ -157,10 +167,9 @@ export async function repairTornPassphraseRetirement({
       mine,
       ...(credential ? { credential } : {})
     })
-    return
   }
   if (entry.keyAgreementKeyMultibase === mine) {
-    return
+    return 'noop'
   }
   if (!entry.updateKeyMultibase) {
     // An entry naming ANOTHER credential with no recorded rung. The
@@ -170,7 +179,7 @@ export async function repairTornPassphraseRetirement({
     log.warn(
       "The registry's passphrase entry names another credential but records no update key; the repair cannot attribute it, so the entry is left as it stands"
     )
-    return
+    return 'noop'
   }
   // The direction guard. An entry naming another credential is a pending
   // retirement only when the credential logging in is itself standing in the
@@ -200,7 +209,7 @@ export async function repairTornPassphraseRetirement({
     // the same registry and document state but no marker naming it, so it
     // can never establish itself back into an account it was rotated off.
     if (!establishmentMarkerNamesLogin({ entry, found, mine }) || !credential) {
-      return
+      return 'noop'
     }
     // The marker-armed state holds the old credential standing by
     // construction (the change tears before its retirement). A marker over
@@ -218,7 +227,7 @@ export async function repairTornPassphraseRetirement({
       log.warn(
         "The registry's establishment marker names the credential logging in, but the entry's own credential is no longer in the document; the marker is stale and the arm does not fire"
       )
-      return
+      return 'noop'
     }
     // Establish-first is load-bearing: retiring the old credential while
     // the login credential is still plain would leave the account with no
@@ -229,7 +238,7 @@ export async function repairTornPassphraseRetirement({
       credential
     })
     if (!established) {
-      return
+      return 'noop'
     }
     // The establishment extended the account log (and dropped the verified
     // memo), so the still-standing check below reads the post-edit document.
@@ -285,7 +294,13 @@ export async function repairTornPassphraseRetirement({
           ).retryableWithLadderSeed
         }
       )
-      return
+      return 'noop'
+    }
+    // The retirement's ceremony-tail entry, reported from the ceremony's own
+    // call site: it carries no registration, so no login chain's runner ever
+    // sees it.
+    if (outcome) {
+      reportCeremonyTail({ mended: outcome.mended })
     }
     if (outcome?.rotated && outcome.userKey) {
       // Already adopted in band by the retirement's roster tail, so this
@@ -328,6 +343,7 @@ export async function repairTornPassphraseRetirement({
       })
     }
   })
+  return 'repaired'
 }
 
 /**
@@ -444,7 +460,7 @@ async function establishLoginCredential({
  *   multibase
  * @param [options.credential] {object}   the typed login secret, which the
  *   marker-gated establishment consumes
- * @returns {Promise<void>}
+ * @returns {Promise<'noop' | 'repaired'>}
  */
 async function rebuildBareEntry({
   session,
@@ -462,7 +478,7 @@ async function rebuildBareEntry({
   entry?: PassphraseUnlockMethod
   mine: string
   credential?: { secret?: string | Uint8Array; derived?: UnlockCredential }
-}): Promise<void> {
+}): Promise<'noop' | 'repaired'> {
   const { doc } = await verifiedAccountLog({
     profile: session.profile,
     pointer: context.pointer
@@ -477,7 +493,7 @@ async function rebuildBareEntry({
     }))
   ) {
     if (!establishmentMarkerNamesLogin({ entry, found, mine }) || !credential) {
-      return
+      return 'noop'
     }
     established = await establishLoginCredential({
       session,
@@ -485,7 +501,7 @@ async function rebuildBareEntry({
       credential
     })
     if (!established) {
-      return
+      return 'noop'
     }
   }
   log.warn(
@@ -509,6 +525,7 @@ async function rebuildBareEntry({
         standing
       })
   })
+  return 'repaired'
 }
 
 /**
@@ -531,33 +548,41 @@ async function rebuildBareEntry({
  * @param options.session {Session}   the live session of the passkey logging
  *   in
  * @param options.found {KeyringFetchResult}   that credential's keyring hit
- * @returns {Promise<void>}
+ * @param [options.readRegistry] {Function}   the registry read. A login
+ *   block hands its shared read here, so the passes beside this one ride the
+ *   same fetch; omitted, the registry is read directly
+ * @returns {Promise<'noop' | 'repaired'>}   `repaired` when a bare entry was
+ *   rebuilt, `noop` when there was nothing bare to rebuild
  */
 export async function rebuildBarePasskeyEntry({
   session,
-  found
+  found,
+  readRegistry
 }: {
   session: Session
   found: KeyringFetchResult
-}): Promise<void> {
+  readRegistry?: () => Promise<UnlockMethodsRecord | null>
+}): Promise<'noop' | 'repaired'> {
   if (session.profile.unlockMethod?.type !== 'passkey') {
-    return
+    return 'noop'
   }
   const context = await accountCeremonyContext({ session })
   const standingClient = found.standingClient
   if (!context || !standingClient) {
-    return
+    return 'noop'
   }
-  const registry = await getUnlockMethods({ session })
+  const registry = await (readRegistry
+    ? readRegistry()
+    : getUnlockMethods({ session }))
   if (!registry) {
-    return
+    return 'noop'
   }
   const entry = registry.methods.find(
     (method): method is PasskeyUnlockMethod =>
       method.type === 'passkey' && method.unlockSpaceId === found.unlockSpaceId
   )
   if (!entry || entry.keyAgreementKeyMultibase) {
-    return
+    return 'noop'
   }
   const { doc } = await verifiedAccountLog({
     profile: session.profile,
@@ -571,7 +596,7 @@ export async function rebuildBarePasskeyEntry({
       published: 'verbatim'
     }))
   ) {
-    return
+    return 'noop'
   }
   log.warn(
     "The registry's entry for the passkey logging in is bare; rebuilding it from that credential"
@@ -588,6 +613,7 @@ export async function rebuildBarePasskeyEntry({
         entry: rebuilt
       })
   })
+  return 'repaired'
 }
 
 /**

@@ -60,7 +60,10 @@ vi.mock('@/session/initSession', () => ({
   initSessionFromSeed: vi.fn()
 }))
 
-vi.mock('@/session/credentialAnchoredGenesis', () => ({
+vi.mock('@/session/credentialAnchoredGenesis', async importOriginal => ({
+  ...(await importOriginal<
+    typeof import('@/session/credentialAnchoredGenesis')
+  >()),
   mendCredentialAnchoredAccount: vi.fn(async () => ({ reenter: false })),
   passphraseRegistryUpsertHook: vi.fn(() => vi.fn())
 }))
@@ -128,6 +131,8 @@ import {
   refreshTransientManageCapability
 } from '@/session/unlockMethods'
 import { initSessionFromSeed } from '@/session/initSession'
+import { mendReportAccumulator } from '@interop/wallet-core/menders'
+import type { FreewalletCeremonyId } from '@/session/ceremonies'
 import type { TransientKeyringFetchResult } from '@/session/keyring'
 import { transientSessionStores } from '@/session/persistence'
 import { verifiedAccountLog } from '@/session/verifiedLog'
@@ -932,19 +937,108 @@ describe('transientSessionFromKeyringHit -- the client-annex generation-readines
    */
   async function runComposition(found = makeFound()) {
     const persistence = transientSessionStores()
+    const mends = mendReportAccumulator<FreewalletCeremonyId>()
     const { session } = await transientSessionFromKeyringHit({
       found,
       type: 'passphrase',
-      persistence
+      persistence,
+      mends
     })
     return {
       session,
       persistence,
       found,
       ensureCall: vi.mocked(ensureCredentialClientAnnexGeneration).mock
-        .calls[0]![0]
+        .calls[0]![0],
+      // The grade each routing entry reported, keyed by invariant id.
+      grades: Object.fromEntries(
+        mends.entries().map(entry => [entry.invariant, entry.outcome])
+      ) as Record<string, string>
     }
   }
+
+  /**
+   * Runs the composition and returns the grades alone.
+   *
+   * @param [found] {TransientKeyringFetchResult}
+   * @returns {Promise<Record<string, string>>}
+   */
+  async function reportedGrades(found = makeFound()) {
+    return (await runComposition(found)).grades
+  }
+
+  it('grades a healthy visit as a no-op on every routing entry', async () => {
+    // The ensure always hands back a generation delegation and the record's
+    // own bridge and sibling, so a visit that mended nothing must report
+    // `noop` -- not `clean` off a member that is always set.
+    primeHappyPath()
+    expect(await reportedGrades()).toMatchObject({
+      'annex-generation-is-reachable': 'noop',
+      'standing-delegations-verify-under-the-current-document': 'noop',
+      'generation-delegation-is-current': 'noop'
+    })
+  })
+
+  it('grades a renewed generation delegation as a mend', async () => {
+    primeHappyPath()
+    vi.mocked(ensureCredentialClientAnnexGeneration).mockResolvedValue(
+      ensureOutcome({
+        delegationRenewed: true,
+        generationDelegation: FRESH_DELEGATION
+      }) as never
+    )
+    const grades = await reportedGrades()
+    expect(grades['generation-delegation-is-current']).toBe('clean')
+    // Nothing else was mended.
+    expect(grades['annex-generation-is-reachable']).toBe('noop')
+    expect(
+      grades['standing-delegations-verify-under-the-current-document']
+    ).toBe('noop')
+  })
+
+  it('grades a freshly minted generation as a delegation mend', async () => {
+    // A fresh generation installs its delegation with its genesis, so
+    // `delegationRenewed` stays false and the mint is what says the
+    // delegation is current.
+    primeHappyPath()
+    vi.mocked(ensureCredentialClientAnnexGeneration).mockResolvedValue(
+      ensureOutcome({ generationMinted: true }) as never
+    )
+    const grades = await reportedGrades()
+    expect(grades['generation-delegation-is-current']).toBe('clean')
+    expect(grades['annex-generation-is-reachable']).toBe('clean')
+  })
+
+  it('grades a re-minted bridge as a standing-delegation mend', async () => {
+    primeHappyPath()
+    vi.mocked(ensureCredentialClientAnnexGeneration).mockResolvedValue(
+      ensureOutcome({
+        bridgeReminted: true,
+        delegation: FRESH_BRIDGE
+      }) as never
+    )
+    expect(
+      (await reportedGrades())[
+        'standing-delegations-verify-under-the-current-document'
+      ]
+    ).toBe('clean')
+  })
+
+  it('grades a failed bridge re-seal as partial', async () => {
+    primeHappyPath()
+    vi.mocked(ensureCredentialClientAnnexGeneration).mockResolvedValue(
+      ensureOutcome({
+        bridgeReminted: true,
+        delegation: FRESH_BRIDGE,
+        bridgeResealError: new Error('the re-seal failed')
+      }) as never
+    )
+    expect(
+      (await reportedGrades())[
+        'standing-delegations-verify-under-the-current-document'
+      ]
+    ).toBe('partial')
+  })
 
   it('runs the ensure on every visit, with the credential members', async () => {
     primeHappyPath()
@@ -984,12 +1078,17 @@ describe('transientSessionFromKeyringHit -- the client-annex generation-readines
         }) as never
       }
     )
-    const { ensureCall } = await runComposition(found)
+    const { ensureCall, grades } = await runComposition(found)
     expect(ensureCall.delegatedClients).toBeUndefined()
     expect(found.rebindStandingRecord).toHaveBeenCalledWith({
       delegation: found.standing!.delegation,
       delegatedClients: FRESH_SIBLING
     })
+    // The bridge is untouched here, so grading on it alone would report this
+    // re-sealed record as a no-op.
+    expect(
+      grades['standing-delegations-verify-under-the-current-document']
+    ).toBe('clean')
     // The enrollment rides the sibling the mend handed back, not the
     // record's (absent) one.
     vi.mocked(enrollTransientClient).mock.calls[0]![0].storeForGenerationId(
@@ -1675,7 +1774,8 @@ describe('transientSessionFromKeyringHit -- the login-time registry chain', () =
     vi.clearAllMocks()
     primeHappyPath()
     primeChainSession({ invocationCapability: LIVE_CAPABILITY })
-    // The CHAPI popup skips the whole chain, the refresh with it.
+    // The CHAPI popup runs no registration of the block: each declares
+    // itself off that route, so both promises settle with nothing done.
     const popup = await transientSessionFromKeyringHit({
       found: makeFound({ manageCapability: MANAGE_CAPABILITY } as never),
       type: 'passphrase',
@@ -1683,7 +1783,15 @@ describe('transientSessionFromKeyringHit -- the login-time registry chain', () =
       popup: true
     })
     await popup.session.registryReady
-    expect(popup.session.registryReady).toBeUndefined()
+    // The routing entries the composition itself ran still report, and so
+    // does the did:web projection mend, which the popup fires and the
+    // block's settle point waits for; no registration of the block does.
+    expect((await popup.session.mends)!.map(entry => entry.invariant)).toEqual([
+      'annex-generation-is-reachable',
+      'standing-delegations-verify-under-the-current-document',
+      'generation-delegation-is-current',
+      'did-web-projection-matches-the-log'
+    ])
     expect(backfillPassphraseUnlockMethod).not.toHaveBeenCalled()
     expect(refreshTransientManageCapability).not.toHaveBeenCalled()
   })

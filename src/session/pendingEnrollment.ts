@@ -57,7 +57,8 @@ import { finishForgottenBrowserWipe } from '@/session/forget'
 import { selfEnrollStandingClient } from '@/session/standingUnlock'
 import {
   resumeRecoverySpend,
-  type RecoverySpendPrompt
+  type RecoverySpendPrompt,
+  type RecoverySpendResumeReport
 } from '@/session/recovery'
 import type {
   KeyringFetchResult,
@@ -167,10 +168,10 @@ const PASSTHROUGH_ERROR_NAMES = new Set([
  * Whether a keyring hit routes to the pending-enrollment resume: this client
  * holds a record under the credential, the account is promoted (only the
  * verified log can decide the resume's branch), and the record has no
- * `userKey` -- the pending discriminator (design question 2 as amended
- * 2026-08-24: a record WITH a user key routes enrolled whatever its other
- * members, so `pointerDid` is the resume's cross-check, not a routing
- * member, and a record predating it never loses the offline start).
+ * `userKey` -- the pending discriminator. A record WITH a user key routes
+ * enrolled whatever its other members, so `pointerDid` is the resume's
+ * cross-check rather than a routing member, and a record predating that
+ * rule never loses the offline start.
  *
  * @param options {object}
  * @param options.found {KeyringFetchResult}
@@ -201,7 +202,8 @@ export function isPendingKeyringHit({
  * @param options.found {KeyringFetchResult}   a hit `isPendingKeyringHit`
  *   accepted
  * @param [options.idb] {IDBFactory}
- * @returns {Promise<object>}   the completed key set and its persist closure
+ * @returns {Promise<object>}   the completed key set, its persist closure,
+ *   and -- on the spend branch -- what that resume landed
  */
 export async function resumePendingEnrollment({
   found,
@@ -215,6 +217,7 @@ export async function resumePendingEnrollment({
   clientKeys: ClientKeyRecord
   persistClientKeys: (changes: PersistableClientKeys) => Promise<void>
   recoverySpendPrompt?: RecoverySpendPrompt
+  spendResume?: RecoverySpendResumeReport
 }> {
   try {
     return await decidePendingResume({ found, pinStore, idb })
@@ -251,6 +254,7 @@ async function decidePendingResume({
   clientKeys: ClientKeyRecord
   persistClientKeys: (changes: PersistableClientKeys) => Promise<void>
   recoverySpendPrompt?: RecoverySpendPrompt
+  spendResume?: RecoverySpendResumeReport
 }> {
   const clientKeys = found.clientKeys!
   const pointer = found.pointer!

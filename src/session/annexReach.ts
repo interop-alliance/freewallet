@@ -32,6 +32,7 @@ import {
 import type { IZcap } from '@interop/data-integrity-core'
 import type { ZcapClient } from '@interop/ezcap'
 import type { ResourceLogPinStore } from '@interop/vh-resource-log'
+import { errorNameOf, type MendOutcome } from '@interop/wallet-core/menders'
 import {
   accountLogPinId,
   delegatedWebvhLogStore,
@@ -598,7 +599,8 @@ export function didWebProjectionStore({
  * republishes the projection with no widened bridge and no server change.
  *
  * On a healthy account it costs one unauthenticated GET and writes nothing.
- * Never rejects: every failure is a warn, and the next visit retries.
+ * Never rejects: every failure is a warn and a `failed` outcome, and the next
+ * visit retries.
  *
  * @param options {object}
  * @param options.host {string}   the storage server's base URL
@@ -612,7 +614,9 @@ export function didWebProjectionStore({
  * @param options.delegation {IZcap}   the visit's generation delegation, the
  *   authority the PUT invokes under
  * @param options.zcapClient {ZcapClient}   the annex-signing client
- * @returns {Promise<void>}
+ * @returns {Promise<MendOutcome>}   `clean` when the projection was
+ *   republished, `noop` when it already matched, `refused` when a concurrent
+ *   writer's projection stands, `failed` otherwise
  */
 export async function refreshDidWebProjection({
   host,
@@ -630,7 +634,7 @@ export async function refreshDidWebProjection({
   pinStore: ResourceLogPinStore
   delegation: IZcap
   zcapClient: ZcapClient
-}): Promise<void> {
+}): Promise<MendOutcome> {
   try {
     const { outcome } = await ensureDidWebProjection({
       store: didWebProjectionStore({
@@ -664,6 +668,7 @@ export async function refreshDidWebProjection({
       log.info('Republished the stale did:web projection of the account log', {
         did
       })
+      return { outcome: 'clean' }
     }
     if (outcome === 'conflict') {
       // Another writer's projection landed between the read and the PUT. It
@@ -673,10 +678,13 @@ export async function refreshDidWebProjection({
           'log',
         { did }
       )
+      return { outcome: 'refused', detail: { reason: 'concurrent-writer' } }
     }
+    return { outcome: 'noop' }
   } catch (err) {
     log.warn('Could not refresh the did:web projection of the account log', {
       err
     })
+    return { outcome: 'failed', errorName: errorNameOf(err) }
   }
 }

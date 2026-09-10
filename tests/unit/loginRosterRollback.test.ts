@@ -105,15 +105,16 @@ describe('the login-time roster continuity policy', () => {
     state.storeRead = async () => {
       throw continuityError('rollback')
     }
-    const { session } = await initSessionFromSeed({
+    const { session, rosterRead } = await initSessionFromSeed({
       seed: randomSeed(),
       userKey: CACHED_USER_KEY,
       accountPointer: POINTER
     })
     // Nothing rolled back is adopted; the session runs on the cached key and
-    // there is no roster read to sweep from.
+    // there is no roster read to sweep from, so the login-time sweep
+    // registration has no roster stage to run.
     expect(session.profile.userKey).toEqual(CACHED_USER_KEY)
-    expect(session.userKeySweep).toBeUndefined()
+    expect(rosterRead).toBeNull()
     expect(session.userKeyPersistFailed).toBeUndefined()
   })
 

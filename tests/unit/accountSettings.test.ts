@@ -243,13 +243,24 @@ vi.mock('@/session/credentialRotation', () => ({
       }
       // The real ceremony fires this once its document edit has landed.
       options.onInventoryRemoved?.()
+      // Every outcome carries the retirement's ceremony-tail entry, which
+      // the caller reports.
+      const mended = [
+        {
+          invariant: 'retired-credential-leaves-no-annex-inventory',
+          ceremonies: ['unlock-credential-rotation'],
+          outcome: 'clean',
+          detail: { action: 'struck' }
+        }
+      ]
       return state.rotation === 'rotated'
         ? {
             rotated: true,
             collections: { outcomes: {}, failed: [] },
-            userKey: FRESH_USER_KEY
+            userKey: FRESH_USER_KEY,
+            mended
           }
-        : { rotated: false, collections: { outcomes: {}, failed: [] } }
+        : { rotated: false, collections: { outcomes: {}, failed: [] }, mended }
     }
   )
 }))

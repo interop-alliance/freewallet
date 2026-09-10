@@ -167,22 +167,23 @@ export async function deleteCredential(page: Page) {
 }
 
 /**
- * Waits for the login-time pass chain (`session.registryReady`) and the annex
- * GC sweep forked off its tail to settle, through the non-production seam the
- * auth store publishes. Navigation to the dashboard waits on storage
- * provisioning alone, so a fixture that closes its context (or starts a
- * second visit) the moment the dashboard renders aborts those passes wherever
- * they happen to be, and which of them landed decides what the account looks
- * like afterwards.
+ * Waits for the login-time mender block to settle, through the
+ * non-production seam the auth store publishes: `session.mends`, which
+ * settles when every registration of the block has reported, the app-key
+ * sweep and the annex GC included. Navigation to the dashboard waits on
+ * storage provisioning alone, so a fixture that closes its context (or
+ * starts a second visit) the moment the dashboard renders aborts the block
+ * wherever it happens to be, and which registrations landed decides what
+ * the account looks like afterwards.
  *
  * Call it in any fixture that builds a remembered session and then hands it
- * to something else. Neither promise rejects, so this resolves whether the
- * passes succeeded or warned and skipped.
+ * to something else. The report never rejects, so this resolves whether the
+ * registrations mended, refused, or failed.
  *
  * @param page {Page}   a page holding a logged-in session
- * @param [timeoutMs] {number}   how long to wait for the chain to settle
+ * @param [timeoutMs] {number}   how long to wait for the block to settle
  * @returns {Promise<number>}   how long the wait actually took, in
- *   milliseconds -- a fixture can record it to show the chain was still in
+ *   milliseconds -- a fixture can record it to show the block was still in
  *   flight rather than already settled
  */
 export async function awaitLoginChain(

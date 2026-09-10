@@ -24,19 +24,35 @@ import { invalidateVerifiedLog } from '@/session/verifiedLog'
 import type { Session } from '@/types/auth'
 
 /**
- * One annex GC pass for a live remembered session. Resolves null when the
- * session cannot run it (not on the browser-local strategy, not an enrolled
- * did:webvh account) -- the same silent-skip policy as the other login-time
- * sweeps -- and otherwise returns wallet-core's per-pass report. A pass that
- * swapped the generation invalidates the session's verified-log memo (the
- * account log gained the pointer-update entry).
+ * Why a session ran no pass at all: the preconditions in the order they are
+ * checked, so a skip says which one it was rather than resolving a bare
+ * null.
+ */
+export type ClientAnnexGcSkip =
+  'not-browser-local' | 'not-enrolled' | 'no-account-did' | 'no-annex-inventory'
+
+/**
+ * One annex GC pass's outcome: the pass's report, or the precondition that
+ * refused it.
+ */
+export type ClientAnnexGcOutcome =
+  { report: ClientAnnexGcReport } | { skipped: ClientAnnexGcSkip }
+
+/**
+ * One annex GC pass for a live remembered session. Names the precondition
+ * when the session cannot run it (not on the browser-local strategy, not an
+ * enrolled did:webvh account, no annex inventory) -- the same silent-skip
+ * policy as the other login-time sweeps -- and otherwise returns
+ * wallet-core's per-pass report. A pass that swapped the generation
+ * invalidates the session's verified-log memo (the account log gained the
+ * pointer-update entry).
  *
  * @param options {object}
  * @param options.session {Session}   a live session
  * @param [options.ladderSeed] {Uint8Array}   the login credential's ladder
  *   seed, from its unlock record; absent, a due swap is skipped and only the
  *   collect fan-out runs
- * @returns {Promise<ClientAnnexGcReport | null>}
+ * @returns {Promise<ClientAnnexGcOutcome>}
  */
 export async function sweepClientAnnexGenerations({
   session,
@@ -44,25 +60,25 @@ export async function sweepClientAnnexGenerations({
 }: {
   session: Session
   ladderSeed?: Uint8Array
-}): Promise<ClientAnnexGcReport | null> {
+}): Promise<ClientAnnexGcOutcome> {
   const persistence = session.profile.persistence
   if (!persistence || !isBrowserLocalSession(persistence)) {
-    return null
+    return { skipped: 'not-browser-local' }
   }
   const context = enrolledCeremonyContext({ session })
   if (!context) {
-    return null
+    return { skipped: 'not-enrolled' }
   }
   const { remoteStore, pointer, clientWebvhKeys } = context
   if (!isWebvhDid(pointer.did)) {
-    return null
+    return { skipped: 'no-account-did' }
   }
 
   const reach = await pointedClientAnnexReach({ session, pointer })
   if (reach === null) {
     // No annex inventory on this account: nothing to swap, and no
     // auxiliary Space to list orphans in.
-    return null
+    return { skipped: 'no-annex-inventory' }
   }
   const { doc, log, was } = reach
 
@@ -85,5 +101,5 @@ export async function sweepClientAnnexGenerations({
   if (report.swap === 'replaced') {
     invalidateVerifiedLog({ profile: session.profile })
   }
-  return report
+  return { report }
 }

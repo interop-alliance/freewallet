@@ -91,6 +91,7 @@ import {
   type KmsAuthenticationBinding
 } from '@interop/wallet-core/webvh'
 import { ensureAccountGenesis } from '@interop/wallet-core/genesis'
+import { errorNameOf, type MendOutcome } from '@interop/wallet-core/menders'
 import { clampGrantExpires } from '@interop/wallet-core/clientAnnex'
 import { promoteKeystoreController, rebindKeystoreAgent } from '@/lib/kms'
 import { accountRosterStore } from '@/session/rosterStore'
@@ -506,6 +507,11 @@ export class StorageManager {
   // The provisioning promise from `ensureUserCollections` (fired at session
   // creation), awaited by the read-readiness contract in non-remote-direct mode.
   #provisioning?: Promise<void>
+  // The keystore promotion this session fired, from whichever call to
+  // `ensurePromotedController` ran first: provisioning's, or the login
+  // block's pointer heal. Read by the block's tail registration, so the one
+  // promotion a login runs is the one it reports.
+  #keystorePromotion?: Promise<MendOutcome>
   // The vault key material, kept so ciphers can be rebuilt after a descriptor
   // refresh (an unknown-epoch read) without re-plumbing the profile.
   #vaultKeys?: {
@@ -2256,22 +2262,64 @@ export class StorageManager {
    * The keystore half runs after the Space half, non-fatally (KMS outages
    * must not fail provisioning): the keystore config's controller becomes
    * the did:webvh and the session's KeystoreAgent rebinds to invoke under
-   * it.
+   * it. It is fired without await here, and its promise is handed back so
+   * one caller (the login chain's block) can report its outcome without a
+   * second KMS round trip.
    *
    * @param options {object}
    * @param options.profile {ControllerProfile}
-   * @returns {Promise<void>}
+   * @returns {Promise<{ promoted: boolean, keystorePromotion?: Promise<MendOutcome> }>}
+   *   whether a Space promotion was written here, and the fired keystore
+   *   promotion where one ran
    */
+  /**
+   * The keystore promotion this session fired, where one ran. Provisioning
+   * fires it on every login of a pointer-promoted account and drops the
+   * promise; the login block's tail reads it here, so the promotion that
+   * actually ran is the one reported rather than the absence of a heal.
+   *
+   * @returns {Promise<MendOutcome> | undefined}
+   */
+  get keystorePromotion(): Promise<MendOutcome> | undefined {
+    return this.#keystorePromotion
+  }
+
+  /**
+   * Fires the keystore promotion and keeps its promise for the login block's
+   * tail. One promotion per session: a second `ensurePromotedController`
+   * (provisioning's, then the pointer heal's) would only run on an account
+   * whose first call returned before firing one.
+   *
+   * @param options {object}
+   * @param options.profile {ControllerProfile}
+   * @param options.did {string}
+   * @returns {Promise<MendOutcome>}
+   */
+  #fireKeystorePromotion({
+    profile,
+    did
+  }: {
+    profile: ControllerProfile
+    did: string
+  }): Promise<MendOutcome> {
+    const promotion = promoteAccountKeystore({ profile, did })
+    this.#keystorePromotion = promotion
+    return promotion
+  }
+
   async ensurePromotedController({
     profile
   }: {
     profile: ControllerProfile
-  }): Promise<void> {
+  }): Promise<{
+    promoted: boolean
+    keystorePromotion?: Promise<MendOutcome>
+  }> {
     const remote = this.#remoteStore
     const did = profile.didWebvh?.did
     const { keyAgent } = profile
     if (!remote || !keyAgent || !isWebvhDid(did)) {
-      return
+      return { promoted: false }
     }
 
     if (remote.controller === did) {
@@ -2289,11 +2337,14 @@ export class StorageManager {
         description = await remote.spaceHandle().describe()
       } catch (err) {
         log.warn('Could not confirm the promoted Space controller', { err })
-        return
+        return { promoted: false }
       }
       if (description?.controller === did) {
-        this.#promoteKeystore({ profile, did })
-        return
+        // The server already agrees, so nothing was promoted here.
+        return {
+          promoted: false,
+          keystorePromotion: this.#fireKeystorePromotion({ profile, did })
+        }
       }
       remote.rebindController({
         zcapClient: didKeyZcapClient({ keyAgent }),
@@ -2316,8 +2367,10 @@ export class StorageManager {
           controller: did
         })
       }
-      this.#promoteKeystore({ profile, did })
-      return
+      return {
+        promoted: true,
+        keystorePromotion: this.#fireKeystorePromotion({ profile, did })
+      }
     }
 
     // Fresh promotion: the PUT is authorized by the stored did:key
@@ -2326,61 +2379,10 @@ export class StorageManager {
     const zcapClient = webvhZcapClient({ keyAgent, did })
     profile.zcapClient = zcapClient
     remote.rebindController({ zcapClient, controller: did })
-    this.#promoteKeystore({ profile, did })
-  }
-
-  /**
-   * The keystore half of controller promotion, non-fatal by design (no
-   * wallet feature hard-depends on the keystore): promotes the keystore
-   * config's controller to the did:webvh -- retrying once with the did:key
-   * identity when the bound agent's invocation is refused (a keystore not
-   * yet promoted, invoked as the did:webvh) -- and rebinds the session's
-   * KeystoreAgent to invoke under the promoted identity.
-   *
-   * Fired without await from the Space promotion path: the keystore's
-   * promotion has no ordering dependency on anything that follows, and a
-   * KMS hiccup only surfaces as the same warn a failed keystore
-   * provisioning does.
-   *
-   * @param options {object}
-   * @param options.profile {ControllerProfile}
-   * @param options.did {string}   the account's did:webvh DID
-   * @returns {void}
-   */
-  #promoteKeystore({
-    profile,
-    did
-  }: {
-    profile: ControllerProfile
-    did: string
-  }): void {
-    const { keystoreAgent, keyAgent } = profile
-    if (!keystoreAgent || !keyAgent) {
-      return
+    return {
+      promoted: true,
+      keystorePromotion: this.#fireKeystorePromotion({ profile, did })
     }
-    void (async () => {
-      try {
-        await promoteKeystoreController({ keystoreAgent, controller: did })
-      } catch {
-        // The bound identity could not read/update the config -- a keystore
-        // still under the did:key invoked as the did:webvh. Retry as the
-        // did:key.
-        const didKeyBound = rebindKeystoreAgent({
-          keystoreAgent,
-          capabilityAgent: keyAgent
-        })
-        await promoteKeystoreController({
-          keystoreAgent: didKeyBound,
-          controller: did
-        })
-      }
-      profile.keystoreAgent = rebindKeystoreAgent({
-        keystoreAgent,
-        capabilityAgent: webvhCapabilityAgent({ keyAgent, did })
-      })
-    })().catch(err => {
-      log.warn('Keystore controller promotion failed', { err })
-    })
   }
 
   async #provisionUserCollections({
@@ -4034,5 +4036,70 @@ export class StorageManager {
     contactId: string
   }): Promise<Array<ContactRevisionPayload>> {
     return await this.#store.listContactRevisions({ contactId })
+  }
+}
+
+/**
+ * The keystore half of controller promotion, non-fatal by design (no wallet
+ * feature hard-depends on the keystore): promotes the keystore config's
+ * controller to the did:webvh -- retrying once with the did:key identity
+ * when the bound agent's invocation is refused (a keystore not yet
+ * promoted, invoked as the did:webvh) -- and rebinds the session's
+ * KeystoreAgent to invoke under the promoted identity.
+ *
+ * Fired without await from the Space promotion path: the keystore's
+ * promotion has no ordering dependency on anything that follows, and a KMS
+ * hiccup only surfaces as the same warn a failed keystore provisioning
+ * does. It never rejects: the outcome is the value, so the login chain's
+ * pointer heal can report it beside the two Space-side predicates it
+ * converges.
+ *
+ * @param options {object}
+ * @param options.profile {ControllerProfile}
+ * @param options.did {string}   the account's did:webvh DID
+ * @returns {Promise<MendOutcome>}   `noop` when this session holds no
+ *   keystore to promote and when the keystore already named the account,
+ *   `clean` when a promotion was written here, `failed` (with the error's
+ *   name alone) otherwise
+ */
+export async function promoteAccountKeystore({
+  profile,
+  did
+}: {
+  profile: ControllerProfile
+  did: string
+}): Promise<MendOutcome> {
+  const { keystoreAgent, keyAgent } = profile
+  if (!keystoreAgent || !keyAgent) {
+    return { outcome: 'noop' }
+  }
+  try {
+    let promoted: boolean
+    try {
+      promoted = await promoteKeystoreController({
+        keystoreAgent,
+        controller: did
+      })
+    } catch {
+      // The bound identity could not read/update the config -- a keystore
+      // still under the did:key invoked as the did:webvh. Retry as the
+      // did:key.
+      const didKeyBound = rebindKeystoreAgent({
+        keystoreAgent,
+        capabilityAgent: keyAgent
+      })
+      promoted = await promoteKeystoreController({
+        keystoreAgent: didKeyBound,
+        controller: did
+      })
+    }
+    profile.keystoreAgent = rebindKeystoreAgent({
+      keystoreAgent,
+      capabilityAgent: webvhCapabilityAgent({ keyAgent, did })
+    })
+    return { outcome: promoted ? 'clean' : 'noop' }
+  } catch (err) {
+    log.warn('Keystore controller promotion failed', { err })
+    return { outcome: 'failed', errorName: errorNameOf(err) }
   }
 }

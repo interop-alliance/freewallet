@@ -47,6 +47,7 @@ import {
   revokeEnrolledClient,
   type RevocationOutcome
 } from '@/session/revocation'
+import { reportCeremonyTail } from '@/session/menders/ceremonyTail'
 import { verifiedAccountLog } from '@/session/verifiedLog'
 import { createLogger } from '@/lib/log'
 
@@ -255,6 +256,10 @@ export async function disconnectAccountClient({
     client: revokedClientKeysFor({ client }),
     ...(client.label !== undefined ? { label: client.label } : {})
   })
+  // The cascade's ceremony-tail entry, reported from the ceremony's own call
+  // site: it carries no registration, so no login chain's runner ever sees
+  // it.
+  reportCeremonyTail({ mended: outcome.mended })
   try {
     await removeClientLabel({
       store: remoteStore.clientLabelsStore(),

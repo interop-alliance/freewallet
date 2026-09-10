@@ -78,10 +78,15 @@ src/session/        Session bootstrap and the account ceremonies -- the
                     unlockMethods.ts, clients.ts, shares.ts, applications.ts
   Ceremonies        recovery.ts, revocation.ts, forget.ts, wipe.ts,
                     ceremonies.ts
-  Repairs / sweeps  registryPasses.ts (the login-time registry chain),
+  Repairs / sweeps  registryPasses.ts (the passes both chains share),
                     pendingEnrollment.ts, pendingRetirement.ts,
-                    registryReseal.ts, userKeyAdoption.ts, userKeyCascade.ts,
-                    appKeySweep.ts, clientAnnexGc.ts, credentialCoverage.ts
+                    registryReseal.ts, userKeySweep.ts, userKeyAdoption.ts,
+                    userKeyCascade.ts, standingDelegationRefresh.ts,
+                    pointerHeal.ts, appKeySweep.ts, clientAnnexGc.ts,
+                    credentialCoverage.ts
+  Menders           menders/ -- the mender registry: the invariant table,
+                    the two chains' registration lists, the runner that
+                    executes one, and the gap allowlist
   Shared parts      rosterStore.ts, collectionLogStore.ts, annexReach.ts,
                     recordEnvelope.ts,
                     accountCeremonyContext.ts, completeAppLogin.ts (the
@@ -175,11 +180,22 @@ unlock secret (passphrase | passkey PRF output)
 ```
 
 Navigation to the dashboard waits on `session.storageReady` alone. The
-login-time chain of repairs, sweeps, and registry writes runs after
-navigation, on a separate `session.registryReady` promise that never
-rejects; a failed stage is logged and skipped. A Settings-entered ceremony
-that writes the unlock-methods registry awaits that promise at its own entry
-rather than racing the chain.
+login-time repairs, sweeps, and registry writes run after navigation, as one
+mender block: the registrations listed for this chain, in registration
+order, run by the mender runner. The runner holds the try, warn, and skip
+discipline once, so a failed registration is logged and the block carries
+on; only the block's seed, storage provisioning, aborts it. Two promises
+settle it. `session.registryReady` settles when the registry-writing
+registrations have reported, and never rejects, so a Settings-entered
+ceremony that writes the unlock-methods registry awaits it at its own entry
+rather than racing them. It does not wait on the keystore promotion: the
+pointer heal fires that and the block's tail reports it, so no
+`registryReady` awaiter sits behind a KMS round trip. `session.mends`
+settles when the whole block has run -- the keystore report, the app-key
+sweep, and the annex GC included -- and behind any report the composition
+fired beside the block (the did:web projection mend). It carries this
+login's mend report: one entry per invariant a mender reported, the routing
+entries first.
 
 The `Session` object lives in the Zustand `authStore` and is in-memory only,
 so reloading the browser logs the user out. Record authenticity, the replay
@@ -441,7 +457,13 @@ freewallet-side wrappers and the app-only ceremonies. The mender column
 names how a torn run gets finished (see Tear mending in the Glossary): a
 trigger a credential-only visit can fire, or a remembered-login sweep on a
 ceremony only a remembered session runs. A residue left to that chain on an
-account that may never run one is an open gap instead, listed below.
+account that may never run one is an open gap instead, listed below. Every
+mender is also declared as an invariant in the mender registry
+(`src/session/menders/invariants.ts`), keyed by the predicate it makes true.
+The declarations are data and the registrations are code
+(`src/session/menders/registrations.ts`): the runner executes one chain's
+list in order and reports each entry into `session.mends`, and a routing or
+ceremony-tail entry reports from its own call site instead.
 
 | Ceremony                                  | Entry point                                                     | Module                                                                      | Shared half                 | Mender                                                                                                                                                          | Topic doc               |
 | ----------------------------------------- | --------------------------------------------------------------- | --------------------------------------------------------------------------- | --------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------- |
@@ -464,47 +486,69 @@ A WAS signup's remembered and passkey flavors continue into the
 self-enrollment row, and the credential-anchored genesis heal branch also
 mends a remembered signup torn before its self-enrollment.
 
-The open gaps come in two classes. First, a stated residue with no mender
+This list is mirrored by the mender registry's declared gap allowlist
+(`src/session/menders/gaps.ts`). Each bullet below names its invariant id,
+and a unit test holds the two id sets equal. The allowlist kinds each row
+independently of the class its bullet sits in. A `none` gap is a residue no
+registration reports on any trigger. An `unreachable` gap is one a
+registration reports, on triggers no credential-only visit on the affected
+account shape can fire.
+
+The open gaps come in three classes. First, a stated residue with no mender
 built:
 
-- The transient recovery's roster-append repair, on a client-less account.
-- A user-key rotation torn mid-fan-out on a client-less account.
-- An establishment torn between the record re-bind and the promotion leaves
-  the KMS keystore's controller on the ladder's bare did:key, outside the
-  current-key-set rule. A mender could run from a transient visit, the
-  keystore ensure not depending on the Space.
+- The transient recovery's roster-append repair, on a client-less account
+  (invariant `recovery-spend-is-completed`).
+- A user-key rotation torn mid-fan-out on a client-less account (invariant
+  `collection-epochs-name-the-current-user-key`).
 - A recovery-code issuance torn after its document entry leaves a saved code
   that locates no account, plus a document `keyAgreement` entry and a roster
-  wrap nothing names. The login sweep rotates the orphan wrap away, but the
-  registry-driven health check cannot see the code, so the retire-and-reissue
-  mender is unbuilt.
+  wrap nothing names (invariant
+  `every-document-key-agreement-entry-has-a-locatable-credential`). The
+  login sweep rotates the orphan wrap away, but the registry-driven health
+  check cannot see the code, so the retire-and-reissue mender is unbuilt.
 - A sibling unlock Space an account deletion could not remove, whose
-  credential is never used again. That credential's own next use is the only
-  mender, and an unspent recovery code is the sharp case.
+  credential is never used again (invariant
+  `no-unlock-space-outlives-its-credential`). That credential's own next use
+  is the only mender, and an unspent recovery code is the sharp case.
 - On a KMS deployment, a keystore orphaned by an account deletion that ran
-  before the keystore-deletion route lands. A server-side reaper is not a
-  wallet mender.
+  before the keystore-deletion route lands (invariant
+  `no-keystore-outlives-its-account`). A server-side reaper is not a wallet
+  mender.
 - A signup whose KMS stage failed or timed out publishes a document with no
-  `authentication` relation, and nothing adds one. The failure is collected
-  rather than thrown, so the account pointer binds and no establishment
-  re-run fires the stage again, leaving a remembered login this account may
-  never see as the only other trigger. The account presents did:key and
-  refuses a `web` or `webvh` request; closing it means a ladder-signed entry
-  adding the verification method after the fact.
+  `authentication` relation, and nothing adds one (invariant
+  `account-document-publishes-an-authentication-key`). The failure is
+  collected rather than thrown, so the account pointer binds and no
+  establishment re-run fires the stage again, leaving a remembered login
+  this account may never see as the only other trigger. The account presents
+  did:key and refuses a `web` or `webvh` request; closing it means a
+  ladder-signed entry adding the verification method after the fact.
 - A ladder-branch disconnect of the account's last enrolled client, torn
   after its removal entry, leaves the roster wrapping the current key to the
-  removed client. The row is gone from the listing and that account runs no
+  removed client (invariant `roster-wraps-exactly-the-document-key-set`).
+  The row is gone from the listing and that account runs no
   remembered-login sweep, so the only mender is the retire-direction
   convergence of a later ladder-branch ceremony, which the user may never
   run.
 - The retired credentials' unlock Spaces on a recovery spend torn between
-  the landed registry drop and the deletes. The entries are gone, so nothing
-  names the Spaces again. The residue is inert, and is the class the
+  the landed registry drop and the deletes (invariant
+  `no-unlock-space-outlives-its-credential`). The entries are gone, so
+  nothing names the Spaces again. The residue is inert, and is the class the
   registry-driven account-deletion walk already leaves behind.
+- An establishment torn between the record re-bind and the registry
+  re-entry leaves the unlock-methods registry naming no establishing
+  credential (invariant `registry-records-the-establishing-credential`). The
+  re-entry arm's trigger is a marker held in the crashed tab's memory, so
+  the next visit does not fire it.
+- A pending passphrase entry written by a refusal after establishment stays
+  in the registry (invariant
+  `registry-passphrase-entry-names-the-standing-credential`). The seedless
+  torn-retirement repair cannot clear it (wallet-core's `decisions/0015`).
 
 Second, a residue whose only mender is a remembered login:
 
-- The collection descriptor logs behind a forget ceremony's removal entry.
+- The collection descriptor logs behind a forget ceremony's removal entry
+  (invariant `governed-log-heads-anchor-past-the-membership-change`).
   Both forget grades run their collection fan-out before the entry, so every
   append anchors at a version that still lists the forgotten client's key,
   and that key can keep appending there until a still-listed key appends
@@ -512,15 +556,54 @@ Second, a residue whose only mender is a remembered login:
   login's sweep. The last-client transition leaves an account nothing seals,
   since the departing client's authority ends at its own entry and the
   transient login runs no collection seal.
-- The annex generation GC, which runs from the remembered-login chain only.
-  On a client-less account the pointed generation's log grows by one entry
-  per transient visit with nothing collecting it, and every visit resolves
-  that log from genesis. A `gen-` collection orphaned by a crashed first
-  visit waits for the same sweep, an account-log pointer entry left by one
-  is append-only, and an auxiliary Space stranded between its mint and its
-  pointer entry has no deleter at all. The constraint is authority: the swap
-  re-points the account log, the collect fan-out is controller-tier, and a
-  ladder VM can sign neither.
+- The annex generation GC, which runs from the remembered-login chain only
+  (invariant `no-annex-generation-outlives-its-pointer`). On a client-less
+  account the pointed generation's log grows by one entry per transient
+  visit with nothing collecting it, and every visit resolves that log from
+  genesis. A `gen-` collection orphaned by a crashed first visit waits for
+  the same sweep, and an account-log pointer entry left by one is
+  append-only. The constraint is authority: the swap re-points the account
+  log, the collect fan-out is controller-tier, and a ladder VM can sign
+  neither.
+- An auxiliary Space stranded between its mint and its pointer entry by a
+  crashed first visit (invariant `no-auxiliary-space-stands-unnamed`). No
+  account-log pointer entry names it, and nothing deletes it.
+- A credential-anchored signup whose pointer backfill failed leaves the
+  unlock record pointing at the signup-time did:key (invariant
+  `account-pointer-names-the-account-did`). The heal that converges it is
+  registered on the remembered-login block alone, which a client-less
+  account never runs.
+- An establishment torn between the record re-bind and the promotion leaves
+  the KMS keystore's controller on the ladder's bare did:key, outside the
+  current-key-set rule (invariant `keystore-controller-is-the-account-did`).
+  The promotion that converges it is fired by the same remembered-login
+  pointer heal and reported from that block's tail. A mender could run from
+  a transient visit instead, the keystore ensure not depending on the
+  Space.
+- Stranded app keys after a last-client transition (invariant
+  `app-keys-live-only-in-app-connections`). The sweep that clears them runs
+  from the remembered-login chain alone.
+- A signup torn before its standard collections are provisioned, on an
+  account that runs no remembered login (invariant
+  `standard-collections-are-provisioned`). Whether the transient heal
+  re-provisions them is the tracking item's first question.
+- A forgotten or disconnected browser whose local wipe tore, on an account
+  with no remembered login left to run the detector (invariant
+  `this-browser-is-still-an-enrolled-client`). Whether this is a gap at all
+  is the tracking item's first question, since a login on the browser
+  holding the residue routes remembered and fires the detector.
+
+Third, a detector that is not a mender: a declaration carrying a detector and
+no registration, by design, so the derivation kinds it `none` and the row
+tracks the decision rather than a build:
+
+- The acting credential's document listing (invariant
+  `document-lists-the-acting-credential`). The detector refuses the transient
+  login with `credential-not-standing`; the ceremony that tore converges it
+  on its own re-run.
+- The saved recovery codes' health (invariant
+  `saved-recovery-codes-locate-their-account`). The detector nudges the user
+  rather than refusing; the user's own reissue is the mender.
 
 One bound is not an open gap. An account that runs the last-client
 transition with several standing credentials lands client-less carrying one
@@ -564,6 +647,11 @@ cascades, and the permanent wire-level constants.
   - `/space` (collection layout, activity builders, `was-link`)
   - `/resourceLog` (the did:webvh controller adapter
     `webvhResourceLogController` and the ceremony-tail license)
+  - `/menders` (the mender registry's structure: the declaration and
+    registration types, the vocabularies and the closed invariant-id census,
+    the readers, the runner that executes one chain trigger's registrations
+    under one try, warn, and skip discipline, and the derived-set helpers
+    the audit tests read)
   - `/sync` (contacts head-conflict resolution,
     `resolveContactHeadConflict`, over social-core's comparison; the change
     engine beside it is the mobile wallet's).
@@ -760,12 +848,36 @@ base64url(SHA-256(unlock did:key))` (a discovery convention).
   from it plus durable state (wallet-core's
   `decisions/0010-post-pivot-derivability-rule.md`). Avoid: flow, workflow,
   wizard.
+- **Invariant** -- the mender registry's unit: a predicate over the
+  account's server-held state, and for a few entries over this browser's
+  local state, that must hold between ceremonies. A ceremony may violate it
+  while it runs. Once no ceremony is running, a violation is a torn state,
+  and converging it is mending. Each declaration names one authority
+  (`none`, `account`, `enrolled`, or `ladder`) and the triggers that check
+  the predicate today (`remembered-login-chain`, `transient-login-chain`,
+  `login-routing`, `ceremony-tail`). A session holds `none` always, plus
+  `account` and the resolved kind whenever an account-ceremony context
+  resolves, and an entry is satisfied when the held set contains its
+  authority. The id names the predicate rather than the code, so moving a
+  converger between modules renames nothing. Avoid: mender id, check, rule.
+- **Mender registry** -- the invariant declaration table plus the
+  per-trigger registration lists. `@interop/wallet-core/menders` carries the
+  structure and the readers; `src/session/menders/` carries freewallet's
+  table. Declarations are data and registrations are code. The registry
+  describes the ceremonies from the outside and executes no stage order.
+  Registration order within a list is execution order, and there is no
+  dependency graph. Its gap allowlist declares the residues nothing
+  converges today, in two kinds: `none`, where no registration reports the
+  invariant at all, and `unreachable`, where one reports it on triggers a
+  credential-only visit cannot fire. Avoid: saga, state machine, mender
+  table.
 - **Tear mending** -- the umbrella for how a torn ceremony (one interrupted
   mid-run) gets finished, by a converging re-run, a standing sweep, or a
   repair. A mender counts only if a credential-only visit can fire it, so a
   residue whose one trigger is the remembered-login chain is an open gap
-  (`decisions/0010-remembered-login-is-not-a-mender-trigger.md`). Avoid:
-  tear closure.
+  (`decisions/0010-remembered-login-is-not-a-mender-trigger.md`). The open
+  gaps are declared in the mender registry's gap allowlist, in the two kinds
+  `none` and `unreachable`. Avoid: tear closure.
 - **Repair** -- the mender of last resort: code waiting at the one entry
   point where the authority a torn state needs reassembles, detecting that
   state from stored state alone and finishing the ceremony. Always qualified
