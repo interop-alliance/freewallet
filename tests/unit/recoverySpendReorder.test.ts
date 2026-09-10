@@ -31,6 +31,10 @@ import { memoryResourceLogPinStore } from '@interop/vh-resource-log'
 import { addSink, captureSink } from '@interop/logger'
 import type { IKeyAgreementKey, IZcap } from '@interop/data-integrity-core'
 
+// The codes and passphrases derive through the real Argon2id KDF (several
+// derivations per test), so the default 5s limit trips under full-suite load.
+vi.setConfig({ testTimeout: 30_000 })
+
 const state = vi.hoisted(() => ({
   records: new Map<string, unknown>(),
   calls: [] as string[],
