@@ -23,8 +23,7 @@ import { quotaViewFromReport, writesRestricted } from '@/lib/storageQuota'
 import type { StorageQuotaStatus } from '@/types/storageQuota'
 import type { ImportSpaceSummary } from '@/stores/storageManager'
 import { parseImportTarFile } from '@/lib/import'
-import { listSharedCollections, type CollectionShare } from '@/session/shares'
-import { useConnectedApps } from '@/hooks/useConnectedApps'
+import { useStorageListings } from '@/hooks/useStorageListings'
 import { attributeCollectionsToApps } from '@/lib/collectionAttribution'
 import { SYNCED_COLLECTIONS } from '@/app.config'
 import { createLogger } from '@/lib/log'
@@ -167,40 +166,14 @@ export const StoragePage = () => {
     ? 'storage.collectionsLoadError'
     : null
 
-  // The reader rosters behind each collection row's "Shared" chip. A failure
-  // is non-blocking: the chips simply do not appear, and the storage listing
-  // itself stays usable.
+  // The reader rosters behind each collection row's "Shared" chip and the
+  // connected applications behind its "Created by" line, over one read of the
+  // activity history.
   const {
-    data: loadedShares,
-    error: sharesError,
+    sharesByCollection,
+    apps,
     reload: reloadShares
-  } = useAsyncLoad(
-    async (): Promise<Record<string, CollectionShare[]>> => {
-      if (!hasRemoteStorage || !session) {
-        return {}
-      }
-      return listSharedCollections({ session })
-    },
-    [hasRemoteStorage, session],
-    {
-      enabled: hasRemoteStorage && Boolean(session),
-      onError: err => {
-        log.error('Could not load the collection shares', { err })
-      }
-    }
-  )
-
-  const sharesByCollection = useMemo(
-    () => (sharesError ? {} : (loadedShares ?? {})),
-    [loadedShares, sharesError]
-  )
-
-  // The connected applications behind each collection's "Created by" line,
-  // loaded only once some listed collection carries an app to name.
-  const apps = useConnectedApps({
-    storage: session?.storage,
-    enabled: collections.some(({ generator }) => generator !== undefined)
-  })
+  } = useStorageListings({ session, collections })
 
   const appsByCollection = useMemo(
     () => attributeCollectionsToApps({ collections, apps }),

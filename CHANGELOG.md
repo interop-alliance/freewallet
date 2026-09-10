@@ -167,6 +167,12 @@
 
 ### Fixed
 
+- The Storage page reads and decrypts the activity history once per visit,
+  in `useStorageListings`, and hands the scan to both the shares listing and
+  the connected-apps listing. `listSharedCollections` takes an optional
+  pre-fetched `items`, as `listConnectedApps` already did, and so does
+  `useConnectedApps`.
+
 - Grant revocation no longer records a refused POST as revoked. Only the
   server's `AlreadyRevokedError` counts as skipped; any other failure, a
   plain `ValidationError` included (a read-replica lag on a live grant

@@ -22,6 +22,9 @@ const NO_APPS: ConnectedApp[] = []
 /**
  * @param options {object}
  * @param [options.storage] {StorageManager}   the session's storage
+ * @param [options.items] {Awaited<ReturnType<StorageManager['listHistoryItems']>>}
+ *   the activity history, when the caller has already read it; the load then
+ *   runs no history read of its own
  * @param [options.enabled] {boolean}   false leaves the load off entirely
  *   (no listed collection carries a `generator`); defaults to true
  * @returns {ConnectedApp[]}   the apps, latest-connected first; empty while
@@ -29,9 +32,11 @@ const NO_APPS: ConnectedApp[] = []
  */
 export function useConnectedApps({
   storage,
+  items,
   enabled = true
 }: {
   storage?: StorageManager
+  items?: Awaited<ReturnType<StorageManager['listHistoryItems']>>
   enabled?: boolean
 }): ConnectedApp[] {
   const active = enabled && Boolean(storage?.hasRemoteStorage)
@@ -40,9 +45,9 @@ export function useConnectedApps({
       if (!storage) {
         return []
       }
-      return listConnectedApps({ storage })
+      return listConnectedApps({ storage, items })
     },
-    [storage],
+    [storage, items],
     {
       enabled: active,
       onError: err => {

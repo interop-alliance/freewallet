@@ -6,6 +6,7 @@
  * here.
  */
 import { WALLET_STANDARD_COLLECTIONS } from '@/app.config'
+import type { StorageManager } from '@/stores/storageManager'
 import type { Session } from '@/types/auth'
 
 /**
@@ -39,16 +40,21 @@ export const SHAREABLE_COLLECTIONS = WALLET_STANDARD_COLLECTIONS.filter(
  *
  * @param options {object}
  * @param options.session {Session}
+ * @param [options.items] {Awaited<ReturnType<StorageManager['listHistoryItems']>>}
+ *   the activity history, when the caller has already read it (the Storage
+ *   page's connected-apps listing scans the same collection)
  * @returns {Promise<Record<string, CollectionShare[]>>}
  */
 export async function listSharedCollections({
-  session
+  session,
+  items: providedItems
 }: {
   session: Session
+  items?: Awaited<ReturnType<StorageManager['listHistoryItems']>>
 }): Promise<Record<string, CollectionShare[]>> {
   // One history scan for the whole listing: every shareable collection's reader
   // labels come out of the same activity list.
-  const items = await session.storage.listHistoryItems()
+  const items = providedItems ?? (await session.storage.listHistoryItems())
   const entries = await Promise.all(
     SHAREABLE_COLLECTIONS.map(
       async ({ id }) =>

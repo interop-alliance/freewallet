@@ -19,7 +19,8 @@ src/pages/          Route-level React components (one file per page)
 src/components/     Shared React components
   credentialDetails/, storage/, resume/   Feature sub-components
 src/hooks/          Shared React hooks (verification, credential delete,
-                    PRF retry prompt, clipboard, search)
+                    PRF retry prompt, clipboard, search, the Storage page's
+                    one-read shares and apps listings)
 src/context/        Theme and info-box React context
 src/lib/            Pure business logic (no React)
   kms.ts            WebKMS keystore provisioning (ensureKeystore) and the
