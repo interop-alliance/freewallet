@@ -63,12 +63,13 @@ every agent Login for that controller newer than the latest matching Revoke
 activity (same origin marker, no `appConnect`, the controller in
 `object.controller`), since a later request can add a grant without retiring
 an earlier one. A row whose grants have all expired is dropped. Revoking a
-row reads each recorded capability against the verified account document
-(`grantRevocationSkip`: expired, orphaned, or chained under a parent
-delegation whose signer has left the document or whose generation is no
-longer the pointed one is skipped without a POST) and POSTs the rest, the orphaned
-marker gating nothing on its own; a refused POST other than the server's
-`AlreadyRevokedError` is thrown before any Revoke is recorded. The Revoke's
+row POSTs each recorded capability through wallet-core's
+`revokeRecordedGrant` (only a grant expired beyond the clock-skew margin is
+skipped locally), the orphaned marker gating nothing on its own; a plain
+refusal the verified document can explain (expired, orphaned, or chained
+under a parent delegation whose signer has left the document or whose
+generation is no longer the pointed one) counts as skipped, and any other
+refusal is thrown before any Revoke is recorded. The Revoke's
 `created` is stamped at least one millisecond past the latest Login, so a
 fast-clocked terminal cannot leave the row standing.
 There is no app key to delete and no collection epoch to rotate, an agent

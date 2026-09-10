@@ -93,8 +93,10 @@ import { ensureAccountGenesis } from '@interop/wallet-core/genesis'
 import { errorNameOf, type MendOutcome } from '@interop/wallet-core/menders'
 import {
   clampGrantExpires,
-  isDelegationExpired
+  revokeRecordedGrant,
+  type AccountSignerCheck
 } from '@interop/wallet-core/clientAnnex'
+import { delegationExpired } from '@interop/wallet-core/webvh'
 import { promoteKeystoreController, rebindKeystoreAgent } from '@/lib/kms'
 import { accountRosterStore } from '@/session/rosterStore'
 import { mintRecordEncryption } from '@interop/wallet-core/keyring'
@@ -129,10 +131,6 @@ import {
   type SyncedCollectionStore
 } from '@/stores/remoteDirectStore'
 import { EXTERNAL_REQUEST_ORIGIN } from '@/lib/walletRequest/externalRequest'
-import {
-  grantRevocationSkip,
-  type AccountSignerCheck
-} from '@/lib/connectedApps'
 import type { CredentialActivityVerb } from '@/lib/historyActivity'
 import { uuidv7 } from 'uuidv7'
 import {
@@ -3131,33 +3129,30 @@ export class StorageManager {
   }
 
   /**
-   * Revokes a set of recorded capabilities on the WAS server, one POST each.
-   * Before any POST, a capability the verified account document already
-   * reads as dead is skipped locally (`grantRevocationSkip`: its own
-   * `expires` has passed, it is an orphaned account-signed grant, or it is an
-   * grant chained under a parent delegation whose signer has left the
-   * document or, for a generation delegation, whose generation the document
-   * no longer points at). The remaining POSTs are independent, so they run together
-   * and all of them settle before the outcome is folded in the order the
-   * capabilities were given. Of the POSTs, only was-client's
-   * `AlreadyRevokedError` -- the server's genuine capability-already-revoked
-   * answer -- counts into `skipped`. Every other error, a plain
-   * `ValidationError` included (a root-capability refusal, a foreign target,
-   * a malformed body, an id mismatch, a chain the server cannot verify right
-   * now -- which is also what a read-replica lag on a LIVE grant answers --
-   * or an HTTP 415), counts as failed, and once every POST has settled the
+   * Revokes a set of recorded capabilities on the WAS server, one POST each
+   * through wallet-core's `revokeRecordedGrant`, whose policy each POST
+   * follows: the one local skip is a capability expired beyond the
+   * revocation clock-skew margin; everything else is POSTed, whatever the
+   * verified document says about its signer; was-client's
+   * `AlreadyRevokedError` counts as skipped; a plain `ValidationError` is
+   * read against the document and counts as skipped when the client can say
+   * why the chain no longer verifies (expired, an orphaned account-signed
+   * grant, a parent delegation whose signer left the document, or a
+   * generation the document no longer points at), and is thrown otherwise,
+   * as is every other failure. The POSTs are independent, so they run
+   * together and all of them settle before the outcome is folded in the
+   * order the capabilities were given. Once every POST has settled the
    * first failure is thrown verbatim, `err.name` intact, so the caller
    * neither deletes the credential nor records the Revoke and a retry re-runs
-   * the set; the ids that did land ride the warn logged before the throw,
-   * since the caller records nothing. `revokedIds` names only the
-   * capabilities whose POST succeeded, which is what an agent revocation
-   * records as its audit trail. Errors are matched on `name`: was-client may
-   * resolve twice in the tree.
+   * the set; the ids that did land, and the reasons the rest were skipped,
+   * ride the warn logged before the throw, since the caller records nothing.
+   * `revokedIds` names only the capabilities whose POST succeeded, which is
+   * what an agent revocation records as its audit trail.
    *
    * @param options {object}
    * @param options.zcaps {IDelegatedZcap[]}
    * @param [options.signerCheck] {AccountSignerCheck}   the verified account
-   *   document's reading; without it only the expiry skip applies
+   *   document's reading; without it a refusal is read on expiry alone
    * @returns {Promise<{ revoked: number; skipped: number; revokedIds: string[] }>}
    */
   async #revokeZcaps({
@@ -3178,38 +3173,32 @@ export class StorageManager {
     const space = remote.spaceHandle()
     const now = Date.now()
     const outcomes = await Promise.allSettled(
-      zcaps.map(async zcap => {
-        const skip = grantRevocationSkip({ zcap, signerCheck, now })
-        if (skip !== undefined) {
-          return { id: zcap.id, skipped: skip }
-        }
-        try {
-          await space.revoke(zcap)
-          return { id: zcap.id }
-        } catch (err) {
-          if (errorNameOf(err) === 'AlreadyRevokedError') {
-            return { id: zcap.id, skipped: 'already-revoked' }
-          }
-          throw err
-        }
-      })
+      zcaps.map(zcap =>
+        revokeRecordedGrant({
+          revoke: delegation => space.revoke(delegation),
+          zcap,
+          signerCheck,
+          now
+        })
+      )
     )
     const revokedIds: string[] = []
+    const skipped: Array<{ id: string; reason: string }> = []
     const failed: Array<{ id: string; err: unknown }> = []
-    let skipped = 0
     outcomes.forEach((outcome, index) => {
+      const { id } = zcaps[index]
       if (outcome.status === 'rejected') {
-        failed.push({ id: zcaps[index].id, err: outcome.reason })
-      } else if (outcome.value.skipped !== undefined) {
-        skipped += 1
+        failed.push({ id, err: outcome.reason })
+      } else if (outcome.value === 'revoked') {
+        revokedIds.push(id)
       } else {
-        revokedIds.push(outcome.value.id)
+        skipped.push({ id, reason: outcome.value })
       }
     })
     if (failed.length > 0) {
-      // The ids that DID land are diagnosable here and nowhere else: the
-      // throw carries the first failure alone, and the caller records
-      // nothing.
+      // The ids that DID land, and why the rest were skipped, are
+      // diagnosable here and nowhere else: the throw carries the first
+      // failure alone, and the caller records nothing.
       log.warn('Could not revoke every recorded grant; none recorded', {
         failed: failed.map(entry => entry.id),
         revokedIds,
@@ -3217,7 +3206,7 @@ export class StorageManager {
       })
       throw failed[0].err
     }
-    return { revoked: revokedIds.length, skipped, revokedIds }
+    return { revoked: revokedIds.length, skipped: skipped.length, revokedIds }
   }
 
   /**
@@ -3432,7 +3421,8 @@ export class StorageManager {
    * The full delegated zcaps recorded for one grantee, scanned from the
    * `Login` history activities `matches` accepts: those whose recorded `zcap`
    * was delegated to `controller` and has not already expired by its own
-   * `expires` (wallet-core's `isDelegationExpired`; an absent or unparseable
+   * `expires` (wallet-core's `delegationExpired`, beyond the revocation
+   * clock-skew margin; an absent or unparseable
    * value is not expired). Deduplicated by capability id. `skipped` counts
    * the entries that carry no revocable capability (legacy summary-only
    * records, a different controller, or an already-expired grant). The predicate is what tells the two grantee kinds
@@ -3498,7 +3488,7 @@ export class StorageManager {
         seen.add(zcap.id)
         // The one expiry reading every revocation path shares: the zcap's
         // own `expires`, and an absent or unparseable one is NOT expired.
-        if (isDelegationExpired({ delegation: zcap, now })) {
+        if (delegationExpired({ zcap, now })) {
           skipped += 1
           continue
         }

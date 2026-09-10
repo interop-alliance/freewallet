@@ -23,12 +23,13 @@
  * derives as unknown rather than orphaned; its chain is dead exactly when
  * the generation delegation it chains under no longer belongs to the
  * generation the account document points at.
- * `grantRevocationSkip` is the revocation-time reading of the same document:
- * a grant that is expired, orphaned, or chained under a parent delegation
- * whose signer has left the document (or whose generation is no longer the
- * pointed one) is dead already and is skipped without a POST; every other
- * grant is POSTed,
- * and only the server's genuine `AlreadyRevokedError` reads as a no-op there.
+ * Wallet-core's `grantRevocationSkip` (`/clientAnnex`) is the revocation-time
+ * reading of the same document, applied per grant by
+ * `StorageManager#revokeZcaps`: a grant that is expired, orphaned, or chained
+ * under a parent delegation whose signer has left the document (or whose
+ * generation is no longer the pointed one) is dead already and is skipped
+ * without a POST; every other grant is POSTed, and only the server's genuine
+ * `AlreadyRevokedError` reads as a no-op there.
  * `revokeAppAccess` retires an app: for each app-provisioned encrypted
  * collection it rotates the epoch to drop the app's recipient key (so the app
  * cannot decrypt future writes) and revokes those pull-axis grants
@@ -52,14 +53,10 @@ import {
   deriveGrantSignerState,
   type GrantSignerState
 } from '@interop/wallet-core/clients'
+import type { AccountSignerCheck } from '@interop/wallet-core/clientAnnex'
 import {
-  clientAnnexDidParts,
-  isDelegationExpired
-} from '@interop/wallet-core/clientAnnex'
-import {
-  delegationKeyInDocument,
-  delegationProofKeyId,
-  type PublishedKeyDocument
+  delegationExpired,
+  delegationProofKeyId
 } from '@interop/wallet-core/webvh'
 import type { IZcap } from '@interop/data-integrity-core'
 import {
@@ -93,22 +90,10 @@ export interface AppGrant {
 
 /**
  * What a recorded grant is checked against, read off the session's verified
- * account document: the account DID an enrolled client's promoted
- * verification-method id is under, the enrolled clients' signing-key
- * multibases (the two named as wallet-core's `deriveGrantSignerState` takes
- * them), the verified document itself (what an embedded generation
- * delegation's proof key is checked against, wallet-core's
- * `delegationKeyInDocument`), and the annex DID the document's
- * delegated-clients pointer currently names, absent when it names none. The
- * first two settle the orphaned marker; the last two settle whether an
- * annex-signed grant's generation delegation still stands.
+ * account document; assembled app-side by `currentAccountSignerCheck`
+ * (`src/session/clients.ts`) and read by wallet-core's `grantRevocationSkip`.
  */
-export interface AccountSignerCheck {
-  accountDid: string
-  currentSigningKeys: Set<string>
-  doc: PublishedKeyDocument
-  clientAnnexDid?: string
-}
+export type { AccountSignerCheck } from '@interop/wallet-core/clientAnnex'
 
 /**
  * A connected application, joined from its app-key credential and the latest
@@ -264,22 +249,17 @@ function grantExpires(record: { expires?: unknown; zcap?: unknown }): string {
 
 /**
  * The verification-method id that signed a recorded grant capability's
- * delegation proof, when the record carries the full zcap (a delegated zcap
- * carries exactly one `capabilityDelegation` proof, but the wire shape allows
- * an array).
+ * delegation proof, when the record carries the full zcap: wallet-core's
+ * `delegationProofKeyId`, the same accessor the parent check reads, behind
+ * the guard an unvalidated activity record needs.
  *
  * @param zcap {unknown}   the recorded full capability, if any
  * @returns {string | undefined}
  */
 function grantSignerKeyId(zcap: unknown): string | undefined {
-  if (!zcap || typeof zcap !== 'object') {
-    return undefined
-  }
-  const { proof } = zcap as { proof?: unknown }
-  return stringField(
-    Array.isArray(proof) ? proof[0] : proof,
-    'verificationMethod'
-  )
+  return zcap && typeof zcap === 'object'
+    ? delegationProofKeyId(zcap as IZcap)
+    : undefined
 }
 
 /**
@@ -315,134 +295,6 @@ export function deriveGrantsState({
     accountDid,
     currentSigningKeys
   })
-}
-
-/**
- * Why a recorded grant's revocation is skipped without a POST, when it is:
- * `expired` (the grant's own `expires` has passed; an absent or unparseable
- * value is NOT expired, wallet-core's `isDelegationExpired`), `orphaned` (a
- * grant delegated straight under the Space root whose signer has left the
- * verified document -- the same {@link deriveGrantsState} reading the listing
- * marks the row with, over this one grant), `signer-gone` (a grant chained
- * under an embedded parent delegation whose own proof key has left the
- * verified document under `capabilityDelegation` -- the current-key-set rule
- * applied to the parent, wallet-core's `delegationKeyInDocument`, which is
- * what catches a generation delegation replaced within its generation as
- * well as one struck with its signer), or `generation-swapped` (a parent
- * that is provably a generation delegation, its `controller` parsing as an
- * annex DID, naming a generation other than the one the account document
- * currently points at). Each is a chain the server would refuse with a
- * plain `ValidationError`, indistinguishable there from a transient refusal,
- * so the local reading is what settles them.
- */
-export type GrantRevocationSkip =
-  'expired' | 'orphaned' | 'signer-gone' | 'generation-swapped'
-
-/**
- * Reads a recorded grant against the verified account document and says
- * whether its revocation can be skipped, and why. Without a `signerCheck`
- * only the expiry check applies: everything else is POSTed, since nothing
- * local can say the chain is dead.
- *
- * The chain reading walks `proof.capabilityChain`, where the delegation
- * suite writes it: a grant a transient session minted embeds its parent, the
- * generation delegation, as the chain's last link; a grant delegated under
- * the Space root carries only the root's id string there. An embedded parent
- * is checked by its own proof key first (`signer-gone`), then, when it is
- * provably a generation delegation, by the pointer (`generation-swapped`).
- * Every fail-open case POSTs: a parent whose proof key is absent (an
- * uncheckable chain is not a dead one, the same reasoning wallet-core's
- * `revokeTreatingAlreadyRevokedAsSuccess` states), a parent of some other
- * shape, and a document that currently points at no generation at all.
- *
- * @param options {object}
- * @param options.zcap {IZcap}   the recorded full capability
- * @param [options.signerCheck] {AccountSignerCheck}
- * @param options.now {number}   epoch milliseconds
- * @returns {GrantRevocationSkip | undefined}   undefined when the grant must
- *   be POSTed
- */
-export function grantRevocationSkip({
-  zcap,
-  signerCheck,
-  now
-}: {
-  zcap: IZcap
-  signerCheck?: AccountSignerCheck
-  now: number
-}): GrantRevocationSkip | undefined {
-  if (isDelegationExpired({ delegation: zcap, now })) {
-    return 'expired'
-  }
-  if (!signerCheck) {
-    return undefined
-  }
-  const parent = embeddedParent(zcap)
-  if (parent === undefined) {
-    const state = deriveGrantsState({
-      grants: [{ signerKeyId: grantSignerKeyId(zcap) }],
-      signerCheck
-    })
-    return state === 'orphaned' ? 'orphaned' : undefined
-  }
-  const parentKeyId = delegationProofKeyId(parent)
-  if (
-    parentKeyId !== undefined &&
-    !delegationKeyInDocument({
-      doc: signerCheck.doc,
-      delegationKeyId: parentKeyId
-    })
-  ) {
-    return 'signer-gone'
-  }
-  const parentController = stringField(parent, 'controller')
-  if (
-    signerCheck.clientAnnexDid !== undefined &&
-    parentController !== undefined &&
-    isClientAnnexDid(parentController) &&
-    parentController !== signerCheck.clientAnnexDid
-  ) {
-    return 'generation-swapped'
-  }
-  return undefined
-}
-
-/**
- * The parent capability a grant embeds as the last link of its
- * `proof.capabilityChain`, when the chain embeds one (an object rather than
- * an id string).
- *
- * @param zcap {IZcap}
- * @returns {IZcap | undefined}
- */
-function embeddedParent(zcap: IZcap): IZcap | undefined {
-  const { proof } = zcap as { proof?: unknown }
-  const single = Array.isArray(proof) ? proof[0] : proof
-  if (!single || typeof single !== 'object') {
-    return undefined
-  }
-  const chain = (single as { capabilityChain?: unknown }).capabilityChain
-  if (!Array.isArray(chain) || chain.length === 0) {
-    return undefined
-  }
-  const last: unknown = chain[chain.length - 1]
-  return last !== null && typeof last === 'object' ? (last as IZcap) : undefined
-}
-
-/**
- * Whether a DID string is a client annex did:webvh, by wallet-core's own
- * parse.
- *
- * @param did {string}
- * @returns {boolean}
- */
-function isClientAnnexDid(did: string): boolean {
-  try {
-    clientAnnexDidParts({ did })
-    return true
-  } catch {
-    return false
-  }
 }
 
 /**
@@ -581,8 +433,8 @@ export async function listConnectedApps({
  * grants are revoked (`revokeAppGrants`, which tolerates the double-revocation
  * of the already-rotated collections' grants).
  *
- * Which grants are POSTed is settled by {@link grantRevocationSkip} against
- * the same verified document the listing marked the row with: an expired
+ * Which grants are POSTed is settled by wallet-core's `grantRevocationSkip`
+ * against the same verified document the listing marked the row with: an expired
  * grant, an orphaned root-delegated grant, and a grant chained under a parent
  * delegation that has rotted (its signer gone, or its generation no longer
  * the pointed one) are dead already and skipped without a POST. Every other
@@ -649,7 +501,7 @@ export async function revokeAppAccess({
     origin: app.origin,
     subjectDid: app.subjectDid,
     items,
-    ...(signerCheck ? { signerCheck } : {})
+    signerCheck
   })
   await storage.deleteAppKey({ cid: app.cid })
   await storage.addHistoryAppRevoke({
@@ -768,7 +620,7 @@ export function isAgentGrantLogin({
  * Whether every recorded grant of an agent row has already expired -- there is
  * nothing left to revoke, so the row is dropped from the listing. The expiry
  * is the grant's `expires` as {@link AppGrant} carries it (the capability's
- * own where recorded), under wallet-core's `isDelegationExpired`: a grant
+ * own where recorded), under wallet-core's `delegationExpired`: a grant
  * with no recorded expiry (or an unparseable one) counts as still live, so a
  * row is never hidden on a missing stamp.
  *
@@ -788,8 +640,8 @@ function allGrantsExpired({
     return true
   }
   return grants.every(grant =>
-    isDelegationExpired({
-      delegation: { expires: grant.expires } as unknown as IZcap,
+    delegationExpired({
+      zcap: { expires: grant.expires } as unknown as IZcap,
       now
     })
   )
@@ -969,7 +821,7 @@ export async function listConnectedAgents({
  * admits, and it is never an epoch recipient.
  *
  * Which recorded grants are POSTed follows the app path exactly
- * ({@link grantRevocationSkip} over `signerCheck`): an expired grant, an
+ * (wallet-core's `grantRevocationSkip` over `signerCheck`): an expired grant, an
  * orphaned root-delegated grant, and a grant under a rotted parent
  * delegation are skipped without a POST, and every other
  * grant is POSTed whatever the row's marker, since a grant delegated from a
@@ -1005,7 +857,7 @@ export async function revokeAgentAccess({
 }): Promise<{ revoked: number; skipped: number }> {
   const outcome = await storage.revokeAgentGrants({
     controller: agent.controller,
-    ...(signerCheck ? { signerCheck } : {})
+    signerCheck
   })
   await storage.addHistoryAgentRevoke({
     user,

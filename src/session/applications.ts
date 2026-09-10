@@ -103,7 +103,7 @@ export async function revokeApplication({
     storage: session.storage,
     user: session.user,
     app,
-    ...(signerCheck ? { signerCheck } : {})
+    signerCheck
   })
   // The rotation revokes an app-provisioned collection's pull grant with the
   // epoch, and the second stage's re-POST of that same capability comes back
@@ -180,7 +180,7 @@ export async function revokeAgent({
     storage: session.storage,
     user: session.user,
     agent,
-    ...(signerCheck ? { signerCheck } : {})
+    signerCheck
   })
   return { revoked: outcome.revoked }
 }

@@ -3,8 +3,8 @@
  * loaded once per page over `listConnectedApps`. The load is non-blocking: a
  * failure is logged and reads as no apps, so the attribution line is left off
  * rather than the page failing. It runs only where the line can name an app:
- * a session with remote storage, and (where the caller names one) a
- * collection the wallet did not provision itself.
+ * a session with remote storage, and (where the caller says so) a listing
+ * with at least one collection carrying a `generator`.
  */
 import { listConnectedApps, type ConnectedApp } from '@/lib/connectedApps'
 import { createLogger } from '@/lib/log'
@@ -14,10 +14,16 @@ import { useAsyncLoad } from './useAsyncLoad'
 const log = createLogger('fw:ui:storage')
 
 /**
+ * One shared empty listing, so a disabled, loading, or failed hook keeps a
+ * stable identity across renders and the consumers' memos hold.
+ */
+const NO_APPS: ConnectedApp[] = []
+
+/**
  * @param options {object}
  * @param [options.storage] {StorageManager}   the session's storage
  * @param [options.enabled] {boolean}   false leaves the load off entirely
- *   (a wallet collection has no app to name); defaults to true
+ *   (no listed collection carries a `generator`); defaults to true
  * @returns {ConnectedApp[]}   the apps, latest-connected first; empty while
  *   loading, when the load is off, and after a failed load
  */
@@ -45,7 +51,7 @@ export function useConnectedApps({
     }
   )
   if (!active || error) {
-    return []
+    return NO_APPS
   }
-  return data ?? []
+  return data ?? NO_APPS
 }

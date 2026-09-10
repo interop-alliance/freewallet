@@ -128,33 +128,6 @@ function controllerDid(controller: string): IDID {
   return controller as IDID
 }
 
-/**
- * The app-attribution pair as the provisioning ensures take it. The
- * `generator` is narrowed onto the DID type: an app-provisioned collection's
- * generator is the connected app's did:key, and a value that is not a DID is
- * dropped rather than stamped, since attribution is advisory and no
- * provisioning should fail over it. The origin says which origin that DID was
- * bound to, so it is dropped with it. Both provisioning paths pass the pair
- * through this one helper, so they stamp the same thing.
- *
- * @param options {object}
- * @param [options.generator] {string}
- * @param [options.generatorOrigin] {string}
- * @returns {{ generator?: IDID, generatorOrigin?: string }}
- */
-function collectionAttribution({
-  generator,
-  generatorOrigin
-}: {
-  generator?: string
-  generatorOrigin?: string
-}): { generator?: IDID; generatorOrigin?: string } {
-  if (!generator?.startsWith('did:')) {
-    return {}
-  }
-  return { generator: generator as IDID, generatorOrigin }
-}
-
 export class WASRemoteStore {
   public storageServerUrl: string
   public was: WasClient
@@ -658,10 +631,7 @@ export class WASRemoteStore {
    * A standing collection may be log-governed (an App Connect provisioning
    * made it so), and its served `encryption` member is the server's own
    * projection, which a Description PUT may not carry
-   * (`encryption-history-log-governed`); the ensure never re-sends it. The
-   * Space half is skipped by supplying the description of the Space this
-   * session already runs in, since the bound capability may be scoped below
-   * the bare Space URL.
+   * (`encryption-history-log-governed`); the ensure never re-sends it.
    *
    * `generator` and `generatorOrigin` are the collection's app attribution
    * (the DID of the application it is provisioned for, and the Web origin
@@ -691,21 +661,13 @@ export class WASRemoteStore {
     generatorOrigin?: string
   }): Promise<string> {
     try {
-      await ensureSpaceAndCollection({
-        was: this.was,
-        spaceId: this.spaceId,
-        controllerDid: this.controller,
-        collectionId: id,
-        collectionName: name ?? id,
+      await this.#ensureCollectionInSpace({
+        id,
+        name,
         encryption: 'plaintext',
         isPublic,
-        ...collectionAttribution({ generator, generatorOrigin }),
-        spaceDescription: {
-          id: this.spaceId,
-          type: ['Space'],
-          controller: this.controller
-        },
-        capability: this.#capability
+        generator,
+        generatorOrigin
       })
     } catch (err) {
       log.error('Error provisioning collection', { id, err })
@@ -730,11 +692,6 @@ export class WASRemoteStore {
    * client-written `encryption` member refuses rather than trip the server's
    * `encryption-immutable` refusal on the genesis.
    *
-   * Every request rides this store's bound invocation capability (a transient
-   * session's generation delegation), which is scoped below the bare Space
-   * URL, so the ensure's Space half is skipped by supplying the description
-   * of the Space this session already runs in.
-   *
    * `generator` and `generatorOrigin` are the collection's app attribution,
    * stamped on the guarded create.
    *
@@ -758,14 +715,57 @@ export class WASRemoteStore {
     generator?: string
     generatorOrigin?: string
   }): Promise<void> {
+    await this.#ensureCollectionInSpace({
+      id,
+      name,
+      encryption: 'governed',
+      generator,
+      generatorOrigin
+    })
+  }
+
+  /**
+   * The one was-client ensure both provisioning paths ride. The Space half
+   * is skipped by supplying the description of the Space this session
+   * already runs in, since the bound invocation capability (a transient
+   * session's generation delegation) may be scoped below the bare Space URL.
+   * The attribution pair passes through as supplied: was-client stamps it on
+   * the create and drops a lone `generatorOrigin` itself.
+   *
+   * @param options {object}
+   * @param options.id {string}
+   * @param [options.name] {string}   display name; defaults to the id
+   * @param options.encryption {'plaintext' | 'governed'}
+   * @param [options.isPublic] {boolean}
+   * @param [options.generator] {string}
+   * @param [options.generatorOrigin] {string}
+   * @returns {Promise<void>}
+   */
+  async #ensureCollectionInSpace({
+    id,
+    name,
+    encryption,
+    isPublic,
+    generator,
+    generatorOrigin
+  }: {
+    id: string
+    name?: string
+    encryption: 'plaintext' | 'governed'
+    isPublic?: boolean
+    generator?: string
+    generatorOrigin?: string
+  }): Promise<void> {
     await ensureSpaceAndCollection({
       was: this.was,
       spaceId: this.spaceId,
       controllerDid: this.controller,
       collectionId: id,
       collectionName: name ?? id,
-      encryption: 'governed',
-      ...collectionAttribution({ generator, generatorOrigin }),
+      encryption,
+      isPublic,
+      generator,
+      generatorOrigin,
       spaceDescription: {
         id: this.spaceId,
         type: ['Space'],

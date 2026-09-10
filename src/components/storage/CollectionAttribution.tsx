@@ -30,20 +30,37 @@ export function CollectionAttribution({
 }) {
   const { t } = useTranslation()
 
-  if (isWalletCollection(collection.id)) {
-    return (
-      <Typography
-        variant="caption"
-        component="div"
-        sx={storageStyles.collectionAttribution}
-      >
-        {t('storage.createdByWallet')}
-      </Typography>
-    )
+  const caption = isWalletCollection(collection.id)
+    ? t('storage.createdByWallet')
+    : appCaption({ collection, app, linkToApp })
+  if (!caption) {
+    return null
   }
+  return (
+    <Typography
+      variant="caption"
+      component="div"
+      sx={storageStyles.collectionAttribution}
+    >
+      {caption}
+    </Typography>
+  )
+}
 
-  // A collection whose app the wallet still holds a key for links to it; one
-  // stamped with an origin alone names that origin as plain text.
+/**
+ * The app half of the caption: a collection whose app the wallet still holds
+ * a key for links to it; one stamped with an origin alone names that origin
+ * as plain text; one with neither has no caption.
+ */
+function appCaption({
+  collection,
+  app,
+  linkToApp
+}: {
+  collection: StorageCollection
+  app?: ConnectedApp
+  linkToApp: boolean
+}) {
   const label = app?.name ?? collection.generatorOrigin
   if (!label) {
     return null
@@ -58,18 +75,11 @@ export function CollectionAttribution({
     ) : (
       <Box component="span" />
     )
-
   return (
-    <Typography
-      variant="caption"
-      component="div"
-      sx={storageStyles.collectionAttribution}
-    >
-      <Trans
-        i18nKey="storage.createdByApp"
-        values={{ name: label }}
-        components={{ app: nameComponent }}
-      />
-    </Typography>
+    <Trans
+      i18nKey="storage.createdByApp"
+      values={{ name: label }}
+      components={{ app: nameComponent }}
+    />
   )
 }

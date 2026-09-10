@@ -199,22 +199,25 @@ activity. An app whose recorded signers have all left the document shows as
 orphaned, and reconnecting through the ordinary App Connect flow is the
 recovery path. A grant minted in a transient session is signed by an annex
 key the account document never lists, so that signer derives as unknown and
-the row carries no marker. The marker is display-only; what gates each
-grant's POST is `grantRevocationSkip`, the same document read per grant at
-revocation time: a grant that is expired, orphaned (delegated under the
-Space root, signer gone), or chained under an embedded parent delegation
-that has rotted (the parent's own proof key gone from the document under
-`capabilityDelegation`, wallet-core's `delegationKeyInDocument`, which
-covers a generation delegation replaced within its generation; or a parent
-whose `controller` parses as an annex DID other than the pointed one) is
-dead already and skipped without a POST. Every fail-open case POSTs: a
-parent with no proof key, a parent of another shape, a document pointing at
-no generation. Every other grant is POSTed, and of the POSTs only the
-server's `AlreadyRevokedError` counts as skipped. Any other refusal, a plain
-`ValidationError` included (a read-replica lag on a live grant answers the
-same way as a dead chain), is thrown after the sibling POSTs settle, before
-the app key is deleted or the Revoke recorded, so the row stays listed and a
-retry re-runs. A failure leaves the app-provisioned collections already
+the row carries no marker. The marker is display-only; each grant's
+revocation is wallet-core's `revokeRecordedGrant`, the same policy the
+generation delegation's revocation follows. A grant expired beyond the
+revocation clock-skew margin is skipped without a POST. Every other grant
+is POSTed, whatever the document says about its signer, since the document
+a login read is a snapshot. The server's `AlreadyRevokedError` counts as
+skipped. A plain `ValidationError` is read against the same document
+(`classifyGrantRevocationRefusal`): a grant at or past its own `expires`,
+an orphaned one (delegated under the Space root, signer gone), or one
+chained under an embedded parent delegation that has rotted (the parent's
+own proof key gone from the document under `capabilityDelegation`,
+wallet-core's `delegationSignerGone`, which covers a generation delegation
+replaced within its generation; or a parent whose `controller` parses as an
+annex DID other than the pointed one) counts as skipped. A refusal the
+client cannot read (a parent with no proof key, a parent of another shape,
+a document pointing at no generation, a signer still enrolled) is thrown,
+as is any other failure, after the sibling POSTs settle, before the app key
+is deleted or the Revoke recorded, so the row stays listed and a retry
+re-runs. A failure leaves the app-provisioned collections already
 rotated off the app's recipient key (the rotation stage runs first) with
 the credential kept and no Revoke recorded; the rotation is idempotent and
 the landed revocations answer `AlreadyRevokedError`, so the retry converges

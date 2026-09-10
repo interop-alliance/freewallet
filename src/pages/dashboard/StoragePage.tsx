@@ -195,8 +195,12 @@ export const StoragePage = () => {
     [loadedShares, sharesError]
   )
 
-  // The connected applications behind each collection's "Created by" line.
-  const apps = useConnectedApps({ storage: session?.storage })
+  // The connected applications behind each collection's "Created by" line,
+  // loaded only once some listed collection carries an app to name.
+  const apps = useConnectedApps({
+    storage: session?.storage,
+    enabled: collections.some(({ generator }) => generator !== undefined)
+  })
 
   const appsByCollection = useMemo(
     () => attributeCollectionsToApps({ collections, apps }),

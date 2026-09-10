@@ -140,21 +140,25 @@
   discipline, one registry read per block, one authority-kind decision in
   `accountCeremonyContext`, and one `startLoginMenderBlock`.
 - App and agent grant revocation (`revokeAppGrants`, `revokeAgentGrants`)
-  reads each recorded grant against the verified account document before
-  any POST (`grantRevocationSkip` in `src/lib/connectedApps.ts`): an expired
-  grant, an orphaned root-delegated grant, and a grant whose embedded parent
-  delegation (read from `proof.capabilityChain`) has rotted, its proof key
-  gone from the verified document (`delegationKeyInDocument`) or, for a
-  generation delegation, its generation no longer the pointed one, are
-  skipped locally. `AccountSignerCheck` carries the verified document
-  (`doc`) and the delegated-clients pointer (`clientAnnexDid`) for that
-  reading, and `revokeAppAccess`,
-  `revokeAgentAccess`, `revokeAgent`, and the app-key sweep
-  (`readSignerCheck`, read once and only when a row needs revoking) take it.
+  POSTs each recorded grant through wallet-core's `revokeRecordedGrant`
+  (`/clientAnnex`), which holds the one policy: a grant expired beyond the
+  revocation clock-skew margin is skipped without a POST; everything else is
+  POSTed; the server's `AlreadyRevokedError` counts as skipped; a plain
+  `ValidationError` is read against the verified account document
+  (`classifyGrantRevocationRefusal`) and counts as skipped when the client
+  can say why the chain is dead (expired, an orphaned root-delegated grant,
+  an embedded parent delegation whose proof key left the document, or a
+  generation delegation naming a generation the document no longer points
+  at), and is thrown otherwise. Wallet-core's `AccountSignerCheck` carries
+  the verified document (`doc`) and the delegated-clients pointer
+  (`clientAnnexDid`) for that reading; `currentAccountSignerCheck` assembles
+  it, and `revokeAppAccess`, `revokeAgentAccess`, `revokeAgent`, and the
+  app-key sweep (`readSignerCheck`, read once and only when a row needs
+  revoking) take it.
 - The recorded-grant lookup's expiry reading is wallet-core's
-  `isDelegationExpired` over the zcap's own `expires`; an absent or
-  unparseable value is not expired, and the summary record's `expires` is no
-  longer a fallback. The Applications listing reads the same value: an
+  `delegationExpired` over the zcap's own `expires`, beyond the revocation
+  clock-skew margin; an absent or unparseable value is not expired, and the
+  summary record's `expires` is no longer a fallback. The Applications listing reads the same value: an
   `AppGrant`'s `expires` is the recorded capability's own where the full
   zcap was recorded, the summary's only on a legacy summary-only record.
 - The credential retirement's generation-swap warning names why the old

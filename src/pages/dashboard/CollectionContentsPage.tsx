@@ -54,12 +54,10 @@ import {
 } from '@/components/storage/useResourceSource'
 import {
   getCollectionDisplayName,
-  getResourceDisplayName,
-  isWalletCollection
+  getResourceDisplayName
 } from '@/components/storage/displayUtils'
 import { CollectionAttribution } from '@/components/storage/CollectionAttribution'
 import { useConnectedApps } from '@/hooks/useConnectedApps'
-import { attributeCollectionsToApps } from '@/lib/collectionAttribution'
 import { createLogger } from '@/lib/log'
 
 const log = createLogger('fw:ui:storage')
@@ -161,21 +159,16 @@ export function CollectionContentsPage() {
   )
 
   // The connected application this collection belongs to, for the header's
-  // "Created by" line. A wallet collection names no app, so the load is off
-  // there rather than decrypting the activity log for nothing.
+  // "Created by" line: the newest connect for its `generator` DID, the apps
+  // listing latest-connected first. A collection stamped with no generator
+  // names no app, so the load is off there rather than decrypting the
+  // activity log for nothing.
+  const generator = collection?.generator
   const apps = useConnectedApps({
     storage,
-    enabled: collectionId !== undefined && !isWalletCollection(collectionId)
+    enabled: generator !== undefined
   })
-
-  const attributedApp = useMemo(() => {
-    if (!collection) {
-      return undefined
-    }
-    return attributeCollectionsToApps({ collections: [collection], apps }).get(
-      collection.id
-    )
-  }, [apps, collection])
+  const attributedApp = apps.find(app => app.subjectDid === generator)
 
   const resources = contentsError ? [] : (contents?.resources ?? [])
   const errorKey = contentsError

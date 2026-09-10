@@ -49,8 +49,7 @@ import {
   ladderRung,
   ladderVmAgent,
   retireClientAnnexRung,
-  swapClientAnnexGeneration,
-  type ClientAnnexGenerationSwap
+  swapClientAnnexGeneration
 } from '@interop/wallet-core/clientAnnex'
 import type { IKeyAgreementKey, IZcap } from '@interop/data-integrity-core'
 import type { ZcapClient } from '@interop/ezcap'
@@ -666,7 +665,7 @@ async function retireClientAnnexInventoryStage({
       // the explicit revoke only covers the fail-open case, so a skipped
       // one is worth a warning, not a failure.
       log.warn(
-        `${SWAP_REVOKE_SKIPPED[revoke]}; the re-point alone retires the retired credential's annex inventory`,
+        "The generation swap sent no revocation POST for the old delegation; the re-point alone retires the retired credential's annex inventory",
         { revoke }
       )
     }
@@ -682,26 +681,6 @@ async function retireClientAnnexInventoryStage({
       errorName: errorNameOf(err)
     }
   }
-}
-
-/**
- * Why a generation swap sent no revocation POST for the old generation's
- * delegation, worded per `swapClientAnnexGeneration`'s `revoke` outcome:
- * `expired` and `signer-gone` found the delegation and skipped the POST
- * locally, `no-delegation` and `log-absent` found nothing to revoke.
- */
-const SWAP_REVOKE_SKIPPED: Record<
-  Exclude<ClientAnnexGenerationSwap['revoke'], 'revoked'>,
-  string
-> = {
-  expired:
-    'The generation swap skipped revoking the old delegation, already expired',
-  'signer-gone':
-    'The generation swap skipped revoking the old delegation, whose signer has left the account document',
-  'no-delegation':
-    'The generation swap found no old delegation to revoke in the old generation',
-  'log-absent':
-    'The generation swap found no old generation log to revoke a delegation from'
 }
 
 /**

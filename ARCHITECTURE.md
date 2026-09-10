@@ -641,9 +641,11 @@ cascades, and the permanent wire-level constants.
   - the root entry (the ceremony-id vocabulary, and the stage-notifier and
     logger seams)
   - `/webvh` (the did:webvh log, the document halves of the ceremonies)
-  - `/clientAnnex` (the ladder, the annex log and its GC, and the
+  - `/clientAnnex` (the ladder, the annex log and its GC, the
     ladder-anchored ceremonies: credential-anchored genesis, self-enrollment,
-    transient recovery). The verify-side halves stay in the base subpaths.
+    transient recovery, and the recorded-grant revocation
+    `revokeRecordedGrant` with its refusal reading). The verify-side halves
+    stay in the base subpaths.
   - `/keys` (the user key, its wrap-set roster, the per-collection
     descriptor log store, the client-key record codec, client labels)
   - `/keyring` (the unlock layer), `/unlock` (standing unlock credentials,
