@@ -85,7 +85,7 @@ export async function repairStaleUnlockRegistrySeal({
   session,
   rosterRead,
   context,
-  readRegistry
+  readRegistry = () => getUnlockMethods({ session })
 }: {
   session: Session
   rosterRead: UserKeyRosterReadResult
@@ -114,7 +114,7 @@ export async function repairStaleUnlockRegistrySeal({
     return 'ok'
   }
   try {
-    await (readRegistry ? readRegistry() : getUnlockMethods({ session }))
+    await readRegistry()
     return 'ok'
   } catch (err) {
     if (!(err instanceof UnlockRegistryStaleSealError)) {

@@ -59,16 +59,14 @@ describe('the keystore promotion a login keeps', () => {
       persistence: browserLocalSessionPersistence()
     })
 
-    const { promoted, keystorePromotion } =
-      await storage.ensurePromotedController({
-        profile: profileWithNoKeystore()
-      })
+    const { promoted } = await storage.ensurePromotedController({
+      profile: profileWithNoKeystore()
+    })
 
     // The server already agreed, so nothing was promoted here -- but the
     // keystore half ran, and the manager kept it for the block's tail.
     expect(promoted).toBe(false)
-    expect(keystorePromotion).toBeDefined()
-    expect(storage.keystorePromotion).toBe(keystorePromotion)
+    expect(storage.keystorePromotion).toBeDefined()
     expect(await storage.keystorePromotion).toEqual({ outcome: 'noop' })
   })
 

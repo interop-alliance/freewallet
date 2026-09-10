@@ -17,8 +17,8 @@
  * backfill. The remembered block adds its own registrations around them (the
  * provisioning seed and the user key sweep ahead, the standing-delegation
  * and ladder-rung refreshes, the pointer heal, the generation-delegation
- * heal, then the app-key sweep and the annex GC); the transient block adds
- * the management-zcap refresh last.
+ * heal, then the app-key sweep, the annex GC and the keystore report); the
+ * transient block adds the management-zcap refresh last.
  */
 import type { MendOutcome } from '@interop/wallet-core/menders'
 import type { UserKeyRosterReadResult } from '@interop/wallet-core/keys'
@@ -212,12 +212,14 @@ export async function resealRegistryPass({
 export async function tornRetirementPass({
   session,
   found,
+  context,
   registry,
   credential
 }: SharedRegistryPassOptions): Promise<MendOutcome> {
   const repaired = await repairTornPassphraseRetirement({
     session,
     found,
+    context,
     readRegistry: registry.read,
     ...(credential ? { credential } : {})
   })
@@ -237,11 +239,13 @@ export async function tornRetirementPass({
 export async function barePasskeyPass({
   session,
   found,
+  context,
   registry
 }: SharedRegistryPassOptions): Promise<MendOutcome> {
   const rebuilt = await rebuildBarePasskeyEntry({
     session,
     found,
+    context,
     readRegistry: registry.read
   })
   if (rebuilt === 'repaired') {

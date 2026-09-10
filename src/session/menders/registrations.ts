@@ -7,13 +7,14 @@
  *
  * Two lists are run by the runner, one per chain trigger. The remembered
  * list is split at the settle point: the registry-writing part settles
- * `session.registryReady`, and the tail (the keystore report, the app-key
- * sweep, and the annex GC) settles only `session.mends`. Beside them sit the sites that report from
- * their own call sites: the routing entries, whose control flow decides
- * whether a session is built at all, and the did:web projection mend, which
- * a transient visit fires before its chain and in the CHAPI popup. Those are
- * data (`RegistrationSite`) rather than registrations, so nothing can run
- * them out of their own order.
+ * `session.registryReady`, and the tail (the app-key sweep, the annex GC,
+ * and the keystore report last, so neither sweep queues behind its KMS
+ * round trip) settles only `session.mends`. Beside them sit the sites that
+ * report from their own call sites: the routing entries, whose control flow
+ * decides whether a session is built at all, and the did:web projection
+ * mend, which a transient visit fires before its chain and in the CHAPI
+ * popup. Those are data (`RegistrationSite`) rather than registrations, so
+ * nothing can run them out of their own order.
  */
 import type {
   InvariantId,
@@ -36,7 +37,6 @@ import type { AccountCeremonyContext } from '@/session/accountCeremonyContext'
 import {
   backfillRegistryPass,
   barePasskeyPass,
-  blockRegistryRead,
   promotedAccountPointer,
   promotedAccountView,
   resealRegistryPass,
@@ -44,6 +44,7 @@ import {
   type BlockRegistryRead,
   type SharedRegistryPassOptions
 } from '@/session/registryPasses'
+import { verifiedAccountLog } from '@/session/verifiedLog'
 import { sweepUserKeyToDocument } from '@/session/userKeySweep'
 import {
   refreshCommittedLadderRung,
@@ -86,13 +87,11 @@ export interface RememberedMenderDeps {
    */
   refreshContext: () => void
   /**
-   * Where the pointer heal leaves the keystore promotion it fired, read by
-   * the tail registration that reports the keystore controller. With no
-   * `pending` that registration falls back to the promotion storage
-   * provisioning fired, which is the ordinary case on an account whose
-   * pointer already names the did:webvh.
+   * The block's one unlock-methods registry read, so every registration of
+   * one login shares one fetch. A pass that wrote the registry drops the
+   * memo, and the passes behind it read the record it left.
    */
-  keystorePromotion: { pending?: Promise<MendOutcome> }
+  registry: BlockRegistryRead
   /**
    * The login's verified roster read, where one succeeded.
    */
@@ -120,6 +119,11 @@ export interface TransientMenderDeps {
   found: TransientKeyringFetchResult
   context: () => Promise<AccountCeremonyContext | null>
   /**
+   * The block's one unlock-methods registry read, as on the remembered
+   * chain.
+   */
+  registry: BlockRegistryRead
+  /**
    * The visit's roster read, whose user key the registry writes seal to.
    */
   rosterRead: UserKeyRosterReadResult
@@ -128,9 +132,11 @@ export interface TransientMenderDeps {
    */
   generationDelegation: IZcap
   /**
-   * The derived unlock credential, where the visit holds one.
+   * The login credential, where the visit holds one. The same member the
+   * remembered chain carries, so the shared passes read it with no branch
+   * on the chain.
    */
-  credential?: UnlockCredential
+  loginCredential?: { secret?: string | Uint8Array; derived?: UnlockCredential }
 }
 
 /**
@@ -276,30 +282,6 @@ const USER_KEY_SWEEP: Registration<LoginMenderDeps, FreewalletCeremonyId> = {
 }
 
 /**
- * The block's one unlock-methods registry read, keyed by the deps object the
- * block was started with. The deps object IS the block, so every
- * registration of one login shares one fetch while two logins in flight keep
- * their own. A pass that wrote the registry drops the memo, so the passes
- * behind it read the record it left.
- */
-const BLOCK_REGISTRY_READS = new WeakMap<LoginMenderDeps, BlockRegistryRead>()
-
-/**
- * The block's registry read, created on the first registration that asks.
- *
- * @param deps {LoginMenderDeps}
- * @returns {BlockRegistryRead}
- */
-function blockRegistry(deps: LoginMenderDeps): BlockRegistryRead {
-  let memo = BLOCK_REGISTRY_READS.get(deps)
-  if (!memo) {
-    memo = blockRegistryRead({ session: deps.session })
-    BLOCK_REGISTRY_READS.set(deps, memo)
-  }
-  return memo
-}
-
-/**
  * What the shared passes read, assembled from either chain's deps.
  *
  * @param deps {LoginMenderDeps}
@@ -308,20 +290,15 @@ function blockRegistry(deps: LoginMenderDeps): BlockRegistryRead {
 async function sharedPassOptions(
   deps: LoginMenderDeps
 ): Promise<SharedRegistryPassOptions> {
-  const { session, found, context, rosterRead } = deps
-  const credential =
-    deps.chain === 'remembered'
-      ? deps.loginCredential
-      : deps.credential
-        ? { derived: deps.credential }
-        : undefined
+  const { session, found, context, registry, rosterRead, loginCredential } =
+    deps
   return {
     session,
     found,
     context: await context(),
-    registry: blockRegistry(deps),
+    registry,
     ...(rosterRead ? { rosterRead } : {}),
-    ...(credential ? { credential } : {})
+    ...(loginCredential ? { credential: loginCredential } : {})
   }
 }
 
@@ -410,15 +387,7 @@ const STANDING_DELEGATION_REFRESH: Registration<
     const refreshed = await refreshStandingDelegations({
       session,
       pointer,
-      verifiedLog: async () => {
-        const promoted = await promotedAccountView({ session })
-        if (!promoted) {
-          throw new Error(
-            'The account pointer stopped naming a did:webvh mid-refresh.'
-          )
-        }
-        return promoted.verified
-      },
+      verifiedLog: async () => verifiedAccountLog({ profile: session.profile }),
       rebindStandingRecord,
       delegation,
       ...(found.standing?.delegatedClients
@@ -489,9 +458,9 @@ const LADDER_RUNG_REFRESH: Registration<LoginMenderDeps, FreewalletCeremonyId> =
 
 /**
  * The did:webvh pointer heal and the Space-controller promotion behind it.
- * The keystore promotion that promotion fires is left on the deps for the
- * tail registration below, so `session.registryReady` does not wait on a
- * KMS round trip.
+ * The keystore promotion that promotion fires is left on the storage manager
+ * for the tail registration below to read, so `session.registryReady` does
+ * not wait on a KMS round trip.
  */
 const POINTER_HEAL: Registration<LoginMenderDeps, FreewalletCeremonyId> = {
   trigger: 'remembered-login-chain',
@@ -500,7 +469,7 @@ const POINTER_HEAL: Registration<LoginMenderDeps, FreewalletCeremonyId> = {
     'space-controller-is-the-account-did'
   ],
   async converge(deps) {
-    const { session, found, keystorePromotion } = remembered(deps)
+    const { session, found } = remembered(deps)
     const healed = await healAccountPointer({
       session,
       ...(found.persistAccountPointer
@@ -508,9 +477,6 @@ const POINTER_HEAL: Registration<LoginMenderDeps, FreewalletCeremonyId> = {
         : {}),
       ...(found.pointer ? { pointer: found.pointer } : {})
     })
-    if (healed.keystorePromotion) {
-      keystorePromotion.pending = healed.keystorePromotion
-    }
     // The heal may have promoted the account, which is the state the
     // block's context was resolved against.
     if (healed.pointer.outcome === 'clean') {
@@ -530,7 +496,9 @@ const POINTER_HEAL: Registration<LoginMenderDeps, FreewalletCeremonyId> = {
  * The keystore controller, reported from the promotion this login fired: the
  * pointer heal's where the heal ran one, and otherwise storage
  * provisioning's, which fires it on every login of an account whose pointer
- * already names the did:webvh. It sits in the tail rather than beside the
+ * already names the did:webvh. Either way the promotion is the one the
+ * storage manager kept, and the pointer heal runs earlier in the list, so
+ * whatever it fired stands here. It sits in the tail rather than beside the
  * heal because awaiting a KMS round trip inside the registry-writing prefix
  * would put every Settings ceremony's `registryReady` wait behind that trip.
  * It reports `noop` only when no promotion ran at all (a session with no
@@ -541,10 +509,9 @@ const KEYSTORE_PROMOTION: Registration<LoginMenderDeps, FreewalletCeremonyId> =
     trigger: 'remembered-login-chain',
     reports: ['keystore-controller-is-the-account-did'],
     async converge(deps) {
-      const { session, keystorePromotion } = remembered(deps)
+      const { session } = remembered(deps)
       const invariant = 'keystore-controller-is-the-account-did'
-      const pending =
-        keystorePromotion.pending ?? session.storage.keystorePromotion
+      const pending = session.storage.keystorePromotion
       if (!pending) {
         return [
           { invariant, outcome: 'noop', detail: { reason: 'no-promotion' } }
@@ -620,8 +587,10 @@ const GENERATION_DELEGATION_HEAL: Registration<
 }
 
 /**
- * The stranded app-key sweep. Registered behind the registry-writing
- * entries, so it settles under `session.mends` alone.
+ * The stranded app-key sweep, first of the tail: it is registered behind the
+ * registry-writing entries, so it settles under `session.mends` alone, and
+ * ahead of the keystore report, so it does not queue behind a KMS round
+ * trip.
  */
 const APP_KEY_SWEEP: Registration<LoginMenderDeps, FreewalletCeremonyId> = {
   trigger: 'remembered-login-chain',
@@ -642,7 +611,8 @@ const APP_KEY_SWEEP: Registration<LoginMenderDeps, FreewalletCeremonyId> = {
 }
 
 /**
- * The annex GC sweep, last: a sibling re-mint above lands first.
+ * The annex GC sweep, after the registry-writing entries: a sibling re-mint
+ * above lands first.
  */
 const ANNEX_GC: Registration<LoginMenderDeps, FreewalletCeremonyId> = {
   trigger: 'remembered-login-chain',
@@ -747,12 +717,13 @@ export const REMEMBERED_REGISTRY_REGISTRATIONS: ReadonlyArray<
 ]
 
 /**
- * The remembered block's tail: the keystore report and the two sweeps,
- * which nothing waits on but `session.mends`.
+ * The remembered block's tail: the two sweeps and the keystore report, which
+ * nothing waits on but `session.mends`. The keystore report is last, so
+ * neither sweep queues behind its KMS round trip.
  */
-export const REMEMBERED_TAIL_REGISTRATIONS: ReadonlyArray<
+const REMEMBERED_TAIL_REGISTRATIONS: ReadonlyArray<
   Registration<LoginMenderDeps, FreewalletCeremonyId>
-> = [KEYSTORE_PROMOTION, APP_KEY_SWEEP, ANNEX_GC]
+> = [APP_KEY_SWEEP, ANNEX_GC, KEYSTORE_PROMOTION]
 
 /**
  * The remembered block, seed excluded (the runner takes that separately).
@@ -778,7 +749,7 @@ export const TRANSIENT_REGISTRATIONS: ReadonlyArray<
  * CHAPI popup. They carry no `converge`, so nothing can run them out of
  * their own order.
  */
-export const REPORTING_SITES: ReadonlyArray<RegistrationSite> = [
+const REPORTING_SITES: ReadonlyArray<RegistrationSite> = [
   // The did:web projection mend, `refreshDidWebProjection`
   // (`src/session/annexReach.ts`), void-fired by the transient composition
   // before its chain.

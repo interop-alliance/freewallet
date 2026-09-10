@@ -88,6 +88,7 @@ import {
 } from '@/session/keyring'
 import {
   mendReportAccumulator,
+  type MendOutcome,
   type MendReportAccumulator
 } from '@interop/wallet-core/menders'
 import type { FreewalletCeremonyId } from '@/session/ceremonies'
@@ -95,6 +96,7 @@ import {
   blockCeremonyContext,
   startLoginMenderBlock
 } from '@/session/menders/run'
+import { blockRegistryRead } from '@/session/registryPasses'
 import { primeVerifiedAccountLog } from '@/session/verifiedLog'
 import { documentListsCredential } from '@/session/pendingRetirement'
 import { refreshDidWebProjection } from '@/session/annexReach'
@@ -679,17 +681,20 @@ export async function transientSessionFromKeyringHit({
   })
   // The readiness stage is the routing site of three invariants: the
   // generation it readies, the standing delegations it may have renewed and
-  // re-sealed, and the generation delegation it installs.
+  // re-sealed, and the generation delegation it installs. The two the stage
+  // itself decides grade the same way: a refusal where nothing was readied
+  // at all, and otherwise whether this visit is what mended the predicate.
+  const graded = (mended: boolean): MendOutcome =>
+    readiness.outcome
+      ? mended
+        ? { outcome: 'clean' }
+        : { outcome: 'noop' }
+      : { outcome: 'refused', detail: { reason: 'generation-unavailable' } }
   mends.report({
     invariant: 'annex-generation-is-reachable',
-    ...(readiness.outcome
-      ? readiness.outcome.generationMinted || readiness.outcome.spaceMinted
-        ? { outcome: 'clean' as const }
-        : { outcome: 'noop' as const }
-      : {
-          outcome: 'refused' as const,
-          detail: { reason: 'generation-unavailable' }
-        })
+    ...graded(
+      !!readiness.outcome?.generationMinted || !!readiness.outcome?.spaceMinted
+    )
   })
   // Either re-mint counts as a mend: a fresh sibling is re-sealed into the
   // record just as a fresh bridge is, and grading on the bridge alone would
@@ -709,15 +714,10 @@ export async function transientSessionFromKeyringHit({
   // minted generation (which installs one with its genesis) is a mend.
   mends.report({
     invariant: 'generation-delegation-is-current',
-    ...(readiness.outcome
-      ? readiness.outcome.delegationRenewed ||
-        readiness.outcome.generationMinted
-        ? { outcome: 'clean' as const }
-        : { outcome: 'noop' as const }
-      : {
-          outcome: 'refused' as const,
-          detail: { reason: 'generation-unavailable' }
-        })
+    ...graded(
+      !!readiness.outcome?.delegationRenewed ||
+        !!readiness.outcome?.generationMinted
+    )
   })
   const healedGenerationDelegation = readiness.outcome?.generationDelegation
   // The bridge this visit may still write the log through: the renewed one
@@ -951,22 +951,23 @@ export async function transientSessionFromKeyringHit({
         capability: generationDelegation,
         pinStore: persistence.logPins,
         // The roster store anchors at the log this composition verified.
-        log: verified.log,
-        registry: {
-          unlockSpaceId: found.unlockSpaceId,
-          delegation: usableBridge,
-          delegatedClients: siblingDelegation,
-          ...(found.unlockKeyAgreementKeyId
-            ? { unlockKeyAgreementKeyId: found.unlockKeyAgreementKeyId }
-            : {}),
-          ...(found.unlockKeyAgreementKeyMultibase
-            ? {
-                unlockKeyAgreementKeyMultibase:
-                  found.unlockKeyAgreementKeyMultibase
-              }
-            : {})
-        }
+        log: verified.log
       })),
+      // The acting credential's registry members, beside that authority.
+      registry: {
+        unlockSpaceId: found.unlockSpaceId,
+        delegation: usableBridge,
+        delegatedClients: siblingDelegation,
+        ...(found.unlockKeyAgreementKeyId
+          ? { unlockKeyAgreementKeyId: found.unlockKeyAgreementKeyId }
+          : {}),
+        ...(found.unlockKeyAgreementKeyMultibase
+          ? {
+              unlockKeyAgreementKeyMultibase:
+                found.unlockKeyAgreementKeyMultibase
+            }
+          : {})
+      },
       ...(type === 'passphrase'
         ? {
             beforePromotion: passphraseRegistryUpsertHook({
@@ -1218,9 +1219,12 @@ export async function transientSessionFromKeyringHit({
       session,
       found,
       context,
+      registry: blockRegistryRead({ session }),
       rosterRead,
       generationDelegation,
-      ...(credential ? { credential } : {})
+      // The derived credential is wrapped once here, so the shared passes
+      // read the same member on either chain.
+      ...(credential ? { loginCredential: { derived: credential } } : {})
     }
   })
   return { session, userExists }

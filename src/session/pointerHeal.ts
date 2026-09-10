@@ -16,6 +16,7 @@ import type { AccountPointer } from '@interop/wallet-core/keyring'
 import { isWebvhDid } from '@interop/wallet-core/webvh'
 import type { Session } from '@/types/auth'
 import { createLogger } from '@/lib/log'
+import { MENDER_WARNINGS } from '@/session/menders/warnings'
 
 const log = createLogger('fw:session:registry')
 
@@ -23,9 +24,9 @@ const log = createLogger('fw:session:registry')
  * One heal pass. The two outcomes it reports are the two predicates it
  * converges: the unlock record's pointer names the account did:webvh, and
  * the data Space's controller is that DID. The keystore promotion the
- * Space-side promotion fires is handed back unawaited, for the block's tail
- * registration to report; awaiting a KMS round trip here would put every
- * `registryReady` awaiter behind it.
+ * Space-side promotion fires is left unawaited on the storage manager, for
+ * the block's tail registration to read and report; awaiting a KMS round
+ * trip here would put every `registryReady` awaiter behind it.
  *
  * @param options {object}
  * @param options.session {Session}
@@ -34,7 +35,7 @@ const log = createLogger('fw:session:registry')
  * @param [options.pointer] {AccountPointer}   the pointer the unlock record
  *   served this login, which the backfill rewrites
  * @returns {Promise<object>}   one outcome per predicate (the pointer and
- *   the Space controller), plus the fired keystore promotion where one ran
+ *   the Space controller)
  */
 export async function healAccountPointer({
   session,
@@ -47,7 +48,6 @@ export async function healAccountPointer({
 }): Promise<{
   pointer: MendOutcome
   controller: MendOutcome
-  keystorePromotion?: Promise<MendOutcome>
 }> {
   if (!persistAccountPointer || !servedPointer) {
     return {
@@ -75,22 +75,17 @@ export async function healAccountPointer({
   // one holds whatever the promotion does, so the promotion's failure is
   // reported against the controller alone rather than against both.
   try {
-    const { promoted, keystorePromotion } =
-      await session.storage.ensurePromotedController({
-        profile: session.profile
-      })
+    const { promoted } = await session.storage.ensurePromotedController({
+      profile: session.profile
+    })
     return {
       pointer: { outcome: 'clean' },
       controller: promoted
         ? { outcome: 'clean' }
-        : { outcome: 'noop', detail: { reason: 'no-promotion' } },
-      ...(keystorePromotion ? { keystorePromotion } : {})
+        : { outcome: 'noop', detail: { reason: 'no-promotion' } }
     }
   } catch (err) {
-    log.warn(
-      'Could not backfill the did:webvh pointer and promote the controller; the next login retries',
-      { err }
-    )
+    log.warn(MENDER_WARNINGS['account-pointer-names-the-account-did'], { err })
     return {
       pointer: { outcome: 'clean' },
       controller: { outcome: 'failed', errorName: errorNameOf(err) }

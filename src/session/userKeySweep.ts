@@ -12,7 +12,6 @@
  */
 import type { CollectionEncryption } from '@interop/was-client'
 import type { IKeyAgreementKey } from '@interop/data-integrity-core'
-import { isWebvhDid } from '@interop/wallet-core/webvh'
 import { convergeUserKeyRosterToAccount } from '@interop/wallet-core/clients'
 import type {
   SealableEncryptionDescriptorStore,
@@ -25,6 +24,7 @@ import { WAS_SERVER_URL } from '@/app.config'
 import type { Session } from '@/types/auth'
 import type { SessionPersistence } from '@/session/persistence'
 import { sessionCollectionStores } from '@/session/collectionLogStore'
+import { promotedAccountPointer } from '@/session/registryPasses'
 import { adoptRotatedUserKeyInBand } from '@/session/userKeyAdoption'
 import { cascadeCollectionsToUserKey } from '@/session/userKeyCascade'
 
@@ -52,7 +52,8 @@ import { cascadeCollectionsToUserKey } from '@/session/userKeyCascade'
  * @param options {object}
  * @param options.session {Session}   the live session, whose vault keys and
  *   ciphers adopt a rotation
- * @param [options.pointer] {AccountPointer}
+ * @param [options.pointer] {AccountPointer & { did: string }}   the account
+ *   pointer, once it names a promoted did:webvh
  * @param options.store {SealableEncryptionDescriptorStore}   the roster store
  *   the login read came through
  * @param options.userKey {UserKey}   the login's current per-user key
@@ -65,7 +66,7 @@ import { cascadeCollectionsToUserKey } from '@/session/userKeyCascade'
  *   fan-out should use, whether the convergence rotated the roster or sealed
  *   its log, and how many recipients it found stale or escrowed
  */
-export async function convergeRosterToDocument({
+async function convergeRosterToDocument({
   session,
   pointer,
   store,
@@ -75,7 +76,7 @@ export async function convergeRosterToDocument({
   persistence
 }: {
   session: Session
-  pointer?: AccountPointer
+  pointer?: AccountPointer & { did: string }
   store: SealableEncryptionDescriptorStore
   userKey: UserKey
   read: UserKeyRosterReadResult
@@ -91,7 +92,7 @@ export async function convergeRosterToDocument({
 }> {
   const { keyAgent } = session.profile
   const descriptor = read.descriptor
-  if (!pointer || !isWebvhDid(pointer.did) || !WAS_SERVER_URL || !keyAgent) {
+  if (!pointer || !WAS_SERVER_URL || !keyAgent) {
     return {
       userKey,
       rosterDescriptor: descriptor,
@@ -101,10 +102,6 @@ export async function convergeRosterToDocument({
       escrowedRecipients: 0
     }
   }
-  // The did:webvh check above is what makes the pins' account DID available:
-  // the roster-epoch pin is keyed by it, and an unpromoted account returned
-  // early.
-  const accountDid = pointer.did
   const {
     userKey: convergedUserKey,
     descriptor: convergedDescriptor,
@@ -114,7 +111,7 @@ export async function convergeRosterToDocument({
     escrowedRecipientIds
   } = await convergeUserKeyRosterToAccount({
     pointer: {
-      did: accountDid,
+      did: pointer.did,
       spaceId: pointer.spaceId,
       host: pointer.host
     },
@@ -123,7 +120,9 @@ export async function convergeRosterToDocument({
     descriptor,
     ...(read.etag !== undefined ? { etag: read.etag } : {}),
     clientKeyAgreementKey,
-    pinnedEpochId: await persistence.epochPins.load({ accountDid }),
+    pinnedEpochId: await persistence.epochPins.load({
+      accountDid: pointer.did
+    }),
     accountLogPinStore: persistence.logPins,
     // Adoption is app-side and in band: the unlock-methods registry is
     // re-sealed to the adopted key first (while this browser's local
@@ -141,7 +140,7 @@ export async function convergeRosterToDocument({
       await adoptRotatedUserKeyInBand({
         session,
         spaceId: pointer.spaceId,
-        accountDid,
+        accountDid: pointer.did,
         userKey: adopted,
         latestEpochId,
         descriptor: read
@@ -209,6 +208,7 @@ export async function sweepUserKeyToDocument({
   cascade: UserKeyCascadeResult
 }> {
   const { profile, storage } = session
+  const pointer = promotedAccountPointer({ session })
   const remoteStore = storage.remoteStore
   const clientKeyAgreementKey = profile.clientKeyAgreementKey
   const { keyAgent } = profile
@@ -227,7 +227,7 @@ export async function sweepUserKeyToDocument({
     escrowedRecipients
   } = await convergeRosterToDocument({
     session,
-    ...(profile.accountPointer ? { pointer: profile.accountPointer } : {}),
+    ...(pointer ? { pointer } : {}),
     store,
     userKey,
     read,

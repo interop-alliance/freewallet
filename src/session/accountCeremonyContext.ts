@@ -47,7 +47,7 @@ import {
 } from '@interop/wallet-core/clientAnnex'
 import type { SealableEncryptionDescriptorStore } from '@interop/wallet-core/keys'
 import { WAS_SERVER_URL } from '@/app.config'
-import type { ICapabilityAgent, Session } from '@/types/auth'
+import type { ControllerProfile, ICapabilityAgent, Session } from '@/types/auth'
 import type { WASRemoteStore } from '@/stores/wasRemoteStore'
 import { sessionRosterStore } from '@/session/rosterStore'
 import {
@@ -229,6 +229,39 @@ function resolveAccountReach({ session }: { session: Session }):
 }
 
 /**
+ * An enrolled client's key material off the profile, or the first member
+ * missing. The one test of that material: the full resolution below consumes
+ * what it hands back, and {@link sessionAuthorityKind} decides the enrolled
+ * kind by it.
+ *
+ * @param options {object}
+ * @param options.profile {ControllerProfile}
+ * @returns {object | { missing: MissingPrecondition }}
+ */
+function enrolledKeyMaterial({ profile }: { profile: ControllerProfile }):
+  | {
+      clientWebvhKeys: ClientWebvhUpdateKeys
+      clientKeyAgreementKey: IKeyAgreementKey
+      keyAgent: ICapabilityAgent
+    }
+  | { missing: MissingPrecondition } {
+  if (!profile.clientWebvhKeys) {
+    return { missing: 'updateKeys' }
+  }
+  if (!profile.clientKeyAgreementKey) {
+    return { missing: 'keyAgreementKey' }
+  }
+  if (!profile.keyAgent) {
+    return { missing: 'keyAgent' }
+  }
+  return {
+    clientWebvhKeys: profile.clientWebvhKeys,
+    clientKeyAgreementKey: profile.clientKeyAgreementKey,
+    keyAgent: profile.keyAgent
+  }
+}
+
+/**
  * Resolves the enrolled kind, or names the first precondition the session
  * misses. Synchronous: every member is already in the profile.
  *
@@ -246,14 +279,9 @@ function resolveEnrolledContext({
     return reach
   }
   const { profile } = session
-  if (!profile.clientWebvhKeys) {
-    return { missing: 'updateKeys' }
-  }
-  if (!profile.clientKeyAgreementKey) {
-    return { missing: 'keyAgreementKey' }
-  }
-  if (!profile.keyAgent) {
-    return { missing: 'keyAgent' }
+  const material = enrolledKeyMaterial({ profile })
+  if ('missing' in material) {
+    return material
   }
   let idStore: WebvhIdStore | undefined
   let rosterStore: SealableEncryptionDescriptorStore | undefined
@@ -262,7 +290,7 @@ function resolveEnrolledContext({
     context: {
       kind: 'enrolled',
       ...reach,
-      signer: { kind: 'client', updateKeys: profile.clientWebvhKeys },
+      signer: { kind: 'client', updateKeys: material.clientWebvhKeys },
       get idStore() {
         return (idStore ??= reach.remoteStore.webvhIdStore())
       },
@@ -273,15 +301,13 @@ function resolveEnrolledContext({
         return (collectionStore ??= sessionCollectionStores({
           profile,
           remoteStore: reach.remoteStore,
-          keyAgent: profile.keyAgent!
+          keyAgent: material.keyAgent
         }))
       },
       get invoker() {
         return { zcapClient: profile.zcapClient }
       },
-      clientWebvhKeys: profile.clientWebvhKeys,
-      clientKeyAgreementKey: profile.clientKeyAgreementKey,
-      keyAgent: profile.keyAgent
+      ...material
     }
   }
 }
@@ -361,44 +387,54 @@ export function canRunAccountCeremonies({
   if (enrolledCeremonyContext({ session })) {
     return true
   }
-  if (sessionAuthorityKind({ session }) !== 'ladder') {
+  if (sessionAuthorityKind({ session })?.kind !== 'ladder') {
     return false
   }
   return !('missing' in resolveAccountReach({ session }))
 }
 
 /**
- * The authority kind this session HOLDS, whether or not the account
- * preconditions a full resolution adds are met. It is the mender registry's
- * fallback when {@link accountCeremonyContext} resolves nothing: the
- * preconditions the resolution adds beyond this key material -- a promoted
- * account pointer, a configured storage server with a remote store -- are
- * exactly the states a login chain's identity repairs converge, so a held
- * set computed from the resolution alone would stand those repairs down on
- * the state they exist to fix.
+ * The authority kind this session HOLDS, with the key material that decided
+ * it, whether or not the account preconditions a full resolution adds are
+ * met. A caller consumes what was tested rather than restating the test.
+ *
+ * It is the mender registry's fallback when {@link accountCeremonyContext}
+ * resolves nothing: the preconditions the resolution adds beyond this key
+ * material -- a promoted account pointer, a configured storage server with a
+ * remote store -- are exactly the states a login chain's identity repairs
+ * converge, so a held set computed from the resolution alone would stand
+ * those repairs down on the state they exist to fix.
  *
  * @param options {object}
  * @param options.session {Session}
- * @returns {'enrolled' | 'ladder' | undefined}
+ * @returns {object | undefined}   `{ kind: 'enrolled' }` with the client's
+ *   key material, `{ kind: 'ladder' }` with the credential's ladder seed and
+ *   standing members, or `undefined` when the session holds neither
  */
-export function sessionAuthorityKind({
-  session
-}: {
-  session: Session
-}): 'enrolled' | 'ladder' | undefined {
+export function sessionAuthorityKind({ session }: { session: Session }):
+  | {
+      kind: 'enrolled'
+      clientWebvhKeys: ClientWebvhUpdateKeys
+      clientKeyAgreementKey: IKeyAgreementKey
+      keyAgent: ICapabilityAgent
+    }
+  | {
+      kind: 'ladder'
+      ladderSeed: Uint8Array
+      standingUnlock: NonNullable<ControllerProfile['standingUnlock']>
+    }
+  | undefined {
   if (session.isGuest) {
     return undefined
   }
   const { profile } = session
-  if (
-    profile.clientWebvhKeys &&
-    profile.clientKeyAgreementKey &&
-    profile.keyAgent
-  ) {
-    return 'enrolled'
+  const material = enrolledKeyMaterial({ profile })
+  if (!('missing' in material)) {
+    return { kind: 'enrolled', ...material }
   }
-  if (profile.ladderSeed && profile.standingUnlock) {
-    return 'ladder'
+  const { ladderSeed, standingUnlock } = profile
+  if (ladderSeed && standingUnlock) {
+    return { kind: 'ladder', ladderSeed, standingUnlock }
   }
   return undefined
 }
@@ -420,11 +456,11 @@ export async function accountCeremonyContext({
 }: {
   session: Session
 }): Promise<AccountCeremonyContext | null> {
-  const kind = sessionAuthorityKind({ session })
-  if (kind === 'enrolled') {
+  const authority = sessionAuthorityKind({ session })
+  if (authority?.kind === 'enrolled') {
     return enrolledCeremonyContext({ session })
   }
-  if (kind !== 'ladder') {
+  if (authority?.kind !== 'ladder') {
     return null
   }
   const reach = resolveAccountReach({ session })
@@ -432,10 +468,9 @@ export async function accountCeremonyContext({
     return null
   }
   const { profile } = session
-  // The kind above is what tested these two, so the assertions restate no
-  // check of their own.
-  const ladderSeed = profile.ladderSeed!
-  const standingUnlock = profile.standingUnlock!
+  // The key material the kind above tested, handed back by it rather than
+  // re-read here.
+  const { ladderSeed, standingUnlock } = authority
   const accountDid = reach.pointer.did
   const delegationSigner = await ladderVmZcapClient({ accountDid, ladderSeed })
   const agent = await ladderVmAgent({ ladderSeed })

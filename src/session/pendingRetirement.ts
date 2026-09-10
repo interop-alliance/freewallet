@@ -110,6 +110,10 @@ const log = createLogger('fw:session:retirement')
  *   passphrase derives -- the secret and, when the login already ran the
  *   KDF, the derived bundle. Only the establish-first arm consumes it;
  *   absent, that arm skips and every other shape mends as before
+ * @param [options.context] {AccountCeremonyContext | null}   this session's
+ *   account-ceremony context. A login block hands the one it resolved for
+ *   the whole block, `null` included (a session neither kind resolves for);
+ *   omitted, the context is resolved here
  * @param [options.readRegistry] {Function}   the registry read. A login
  *   block hands its shared read here, so the passes beside this one ride the
  *   same fetch; omitted, the registry is read directly
@@ -121,24 +125,27 @@ export async function repairTornPassphraseRetirement({
   session,
   found,
   credential,
-  readRegistry
+  context: suppliedContext,
+  readRegistry = () => getUnlockMethods({ session })
 }: {
   session: Session
   found: KeyringFetchResult
   credential?: { secret?: string | Uint8Array; derived?: UnlockCredential }
+  context?: AccountCeremonyContext | null
   readRegistry?: () => Promise<UnlockMethodsRecord | null>
 }): Promise<'noop' | 'repaired'> {
   if (session.profile.unlockMethod?.type !== 'passphrase') {
     return 'noop'
   }
-  const context = await accountCeremonyContext({ session })
+  const context =
+    suppliedContext === undefined
+      ? await accountCeremonyContext({ session })
+      : suppliedContext
   const standingClient = found.standingClient
   if (!context || !standingClient) {
     return 'noop'
   }
-  const registry = await (readRegistry
-    ? readRegistry()
-    : getUnlockMethods({ session }))
+  const registry = await readRegistry()
   if (!registry) {
     // No registry at all is the backfill's business, not a repair's: it
     // creates the record, and the login after that finds an entry here.
@@ -548,6 +555,9 @@ async function rebuildBareEntry({
  * @param options.session {Session}   the live session of the passkey logging
  *   in
  * @param options.found {KeyringFetchResult}   that credential's keyring hit
+ * @param [options.context] {AccountCeremonyContext | null}   this session's
+ *   account-ceremony context, as {@link repairTornPassphraseRetirement}
+ *   takes it; omitted, the context is resolved here
  * @param [options.readRegistry] {Function}   the registry read. A login
  *   block hands its shared read here, so the passes beside this one ride the
  *   same fetch; omitted, the registry is read directly
@@ -557,23 +567,26 @@ async function rebuildBareEntry({
 export async function rebuildBarePasskeyEntry({
   session,
   found,
-  readRegistry
+  context: suppliedContext,
+  readRegistry = () => getUnlockMethods({ session })
 }: {
   session: Session
   found: KeyringFetchResult
+  context?: AccountCeremonyContext | null
   readRegistry?: () => Promise<UnlockMethodsRecord | null>
 }): Promise<'noop' | 'repaired'> {
   if (session.profile.unlockMethod?.type !== 'passkey') {
     return 'noop'
   }
-  const context = await accountCeremonyContext({ session })
+  const context =
+    suppliedContext === undefined
+      ? await accountCeremonyContext({ session })
+      : suppliedContext
   const standingClient = found.standingClient
   if (!context || !standingClient) {
     return 'noop'
   }
-  const registry = await (readRegistry
-    ? readRegistry()
-    : getUnlockMethods({ session }))
+  const registry = await readRegistry()
   if (!registry) {
     return 'noop'
   }

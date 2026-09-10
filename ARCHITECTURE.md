@@ -191,8 +191,8 @@ ceremony that writes the unlock-methods registry awaits it at its own entry
 rather than racing them. It does not wait on the keystore promotion: the
 pointer heal fires that and the block's tail reports it, so no
 `registryReady` awaiter sits behind a KMS round trip. `session.mends`
-settles when the whole block has run -- the keystore report, the app-key
-sweep, and the annex GC included -- and behind any report the composition
+settles when the whole block has run -- the app-key sweep, the annex GC,
+and the keystore report included -- and behind any report the composition
 fired beside the block (the did:web projection mend). It carries this
 login's mend report: one entry per invariant a mender reported, the routing
 entries first.

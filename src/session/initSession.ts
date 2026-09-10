@@ -74,10 +74,6 @@ import {
   PendingEnrollmentError,
   resumePendingEnrollment
 } from '@/session/pendingEnrollment'
-import type {
-  RecoverySpendPrompt,
-  RecoverySpendResumeReport
-} from '@/session/recovery'
 import {
   assertClientStillEnrolled,
   wipeStaleClientResidue
@@ -91,6 +87,7 @@ import {
   blockCeremonyContext,
   startLoginMenderBlock
 } from '@/session/menders/run'
+import { blockRegistryRead } from '@/session/registryPasses'
 import { primeVerifiedAccountLog } from '@/session/verifiedLog'
 import type { AccountPointer } from '@interop/wallet-core/keyring'
 import type {
@@ -461,10 +458,11 @@ export async function initSessionFromSeed({
   }
 
   // A session whose caller builds no mender block still carries a settled
-  // report, so every reader has one shape to read.
-  const mends = accumulator ?? mendReportAccumulator<FreewalletCeremonyId>()
-  session.mends = mends.settled
+  // report, so every reader has one shape to read. A caller that starts one
+  // stamps `session.mends` itself, beside `session.registryReady`.
   if (!accumulator) {
+    const mends = mendReportAccumulator<FreewalletCeremonyId>()
+    session.mends = mends.settled
     mends.settle()
   }
 
@@ -1146,11 +1144,12 @@ async function sessionFromKeyringHit({
       detail: { reason: 'unverified' }
     })
   }
+  const resumed = pendingResume
+    ? await resumePendingEnrollment({ found, pinStore, idb })
+    : undefined
   const enrolled = !found.clientKeys
     ? await selfEnrollStandingClient({ found, pinStore })
-    : pendingResume
-      ? await resumePendingEnrollment({ found, pinStore, idb })
-      : undefined
+    : resumed
   if (pendingResume) {
     // Both entries below are graded from what the resume RETURNED rather
     // than from the record's ceremony marker: a spend resume's two
@@ -1159,9 +1158,7 @@ async function sessionFromKeyringHit({
     // carries. The arms that finish no ceremony -- the removed-client wipe
     // and the two discards -- throw out of the resume, so this block never
     // runs on them and neither entry is reported at all.
-    const spendResume = (
-      enrolled as { spendResume?: RecoverySpendResumeReport } | undefined
-    )?.spendResume
+    const spendResume = resumed?.spendResume
     // The pending carrier clears inside the spend's confirm-gated
     // completion, so a record still owing that confirm is still pending.
     const confirmOwed = spendResume?.completion === 'confirm-pending'
@@ -1268,9 +1265,7 @@ async function sessionFromKeyringHit({
   // display: the prompt rides the session so the login surface can render
   // the save-this-code dialog and run the confirm-gated completion before
   // navigating on.
-  const recoverySpendPrompt = (
-    enrolled as { recoverySpendPrompt?: RecoverySpendPrompt } | undefined
-  )?.recoverySpendPrompt
+  const recoverySpendPrompt = resumed?.recoverySpendPrompt
   if (recoverySpendPrompt) {
     session.recoverySpendPrompt = recoverySpendPrompt
   }
@@ -1311,6 +1306,9 @@ async function sessionFromKeyringHit({
   // the block's registry, bridge, or promotion writes is wanted on its
   // behalf.
   if (!session.storageReady) {
+    // No block, so nothing else stamps the report: this login's routing
+    // entries are all of it.
+    session.mends = mends.settled
     mends.settle()
     return { session, userExists }
   }
@@ -1324,7 +1322,7 @@ async function sessionFromKeyringHit({
       found,
       context,
       refreshContext,
-      keystorePromotion: {},
+      registry: blockRegistryRead({ session }),
       selfEnrolled: !!enrolled,
       ...(rosterRead ? { rosterRead } : {}),
       ...(rosterStore ? { rosterStore } : {}),

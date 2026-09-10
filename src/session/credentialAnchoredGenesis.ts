@@ -642,13 +642,11 @@ export function passphraseRegistryUpsertHook({
  * @param options.capability {IZcap}   the generation delegation every
  *   request rides
  * @param options.pinStore {ResourceLogPinStore}   the visit's chain-head pins
- * @param options.registry {CredentialAnchoredRegistryContext}   the acting
- *   credential's registry members: its unlock Space, the bridge and sibling
- *   delegations, and its unlock key-agreement identifiers
  * @param [options.log] {DIDLog}   the account log this visit already
  *   verified, which the roster store resolves its controller view from
- * @returns {Promise<object>}   the invocation authority, the ladder-signed
- *   roster and collection stores, and the registry context
+ * @returns {Promise<object>}   the invocation authority and the
+ *   ladder-signed roster and collection stores. The acting credential's
+ *   registry members are the caller's to state beside them
  */
 export async function ladderMendAuthority({
   pointer,
@@ -656,7 +654,6 @@ export async function ladderMendAuthority({
   zcapClient,
   capability,
   pinStore,
-  registry,
   log
 }: {
   pointer: AccountPointer & { did: string }
@@ -664,13 +661,11 @@ export async function ladderMendAuthority({
   zcapClient: ZcapClient
   capability: IZcap
   pinStore: ResourceLogPinStore
-  registry: CredentialAnchoredRegistryContext
   log?: DIDLog
 }): Promise<{
   invocation: { was: WasClient; zcapClient: ZcapClient; capability: IZcap }
   rosterStore: SealableEncryptionDescriptorStore
   collectionStore: CollectionStoreFor
-  registry: CredentialAnchoredRegistryContext
 }> {
   const keyAgent = await ladderVmAgent({ ladderSeed })
   return {
@@ -697,8 +692,7 @@ export async function ladderMendAuthority({
       pointer,
       pinStore,
       capability
-    }),
-    registry
+    })
   }
 }
 

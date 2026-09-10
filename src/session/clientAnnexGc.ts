@@ -24,21 +24,6 @@ import { invalidateVerifiedLog } from '@/session/verifiedLog'
 import type { Session } from '@/types/auth'
 
 /**
- * Why a session ran no pass at all: the preconditions in the order they are
- * checked, so a skip says which one it was rather than resolving a bare
- * null.
- */
-export type ClientAnnexGcSkip =
-  'not-browser-local' | 'not-enrolled' | 'no-account-did' | 'no-annex-inventory'
-
-/**
- * One annex GC pass's outcome: the pass's report, or the precondition that
- * refused it.
- */
-export type ClientAnnexGcOutcome =
-  { report: ClientAnnexGcReport } | { skipped: ClientAnnexGcSkip }
-
-/**
  * One annex GC pass for a live remembered session. Names the precondition
  * when the session cannot run it (not on the browser-local strategy, not an
  * enrolled did:webvh account, no annex inventory) -- the same silent-skip
@@ -52,7 +37,9 @@ export type ClientAnnexGcOutcome =
  * @param [options.ladderSeed] {Uint8Array}   the login credential's ladder
  *   seed, from its unlock record; absent, a due swap is skipped and only the
  *   collect fan-out runs
- * @returns {Promise<ClientAnnexGcOutcome>}
+ * @returns {Promise<object>}   the pass's report, or the precondition that
+ *   refused it -- named in the order the preconditions are checked, so a skip
+ *   says which one it was rather than resolving a bare null
  */
 export async function sweepClientAnnexGenerations({
   session,
@@ -60,7 +47,16 @@ export async function sweepClientAnnexGenerations({
 }: {
   session: Session
   ladderSeed?: Uint8Array
-}): Promise<ClientAnnexGcOutcome> {
+}): Promise<
+  | { report: ClientAnnexGcReport }
+  | {
+      skipped:
+        | 'not-browser-local'
+        | 'not-enrolled'
+        | 'no-account-did'
+        | 'no-annex-inventory'
+    }
+> {
   const persistence = session.profile.persistence
   if (!persistence || !isBrowserLocalSession(persistence)) {
     return { skipped: 'not-browser-local' }

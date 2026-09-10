@@ -8,7 +8,7 @@
  * total order (the provisioning seed, the user key sweep, the four shared
  * registry passes, the standing-delegation refresh, the ladder-rung
  * refresh, the pointer heal, the generation-delegation heal, then the
- * keystore report, the app-key sweep and the annex GC), is abandoned when
+ * app-key sweep, the annex GC and the keystore report), is abandoned when
  * provisioning itself
  * failed, and neither promise rejects. The order pin reads
  * `session.mends`, which carries one entry per invariant every registration
@@ -161,12 +161,16 @@ function makeFakeStorage() {
     ensureUserCollections: vi.fn(() => provisioning),
     refreshEncryptedDescriptors: vi.fn(async () => undefined),
     adoptRotatedVaultKeys: vi.fn(async () => undefined),
-    // The promotion hands back the keystore promotion it fired, which the
-    // pointer heal reports beside the two Space-side predicates.
-    ensurePromotedController: vi.fn(async () => ({
-      promoted: true,
-      keystorePromotion: Promise.resolve({ outcome: 'clean' as const })
-    })),
+    // The real manager keeps the keystore promotion it fires rather than
+    // handing it back, and the block's tail reports it from there.
+    ensurePromotedController: vi.fn(async () => {
+      ;(
+        storage as unknown as {
+          keystorePromotion?: Promise<{ outcome: string }>
+        }
+      ).keystorePromotion = Promise.resolve({ outcome: 'clean' as const })
+      return { promoted: true }
+    }),
     // Where the real manager keeps the promotion storage provisioning fired,
     // read by the block's tail when the pointer heal fired none.
     keystorePromotion: undefined as Promise<{ outcome: string }> | undefined,
@@ -369,7 +373,7 @@ describe('the FW-300 storageReady / registryReady split', () => {
     // The routing entry the login fired, then every registration of the
     // block, by the invariants it reports: the provisioning seed, the sweep's two, the four shared passes, the two
     // standing refreshes, the pointer heal's two, the generation-delegation
-    // heal, then the tail -- the keystore report and the two sweeps. A
+    // heal, then the tail -- the two sweeps and the keystore report. A
     // registration that stopped reporting would drop its ids from this
     // list.
     expect(report.map(entry => entry.invariant)).toEqual([
@@ -388,9 +392,9 @@ describe('the FW-300 storageReady / registryReady split', () => {
       'account-pointer-names-the-account-did',
       'space-controller-is-the-account-did',
       'generation-delegation-is-current',
-      'keystore-controller-is-the-account-did',
       'app-keys-live-only-in-app-connections',
-      'no-annex-generation-outlives-its-pointer'
+      'no-annex-generation-outlives-its-pointer',
+      'keystore-controller-is-the-account-did'
     ])
     // `registryReady` settles at the registry-writing registrations' last
     // entry, and `mends` behind the two tail sweeps.
@@ -461,12 +465,18 @@ describe('the FW-300 storageReady / registryReady split', () => {
     // block's tail, so `registryReady` (which every Settings ceremony
     // awaits) settles regardless, and `session.mends` is what waits.
     let releaseKeystore!: () => void
-    vi.mocked(fake.storage.ensurePromotedController).mockResolvedValue({
-      promoted: true,
-      keystorePromotion: new Promise(resolve => {
-        releaseKeystore = () => resolve({ outcome: 'clean' as const })
-      })
-    } as never)
+    vi.mocked(fake.storage.ensurePromotedController).mockImplementation(
+      async () => {
+        ;(
+          fake.storage as unknown as {
+            keystorePromotion?: Promise<{ outcome: string }>
+          }
+        ).keystorePromotion = new Promise(resolve => {
+          releaseKeystore = () => resolve({ outcome: 'clean' as const })
+        })
+        return { promoted: true }
+      }
+    )
 
     const { session } = await loginWithPassphrase({ passphrase: PASSPHRASE })
     fake.resolveProvisioning()

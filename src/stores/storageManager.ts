@@ -2240,39 +2240,6 @@ export class StorageManager {
   }
 
   /**
-   * Promotes the account's Space (and keystore) controller to the published
-   * did:webvh -- the last step of promotion by ordering: the Space was
-   * created under this client's did:key, the log went into the
-   * world-readable `id` collection, and this PUTs the Space Description
-   * naming the did:webvh, authorized by the stored controller. Idempotent
-   * across every state:
-   *
-   * - Fresh signup (store bound to the did:key): promote, then swap the
-   *   session's signing -- `profile.zcapClient` and the remote store rebind
-   *   to the `<did:webvh>#<multibase>` keyId, since under the current-key-set
-   *   rule the did:key-signed form stops verifying the moment the promotion
-   *   lands.
-   * - Pointer-promoted login (store already bound to the did:webvh): confirm
-   *   with one describe and return.
-   * - Torn signup (pointer names the did:webvh but the promotion PUT never
-   *   landed): the describe fails, and the promotion is retried signed by
-   *   the stored did:key controller, then the store rebinds back to the
-   *   session's did:webvh client.
-   *
-   * The keystore half runs after the Space half, non-fatally (KMS outages
-   * must not fail provisioning): the keystore config's controller becomes
-   * the did:webvh and the session's KeystoreAgent rebinds to invoke under
-   * it. It is fired without await here, and its promise is handed back so
-   * one caller (the login chain's block) can report its outcome without a
-   * second KMS round trip.
-   *
-   * @param options {object}
-   * @param options.profile {ControllerProfile}
-   * @returns {Promise<{ promoted: boolean, keystorePromotion?: Promise<MendOutcome> }>}
-   *   whether a Space promotion was written here, and the fired keystore
-   *   promotion where one ran
-   */
-  /**
    * The keystore promotion this session fired, where one ran. Provisioning
    * fires it on every login of a pointer-promoted account and drops the
    * promise; the login block's tail reads it here, so the promotion that
@@ -2307,14 +2274,43 @@ export class StorageManager {
     return promotion
   }
 
+  /**
+   * Promotes the account's Space (and keystore) controller to the published
+   * did:webvh -- the last step of promotion by ordering: the Space was
+   * created under this client's did:key, the log went into the
+   * world-readable `id` collection, and this PUTs the Space Description
+   * naming the did:webvh, authorized by the stored controller. Idempotent
+   * across every state:
+   *
+   * - Fresh signup (store bound to the did:key): promote, then swap the
+   *   session's signing -- `profile.zcapClient` and the remote store rebind
+   *   to the `<did:webvh>#<multibase>` keyId, since under the current-key-set
+   *   rule the did:key-signed form stops verifying the moment the promotion
+   *   lands.
+   * - Pointer-promoted login (store already bound to the did:webvh): confirm
+   *   with one describe and return.
+   * - Torn signup (pointer names the did:webvh but the promotion PUT never
+   *   landed): the describe fails, and the promotion is retried signed by
+   *   the stored did:key controller, then the store rebinds back to the
+   *   session's did:webvh client.
+   *
+   * The keystore half runs after the Space half, non-fatally (KMS outages
+   * must not fail provisioning): the keystore config's controller becomes
+   * the did:webvh and the session's KeystoreAgent rebinds to invoke under
+   * it. It is fired without await here and kept on the manager (the
+   * `keystorePromotion` accessor above), so the login chain's block reports
+   * its outcome without a second KMS round trip.
+   *
+   * @param options {object}
+   * @param options.profile {ControllerProfile}
+   * @returns {Promise<{ promoted: boolean }>}   whether a Space promotion
+   *   was written here
+   */
   async ensurePromotedController({
     profile
   }: {
     profile: ControllerProfile
-  }): Promise<{
-    promoted: boolean
-    keystorePromotion?: Promise<MendOutcome>
-  }> {
+  }): Promise<{ promoted: boolean }> {
     const remote = this.#remoteStore
     const did = profile.didWebvh?.did
     const { keyAgent } = profile
@@ -2341,10 +2337,8 @@ export class StorageManager {
       }
       if (description?.controller === did) {
         // The server already agrees, so nothing was promoted here.
-        return {
-          promoted: false,
-          keystorePromotion: this.#fireKeystorePromotion({ profile, did })
-        }
+        this.#fireKeystorePromotion({ profile, did })
+        return { promoted: false }
       }
       remote.rebindController({
         zcapClient: didKeyZcapClient({ keyAgent }),
@@ -2367,10 +2361,8 @@ export class StorageManager {
           controller: did
         })
       }
-      return {
-        promoted: true,
-        keystorePromotion: this.#fireKeystorePromotion({ profile, did })
-      }
+      this.#fireKeystorePromotion({ profile, did })
+      return { promoted: true }
     }
 
     // Fresh promotion: the PUT is authorized by the stored did:key
@@ -2379,10 +2371,8 @@ export class StorageManager {
     const zcapClient = webvhZcapClient({ keyAgent, did })
     profile.zcapClient = zcapClient
     remote.rebindController({ zcapClient, controller: did })
-    return {
-      promoted: true,
-      keystorePromotion: this.#fireKeystorePromotion({ profile, did })
-    }
+    this.#fireKeystorePromotion({ profile, did })
+    return { promoted: true }
   }
 
   async #provisionUserCollections({

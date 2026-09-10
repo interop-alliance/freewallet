@@ -122,7 +122,21 @@ vi.mock('@/session/transientLogin', () => ({
 // file asserts on the sweep registration's own two entries, and every other
 // registration's behavior is its own test file's.
 vi.mock('@/session/registryPasses', () => ({
-  promotedAccountPointer: vi.fn(() => null),
+  // The sweep's own promoted-account guard, so this one keeps the real
+  // reading (`null` until the pointer names a did:webvh) rather than the
+  // quiet stub the other registrations get.
+  promotedAccountPointer: vi.fn(
+    ({
+      session
+    }: {
+      session: { profile: { accountPointer?: { did?: string } } }
+    }) => {
+      const pointer = session.profile.accountPointer
+      return pointer?.did?.startsWith('did:webvh:')
+        ? { ...pointer, did: pointer.did }
+        : null
+    }
+  ),
   promotedAccountView: vi.fn(async () => null),
   blockRegistryRead: vi.fn(() => ({
     read: async () => null,

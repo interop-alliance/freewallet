@@ -14,7 +14,6 @@ import {
   heldAuthorities,
   runMenderBlock,
   type Authority,
-  type ChainTrigger,
   type InvariantId,
   type LoginRoute,
   type MendReportAccumulator,
@@ -67,7 +66,7 @@ export function blockCeremonyContext({ session }: { session: Session }): {
 }
 
 /**
- * The authorities this session holds, for the registry's `dueAt` filter.
+ * The authorities this session holds, for the registry's admission test.
  *
  * The kind comes from the session's own key material rather than from a
  * resolved account-ceremony context. Where a context resolves, the two agree
@@ -85,87 +84,77 @@ export function blockCeremonyContext({ session }: { session: Session }): {
  * @returns {ReadonlyArray<Authority>}
  */
 function heldFor({ session }: { session: Session }): ReadonlyArray<Authority> {
-  const kind = sessionAuthorityKind({ session })
-  return heldAuthorities({ ...(kind ? { kind } : {}) })
+  const authority = sessionAuthorityKind({ session })
+  return heldAuthorities({ ...(authority ? { kind: authority.kind } : {}) })
 }
 
 /**
- * Starts one chain's block, stamping `session.registryReady` and
- * `session.mends` before it awaits anything, so a caller that returns the
- * session at once finds both.
+ * Starts one login chain's block, selecting the registrations, the
+ * registry-writing prefix, and the seed from the chain the deps name. The
+ * remembered chain runs the provisioning seed, the six registry-writing
+ * registrations, then the app-key sweep, the annex GC, and the keystore
+ * report; the transient chain runs the shared registry passes, then the
+ * acting credential's management-zcap refresh, and has no seed, a transient
+ * session provisioning nothing.
  *
- * The two settle points are derived from the lists rather than named: the
- * ids the registry-writing registrations report are what `registryReady`
- * waits for, and the block's own completion settles both (a filtered-out
- * registration reports nothing, and the block always finishes).
+ * Both of the session's promises are stamped before anything is awaited, so
+ * a caller that returns the session at once finds them. The two settle
+ * points are derived from the lists rather than named: the ids the
+ * registry-writing registrations report are what `registryReady` waits for,
+ * skipping any the registry does not admit on this session's authorities and
+ * route (an unadmitted registration reports nothing), and the block's own
+ * completion settles both.
+ *
+ * A registration listed under the wrong trigger is a programming error the
+ * runner refuses with a `TypeError`, which lands in the warn below and
+ * settles both promises rather than tearing the login.
  *
  * @param options {object}
- * @param options.session {Session}
  * @param options.accumulator {MendReportAccumulator}   the report the
  *   routing entries already reported into
- * @param options.trigger {ChainTrigger}
  * @param options.route {LoginRoute}
- * @param options.deps {LoginMenderDeps}
- * @param options.registrations {ReadonlyArray<Registration>}   the block, in
- *   execution order
- * @param options.registryWriting {ReadonlyArray<Registration>}   the prefix
- *   of that list whose reports `registryReady` waits for
- * @param options.held {ReadonlyArray<Authority>}
- * @param [options.seed] {Registration}   the step whose failure aborts
+ * @param options.deps {LoginMenderDeps}   its `chain` member is what picks
+ *   the lists, so the deps and the trigger cannot disagree
  * @param [options.pendingReports] {ReadonlyArray<Promise<unknown>>}   the
- *   reports fired beside the block, awaited before `session.mends` settles
- *   so a report landing after the block still rides it. `registryReady`
- *   does not wait on them
- * @returns {void}
+ *   reports the composition fired beside the block -- the transient
+ *   composition's did:web projection mend -- awaited before `session.mends`
+ *   settles. In the CHAPI popup the block itself runs empty and settles in
+ *   the same tick, so without this the projection's entry would land after
+ *   the report was assembled. `registryReady` does not wait on them
+ * @returns {void}   the block runs on `session.registryReady` and
+ *   `session.mends`, both stamped before this returns
  */
-function startMenderBlock({
-  session,
+export function startLoginMenderBlock({
   accumulator,
-  trigger,
   route,
   deps,
-  registrations,
-  registryWriting,
-  held,
-  seed,
   pendingReports
 }: {
-  session: Session
   accumulator: MendReportAccumulator<FreewalletCeremonyId>
-  trigger: ChainTrigger
   route: LoginRoute
   deps: LoginMenderDeps
-  registrations: ReadonlyArray<
-    Registration<LoginMenderDeps, FreewalletCeremonyId>
-  >
-  registryWriting: ReadonlyArray<
-    Registration<LoginMenderDeps, FreewalletCeremonyId>
-  >
-  held: ReadonlyArray<Authority>
-  seed?: Registration<LoginMenderDeps, FreewalletCeremonyId>
   pendingReports?: ReadonlyArray<Promise<unknown>>
 }): void {
-  // The awaited set is derived through `dueAt`, which filters by trigger,
-  // while the runner's own override path does not: a registration listed
-  // under the wrong trigger would run and never be awaited. It is a
-  // programming error either way, so the block refuses to start.
-  for (const registration of [
-    ...(seed ? [seed] : []),
-    ...registrations,
-    ...registryWriting
-  ]) {
-    if (registration.trigger !== trigger) {
-      throw new Error(
-        `A mender registration listed in the ${trigger} block is registered ` +
-          `under ${registration.trigger}; it reports ` +
-          `${registration.reports.join(', ')}.`
-      )
-    }
-  }
-  const due = new Set(freewalletMenderRegistry.dueAt({ held, trigger, route }))
+  const { session } = deps
+  const { trigger, registrations, registryWriting, seed } =
+    deps.chain === 'remembered'
+      ? {
+          trigger: 'remembered-login-chain' as const,
+          registrations: REMEMBERED_REGISTRATIONS,
+          registryWriting: REMEMBERED_REGISTRY_REGISTRATIONS,
+          seed: REMEMBERED_SEED as
+            Registration<LoginMenderDeps, FreewalletCeremonyId> | undefined
+        }
+      : {
+          trigger: 'transient-login-chain' as const,
+          registrations: TRANSIENT_REGISTRATIONS,
+          registryWriting: TRANSIENT_REGISTRATIONS,
+          seed: undefined
+        }
+  const held = heldFor({ session })
   const awaited = new Set<InvariantId>()
   for (const registration of [...(seed ? [seed] : []), ...registryWriting]) {
-    if (due.has(registration)) {
+    if (freewalletMenderRegistry.admits({ site: registration, held, route })) {
       for (const id of registration.reports) {
         awaited.add(id)
       }
@@ -198,7 +187,8 @@ function startMenderBlock({
   })
     .catch(err => {
       // The runner rejects on a programming error alone (an undeclared
-      // invariant), and neither promise may hang on one.
+      // invariant, or a registration listed under another trigger), and
+      // neither promise may hang on one.
       log.warn('The login mender block could not run', { trigger, err })
     })
     .then(async () => {
@@ -210,67 +200,4 @@ function startMenderBlock({
       }
       accumulator.settle()
     })
-}
-
-/**
- * Starts one login chain's block, selecting the registrations, the
- * registry-writing prefix, and the seed from the chain the deps name. The
- * remembered chain runs the provisioning seed, the six registry-writing
- * registrations, then the app-key sweep and the annex GC; the transient
- * chain runs the shared registry passes, then the acting credential's
- * management-zcap refresh, and has no seed, a transient session provisioning
- * nothing.
- *
- * @param options {object}
- * @param options.accumulator {MendReportAccumulator}
- * @param options.route {LoginRoute}
- * @param options.deps {LoginMenderDeps}   its `chain` member is what picks
- *   the lists, so the deps and the trigger cannot disagree
- * @param [options.pendingReports] {ReadonlyArray<Promise<unknown>>}   the
- *   reports the composition fired beside the block -- the transient
- *   composition's did:web projection mend -- awaited before `session.mends`
- *   settles. In the CHAPI popup the block itself runs empty and settles in
- *   the same tick, so without this the projection's entry would land after
- *   the report was assembled
- * @returns {void}   the block runs on `session.registryReady` and
- *   `session.mends`, both stamped before this returns
- */
-export function startLoginMenderBlock({
-  accumulator,
-  route,
-  deps,
-  pendingReports
-}: {
-  accumulator: MendReportAccumulator<FreewalletCeremonyId>
-  route: LoginRoute
-  deps: LoginMenderDeps
-  pendingReports?: ReadonlyArray<Promise<unknown>>
-}): void {
-  const { session } = deps
-  const chain =
-    deps.chain === 'remembered'
-      ? {
-          trigger: 'remembered-login-chain' as const,
-          registrations: REMEMBERED_REGISTRATIONS,
-          registryWriting: REMEMBERED_REGISTRY_REGISTRATIONS,
-          seed: REMEMBERED_SEED
-        }
-      : {
-          trigger: 'transient-login-chain' as const,
-          registrations: TRANSIENT_REGISTRATIONS,
-          registryWriting: TRANSIENT_REGISTRATIONS,
-          seed: undefined
-        }
-  startMenderBlock({
-    session,
-    accumulator,
-    trigger: chain.trigger,
-    route,
-    deps,
-    registrations: chain.registrations,
-    registryWriting: chain.registryWriting,
-    held: heldFor({ session }),
-    ...(chain.seed ? { seed: chain.seed } : {}),
-    ...(pendingReports ? { pendingReports } : {})
-  })
 }

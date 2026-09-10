@@ -23,16 +23,8 @@ export { MENDER_INVARIANTS } from './invariants.js'
 export {
   MENDER_SITES,
   REMEMBERED_REGISTRATIONS,
-  REMEMBERED_REGISTRY_REGISTRATIONS,
   REMEMBERED_SEED,
-  REMEMBERED_TAIL_REGISTRATIONS,
-  REPORTING_SITES,
   TRANSIENT_REGISTRATIONS
-} from './registrations.js'
-export type {
-  LoginMenderDeps,
-  RememberedMenderDeps,
-  TransientMenderDeps
 } from './registrations.js'
 
 /**

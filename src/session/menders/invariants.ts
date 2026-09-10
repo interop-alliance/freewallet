@@ -26,10 +26,12 @@ import { MENDER_WARNINGS } from './warnings.js'
 
 /**
  * Every invariant this wallet declares, in the design table's numeric order
- * (which is `INVARIANT_IDS` order).
+ * (which is `INVARIANT_IDS` order), minus the warn copy: each declaration's
+ * message is its entry in `MENDER_WARNINGS`, attached below rather than
+ * restated here.
  */
-export const MENDER_INVARIANTS: ReadonlyArray<
-  InvariantDeclaration<never, FreewalletCeremonyId>
+const DECLARATIONS: ReadonlyArray<
+  Omit<InvariantDeclaration<never, FreewalletCeremonyId>, 'warn'>
 > = [
   // 1
   // converger: `convergeRosterToDocument` (`src/session/userKeySweep.ts`)
@@ -54,8 +56,7 @@ export const MENDER_INVARIANTS: ReadonlyArray<
     ],
     // The comparison is the roster's verified log head against the verified
     // account document, both read under the visit's pins.
-    evidence: ['verified-log'],
-    warn: MENDER_WARNINGS['roster-wraps-exactly-the-document-key-set']
+    evidence: ['verified-log']
   },
   // 2
   // converger: none of its own -- the roster half is the `seal()` backstop
@@ -77,10 +78,7 @@ export const MENDER_INVARIANTS: ReadonlyArray<
     ],
     // The anchored version of a governed log's verified head, read under the
     // visit's pins.
-    evidence: ['verified-log'],
-    warn: MENDER_WARNINGS[
-      'governed-log-heads-anchor-past-the-membership-change'
-    ]
+    evidence: ['verified-log']
   },
   // 3
   // converger: wallet-core's driver (`keys/userKeyCascade.ts`), called by
@@ -106,8 +104,7 @@ export const MENDER_INVARIANTS: ReadonlyArray<
     // Each collection's epoch comes from its governing log's verified head;
     // the candidate set the cascade walks is seeded from the host-served
     // `isEncrypted` flag on the collection listing (design note 3).
-    evidence: ['verified-log', 'host-listing'],
-    warn: MENDER_WARNINGS['collection-epochs-name-the-current-user-key']
+    evidence: ['verified-log', 'host-listing']
   },
   // 4
   // converger: `repairStaleUnlockRegistrySeal`
@@ -128,7 +125,6 @@ export const MENDER_INVARIANTS: ReadonlyArray<
       'last-client-transition'
     ],
     evidence: ['served-registry'],
-    warn: MENDER_WARNINGS['unlock-registry-opens-under-the-current-user-key'],
     // The CHAPI popup stands this pass down: it writes no registry.
     when: (route: { popup: boolean }) => !route.popup
   },
@@ -146,9 +142,6 @@ export const MENDER_INVARIANTS: ReadonlyArray<
     triggers: ['remembered-login-chain', 'transient-login-chain'],
     ceremonies: ['unlock-credential-rotation', 'credential-anchored-genesis'],
     evidence: ['served-registry'],
-    warn: MENDER_WARNINGS[
-      'registry-passphrase-entry-names-the-standing-credential'
-    ],
     // The CHAPI popup stands this pass down: it writes no registry.
     when: (route: { popup: boolean }) => !route.popup,
     async holdsWhen(
@@ -173,7 +166,6 @@ export const MENDER_INVARIANTS: ReadonlyArray<
     triggers: ['remembered-login-chain', 'transient-login-chain'],
     ceremonies: ['unlock-credential-rotation'],
     evidence: ['served-registry'],
-    warn: MENDER_WARNINGS['passkey-entry-carries-its-standing-configuration'],
     // The CHAPI popup stands this pass down: it writes no registry.
     when: (route: { popup: boolean }) => !route.popup
   },
@@ -189,7 +181,6 @@ export const MENDER_INVARIANTS: ReadonlyArray<
     triggers: ['remembered-login-chain', 'transient-login-chain'],
     ceremonies: [],
     evidence: ['served-registry'],
-    warn: MENDER_WARNINGS['registry-lists-the-passphrase-method'],
     // The CHAPI popup stands this pass down: it writes no registry.
     when: (route: { popup: boolean }) => !route.popup
   },
@@ -212,10 +203,7 @@ export const MENDER_INVARIANTS: ReadonlyArray<
       'client-revocation',
       'recovery-code-revocation'
     ],
-    evidence: ['served-registry', 'local-clock'],
-    warn: MENDER_WARNINGS[
-      'standing-delegations-verify-under-the-current-document'
-    ]
+    evidence: ['served-registry', 'local-clock']
   },
   // 9
   // converger: the ladder-rung refresh closure (`attributeLadderRung`, then
@@ -232,8 +220,7 @@ export const MENDER_INVARIANTS: ReadonlyArray<
     ceremonies: ['self-enrollment'],
     // The recorded rung is a served registry field; the committed rung is
     // read off the account log under the visit's pins.
-    evidence: ['served-registry', 'verified-log'],
-    warn: MENDER_WARNINGS['registry-records-the-committed-ladder-rung']
+    evidence: ['served-registry', 'verified-log']
   },
   // 10
   // converger: `mendCredentialAnchoredAccount`'s establishment arm
@@ -248,8 +235,7 @@ export const MENDER_INVARIANTS: ReadonlyArray<
     authority: 'ladder',
     triggers: ['login-routing'],
     ceremonies: ['credential-anchored-genesis'],
-    evidence: ['served-unlock-record'],
-    warn: MENDER_WARNINGS['unlock-record-points-at-the-account-did']
+    evidence: ['served-unlock-record']
   },
   // 11
   // converger: `healAccountPointer` (`src/session/pointerHeal.ts`), over the
@@ -263,8 +249,7 @@ export const MENDER_INVARIANTS: ReadonlyArray<
     authority: 'enrolled',
     triggers: ['remembered-login-chain'],
     ceremonies: ['account-genesis', 'credential-anchored-genesis'],
-    evidence: ['served-unlock-record'],
-    warn: MENDER_WARNINGS['account-pointer-names-the-account-did']
+    evidence: ['served-unlock-record']
   },
   // 12
   // converger: `ensurePromotedController` (`src/stores/storageManager.ts`),
@@ -281,8 +266,7 @@ export const MENDER_INVARIANTS: ReadonlyArray<
     // The controller comes back on the host's own answer for the Space. The
     // vocabulary carries no served-description value, and a Space read is
     // the closest of the host-served kinds.
-    evidence: ['host-listing'],
-    warn: MENDER_WARNINGS['space-controller-is-the-account-did']
+    evidence: ['host-listing']
   },
   // 13
   // converger: `mendCredentialAnchoredAccount`'s roster-and-epochs arm
@@ -297,8 +281,7 @@ export const MENDER_INVARIANTS: ReadonlyArray<
     ceremonies: ['credential-anchored-genesis'],
     // The roster's head and each collection's descriptor log head, read
     // under the visit's pins.
-    evidence: ['verified-log'],
-    warn: MENDER_WARNINGS['roster-and-collection-epochs-exist']
+    evidence: ['verified-log']
   },
   // 14
   // converger: `mendCredentialAnchoredAccount`'s registry arm (wallet-core
@@ -311,8 +294,7 @@ export const MENDER_INVARIANTS: ReadonlyArray<
     authority: 'ladder',
     triggers: ['login-routing'],
     ceremonies: ['credential-anchored-genesis'],
-    evidence: ['served-registry'],
-    warn: MENDER_WARNINGS['registry-records-the-establishing-credential']
+    evidence: ['served-registry']
   },
   // 15
   // converger: `ensureClientAnnexGenerationReady`
@@ -328,8 +310,7 @@ export const MENDER_INVARIANTS: ReadonlyArray<
     ceremonies: ['credential-anchored-genesis'],
     // The pointer comes off the verified account document; whether the
     // auxiliary Space is live is the host's own answer.
-    evidence: ['verified-log', 'host-listing'],
-    warn: MENDER_WARNINGS['annex-generation-is-reachable']
+    evidence: ['verified-log', 'host-listing']
   },
   // 16
   // converger: `ensureGenerationDelegation` (`src/session/annexReach.ts`) on
@@ -347,7 +328,6 @@ export const MENDER_INVARIANTS: ReadonlyArray<
     // Expiry is the local clock against the embedded delegation; the signer
     // check reads the verified account document under the visit's pins.
     evidence: ['verified-log', 'local-clock'],
-    warn: MENDER_WARNINGS['generation-delegation-is-current'],
     // The CHAPI popup stands this pass down: it writes no registry.
     when: (route: { popup: boolean }) => !route.popup
   },
@@ -363,7 +343,6 @@ export const MENDER_INVARIANTS: ReadonlyArray<
     triggers: ['transient-login-chain'],
     ceremonies: [],
     evidence: ['served-registry'],
-    warn: MENDER_WARNINGS['acting-credential-manage-zcap-is-current'],
     // The CHAPI popup stands this pass down: it writes no registry.
     when: (route: { popup: boolean }) => !route.popup
   },
@@ -378,8 +357,7 @@ export const MENDER_INVARIANTS: ReadonlyArray<
     authority: 'account',
     triggers: ['transient-login-chain'],
     ceremonies: [],
-    evidence: ['served-projection'],
-    warn: MENDER_WARNINGS['did-web-projection-matches-the-log']
+    evidence: ['served-projection']
   },
   // 19
   // converger: `sweepClientAnnexGenerations` (`src/session/clientAnnexGc.ts`)
@@ -393,7 +371,6 @@ export const MENDER_INVARIANTS: ReadonlyArray<
     triggers: ['remembered-login-chain'],
     ceremonies: [],
     evidence: ['host-listing'],
-    warn: MENDER_WARNINGS['no-annex-generation-outlives-its-pointer'],
     // The CHAPI popup stands this pass down: it writes no registry.
     when: (route: { popup: boolean }) => !route.popup
   },
@@ -407,8 +384,7 @@ export const MENDER_INVARIANTS: ReadonlyArray<
     authority: 'account',
     triggers: ['remembered-login-chain'],
     ceremonies: [],
-    evidence: ['served-body'],
-    warn: MENDER_WARNINGS['app-keys-live-only-in-app-connections']
+    evidence: ['served-body']
   },
   // 21
   // converger: `wipeStaleClientResidue` (`src/session/forget.ts`) plus the
@@ -421,8 +397,7 @@ export const MENDER_INVARIANTS: ReadonlyArray<
     authority: 'none',
     triggers: ['login-routing'],
     ceremonies: [],
-    evidence: ['served-unlock-record', 'local-record'],
-    warn: MENDER_WARNINGS['client-key-record-matches-the-pointed-account']
+    evidence: ['served-unlock-record', 'local-record']
   },
   // 22
   // converger: `assertClientStillEnrolled` (`src/session/forget.ts`), which
@@ -439,8 +414,7 @@ export const MENDER_INVARIANTS: ReadonlyArray<
       'last-client-transition',
       'client-revocation'
     ],
-    evidence: ['verified-log', 'local-record'],
-    warn: MENDER_WARNINGS['this-browser-is-still-an-enrolled-client']
+    evidence: ['verified-log', 'local-record']
   },
   // 23
   // converger: `resumePendingEnrollment`
@@ -461,8 +435,7 @@ export const MENDER_INVARIANTS: ReadonlyArray<
     ],
     // The pending record is this browser's; the discard arm decides against
     // the served unlock record (design note 23).
-    evidence: ['local-record', 'served-unlock-record'],
-    warn: MENDER_WARNINGS['no-client-key-record-stays-pending']
+    evidence: ['local-record', 'served-unlock-record']
   },
   // 24
   // converger: `resumeRecoverySpend` (`src/session/recovery.ts`), dispatched
@@ -478,8 +451,7 @@ export const MENDER_INVARIANTS: ReadonlyArray<
     ceremonies: ['recovery-code-spend'],
     // The pending record carries the spend's `builtOnHead` witness; which
     // stages landed is read off the served record and registry.
-    evidence: ['local-record', 'served-unlock-record', 'served-registry'],
-    warn: MENDER_WARNINGS['recovery-spend-is-completed']
+    evidence: ['local-record', 'served-unlock-record', 'served-registry']
   },
   // 25
   // converger: the rotation's `retireClientAnnexInventoryStage`
@@ -494,8 +466,7 @@ export const MENDER_INVARIANTS: ReadonlyArray<
     triggers: ['ceremony-tail'],
     ceremonies: ['unlock-credential-rotation'],
     // The inventory is read off the annex log's verified head.
-    evidence: ['verified-log'],
-    warn: MENDER_WARNINGS['retired-credential-leaves-no-annex-inventory']
+    evidence: ['verified-log']
   },
   // 26
   // detector: `documentListsCredential` (`src/session/pendingRetirement.ts`),
@@ -509,7 +480,6 @@ export const MENDER_INVARIANTS: ReadonlyArray<
     triggers: ['login-routing'],
     ceremonies: ['credential-anchored-genesis', 'unlock-credential-rotation'],
     evidence: ['verified-log'],
-    warn: MENDER_WARNINGS['document-lists-the-acting-credential'],
     async holdsWhen(
       deps: Parameters<typeof documentListsCredential>[0]
     ): Promise<'holds' | 'violated' | 'undetermined'> {
@@ -539,8 +509,7 @@ export const MENDER_INVARIANTS: ReadonlyArray<
     ceremonies: ['credential-anchored-genesis'],
     // The keystore configuration the KMS serves, which the promotion reads
     // before it writes.
-    evidence: ['served-body'],
-    warn: MENDER_WARNINGS['keystore-controller-is-the-account-did']
+    evidence: ['served-body']
   },
   // 28
   // No converger.
@@ -552,8 +521,7 @@ export const MENDER_INVARIANTS: ReadonlyArray<
     authority: 'ladder',
     triggers: [],
     ceremonies: ['credential-anchored-genesis', 'account-genesis'],
-    evidence: ['verified-log'],
-    warn: MENDER_WARNINGS['account-document-publishes-an-authentication-key']
+    evidence: ['verified-log']
   },
   // 29
   // No converger; two built detectors stand behind it,
@@ -567,10 +535,7 @@ export const MENDER_INVARIANTS: ReadonlyArray<
     authority: 'account',
     triggers: [],
     ceremonies: ['recovery-code-issuance', 'unlock-credential-rotation'],
-    evidence: ['verified-log', 'served-registry'],
-    warn: MENDER_WARNINGS[
-      'every-document-key-agreement-entry-has-a-locatable-credential'
-    ]
+    evidence: ['verified-log', 'served-registry']
   },
   // 30
   // No converger.
@@ -588,8 +553,7 @@ export const MENDER_INVARIANTS: ReadonlyArray<
     ],
     // A detector would compare the registry's live credentials against the
     // Spaces the host still serves.
-    evidence: ['served-registry', 'host-listing'],
-    warn: MENDER_WARNINGS['no-unlock-space-outlives-its-credential']
+    evidence: ['served-registry', 'host-listing']
   },
   // 31
   // No converger; a server-side reaper is not a wallet mender.
@@ -603,8 +567,7 @@ export const MENDER_INVARIANTS: ReadonlyArray<
     ceremonies: ['account-deletion'],
     // A detector would probe the keystore the KMS serves, as invariant 27's
     // would.
-    evidence: ['served-body'],
-    warn: MENDER_WARNINGS['no-keystore-outlives-its-account']
+    evidence: ['served-body']
   },
   // 32
   // detector: `checkRecoveryHealth` (`src/session/recovery.ts`), called from
@@ -627,7 +590,6 @@ export const MENDER_INVARIANTS: ReadonlyArray<
     // The recovery entries come from the served registry; their standing is
     // settled against the verified account log.
     evidence: ['served-registry', 'verified-log'],
-    warn: MENDER_WARNINGS['saved-recovery-codes-locate-their-account'],
     async holdsWhen(
       deps: Parameters<typeof checkRecoveryHealth>[0]
     ): Promise<'holds' | 'violated' | 'undetermined'> {
@@ -651,8 +613,7 @@ export const MENDER_INVARIANTS: ReadonlyArray<
     authority: 'account',
     triggers: ['remembered-login-chain'],
     ceremonies: ['account-genesis', 'credential-anchored-genesis'],
-    evidence: ['host-listing'],
-    warn: MENDER_WARNINGS['standard-collections-are-provisioned']
+    evidence: ['host-listing']
   },
   // 34
   // No converger, and no deleter at all: the stranding happens before any
@@ -667,7 +628,17 @@ export const MENDER_INVARIANTS: ReadonlyArray<
     ceremonies: [],
     // A detector would compare the account log's pointer entries with the
     // auxiliary Spaces the host still serves.
-    evidence: ['verified-log', 'host-listing'],
-    warn: MENDER_WARNINGS['no-auxiliary-space-stands-unnamed']
+    evidence: ['verified-log', 'host-listing']
   }
 ]
+
+/**
+ * The declarations as the registry reads them: each one carrying the warn
+ * string a runner logs when the code reporting it throws.
+ */
+export const MENDER_INVARIANTS: ReadonlyArray<
+  InvariantDeclaration<never, FreewalletCeremonyId>
+> = DECLARATIONS.map(declaration => ({
+  ...declaration,
+  warn: MENDER_WARNINGS[declaration.id]
+}))

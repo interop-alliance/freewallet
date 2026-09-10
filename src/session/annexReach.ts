@@ -47,6 +47,7 @@ import type {
 import { ID_COLLECTION } from '@interop/wallet-core/space'
 import { createLogger } from '@/lib/log'
 import { verifiedAccountLog } from '@/session/verifiedLog'
+import { MENDER_WARNINGS } from '@/session/menders/warnings'
 import type { Session } from '@/types/auth'
 
 const log = createLogger('fw:session:annex')
@@ -682,9 +683,7 @@ export async function refreshDidWebProjection({
     }
     return { outcome: 'noop' }
   } catch (err) {
-    log.warn('Could not refresh the did:web projection of the account log', {
-      err
-    })
+    log.warn(MENDER_WARNINGS['did-web-projection-matches-the-log'], { err })
     return { outcome: 'failed', errorName: errorNameOf(err) }
   }
 }
