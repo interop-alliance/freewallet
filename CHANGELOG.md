@@ -43,7 +43,10 @@
 - Collection-to-app attribution in the storage browser. App Connect
   provisioning stamps `generator` (the app's did:key) and `generatorOrigin`
   (the requesting origin, canonicalized) on the Collection Description when
-  it creates a collection; a standing collection keeps its attribution. The
+  it creates a collection; a standing collection keeps its attribution,
+  enforced where the write happens (was-client's ensure stamps the pair on
+  the guarded create only, so a later ensure naming a different application
+  cannot rename the creator). The
   storage listing and the collection-contents header show a "Created by"
   line: the app name, linking to its Applications page from the collection
   header, the stamped origin when the wallet holds no key for that app, and

@@ -385,7 +385,10 @@ describe('processZcaps collection attribution', () => {
     )
   })
 
-  it('leaves a standing private collection its attribution on re-admit', async () => {
+  it('passes the pair on re-admit too, the standing collection keeping its own', async () => {
+    // The "a standing collection keeps its attribution" rule is enforced
+    // where the write happens (was-client stamps the pair on the guarded
+    // create only), so the call site does not consult a collections snapshot.
     const { session } = fakeSession({ collections: [{ id: 'docs' }] })
     await processZcaps({
       zcapRequests: [APP_WRITE_DESCRIPTOR],
@@ -396,9 +399,11 @@ describe('processZcaps collection attribution', () => {
     expect(session.storage.provisionAppCollection).toHaveBeenCalledTimes(1)
     const [args] = vi.mocked(session.storage.provisionAppCollection).mock
       .calls[0]
-    expect(args.collectionId).toBe('docs')
-    expect(args).not.toHaveProperty('generator')
-    expect(args).not.toHaveProperty('generatorOrigin')
+    expect(args).toMatchObject({
+      collectionId: 'docs',
+      generator: APP_DID,
+      generatorOrigin: APP.origin
+    })
   })
 
   it('stamps nothing when the request is not an App Connect one', async () => {

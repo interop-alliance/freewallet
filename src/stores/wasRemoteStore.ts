@@ -730,7 +730,8 @@ export class WASRemoteStore {
    * already runs in, since the bound invocation capability (a transient
    * session's generation delegation) may be scoped below the bare Space URL.
    * The attribution pair passes through as supplied: was-client stamps it on
-   * the create and drops a lone `generatorOrigin` itself.
+   * the create only, leaves a standing collection's attribution alone, and
+   * drops a lone `generatorOrigin` itself.
    *
    * @param options {object}
    * @param options.id {string}

@@ -1187,8 +1187,9 @@ export async function processZcaps({
    * attribution: the grantee did:key as `generator` and the requesting
    * origin as `generatorOrigin`, so the storage browser can name the
    * application a collection belongs to. A collection that already stands
-   * keeps whatever attribution it has: the re-admit pass that adds a second
-   * app to an existing private collection must not rename its creator. A
+   * keeps whatever attribution it has, since was-client's ensure stamps the
+   * pair on the guarded create only: the re-admit pass that adds a second
+   * app to an existing private collection cannot rename its creator. A
    * request arriving without an App Connect query stamps nothing -- there is
    * no attested origin to record.
    *
@@ -1208,13 +1209,9 @@ export async function processZcaps({
     isPublic: boolean
     controller?: string
   }): Promise<void> {
-    const attribution =
-      appProvisioning && !collections.has(collectionId)
-        ? {
-            generator: controller,
-            generatorOrigin: app?.origin
-          }
-        : {}
+    const attribution = appProvisioning
+      ? { generator: controller, generatorOrigin: app?.origin }
+      : {}
     if (appProvisioning && !isPublic) {
       await session.storage.provisionAppCollection({
         collectionId,
