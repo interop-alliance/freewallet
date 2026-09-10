@@ -447,8 +447,9 @@ export async function listConnectedApps({
  * answers the same way as a dead chain -- propagates from `revokeAppGrants`
  * after the sibling POSTs settle, before the credential is deleted or the
  * Revoke recorded, so the row stays listed and a retry re-runs the whole
- * sequence. Without a `signerCheck` (no verified document this session) only
- * the expiry skip applies and everything else is POSTed.
+ * sequence. The verified document's reading is the storage manager's own,
+ * bound at construction; without one (no verified document this session)
+ * only the expiry skip applies and everything else is POSTed.
  *
  * What a failure leaves behind: the rotation stage has already run, so the
  * app-provisioned collections are rotated off the app's recipient key, while
@@ -470,21 +471,17 @@ export async function listConnectedApps({
  * @param options.storage {StorageManager}
  * @param options.user {User}   the session user (activity actor)
  * @param options.app {ConnectedApp}
- * @param [options.signerCheck] {AccountSignerCheck}   the verified account
- *   document's reading, when the session has one
  * @returns {Promise<{ revoked: number; skipped: number; rotated: number }>}
  *   the grant outcome, plus the collections the rotation re-keyed
  */
 export async function revokeAppAccess({
   storage,
   user,
-  app,
-  signerCheck
+  app
 }: {
   storage: StorageManager
   user: User
   app: ConnectedApp
-  signerCheck?: AccountSignerCheck
 }): Promise<{ revoked: number; skipped: number; rotated: number }> {
   // Both stages below look up the app's recorded grants in the activity
   // history; scan it once here and pass it through.
@@ -500,8 +497,7 @@ export async function revokeAppAccess({
   const outcome = await storage.revokeAppGrants({
     origin: app.origin,
     subjectDid: app.subjectDid,
-    items,
-    signerCheck
+    items
   })
   await storage.deleteAppKey({ cid: app.cid })
   await storage.addHistoryAppRevoke({
@@ -821,7 +817,8 @@ export async function listConnectedAgents({
  * admits, and it is never an epoch recipient.
  *
  * Which recorded grants are POSTed follows the app path exactly
- * (wallet-core's `grantRevocationSkip` over `signerCheck`): an expired grant, an
+ * (wallet-core's `grantRevocationSkip` over the storage manager's own
+ * verified-document reading): an expired grant, an
  * orphaned root-delegated grant, and a grant under a rotted parent
  * delegation are skipped without a POST, and every other
  * grant is POSTed whatever the row's marker, since a grant delegated from a
@@ -840,24 +837,19 @@ export async function listConnectedAgents({
  * @param options.storage {StorageManager}
  * @param options.user {User}   the session user (activity actor)
  * @param options.agent {ConnectedAgent}
- * @param [options.signerCheck] {AccountSignerCheck}   the verified account
- *   document's reading, when the session has one
  * @returns {Promise<{ revoked: number; skipped: number }>}   the grant outcome
  */
 export async function revokeAgentAccess({
   storage,
   user,
-  agent,
-  signerCheck
+  agent
 }: {
   storage: StorageManager
   user: User
   agent: ConnectedAgent
-  signerCheck?: AccountSignerCheck
 }): Promise<{ revoked: number; skipped: number }> {
   const outcome = await storage.revokeAgentGrants({
-    controller: agent.controller,
-    signerCheck
+    controller: agent.controller
   })
   await storage.addHistoryAgentRevoke({
     user,

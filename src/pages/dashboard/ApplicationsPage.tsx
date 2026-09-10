@@ -173,7 +173,10 @@ export function ApplicationsPage() {
       const { outcomeKey } = await revokeApplication({
         session,
         app: revokeTarget,
-        signerCheck
+        grantsState: deriveGrantsState({
+          grants: revokeTarget.grants,
+          signerCheck
+        })
       })
       setRevokeTarget(null)
       showToast({ message: t(outcomeKey) })
@@ -195,8 +198,7 @@ export function ApplicationsPage() {
     try {
       const { revoked } = await revokeAgent({
         session,
-        agent: revokeAgentTarget,
-        signerCheck
+        agent: revokeAgentTarget
       })
       setRevokeAgentTarget(null)
       showToast({

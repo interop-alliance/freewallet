@@ -540,26 +540,19 @@ describe('revokeAppAccess', () => {
     })
   })
 
-  it('hands the signer check to the grant revocation, which settles the skips', async () => {
+  it('leaves the skips to the grant revocation', async () => {
     const storage = fakeStorage({ appKeys: [], history: [] })
-    const signerCheck = {
-      accountDid: 'did:webvh:s:h:x',
-      currentSigningKeys: new Set(['zKey']),
-      doc: {},
-      clientAnnexDid: 'did:webvh:a:h:gen-current'
-    }
 
-    const outcome = await revokeAppAccess({ storage, user, app, signerCheck })
+    const outcome = await revokeAppAccess({ storage, user, app })
 
     // The row's marker gates nothing here: which recorded grants are POSTed
-    // and which are dead already is `revokeAppGrants`'s reading of the same
-    // verified document, so the check is passed through whole.
+    // and which are dead already is `revokeAppGrants`'s reading of the
+    // verified document it holds its own resolver for.
     expect(outcome).toEqual({ revoked: 1, skipped: 0, rotated: 0 })
     expect(storage.revokeAppGrants).toHaveBeenCalledWith({
       origin: 'https://app.example',
       subjectDid: APP_DID,
-      items: [],
-      signerCheck
+      items: []
     })
     expect(storage.deleteAppKey).toHaveBeenCalledWith({ cid: 'c-app' })
   })

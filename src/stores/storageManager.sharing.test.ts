@@ -65,6 +65,7 @@ import {
   ownerRecipient,
   type DocCipher
 } from '@interop/was-client/edv'
+import type { AccountSignerCheck } from '@/lib/connectedApps'
 import { StorageManager } from './storageManager'
 import {
   accountSignerCheck,
@@ -795,7 +796,11 @@ describe('StorageManager.revokeAppGrants', () => {
    * A `StorageManager` over a revoke-recording remote, for the tests that
    * exercise the revocation policy alone.
    */
-  async function revokeStorage(revoke: (zcap: unknown) => Promise<void>) {
+  async function revokeStorage(
+    revoke: (zcap: unknown) => Promise<void>,
+    signerCheck: () => Promise<AccountSignerCheck | undefined> = async () =>
+      undefined
+  ) {
     const owner = await generateKey()
     const stores = memoryDescriptorStores()
     const remoteStore = makeRevokeRemote(revoke)
@@ -809,7 +814,8 @@ describe('StorageManager.revokeAppGrants', () => {
       descriptorLogs: descriptorLogsFrom(stores),
       ciphers,
       vaultKeys: owner,
-      descriptors
+      descriptors,
+      signerCheck
     })
     return { storage, user }
   }
@@ -1068,11 +1074,68 @@ describe('StorageManager.revokeAppGrants', () => {
     expect(outcome).toEqual({ revoked: 1, skipped: 1, revokedIds: ['z-live'] })
   })
 
+  it('posts every unexpired grant, logging once, when the signer-check read throws', async () => {
+    const posted: string[] = []
+    const reads: number[] = []
+    const { storage, user } = await revokeStorage(
+      async zcap => {
+        posted.push((zcap as { id: string }).id)
+      },
+      async () => {
+        reads.push(1)
+        throw new Error('log unreachable')
+      }
+    )
+    const future = new Date(Date.now() + 1_000_000).toISOString()
+
+    await seedLogin(storage, user, [
+      {
+        id: 'g-one',
+        target: 'https://was.example/space/x/private-credentials',
+        allowedActions: ['GET'],
+        expires: future,
+        zcap: recordedGrant({ id: 'z-one', expires: future })
+      },
+      {
+        id: 'g-two',
+        target: 'https://was.example/space/x/public-credentials',
+        allowedActions: ['GET'],
+        expires: future,
+        zcap: recordedGrant({ id: 'z-two', expires: future })
+      }
+    ])
+    const capture = captureSink()
+    const removeSink = addSink(capture.sink)
+
+    try {
+      const outcome = await storage.revokeAppGrants({
+        origin: APP_ORIGIN,
+        subjectDid: APP_SUBJECT
+      })
+
+      expect(outcome).toEqual({ revoked: 2, skipped: 0 })
+      expect(posted.sort()).toEqual(['z-one', 'z-two'])
+      expect(reads).toHaveLength(1)
+      expect(
+        capture.events.filter(
+          event =>
+            event.level === 'warn' &&
+            event.msg.includes('Could not read the account key set')
+        )
+      ).toHaveLength(1)
+    } finally {
+      removeSink()
+    }
+  })
+
   it('skips a grant expired beyond the skew margin without a POST', async () => {
     const revoked: unknown[] = []
-    const { storage, user } = await revokeStorage(async zcap => {
-      revoked.push(zcap)
-    })
+    const { storage, user } = await revokeStorage(
+      async zcap => {
+        revoked.push(zcap)
+      },
+      async () => SIGNER_CHECK
+    )
     const past = new Date(Date.now() - 60 * 60 * 1000).toISOString()
 
     await seedLogin(storage, user, [
@@ -1087,8 +1150,7 @@ describe('StorageManager.revokeAppGrants', () => {
 
     const outcome = await storage.revokeAppGrants({
       origin: APP_ORIGIN,
-      subjectDid: APP_SUBJECT,
-      signerCheck: SIGNER_CHECK
+      subjectDid: APP_SUBJECT
     })
 
     expect(outcome).toEqual({ revoked: 0, skipped: 1 })
@@ -1097,13 +1159,16 @@ describe('StorageManager.revokeAppGrants', () => {
 
   it('reads the refusal of an annex-signed grant under a swapped generation as dead', async () => {
     const posted: string[] = []
-    const { storage, user } = await revokeStorage(async zcap => {
-      const { id } = zcap as { id: string }
-      posted.push(id)
-      if (id === 'z-swapped') {
-        throw new ValidationError('chain does not verify', { status: 400 })
-      }
-    })
+    const { storage, user } = await revokeStorage(
+      async zcap => {
+        const { id } = zcap as { id: string }
+        posted.push(id)
+        if (id === 'z-swapped') {
+          throw new ValidationError('chain does not verify', { status: 400 })
+        }
+      },
+      async () => SIGNER_CHECK
+    )
     const future = new Date(Date.now() + 1_000_000).toISOString()
 
     await seedLogin(storage, user, [
@@ -1135,8 +1200,7 @@ describe('StorageManager.revokeAppGrants', () => {
 
     const outcome = await storage.revokeAppGrants({
       origin: APP_ORIGIN,
-      subjectDid: APP_SUBJECT,
-      signerCheck: SIGNER_CHECK
+      subjectDid: APP_SUBJECT
     })
 
     // Both are POSTed: the document a login read is a snapshot. The
@@ -1147,10 +1211,13 @@ describe('StorageManager.revokeAppGrants', () => {
 
   it('reads the refusal of a grant whose generation delegation was signed by a struck key as dead', async () => {
     const posted: string[] = []
-    const { storage, user } = await revokeStorage(async zcap => {
-      posted.push((zcap as { id: string }).id)
-      throw new ValidationError('chain does not verify', { status: 400 })
-    })
+    const { storage, user } = await revokeStorage(
+      async zcap => {
+        posted.push((zcap as { id: string }).id)
+        throw new ValidationError('chain does not verify', { status: 400 })
+      },
+      async () => SIGNER_CHECK
+    )
     const future = new Date(Date.now() + 1_000_000).toISOString()
 
     await seedLogin(storage, user, [
@@ -1175,8 +1242,7 @@ describe('StorageManager.revokeAppGrants', () => {
 
     const outcome = await storage.revokeAppGrants({
       origin: APP_ORIGIN,
-      subjectDid: APP_SUBJECT,
-      signerCheck: SIGNER_CHECK
+      subjectDid: APP_SUBJECT
     })
 
     expect(outcome).toEqual({ revoked: 0, skipped: 1 })
@@ -1185,13 +1251,16 @@ describe('StorageManager.revokeAppGrants', () => {
 
   it('reads the refusal of an orphaned account-signed grant as dead', async () => {
     const posted: string[] = []
-    const { storage, user } = await revokeStorage(async zcap => {
-      const { id } = zcap as { id: string }
-      posted.push(id)
-      if (id === 'z-orphaned') {
-        throw new ValidationError('chain does not verify', { status: 400 })
-      }
-    })
+    const { storage, user } = await revokeStorage(
+      async zcap => {
+        const { id } = zcap as { id: string }
+        posted.push(id)
+        if (id === 'z-orphaned') {
+          throw new ValidationError('chain does not verify', { status: 400 })
+        }
+      },
+      async () => SIGNER_CHECK
+    )
     const future = new Date(Date.now() + 1_000_000).toISOString()
 
     await seedLogin(storage, user, [
@@ -1221,8 +1290,7 @@ describe('StorageManager.revokeAppGrants', () => {
 
     const outcome = await storage.revokeAppGrants({
       origin: APP_ORIGIN,
-      subjectDid: APP_SUBJECT,
-      signerCheck: SIGNER_CHECK
+      subjectDid: APP_SUBJECT
     })
 
     expect(outcome).toEqual({ revoked: 1, skipped: 1 })

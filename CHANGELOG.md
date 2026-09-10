@@ -55,6 +55,13 @@
 
 ### Changed
 
+- `StorageManager` holds the grant-revocation signer check itself: a lazy
+  resolver injected at construction from the session layer, read once per
+  revocation set, best-effort. The `signerCheck` parameter is gone from
+  `revokeAppGrants`, `revokeAgentGrants`, `revokeAppAccess`,
+  `revokeAgentAccess`, `revokeAgent`, and `sweepStrandedAppKeys`;
+  `revokeApplication` takes the row's derived `grantsState` for the toast
+  wording instead.
 - The last `durable` prose outside the archives says it only of server-backed
   state: `_spec/transient-refusal-considerations.md` and
   `_spec/pivot-placement-audit.md` take the remembered, enrolled, and

@@ -545,6 +545,13 @@ export class StorageManager {
   // login-time genesis can promote the account after the session was built;
   // `undefined` while there is no promoted account to verify against.
   #descriptorLogsFor: () => DescriptorLogs | undefined
+  // The verified account document's reading a grant revocation checks
+  // against (see `AccountSignerCheck`), resolved lazily from the session
+  // layer at each revocation rather than once, since a login-time genesis
+  // can promote the account after the session was built, and the read is
+  // memoized for the session's lifetime upstream. Resolves `undefined` when
+  // the session has no promoted account to check against.
+  #signerCheckFor: () => Promise<AccountSignerCheck | undefined>
   // The once-per-collection-per-session unknown-epoch refresh guard, shared by
   // the standard and the app-provisioned encrypted collections, so a genuinely
   // foreign envelope cannot drive a refresh loop. Its `reset` re-arms a
@@ -585,7 +592,8 @@ export class StorageManager {
     descriptors,
     metas,
     persistence,
-    descriptorLogs
+    descriptorLogs,
+    signerCheck
   }: {
     localStore?: BrowserStore
     remoteStore?: WASRemoteStore
@@ -599,6 +607,7 @@ export class StorageManager {
     metas?: Record<string, { custom?: unknown }>
     persistence: SessionPersistence
     descriptorLogs?: DescriptorLogs | (() => DescriptorLogs | undefined)
+    signerCheck?: () => Promise<AccountSignerCheck | undefined>
   }) {
     this.#localStore = localStore
     this.#remoteStore = remoteStore
@@ -611,6 +620,7 @@ export class StorageManager {
       typeof descriptorLogs === 'function'
         ? descriptorLogs
         : () => descriptorLogs
+    this.#signerCheckFor = signerCheck ?? (async () => undefined)
     // The cache pair rides the persistence strategy: one instance per scope
     // per session (the strategy memoizes), localStorage or in-memory by the
     // strategy's storage tier, and absent only when there is no remote Space
@@ -1233,7 +1243,8 @@ export class StorageManager {
     isGuest = false,
     remoteDirect = false,
     storage: rxStorage,
-    descriptorLogs: suppliedDescriptorLogs
+    descriptorLogs: suppliedDescriptorLogs,
+    signerCheck
   }: {
     user: User
     // The profile the clients sign as, and the session's persistence
@@ -1250,6 +1261,11 @@ export class StorageManager {
     // The per-collection descriptor logs, in place of the ones built from
     // the profile (the unit tests' in-memory stores).
     descriptorLogs?: DescriptorLogs
+    // The verified account document's reading a grant revocation checks
+    // against, resolved lazily from the session layer (which holds the
+    // session this manager becomes part of); absent, no grant is skipped on
+    // the document's reading.
+    signerCheck?: () => Promise<AccountSignerCheck | undefined>
   }) {
     // Guest sessions never touch the remote WAS server -- they get no remote
     // replica. This keeps guest mode usable as a fallback even when the
@@ -1408,7 +1424,8 @@ export class StorageManager {
       descriptors,
       metas,
       persistence,
-      descriptorLogs: descriptorLogsFor
+      descriptorLogs: descriptorLogsFor,
+      signerCheck
     })
     return { storage, userExists }
   }
@@ -3094,20 +3111,16 @@ export class StorageManager {
    *   the controller the grants were delegated to
    * @param [options.items] {Array<{ id: string; doc: WalletActivity }>}   a
    *   pre-fetched history scan, when the caller already holds one
-   * @param [options.signerCheck] {AccountSignerCheck}   the verified account
-   *   document's reading; without it only the expiry skip applies
    * @returns {Promise<{ revoked: number; skipped: number }>}
    */
   async revokeAppGrants({
     origin,
     subjectDid,
-    items,
-    signerCheck
+    items
   }: {
     origin: string
     subjectDid: string
     items?: Array<{ id: string; doc: WalletActivity }>
-    signerCheck?: AccountSignerCheck
   }): Promise<{ revoked: number; skipped: number }> {
     const remote = this.#remoteStore
     if (!remote) {
@@ -3121,7 +3134,7 @@ export class StorageManager {
       controller: subjectDid,
       items: items ?? (await this.listHistoryItems())
     })
-    const outcome = await this.#revokeZcaps({ zcaps, signerCheck })
+    const outcome = await this.#revokeZcaps({ zcaps })
     return {
       revoked: outcome.revoked,
       skipped: outcome.skipped + nonRevocable
@@ -3149,19 +3162,16 @@ export class StorageManager {
    * `revokedIds` names only the capabilities whose POST succeeded, which is
    * what an agent revocation records as its audit trail.
    *
+   * The verified document's reading is resolved here, once per set and only
+   * when the set is non-empty, through the session-layer resolver bound at
+   * construction; best-effort, so a read that throws is logged and read as
+   * no check, and every unexpired grant is POSTed.
+   *
    * @param options {object}
    * @param options.zcaps {IDelegatedZcap[]}
-   * @param [options.signerCheck] {AccountSignerCheck}   the verified account
-   *   document's reading; without it a refusal is read on expiry alone
    * @returns {Promise<{ revoked: number; skipped: number; revokedIds: string[] }>}
    */
-  async #revokeZcaps({
-    zcaps,
-    signerCheck
-  }: {
-    zcaps: IDelegatedZcap[]
-    signerCheck?: AccountSignerCheck
-  }): Promise<{
+  async #revokeZcaps({ zcaps }: { zcaps: IDelegatedZcap[] }): Promise<{
     revoked: number
     skipped: number
     revokedIds: string[]
@@ -3170,7 +3180,11 @@ export class StorageManager {
     if (!remote) {
       return { revoked: 0, skipped: 0, revokedIds: [] }
     }
+    if (zcaps.length === 0) {
+      return { revoked: 0, skipped: 0, revokedIds: [] }
+    }
     const space = remote.spaceHandle()
+    const signerCheck = await this.#readSignerCheck()
     const now = Date.now()
     const outcomes = await Promise.allSettled(
       zcaps.map(zcap =>
@@ -3210,6 +3224,26 @@ export class StorageManager {
   }
 
   /**
+   * The verified account document's reading, best-effort: a resolver that
+   * throws (the log cannot be fetched or verified right now) is logged and
+   * read as no check, so the revocation degrades to POSTing every unexpired
+   * grant rather than failing.
+   *
+   * @returns {Promise<AccountSignerCheck | undefined>}
+   */
+  async #readSignerCheck(): Promise<AccountSignerCheck | undefined> {
+    try {
+      return await this.#signerCheckFor()
+    } catch (err) {
+      log.warn(
+        'Could not read the account key set for the grant revocation; posting every unexpired grant',
+        { err }
+      )
+      return undefined
+    }
+  }
+
+  /**
    * Revokes the storage grants recorded for a connected agent: the
    * capabilities delegated to `controller` on the interaction-URL request
    * page's Login activities. There is no app key and no epoch roster involved
@@ -3223,18 +3257,14 @@ export class StorageManager {
    * @param options.controller {string}   the grantee did:key
    * @param [options.items] {Array<{ id: string; doc: WalletActivity }>}   a
    *   pre-fetched history scan, when the caller already holds one
-   * @param [options.signerCheck] {AccountSignerCheck}   the verified account
-   *   document's reading; without it only the expiry skip applies
    * @returns {Promise<{ revoked: number; skipped: number; revokedIds: string[] }>}
    */
   async revokeAgentGrants({
     controller,
-    items,
-    signerCheck
+    items
   }: {
     controller: string
     items?: Array<{ id: string; doc: WalletActivity }>
-    signerCheck?: AccountSignerCheck
   }): Promise<{ revoked: number; skipped: number; revokedIds: string[] }> {
     if (!this.#remoteStore) {
       return { revoked: 0, skipped: 0, revokedIds: [] }
@@ -3245,7 +3275,7 @@ export class StorageManager {
       controller,
       items: items ?? (await this.listHistoryItems())
     })
-    const outcome = await this.#revokeZcaps({ zcaps, signerCheck })
+    const outcome = await this.#revokeZcaps({ zcaps })
     return {
       revoked: outcome.revoked,
       skipped: outcome.skipped + nonRevocable,

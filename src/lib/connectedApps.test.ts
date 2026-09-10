@@ -352,12 +352,12 @@ describe('revokeAgentAccess', () => {
     expect(storage.addHistoryAgentRevoke).not.toHaveBeenCalled()
   })
 
-  it('hands the signer check through and records what was skipped', async () => {
+  it('leaves the skips to the grant revocation and records them', async () => {
     // A grant delegated from a transient session is signed by an annex key the
     // account document never lists, so the row's marker says nothing about
     // it; whether its generation still stands is the storage layer's
-    // reading of the verified document, so the check is passed through
-    // whole rather than gating anything here.
+    // reading of the verified document it holds its own resolver for, so
+    // nothing gates here.
     const storage = {
       revokeAgentGrants: vi.fn(async () => ({
         revoked: 0,
@@ -366,13 +366,6 @@ describe('revokeAgentAccess', () => {
       })),
       addHistoryAgentRevoke: vi.fn()
     } as unknown as StorageManager
-    const signerCheck = {
-      accountDid: 'did:webvh:s:h:x',
-      currentSigningKeys: new Set(['zKey']),
-      doc: {},
-      clientAnnexDid: 'did:webvh:annex:was.example:gen-2'
-    }
-
     const annexSigned = {
       ...agent,
       grants: [
@@ -389,14 +382,12 @@ describe('revokeAgentAccess', () => {
     const outcome = await revokeAgentAccess({
       storage,
       user,
-      agent: annexSigned,
-      signerCheck
+      agent: annexSigned
     })
 
     expect(outcome).toEqual({ revoked: 0, skipped: 1 })
     expect(storage.revokeAgentGrants).toHaveBeenCalledWith({
-      controller: AGENT_DID,
-      signerCheck
+      controller: AGENT_DID
     })
   })
 

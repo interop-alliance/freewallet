@@ -7,7 +7,6 @@
  */
 import { currentAccountSignerCheck } from '@/session/clients'
 import {
-  deriveGrantsState,
   listConnectedAgents,
   listConnectedApps,
   revokeAgentAccess,
@@ -73,37 +72,35 @@ export async function listApplicationsView({
 
 /**
  * Revokes one connected app's access and words the outcome. The grant state
- * is derived first, against the same verified key set the listing marked the
- * row with, and feeds the wording. The same `signerCheck` is handed to
- * `revokeAppAccess`, which skips the POST for a grant that document already
- * reads as dead (expired, orphaned, or chained under a rotted parent
- * delegation)
- * and POSTs every other one, a transient session's grants included, since
- * those derive as unknown while their generation delegation may still stand.
+ * the listing marked the row with feeds the wording. `revokeAppAccess`
+ * reads the storage manager's own verified-document reading, skipping the
+ * POST for a grant that document already reads as dead (expired, orphaned,
+ * or chained under a rotted parent delegation) and POSTing every other one,
+ * a transient session's grants included, since those derive as unknown
+ * while their generation delegation may still stand.
  *
  * @param options {object}
  * @param options.session {Session}
  * @param options.app {ConnectedApp}
- * @param [options.signerCheck] {AccountSignerCheck}   the account DID and
- *   its current signing keys, or undefined when the check was unavailable
+ * @param options.grantsState {GrantSignerState}   the row's grant state as
+ *   the listing derived it (`deriveGrantsState`); feeds the wording
+ *   alone
  * @returns {Promise<{ outcomeKey: string }>}   the i18n key of the toast to
  *   show ({@link revokeOutcomeKey})
  */
 export async function revokeApplication({
   session,
   app,
-  signerCheck
+  grantsState
 }: {
   session: Session
   app: ConnectedApp
-  signerCheck?: AccountSignerCheck
+  grantsState: GrantSignerState
 }): Promise<{ outcomeKey: string }> {
-  const grantsState = deriveGrantsState({ grants: app.grants, signerCheck })
   const outcome = await revokeAppAccess({
     storage: session.storage,
     user: session.user,
-    app,
-    signerCheck
+    app
   })
   // The rotation revokes an app-provisioned collection's pull grant with the
   // epoch, and the second stage's re-POST of that same capability comes back
@@ -153,9 +150,9 @@ export function revokeOutcomeKey({
 }
 
 /**
- * Revokes one connected agent's storage grants. The `signerCheck` is handed
- * through to `revokeAgentAccess`, which reads it exactly as the app path
- * does: a grant the verified document already reads as dead is skipped
+ * Revokes one connected agent's storage grants. `revokeAgentAccess` reads
+ * the storage manager's own verified-document reading exactly as the app
+ * path does: a grant the verified document already reads as dead is skipped
  * without a POST, and every other one is POSTed, a transient session's
  * included, since its annex signer derives as unknown while its generation
  * delegation may still stand.
@@ -163,24 +160,19 @@ export function revokeOutcomeKey({
  * @param options {object}
  * @param options.session {Session}
  * @param options.agent {ConnectedAgent}
- * @param [options.signerCheck] {AccountSignerCheck}   the verified account
- *   document's reading, or undefined when the check was unavailable
  * @returns {Promise<{ revoked: number }>}
  */
 export async function revokeAgent({
   session,
-  agent,
-  signerCheck
+  agent
 }: {
   session: Session
   agent: ConnectedAgent
-  signerCheck?: AccountSignerCheck
 }): Promise<{ revoked: number }> {
   const outcome = await revokeAgentAccess({
     storage: session.storage,
     user: session.user,
-    agent,
-    signerCheck
+    agent
   })
   return { revoked: outcome.revoked }
 }

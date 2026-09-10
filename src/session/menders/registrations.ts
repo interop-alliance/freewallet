@@ -56,7 +56,6 @@ import {
   ensureGenerationDelegation
 } from '@/session/annexReach'
 import { sweepStrandedAppKeys } from '@/session/appKeySweep'
-import { currentAccountSignerCheck } from '@/session/clients'
 import { sweepClientAnnexGenerations } from '@/session/clientAnnexGc'
 import { refreshTransientManageCapability } from '@/session/unlockMethods'
 
@@ -604,8 +603,7 @@ const APP_KEY_SWEEP: Registration<LoginMenderDeps, FreewalletCeremonyId> = {
   async converge(deps) {
     const { session } = remembered(deps)
     const { deleted, retracted } = await sweepStrandedAppKeys({
-      storage: session.storage,
-      readSignerCheck: () => currentAccountSignerCheck({ session })
+      storage: session.storage
     })
     return [
       {

@@ -114,7 +114,7 @@ export function ApplicationDetailPage() {
       const { outcomeKey } = await revokeApplication({
         session,
         app,
-        signerCheck
+        grantsState
       })
       showToast({ message: t(outcomeKey) })
       navigate('/applications')

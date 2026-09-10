@@ -195,40 +195,27 @@ describe('sweepStrandedAppKeys', () => {
     expect(calls).not.toContain('delete:cid-1')
   })
 
-  it('reads the signer check once and hands it to both revocation passes', async () => {
+  it('hands the shared history to both revocation passes', async () => {
     const storage = storageDouble({
       credentials: [{ cid: 'cid-1', vc: appKeyFixture() }],
       publicCopies: [
         { cid: 'cid-orphan', vc: appKeyFixture({ subject: 'did:key:zOrphan' }) }
       ]
     })
-    const signerCheck = {
-      accountDid: 'did:webvh:s:h:x',
-      currentSigningKeys: new Set(['zKey']),
-      doc: {},
-      clientAnnexDid: 'did:webvh:a:h:gen-current'
-    }
-
-    const readSignerCheck = vi.fn(async () => signerCheck)
 
     await sweepStrandedAppKeys({
-      storage: storage as unknown as StorageManager,
-      readSignerCheck
+      storage: storage as unknown as StorageManager
     })
 
-    // Read once for the whole sweep, both passes included.
-    expect(readSignerCheck).toHaveBeenCalledTimes(1)
     expect(storage.revokeAppGrants).toHaveBeenCalledWith({
       origin: 'https://app.example',
       subjectDid: 'did:key:z6MkfakeAppSubject',
-      items: [],
-      signerCheck
+      items: []
     })
     expect(storage.revokeAppGrants).toHaveBeenCalledWith({
       origin: 'https://app.example',
       subjectDid: 'did:key:zOrphan',
-      items: [],
-      signerCheck
+      items: []
     })
   })
 
@@ -252,38 +239,6 @@ describe('sweepStrandedAppKeys', () => {
     expect(storage.revokeAppGrants).toHaveBeenCalledTimes(1)
     expect(calls).not.toContain('delete:cid-1')
     expect(calls).toContain('delete:cid-2')
-  })
-
-  it('never reads the signer check when no row needs revoking', async () => {
-    const storage = storageDouble({ credentials: [] })
-    const readSignerCheck = vi.fn(async () => undefined)
-
-    await sweepStrandedAppKeys({
-      storage: storage as unknown as StorageManager,
-      readSignerCheck
-    })
-
-    expect(readSignerCheck).not.toHaveBeenCalled()
-  })
-
-  it('posts without a check when the signer-check read throws', async () => {
-    const storage = storageDouble({
-      credentials: [{ cid: 'cid-1', vc: appKeyFixture() }]
-    })
-
-    const { deleted } = await sweepStrandedAppKeys({
-      storage: storage as unknown as StorageManager,
-      readSignerCheck: async () => {
-        throw new Error('log unreachable')
-      }
-    })
-
-    expect(deleted).toBe(1)
-    expect(storage.revokeAppGrants).toHaveBeenCalledWith({
-      origin: 'https://app.example',
-      subjectDid: 'did:key:z6MkfakeAppSubject',
-      items: []
-    })
   })
 
   it('deletes a row with no revocable identity directly', async () => {
