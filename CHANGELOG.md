@@ -64,6 +64,13 @@
 
 ### Changed
 
+- The per-collection descriptor store lookups come from
+  `@interop/wallet-core/keys`: the geneses and the recovery continuations
+  call the shared `accountCollectionStores`, and `sessionCollectionStores`
+  is the live session's binding onto `collectionDescriptorStores` (the remote
+  store's collection handle and the profile's verified-log memo). The
+  app-side `accountCollectionStores` and `CollectionStoreFor` are gone;
+  the type is wallet-core's.
 - The stored unlock-methods envelope moves to frame version 2. A version-1
   (unsigned) record is refused as unusable rather than migrated. The
   browser-local client-key record stays unsigned at its own version.

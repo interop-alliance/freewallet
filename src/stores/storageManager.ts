@@ -56,10 +56,13 @@ import {
   type EncryptionDescriptorStore,
   type RecipientPublicKey
 } from '@interop/was-client/edv'
-import { ensureIndexedFirstEpoch } from '@interop/wallet-core/keys'
-import { isResourceLogRefusal } from '@interop/wallet-core/resourceLog'
 import {
   accountCollectionStores,
+  ensureIndexedFirstEpoch,
+  userKeyRosterLogSigner
+} from '@interop/wallet-core/keys'
+import { isResourceLogRefusal } from '@interop/wallet-core/resourceLog'
+import {
   descriptorLogSignerAgent,
   sessionCollectionDescriptorSource,
   sessionCollectionStores
@@ -2609,14 +2612,12 @@ export class StorageManager {
             // genesis, signed by this client's enrolled key.
             collectionStoreFor: ({ did }) =>
               accountCollectionStores({
+                storageServerUrl: remoteStore.storageServerUrl,
                 zcapClient: profile.zcapClient,
-                keyAgent,
-                pointer: {
-                  did,
-                  spaceId: remoteStore.spaceId,
-                  host: remoteStore.storageServerUrl
-                },
-                pinStore: this.#persistence.logPins
+                spaceId: remoteStore.spaceId,
+                did,
+                pinStore: this.#persistence.logPins,
+                signer: userKeyRosterLogSigner({ keyAgent })
               }),
             promoteController: false,
             // The ceremony's one stage boundary of its own: the
@@ -2725,14 +2726,12 @@ export class StorageManager {
             await remoteStore.ensureSpaceEpochs({
               userKey: profile.userKey,
               storeFor: accountCollectionStores({
+                storageServerUrl: remoteStore.storageServerUrl,
                 zcapClient: profile.zcapClient,
-                keyAgent: profile.keyAgent,
-                pointer: {
-                  did: pointer.did,
-                  spaceId: remoteStore.spaceId,
-                  host: remoteStore.storageServerUrl
-                },
-                pinStore: this.#persistence.logPins
+                spaceId: remoteStore.spaceId,
+                did: pointer.did,
+                pinStore: this.#persistence.logPins,
+                signer: userKeyRosterLogSigner({ keyAgent: profile.keyAgent })
               })
             })
             await refreshDescriptorsWithoutEpochs()

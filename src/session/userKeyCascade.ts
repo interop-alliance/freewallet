@@ -10,8 +10,9 @@
  * declaration is reached through the remote store. Each collection's
  * descriptor store is the caller's: a log-governed store whose appends are
  * signed by whichever key the caller's ceremony is licensed to sign with
- * (`src/session/collectionLogStore.ts`), so the fan-out takes the lookup
- * rather than building one.
+ * (`sessionCollectionStores` in `src/session/collectionLogStore.ts` for a
+ * live session, wallet-core's `accountCollectionStores` for a bare-parts
+ * caller), so the fan-out takes the lookup rather than building one.
  *
  * Convergence is the design, not an afterthought: staleness is detected from
  * durable data alone (a collection is stale exactly when its current epoch
@@ -24,6 +25,7 @@ import type { CollectionEncryption } from '@interop/was-client'
 import type { IKeyAgreementKey } from '@interop/data-integrity-core'
 import {
   cascadeCollectionsToUserKey as driveCascade,
+  type CollectionStoreFor,
   type UserKey,
   type UserKeyCascadeResult
 } from '@interop/wallet-core/keys'
@@ -31,7 +33,6 @@ import type { CascadeCollections } from '@interop/wallet-core/clients'
 import type { WebvhResourceLogController } from '@interop/wallet-core/resourceLog'
 import { ENCRYPTED_STANDARD_COLLECTIONS } from '@/app.config'
 import type { WASRemoteStore } from '@/stores/wasRemoteStore'
-import type { CollectionStoreFor } from '@/session/collectionLogStore'
 import { createLogger } from '@/lib/log'
 
 const log = createLogger('fw:session:cascade')

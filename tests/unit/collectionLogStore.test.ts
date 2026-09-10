@@ -1,17 +1,19 @@
 // @vitest-environment node
 /**
- * Unit tests for the log-governed collection descriptor store builders
- * (`src/session/collectionLogStore.ts`): how the bare-parts builder resolves
- * the controller view across a fan-out of collections, that it builds
- * nothing until the first lookup, the address each store is aimed at (the
- * collection's own `meta/log`, whose pin slot the library names), and which
- * agent a live session's appends sign with.
+ * Unit tests for the session-shaped collection descriptor store wiring
+ * (`src/session/collectionLogStore.ts`): what the live session's binding
+ * hands wallet-core's `collectionDescriptorStores` (the remote store's
+ * collection handle, the session pins, the signer, the verified-log
+ * controller), the address each store is aimed at (the collection's own
+ * `meta/log`, whose pin slot the library names), and which agent a live
+ * session's appends sign with. The bare-parts builder's own behavior is
+ * wallet-core's to test.
  */
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
 vi.mock('@interop/wallet-core/keys', async importOriginal => ({
   ...(await importOriginal<typeof import('@interop/wallet-core/keys')>()),
-  collectionDescriptorLogStore: vi.fn(options => ({ options })),
+  collectionDescriptorStores: vi.fn(options => ({ options })),
   userKeyRosterLogSigner: vi.fn(() => ({ isDescriptorLogSigner: true }))
 }))
 
@@ -22,9 +24,8 @@ vi.mock('@interop/wallet-core/descriptors', async importOriginal => ({
   logGovernedDescriptorSource: vi.fn(options => ({ options }))
 }))
 
-vi.mock('@interop/wallet-core/webvh', async importOriginal => ({
-  ...(await importOriginal<typeof import('@interop/wallet-core/webvh')>()),
-  verifyAccountLog: vi.fn()
+vi.mock('@/session/verifiedLog', () => ({
+  verifiedAccountLog: vi.fn()
 }))
 
 vi.mock('@interop/wallet-core/resourceLog', async importOriginal => ({
@@ -36,23 +37,19 @@ vi.mock('@interop/wallet-core/resourceLog', async importOriginal => ({
 
 import type { Collection } from '@interop/was-client'
 import {
-  collectionDescriptorLogStore,
+  collectionDescriptorStores,
   userKeyRosterLogSigner
 } from '@interop/wallet-core/keys'
 import {
   collectionDescriptorLogPinId,
   logGovernedDescriptorSource
 } from '@interop/wallet-core/descriptors'
-import { verifyAccountLog } from '@interop/wallet-core/webvh'
-import { webvhResourceLogController } from '@interop/wallet-core/resourceLog'
 import { ladderVmAgent } from '@interop/wallet-core/clientAnnex'
-import { memoryResourceLogPinStore } from '@interop/vh-resource-log'
+import { verifiedAccountLog } from '@/session/verifiedLog'
 import {
-  accountCollectionStores,
   descriptorLogSignerAgent,
   sessionCollectionDescriptorSource,
-  sessionCollectionStores,
-  type CollectionStoreFor
+  sessionCollectionStores
 } from '@/session/collectionLogStore'
 import {
   browserLocalSessionPersistence,
@@ -67,32 +64,22 @@ const POINTER = {
   spaceId: 'space-123',
   host: 'https://was.example.test'
 }
-const SERVED_LOG = [{ entry: 'served' }]
-const PARTS = {
-  // was-client reads the wrapped signer's id to derive the controller DID, so
-  // a bare stub is not enough to build a Space handle from.
-  zcapClient: { invocationSigner: { id: 'did:key:zAgent#zAgent' } },
-  keyAgent: { id: 'did:key:zAgent' }
-} as never as {
-  zcapClient: Parameters<typeof accountCollectionStores>[0]['zcapClient']
-  keyAgent: Parameters<typeof accountCollectionStores>[0]['keyAgent']
-}
+const KEY_AGENT = { id: 'did:key:zAgent' } as never as Parameters<
+  typeof sessionCollectionStores
+>[0]['keyAgent']
 
 /**
- * The options the builder handed wallet-core's per-collection store, in the
- * order the lookups were made.
+ * The options the session binding handed wallet-core's lookup builder.
  *
- * @returns {Array<object>}
+ * @returns {object}
  */
-function capturedStoreOptions(): Array<{
-  collection: Collection
+function capturedBuilderOptions(): {
+  collectionFor: (collectionId: string) => Collection
   resolveController: () => Promise<unknown>
   pinStore: unknown
   signer: unknown
-}> {
-  return vi
-    .mocked(collectionDescriptorLogStore)
-    .mock.calls.map(([options]) => options)
+} {
+  return vi.mocked(collectionDescriptorStores).mock.calls[0]![0]
 }
 
 /**
@@ -138,203 +125,47 @@ afterEach(() => {
   vi.clearAllMocks()
 })
 
-describe('accountCollectionStores -- the controller view', () => {
-  it('verifies the account log once across a fan-out of collections', async () => {
-    const pinStore = memoryResourceLogPinStore()
-    vi.mocked(verifyAccountLog).mockResolvedValue({
-      doc: { id: POINTER.did },
-      log: SERVED_LOG,
-      updateKeys: [],
-      nextKeyHashes: []
-    } as never)
-    const storeFor = accountCollectionStores({
-      ...PARTS,
-      pointer: POINTER,
-      pinStore
-    })
-
-    storeFor('private-credentials')
-    storeFor('wallet-activity')
-    storeFor('contacts')
-    // Every collection's store resolves its own controller view, as
-    // wallet-core resolves it per operation.
-    for (const options of capturedStoreOptions()) {
-      await options.resolveController()
-    }
-
-    // One verification for the whole lookup: the in-flight promise is the memo.
-    expect(vi.mocked(verifyAccountLog).mock.calls).toHaveLength(1)
-    expect(vi.mocked(verifyAccountLog).mock.calls[0]![0]).toEqual({
-      did: POINTER.did,
-      spaceId: POINTER.spaceId,
-      host: POINTER.host,
-      pinStore
-    })
-    expect(webvhResourceLogController).toHaveBeenCalledWith({
-      did: POINTER.did,
-      log: SERVED_LOG
-    })
-  })
-
-  it('resolves a seeded head without reading did.jsonl at all', async () => {
-    const seeded = [{ entry: 'this run' }]
-    const storeFor = accountCollectionStores({
-      ...PARTS,
-      pointer: POINTER,
-      pinStore: memoryResourceLogPinStore(),
-      log: seeded as never
-    })
-
-    storeFor('private-credentials')
-    const controller = await capturedStoreOptions()[0]!.resolveController()
-
-    expect(verifyAccountLog).not.toHaveBeenCalled()
-    expect(webvhResourceLogController).toHaveBeenCalledWith({
-      did: POINTER.did,
-      log: seeded
-    })
-    expect(controller).toEqual({
-      controllerFor: { did: POINTER.did, log: seeded }
-    })
-  })
-
-  it('re-reads after a failed verification rather than caching it', async () => {
-    vi.mocked(verifyAccountLog)
-      .mockRejectedValueOnce(new Error('the host flapped'))
-      .mockResolvedValueOnce({
-        doc: { id: POINTER.did },
-        log: SERVED_LOG,
-        updateKeys: [],
-        nextKeyHashes: []
-      } as never)
-    const storeFor = accountCollectionStores({
-      ...PARTS,
-      pointer: POINTER,
-      pinStore: memoryResourceLogPinStore()
-    })
-
-    storeFor('private-credentials')
-    const { resolveController } = capturedStoreOptions()[0]!
-    await expect(resolveController()).rejects.toThrow('the host flapped')
-    await resolveController()
-
-    expect(vi.mocked(verifyAccountLog).mock.calls).toHaveLength(2)
-  })
-})
-
-describe('accountCollectionStores -- what it builds, and when', () => {
-  it('touches the signing client only at the first lookup', () => {
-    // A client with no invocation signer cannot build a Space handle, so a
-    // construction that survives it is one that built nothing: a lookup
-    // handed to a ceremony that installs no epoch costs nothing.
-    let storeFor: CollectionStoreFor | undefined
-    expect(() => {
-      storeFor = accountCollectionStores({
-        zcapClient: {} as never,
-        keyAgent: PARTS.keyAgent,
-        pointer: POINTER,
-        pinStore: memoryResourceLogPinStore()
-      })
-    }).not.toThrow()
-    expect(collectionDescriptorLogStore).not.toHaveBeenCalled()
-    expect(userKeyRosterLogSigner).not.toHaveBeenCalled()
-    expect(verifyAccountLog).not.toHaveBeenCalled()
-
-    expect(() => storeFor!('private-credentials')).toThrow(/invocationSigner/)
-  })
-
-  it('builds the store on the first lookup, fetching nothing', () => {
-    const storeFor = accountCollectionStores({
-      ...PARTS,
-      pointer: POINTER,
-      pinStore: memoryResourceLogPinStore()
-    })
-
-    storeFor('private-credentials')
-
-    expect(collectionDescriptorLogStore).toHaveBeenCalledTimes(1)
-    expect(userKeyRosterLogSigner).toHaveBeenCalledTimes(1)
-    // Nothing fetched yet: the controller view is resolved per operation.
-    expect(verifyAccountLog).not.toHaveBeenCalled()
-  })
-
-  it('shares one Space handle and one signer across its collections', () => {
-    const storeFor = accountCollectionStores({
-      ...PARTS,
-      pointer: POINTER,
-      pinStore: memoryResourceLogPinStore()
-    })
-
-    storeFor('private-credentials')
-    storeFor('wallet-activity')
-
-    expect(userKeyRosterLogSigner).toHaveBeenCalledTimes(1)
-    expect(userKeyRosterLogSigner).toHaveBeenCalledWith({
-      keyAgent: PARTS.keyAgent
-    })
-    const [first, second] = capturedStoreOptions()
-    expect(first!.signer).toBe(second!.signer)
-  })
-
-  it("aims each store at the collection's own meta/log pin slot", () => {
-    const pinStore = memoryResourceLogPinStore()
-    const storeFor = accountCollectionStores({
-      ...PARTS,
-      pointer: POINTER,
-      pinStore
-    })
-
-    storeFor('private-credentials')
-    storeFor('wallet-activity')
-
-    const [credentials, activity] = capturedStoreOptions()
-    // The handle IS the address: wallet-core derives the store's chain-head
-    // pin slot from the handle's Space and collection ids, so the slot the
-    // library names for it is the one this store pins under.
-    expect(credentials!.collection.spaceId).toBe(POINTER.spaceId)
-    expect(credentials!.collection.id).toBe('private-credentials')
-    expect(
-      collectionDescriptorLogPinId({
-        spaceId: credentials!.collection.spaceId,
-        collectionId: credentials!.collection.id
-      })
-    ).toBe('space/space-123/private-credentials/meta/log')
-    expect(
-      collectionDescriptorLogPinId({
-        spaceId: activity!.collection.spaceId,
-        collectionId: activity!.collection.id
-      })
-    ).toBe('space/space-123/wallet-activity/meta/log')
-    // One keyed pin store serves every collection's slot.
-    expect(credentials!.pinStore).toBe(pinStore)
-    expect(activity!.pinStore).toBe(pinStore)
-  })
-})
-
 describe('sessionCollectionStores', () => {
   it('reaches each collection through the remote store, under the session pins', () => {
     const session = sessionFixture({ did: POINTER.did })
-    const storeFor = sessionCollectionStores({
+    sessionCollectionStores({
       session,
       remoteStore: remoteStoreStub(),
-      keyAgent: PARTS.keyAgent
+      keyAgent: KEY_AGENT
     })
 
-    storeFor('contacts')
-
-    const [contacts] = capturedStoreOptions()
-    expect(contacts!.collection).toMatchObject({
+    const { collectionFor, pinStore, signer } = capturedBuilderOptions()
+    const contacts = collectionFor('contacts')
+    expect(contacts).toMatchObject({
       spaceId: POINTER.spaceId,
       id: 'contacts',
       isRemoteHandle: true
     })
-    expect(contacts!.pinStore).toBe(session.persistence.logPins)
+    expect(pinStore).toBe(session.persistence.logPins)
+    expect(userKeyRosterLogSigner).toHaveBeenCalledWith({ keyAgent: KEY_AGENT })
+    expect(signer).toEqual({ isDescriptorLogSigner: true })
     expect(
       collectionDescriptorLogPinId({
-        spaceId: contacts!.collection.spaceId,
-        collectionId: contacts!.collection.id
+        spaceId: contacts.spaceId,
+        collectionId: contacts.id
       })
     ).toBe('space/space-123/contacts/meta/log')
+  })
+
+  it("resolves the controller through the session's verified-log memo", async () => {
+    const session = sessionFixture({ did: POINTER.did })
+    const log = [{ entry: 'memo' }]
+    vi.mocked(verifiedAccountLog).mockResolvedValue({ log } as never)
+    sessionCollectionStores({
+      session,
+      remoteStore: remoteStoreStub(),
+      keyAgent: KEY_AGENT
+    })
+
+    const controller = await capturedBuilderOptions().resolveController()
+
+    expect(verifiedAccountLog).toHaveBeenCalledWith({ session })
+    expect(controller).toEqual({ controllerFor: { did: POINTER.did, log } })
   })
 
   it('refuses a session whose pointer names no DID', () => {
@@ -342,7 +173,7 @@ describe('sessionCollectionStores', () => {
       sessionCollectionStores({
         session: sessionFixture(),
         remoteStore: remoteStoreStub(),
-        keyAgent: PARTS.keyAgent
+        keyAgent: KEY_AGENT
       })
     ).toThrow(/account pointer/)
   })

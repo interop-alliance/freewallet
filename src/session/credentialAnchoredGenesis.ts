@@ -37,7 +37,12 @@
  */
 import { WasClient } from '@interop/was-client'
 import type { EncryptionDescriptorStore } from '@interop/was-client/edv'
-import type { SealableEncryptionDescriptorStore } from '@interop/wallet-core/keys'
+import {
+  accountCollectionStores,
+  userKeyRosterLogSigner,
+  type CollectionStoreFor,
+  type SealableEncryptionDescriptorStore
+} from '@interop/wallet-core/keys'
 import {
   establishCredentialAnchoredAccount as runEstablishment,
   ladderVmAgent,
@@ -87,10 +92,6 @@ import {
   type UnlockCredential
 } from '@/session/keyring'
 import { accountRosterStore } from '@/session/rosterStore'
-import {
-  accountCollectionStores,
-  type CollectionStoreFor
-} from '@/session/collectionLogStore'
 import {
   emptyUnlockMethodsRegistry,
   updateUnlockMethodsWithClient,
@@ -388,10 +389,12 @@ async function establishmentHooks({
     // signed by the ladder VM and invoked as the bootstrap did:key.
     collectionStoreFor: ({ did, log }: { did: string; log: DIDLog }) =>
       accountCollectionStores({
+        storageServerUrl: host,
         zcapClient: bootstrapZcap,
-        keyAgent: bootstrapAgent,
-        pointer: { did, spaceId, host },
+        spaceId,
+        did,
         pinStore: logPins,
+        signer: userKeyRosterLogSigner({ keyAgent: bootstrapAgent }),
         log
       }),
     // Built from the agent wallet-core hands over (it owns the bootstrap
@@ -625,8 +628,9 @@ export function passphraseRegistryUpsertHook({
 /**
  * The ladder kind's authorities from bare parts, for the transient
  * composition's own mend, which runs before a `Session` exists. It is the
- * bare-parts half of the two-builder split `rosterStore.ts` and
- * `collectionLogStore.ts` keep -- a live session's ladder ceremonies resolve
+ * bare-parts half of the two-builder split `rosterStore.ts` keeps and
+ * wallet-core's `accountCollectionStores` / `collectionDescriptorStores`
+ * pair mirrors -- a live session's ladder ceremonies resolve
  * the profile builders through `accountCeremonyContext` instead, which
  * carries the verified-log memo, the remote store's collection handles, and
  * the capability the session renews mid-run -- and the members it hands back
@@ -687,10 +691,12 @@ export async function ladderMendAuthority({
     // The controller view is verified fresh here rather than seeded: a mend
     // arm may have moved the head this visit stood on.
     collectionStore: accountCollectionStores({
+      storageServerUrl: pointer.host,
       zcapClient,
-      keyAgent,
-      pointer,
+      spaceId: pointer.spaceId,
+      did: pointer.did,
       pinStore,
+      signer: userKeyRosterLogSigner({ keyAgent }),
       capability
     })
   }

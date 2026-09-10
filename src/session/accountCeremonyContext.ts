@@ -45,15 +45,15 @@ import {
   ladderVmAgent,
   ladderVmZcapClient
 } from '@interop/wallet-core/clientAnnex'
-import type { SealableEncryptionDescriptorStore } from '@interop/wallet-core/keys'
+import type {
+  CollectionStoreFor,
+  SealableEncryptionDescriptorStore
+} from '@interop/wallet-core/keys'
 import { WAS_SERVER_URL } from '@/app.config'
 import type { ControllerProfile, ICapabilityAgent, Session } from '@/types/auth'
 import type { WASRemoteStore } from '@/stores/wasRemoteStore'
 import { sessionRosterStore } from '@/session/rosterStore'
-import {
-  sessionCollectionStores,
-  type CollectionStoreFor
-} from '@/session/collectionLogStore'
+import { sessionCollectionStores } from '@/session/collectionLogStore'
 import { unlockLogStore } from '@/session/standingUnlock'
 import {
   didWebProjectionStore,

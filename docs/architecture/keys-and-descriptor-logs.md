@@ -101,12 +101,17 @@ Every recipient change is one signed full-state append: a share, an unshare,
 an App Connect provisioning, an app revoke, and each collection's rotation
 in the user key cascade.
 
-**The two builders** in `src/session/collectionLogStore.ts` mirror the
-roster's pair: `accountCollectionStores` for callers with no session
-profile, and `sessionCollectionStores` for a live session, which reaches
-each collection through the remote store's handle, so every request rides
-the capability the session holds at call time. Both return a lookup keyed by
-collection id and resolve the controller view once per lookup.
+**The builders** live in `@interop/wallet-core/keys` beside the roster's:
+`accountCollectionStores` for callers with no session profile (the geneses,
+the mend, the recovery continuations), which verifies the account log once
+per lookup, and `collectionDescriptorStores`, which takes the collection
+reach and the controller resolver as functions.
+`sessionCollectionStores` in `src/session/collectionLogStore.ts` is the live
+session's binding onto the latter: it reaches each collection through the
+remote store's handle, so every request rides the capability the session
+holds at call time, and resolves the controller through the profile's
+verified-log memo. Each of the three returns a lookup keyed by collection
+id.
 `sessionCollectionDescriptorSource` is the read-only counterpart the storage
 layer reads descriptors through, held beside it by `StorageManager` as
 `DescriptorLogs { source, storeFor }` when the account pointer names a

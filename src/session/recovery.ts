@@ -76,13 +76,13 @@ import {
   addUserKeyRosterRecipient,
   replaceUserKeyRosterRecipients,
   userKeyRosterDescriptorStore,
+  accountCollectionStores,
   userKeyRosterLogSigner,
   readUserKeyRoster,
   rotateUserKeyRoster,
   type UserKey
 } from '@interop/wallet-core/keys'
 import { accountRosterStore } from '@/session/rosterStore'
-import { accountCollectionStores } from '@/session/collectionLogStore'
 import { cascadeCollectionsToUserKey } from '@/session/userKeyCascade'
 import {
   clientSigningKeyMultibase,
@@ -1846,14 +1846,12 @@ export async function recoverAccountWithCode({
   await cascadeCollectionsToUserKey({
     remoteStore,
     storeFor: accountCollectionStores({
+      storageServerUrl: pointer.host,
       zcapClient: newZcapClient,
-      keyAgent: newClientAgents.keyAgent,
-      pointer: {
-        did: pointer.did,
-        spaceId: pointer.spaceId,
-        host: pointer.host
-      },
-      pinStore: logPins
+      spaceId: pointer.spaceId,
+      did: pointer.did,
+      pinStore: logPins,
+      signer: userKeyRosterLogSigner({ keyAgent: newClientAgents.keyAgent })
     }),
     rosterDescriptor: postRotation.descriptor,
     clientKeyAgreementKey: newClientAgents.keyAgreementKey,
@@ -2984,10 +2982,12 @@ async function recoverAccountTransient({
     // own head like the roster store above, invoked under the generation
     // delegation.
     storeFor: accountCollectionStores({
+      storageServerUrl: host,
       zcapClient: transientZcapClient,
-      keyAgent: bootstrapAgent,
-      pointer: { did, spaceId, host },
+      spaceId,
+      did,
       pinStore: logPins,
+      signer: userKeyRosterLogSigner({ keyAgent: bootstrapAgent }),
       log: continuation.log,
       capability: generationDelegation
     }),
