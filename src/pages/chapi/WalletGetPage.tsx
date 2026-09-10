@@ -64,6 +64,7 @@ import {
   grantTtlDays,
   hasTypedExample,
   hasZcapStorage,
+  requestingOriginOf,
   isDidAuthOnly,
   isSatisfiable,
   queriesOf,
@@ -259,7 +260,7 @@ export function WalletGetPage() {
       const event =
         injected ?? ((await receiveCredentialEvent()) as CHAPIGetEvent)
       const web = event.credentialRequestOptions?.web
-      const origin = event.credentialRequestOrigin
+      const origin = requestingOriginOf(event.credentialRequestOrigin)
       setCHAPIEvent(event)
       setRequestOrigin(origin)
 

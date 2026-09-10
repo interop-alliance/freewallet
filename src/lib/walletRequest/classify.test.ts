@@ -4,7 +4,8 @@ import {
   classifyRequest,
   credentialQueriesOf,
   credentialsOf,
-  queriesOf
+  queriesOf,
+  requestingOriginOf
 } from './classify'
 import type { CHAPIStoreEvent, IQueryByExample } from './types'
 
@@ -227,5 +228,25 @@ describe('credentialQueriesOf', () => {
   it('returns an empty array when credentialQuery is absent', () => {
     const query = { type: 'QueryByExample' } as never
     expect(credentialQueriesOf(query)).toEqual([])
+  })
+})
+
+describe('requestingOriginOf', () => {
+  it('canonicalizes a trailing slash, default port, and host case', () => {
+    expect(requestingOriginOf('https://App.example:443/')).toBe(
+      'https://app.example'
+    )
+  })
+
+  it('passes a canonical origin through unchanged', () => {
+    expect(requestingOriginOf('https://app.example')).toBe(
+      'https://app.example'
+    )
+  })
+
+  it('treats an absent or unparseable origin as none', () => {
+    expect(requestingOriginOf(undefined)).toBeUndefined()
+    expect(requestingOriginOf('')).toBeUndefined()
+    expect(requestingOriginOf('not a url')).toBeUndefined()
   })
 })

@@ -55,6 +55,12 @@
 
 ### Changed
 
+- The CHAPI popup canonicalizes the requesting origin once where it reads it
+  (`requestingOriginOf` in `src/lib/walletRequest/classify.ts`), so the
+  app-key credential's `credentialSubject.origin`, the returning-app match,
+  the Login activity's origin, and the Collection Description's
+  `generatorOrigin` all carry one serialization. The attribution stamp's own
+  `canonicalOrigin` special case is gone.
 - `StorageManager` holds the grant-revocation signer check itself: a lazy
   resolver injected at construction from the session layer, read once per
   revocation set, best-effort. The `signerCheck` parameter is gone from

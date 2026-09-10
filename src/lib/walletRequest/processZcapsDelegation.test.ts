@@ -9,6 +9,7 @@ import type { Session } from '@/types/auth'
 import { renewTransientGenerationDelegation } from '@/session/annexReach'
 import { ZCAP_RENEWAL_WINDOW_MS } from '@interop/wallet-core/webvh'
 import { RP_ZCAP_WRITE_TTL_MS } from '@/app.config'
+import { requestingOriginOf } from './classify'
 import { GenerationDelegationStaleError, processZcaps } from './processZcaps'
 import type { ICapabilityQueryDetail, IZcap } from './types'
 
@@ -371,16 +372,16 @@ describe('processZcaps collection attribution', () => {
     })
   })
 
-  it('stamps the origin in its canonical form', async () => {
+  it('stamps the intake origin verbatim, trailing slash canonicalized at the door', async () => {
     const { session } = fakeSession()
     await processZcaps({
       zcapRequests: [APP_PUBLIC_DESCRIPTOR],
       session,
       appProvisioning: true,
-      app: { ...APP, origin: 'https://App.example:443/' }
+      app: { ...APP, origin: requestingOriginOf('https://App.example:443/')! }
     })
     expect(session.storage.ensureCollection).toHaveBeenCalledWith(
-      expect.objectContaining({ generatorOrigin: 'https://app.example' })
+      expect.objectContaining({ generatorOrigin: APP.origin })
     )
   })
 

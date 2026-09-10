@@ -37,6 +37,31 @@ export {
 } from '@interop/wallet-request'
 
 /**
+ * The requesting origin in its canonical serialization, read once where the
+ * origin enters the pipeline. The mediator attests the origin off the
+ * message event, so a real browser only ever hands over a canonical value;
+ * the e2e injection seam and the plain string type do not enforce that, and
+ * every record downstream (the app-key credential's `credentialSubject.origin`,
+ * the returning-app match, the Login activity, the Collection Description's
+ * `generatorOrigin`) joins on the value byte-for-byte, so one serialization
+ * is fixed here. A value that does not parse is treated as no origin at all,
+ * which an App Connect request then refuses.
+ *
+ * @param [origin] {string} - The origin as the event carried it.
+ * @returns {string | undefined}
+ */
+export function requestingOriginOf(origin?: string): string | undefined {
+  if (!origin) {
+    return undefined
+  }
+  try {
+    return new URL(origin).origin
+  } catch {
+    return undefined
+  }
+}
+
+/**
  * Normalizes a VPR's `query` to an array of typed query objects. Bridges
  * Freewallet's widened `IVPRDetails` (whose `query` may carry an
  * `AppConnectQuery`) to the shared `queriesOf`. App Connect entries flow through

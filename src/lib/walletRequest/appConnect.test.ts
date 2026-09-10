@@ -14,6 +14,7 @@ import type { IZcap } from './types'
 vi.mock('./processZcaps', () => ({
   processZcaps: vi.fn()
 }))
+import { requestingOriginOf } from './classify'
 import { processZcaps } from './processZcaps'
 
 const APP = {
@@ -238,6 +239,25 @@ describe('processAppConnect', () => {
     expect(presentation.verifiableCredential?.[0].credentialSubject.id).toBe(
       subjectDid
     )
+  })
+
+  it('matches a returning app when the origin arrives with a trailing slash', async () => {
+    const { credential, subjectDid } = await mintAppKeyCredential({
+      app: APP,
+      origin: ORIGIN
+    })
+    const stored = [{ cid: 'cid-1', vc: credential }] as StoredCredential[]
+    const { session, added } = await fakeSession({ appKeys: stored })
+
+    const response = await processAppConnect({
+      appConnect: { app: APP, capabilityQueries: [] },
+      session,
+      origin: requestingOriginOf(`${ORIGIN}/`)!,
+      didAuthRequested: false
+    })
+
+    expect(response.appConnect).toEqual({ firstRun: false, subjectDid })
+    expect(added).toHaveLength(0)
   })
 
   it('does not recover a key stored for another origin', async () => {

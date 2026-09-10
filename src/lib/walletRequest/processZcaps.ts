@@ -1017,27 +1017,6 @@ export function resolveGrants({
 }
 
 /**
- * The requesting origin in its canonical serialization, for the attribution
- * stamp. The App Connect path hands over the origin the CHAPI event attested,
- * which the classifier parses but does not canonicalize, and the server
- * refuses a non-canonical `generatorOrigin` (a trailing slash, say) with a
- * 400 that would fail the whole approval over an advisory field. A value that
- * does not parse is dropped rather than stamped, on the same grounds.
- *
- * @param [origin] {string}
- * @returns {string | undefined}
- */
-function canonicalOrigin(origin?: string): string | undefined {
-  if (!origin) {
-    return undefined
-  }
-  try {
-    return new URL(origin).origin
-  } catch {
-    return undefined
-  }
-}
-/**
  * Delegates capabilities to the relying parties named in the requests, on the
  * consent-approved path. Provisions any missing RP collection first, then
  * delegates each satisfiable grant rooted at the user's Space root capability.
@@ -1233,7 +1212,7 @@ export async function processZcaps({
       appProvisioning && !collections.has(collectionId)
         ? {
             generator: controller,
-            generatorOrigin: canonicalOrigin(app?.origin)
+            generatorOrigin: app?.origin
           }
         : {}
     if (appProvisioning && !isPublic) {
