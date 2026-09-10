@@ -547,11 +547,10 @@ function accountPointerPersister({
   idb?: IDBFactory
 }): (pointer: AccountPointer) => Promise<void> {
   return async pointer => {
-    // Stamped here rather than left to the codec, so the pin advances to the
-    // exact timestamp the record carries without re-reading it. Advanced past
-    // both the record being rewritten and this client's local pin, so a
-    // client whose clock lags behind whichever client bound last still writes
-    // a record that supersedes what everyone has pinned.
+    // Stamped here rather than left to the codec, so the rewrite carries a
+    // known timestamp without re-reading the record. Advanced past the
+    // record being rewritten, so a client whose clock lags behind whichever
+    // client bound last still writes a record that supersedes it.
     const createdAt = nextRecordCreatedAt({ advancePast: [found.createdAt] })
     const record = await wrapKeyringRecord({
       controller: found.controller,
@@ -1450,7 +1449,7 @@ export class UnlockSpaceCollisionError extends Error {
  * is safe. A record naming another account (pointer mismatch) always
  * collides; a same-account STANDING record collides unless the caller proved
  * the overwrite is this ceremony's own rewrite (`ownRewriteLicensed` -- the
- * probe's pin or document evidence, never the local pending record alone) --
+ * probe's document evidence, never the local pending record alone) --
  * its randomly minted standing members are exactly what the typed material
  * cannot re-derive, so an overwrite would destroy them. A same-account plain
  * pointer record carries nothing an overwrite loses.
@@ -1636,12 +1635,12 @@ export async function probeUnlockSpaceCollision({
       // The document license: no published inventory backs the served
       // record's standing members, so it is a torn attempt's inert residue
       // (a genuinely standing credential's commitment IS in the document).
-      // The transient spend's only license (it holds no pin and reads no
-      // local records), and the remembered spend's backstop for the window its
-      // own bind order creates: a tab death between the remote record PUT
-      // and the local persists leaves a served standing record with no
-      // pending record and no pin, which the pin license alone would refuse
-      // forever.
+      // The transient spend's only license (it reads no local records), and
+      // the remembered spend's backstop for the window its own bind order
+      // creates: a tab death between the remote record PUT and the local
+      // persists leaves a served standing record with no pending record
+      // behind it, and the local pending record alone never licenses an
+      // overwrite.
       const did = pointer.did!
       const commitment = await keyAgreementCommitment({
         keyAgreementKeyMultibase: credential.standing.keyAgreementKeyMultibase
@@ -1738,11 +1737,12 @@ export type RemoteUnlockRecordBind = typeof bindCredentialAnchoredUnlockSecret
  *   collision refusal: GET the served record first, refuse a colliding one
  *   (`UnlockSpaceCollisionError`, shared predicate with
  *   `probeUnlockSpaceCollision`), and advance the bind stamp past the served
- *   record's `createdAt` beside the local pin (the fetch-and-advance
- *   obligation). The object form carries `accountDoc` (the locally verified
- *   account document), enabling the probe's document license beside the pin
- *   license. The recovery spend's pre-entry bind passes it; the ordinary
- *   bind and re-establishment sites overwrite their own records by design
+ *   record's `createdAt` (the fetch-and-advance obligation). The object form
+ *   carries `accountDoc` (the locally verified account document), enabling
+ *   the probe's document license, the one proof that overwrites a served
+ *   standing record. The recovery spend's pre-entry bind passes it; the
+ *   ordinary bind and re-establishment sites overwrite their own records by
+ *   design
  * @param [options.idb] {IDBFactory}
  * @param [options.credential] {UnlockCredential}   an already-derived unlock
  *   credential for the same secret and KDF, so a flow that unlocks more than

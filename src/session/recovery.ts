@@ -1503,8 +1503,9 @@ export async function recoverAccountWithCode({
           replacementCode: replacement.codeBytes
         },
         // The guarded bind re-runs the collision refusal with the document
-        // license the pre-flight held (the pin license alone cannot account
-        // for the bind window's own residue -- see the pre-flight probe).
+        // license the pre-flight held, the one proof that overwrites a served
+        // standing record; the local pending record alone cannot account for
+        // the bind window's own residue (see the pre-flight probe).
         refuseCollidingRecord: { accountDoc: verifiedLog.doc },
         credential: newCredential,
         idb

@@ -38,6 +38,16 @@
 
 ### Changed
 
+- The last `durable` prose outside the archives says it only of server-backed
+  state: `_spec/transient-refusal-considerations.md` and
+  `_spec/pivot-placement-audit.md` take the remembered, enrolled, and
+  browser-local words, and the FW-354 design's two verbatim quotes of
+  wallet-core's `decisions/0002` and `0011` are re-synced against the swept
+  records.
+- Four comments in `src/session/keyring.ts` and `src/session/recovery.ts`
+  no longer narrate the continuity pin `decisions/0012` removed: the bind
+  stamp advances past the served record's `createdAt` alone, and the
+  document license is the one proof that overwrites a served standing record.
 - The typed persistence strategy lives at `session.persistence` instead of
   `profile.persistence`: `ControllerProfile` is the identity bundle alone,
   and the strategy sits beside `storage` with the rest of the
