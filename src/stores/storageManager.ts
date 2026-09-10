@@ -64,7 +64,7 @@ import {
   sessionCollectionDescriptorSource,
   sessionCollectionStores
 } from '@/session/collectionLogStore'
-import type { ControllerProfile, User } from '@/types/auth'
+import type { ControllerProfile, SessionCore, User } from '@/types/auth'
 import { cidFrom } from '@interop/was-client/sync'
 import { classifyDecryptFailure } from '@/lib/decryptFailure'
 import { refreshingCollectionCipher } from '@/stores/refreshingCollectionCipher'
@@ -338,24 +338,25 @@ export interface DescriptorLogs {
  * at each store build, since a passphrase change restamps the ladder seed.
  *
  * @param options {object}
- * @param options.profile {ControllerProfile}
+ * @param options.session {object}   the live session's profile and
+ *   persistence strategy
  * @param options.remoteStore {WASRemoteStore}
  * @returns {DescriptorLogs}
  */
 function sessionDescriptorLogs({
-  profile,
+  session,
   remoteStore
 }: {
-  profile: ControllerProfile
+  session: SessionCore
   remoteStore: WASRemoteStore
 }): DescriptorLogs {
   return {
-    source: sessionCollectionDescriptorSource({ profile, remoteStore }),
+    source: sessionCollectionDescriptorSource({ session, remoteStore }),
     storeFor: async collectionId =>
       sessionCollectionStores({
-        profile,
+        session,
         remoteStore,
-        keyAgent: await descriptorLogSignerAgent({ profile })
+        keyAgent: await descriptorLogSignerAgent({ session })
       })(collectionId)
   }
 }
@@ -1223,14 +1224,17 @@ export class StorageManager {
 
   static async initStorageClients({
     user,
-    profile,
+    session,
     isGuest = false,
     remoteDirect = false,
     storage: rxStorage,
     descriptorLogs: suppliedDescriptorLogs
   }: {
     user: User
-    profile: ControllerProfile
+    // The profile the clients sign as, and the session's persistence
+    // strategy: it decides whether a local replica is built, carries the
+    // descriptor/meta caches, and pins the chain heads.
+    session: SessionCore
     isGuest?: boolean
     // Route credential + history operations straight to the remote WAS
     // collections (the CHAPI popup path, whose local IndexedDB is partitioned).
@@ -1248,7 +1252,8 @@ export class StorageManager {
     const storageServerUrl = isGuest ? undefined : WAS_SERVER_URL
     log.info('Initializing storage clients', { storageServerUrl })
 
-    const { keyAgreementKey, keyResolver, persistence } = profile
+    const { profile, persistence } = session
+    const { keyAgreementKey, keyResolver } = profile
     if (!keyAgreementKey || !keyResolver) {
       throw new Error('A full session profile requires the key material.')
     }
@@ -1261,7 +1266,7 @@ export class StorageManager {
       ;({ remoteStore } = await WASRemoteStore.initClient({
         storageServerUrl,
         user,
-        profile
+        session
       }))
     }
     // Fetch the current encryption descriptor -- and the stored `/meta`,
@@ -1292,7 +1297,7 @@ export class StorageManager {
         return suppliedDescriptorLogs
       }
       if (isWebvhDid(profile.accountPointer?.did)) {
-        return (sessionLogs ??= sessionDescriptorLogs({ profile, remoteStore }))
+        return (sessionLogs ??= sessionDescriptorLogs({ session, remoteStore }))
       }
       return undefined
     }

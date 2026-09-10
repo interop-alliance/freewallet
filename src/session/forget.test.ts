@@ -582,14 +582,14 @@ describe('forgetThisBrowser (the ceremony grades)', () => {
           },
           unlockSpaceId: 'unlock-1',
           ...(withRebind ? { rebindRecord } : {})
-        },
-        persistence: {
-          epochPins: {
-            load: vi.fn(async () => 'epoch-1'),
-            saveFromDescriptor
-          },
-          logPins: { logPins: true }
         }
+      },
+      persistence: {
+        epochPins: {
+          load: vi.fn(async () => 'epoch-1'),
+          saveFromDescriptor
+        },
+        logPins: { logPins: true }
       }
     } as unknown as Session
     return { session, rebindRecord, saveFromDescriptor, persistClientKeys }
@@ -678,7 +678,7 @@ describe('forgetThisBrowser (the ceremony grades)', () => {
     )
     expect(vi.mocked(sessionCollectionStores)).toHaveBeenCalledWith(
       expect.objectContaining({
-        profile: session.profile,
+        session,
         keyAgent: { id: 'did:key:zLadderVm' }
       })
     )
@@ -747,7 +747,7 @@ describe('forgetThisBrowser (the ceremony grades)', () => {
       'function'
     )
     expect(vi.mocked(sessionRosterStore)).toHaveBeenCalledWith({
-      profile: session.profile,
+      session,
       keyAgent: { id: 'did:key:zLadderVm' }
     })
     expect(options.clientLogStore).toEqual({ webvhIdStore: true })
@@ -758,7 +758,7 @@ describe('forgetThisBrowser (the ceremony grades)', () => {
     // reads and publishes through.
     expect(vi.mocked(unlockLogStore)).toHaveBeenCalledWith(
       expect.objectContaining({
-        pinStore: session.profile.persistence.logPins
+        pinStore: session.persistence.logPins
       })
     )
   })
@@ -1092,7 +1092,7 @@ describe('forgetThisBrowser (the ceremony grades)', () => {
     expect(vi.mocked(unlockLogStore)).toHaveBeenCalledWith(
       expect.objectContaining({
         pointer,
-        pinStore: session.profile.persistence.logPins
+        pinStore: session.persistence.logPins
       })
     )
   })

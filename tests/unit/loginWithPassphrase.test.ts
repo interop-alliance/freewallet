@@ -243,8 +243,9 @@ describe('loginWithPassphrase -- enrolled keyring hit', () => {
 
     const { session } = await loginWithPassphrase({ passphrase: PASSPHRASE })
 
-    const { profile } = vi.mocked(StorageManager.initStorageClients).mock
-      .calls[0][0]
+    const {
+      session: { profile }
+    } = vi.mocked(StorageManager.initStorageClients).mock.calls[0][0]
     expect(profile.keyAgreementKey!.id).toBe(epochKeyIdFor(userKey.id))
     expect(session!.profile.userKey).toBe(userKey)
   })
@@ -261,8 +262,9 @@ describe('loginWithPassphrase -- enrolled keyring hit', () => {
 
     const { session } = await loginWithPassphrase({ passphrase: PASSPHRASE })
 
-    const { profile } = vi.mocked(StorageManager.initStorageClients).mock
-      .calls[0][0]
+    const {
+      session: { profile }
+    } = vi.mocked(StorageManager.initStorageClients).mock.calls[0][0]
     // The legacy vault KAK is the Montgomery twin of the signing key, so its
     // id is rooted in the account's own did:key controller.
     expect(profile.keyAgreementKey!.id.startsWith(controller)).toBe(true)
@@ -1054,7 +1056,7 @@ describe('loginWithPassphrase -- the popup session (FW-203)', () => {
     // top-level wipe can reach. The popup's caches are in-memory instead:
     // a write reads back within the session and reaches no browser-local
     // store.
-    const cache = session!.profile.persistence.descriptorCache({
+    const cache = session!.persistence.descriptorCache({
       scope: 'space'
     })
     const descriptor = { currentEpoch: 'epoch-0', epochs: [] }
@@ -1090,7 +1092,7 @@ describe('loginWithPassphrase -- the popup session (FW-203)', () => {
       popup: true
     })
 
-    const cache = session!.profile.persistence.descriptorCache({
+    const cache = session!.persistence.descriptorCache({
       scope: 'space'
     })
     await cache.writeDescriptor({
@@ -1125,7 +1127,7 @@ describe('loginWithPassphrase -- the popup session (FW-203)', () => {
     // The localStorage-backed cache: in this Node environment it has no
     // store to write to, so the read-back is empty -- the discriminator
     // against the in-memory pair the WAS-backed popup gets.
-    const cache = session!.profile.persistence.descriptorCache({
+    const cache = session!.persistence.descriptorCache({
       scope: 'space'
     })
     await cache.writeDescriptor({

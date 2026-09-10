@@ -22,7 +22,7 @@
  * the store as-is.
  *
  * The chain-head pin is in-memory on either persistence variant: the
- * session builder takes it from the profile's persistence strategy, and the
+ * session builder takes it from the session's persistence strategy, and the
  * bare-parts builder mints its own unless a `pinStore` is supplied. It
  * guards one visit's several roster reads against a host serving
  * inconsistent versions across them, and remembers nothing past the tab. The
@@ -52,7 +52,7 @@ import {
   memoryResourceLogPinStore,
   type ResourceLogPinStore
 } from '@interop/vh-resource-log'
-import type { ControllerProfile } from '@/types/auth'
+import type { SessionCore } from '@/types/auth'
 import { verifiedAccountLog } from '@/session/verifiedLog'
 
 /**
@@ -145,9 +145,9 @@ export function accountRosterStore({
  * post-edit head, and steady-state surfaces share one log verification.
  *
  * @param options {object}
- * @param options.profile {ControllerProfile}   the live session's profile; it
- *   must hold a key agent and an account pointer naming a did:webvh. The
- *   chain-head pin rides the profile's persistence strategy.
+ * @param options.session {object}   the live session's profile and
+ *   persistence strategy; the profile must hold a key agent and an account
+ *   pointer naming a did:webvh, and the chain-head pin rides the strategy.
  * @param [options.capability] {IZcap}   an invocation capability every request
  *   rides (a transient session's generation delegation, the only authority
  *   that session holds); the root capability is invoked otherwise
@@ -159,14 +159,15 @@ export function accountRosterStore({
  * @returns {SealableEncryptionDescriptorStore}
  */
 export function sessionRosterStore({
-  profile,
+  session,
   capability,
   keyAgent: signingKeyAgent
 }: {
-  profile: ControllerProfile
+  session: SessionCore
   capability?: IZcap
   keyAgent?: ICapabilityAgent
 }): SealableEncryptionDescriptorStore {
+  const { profile, persistence } = session
   const pointer = profile.accountPointer
   const keyAgent = signingKeyAgent ?? profile.keyAgent
   if (!pointer?.did || !keyAgent) {
@@ -181,10 +182,10 @@ export function sessionRosterStore({
     zcapClient: profile.zcapClient,
     spaceId,
     resolveController: async () => {
-      const { log } = await verifiedAccountLog({ profile })
+      const { log } = await verifiedAccountLog({ session })
       return webvhResourceLogController({ did: pointer.did!, log })
     },
-    pinStore: profile.persistence.logPins,
+    pinStore: persistence.logPins,
     signer: userKeyRosterLogSigner({ keyAgent }),
     ...(capability ? { capability } : {})
   })

@@ -146,7 +146,7 @@ export async function listAccountClients({
       host: pointer.host
     },
     verifiedLog: await verifiedAccountLog({
-      profile: session.profile,
+      session,
       pointer
     }),
     labelsStore: remoteStore.clientLabelsStore(),
@@ -191,7 +191,7 @@ export async function currentAccountSignerCheck({
       host: pointer.host
     },
     verifiedLog: await verifiedAccountLog({
-      profile: session.profile,
+      session,
       pointer
     })
   })

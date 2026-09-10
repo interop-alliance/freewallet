@@ -96,9 +96,8 @@ import { signUpWithPassphrase, signUpWithPasskey } from '@/session/signup'
 function rememberedSession() {
   return {
     user: { id: 'did:key:z6MkFirstClient' },
-    profile: {
-      persistence: { passkeyNotices: { save: vi.fn() } }
-    },
+    profile: {},
+    persistence: { passkeyNotices: { save: vi.fn() } },
     storage: {},
     isGuest: false
   }

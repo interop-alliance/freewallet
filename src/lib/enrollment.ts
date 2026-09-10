@@ -128,7 +128,7 @@ export async function approveEnrollment({
   // Nothing else on a transient session re-settles the memo, and the surfaces
   // that peek it (the Key Management chip, the DIDAuth holder dispatch) would
   // read cold until some other section fetched. Best-effort.
-  await reprimeVerifiedAccountLog({ profile, pointer })
+  await reprimeVerifiedAccountLog({ session, pointer })
   if (label?.trim()) {
     try {
       await setClientLabel({

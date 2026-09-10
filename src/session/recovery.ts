@@ -3196,7 +3196,7 @@ export async function revokeRecoveryCode({
   // Wait out the login-time registry passes rather than racing their
   // read-modify-writes; on a settled session the chain resolved long ago.
   await session.registryReady
-  const { epochPins } = session.profile.persistence
+  const { epochPins } = session.persistence
   const context = await requireRecoveryContext({
     session,
     action: 'Recovery-code revocation'
@@ -3242,7 +3242,7 @@ export async function revokeRecoveryCode({
   // 3. The user key rotation off the code's wrap, recipients resolved from
   // the just-updated document (the pull axis already ran there).
   const { doc, log: postEditLog } = await verifiedAccountLog({
-    profile: session.profile,
+    session,
     pointer
   })
   await rotateUserKeyRoster({
@@ -3436,7 +3436,7 @@ export async function checkRecoveryHealth({
     return []
   }
   const { doc, nextKeyHashes } = await verifiedAccountLog({
-    profile: session.profile,
+    session,
     pointer
   })
   // A code's `keyAgreement` inventory carries no delegation relation, so its

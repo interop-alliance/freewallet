@@ -55,7 +55,7 @@ import {
   type ResourceLogPinStore,
   type ResourceLogSigner
 } from '@interop/vh-resource-log'
-import type { ControllerProfile } from '@/types/auth'
+import type { SessionCore } from '@/types/auth'
 import { isBrowserLocalSession } from '@/session/persistence'
 import { verifiedAccountLog } from '@/session/verifiedLog'
 import type { WASRemoteStore } from '@/stores/wasRemoteStore'
@@ -152,25 +152,26 @@ export function accountCollectionStores({
  * capability the store holds at call time, the generation delegation a
  * transient session renews mid-run included), the controller view comes
  * from the profile's verified-log memo, and the chain-head pins ride the
- * profile's persistence strategy.
+ * session's persistence strategy.
  *
  * @param options {object}
- * @param options.profile {ControllerProfile}   the live session's profile; its
- *   account pointer must name a did:webvh
+ * @param options.session {object}   the live session's profile and
+ *   persistence strategy; the profile's account pointer must name a did:webvh
  * @param options.remoteStore {WASRemoteStore}   the session's remote store
  * @param options.keyAgent {ICapabilityAgent}   the agent whose key signs the
  *   appends (`descriptorLogSignerAgent` names the session's default)
  * @returns {CollectionStoreFor}
  */
 export function sessionCollectionStores({
-  profile,
+  session,
   remoteStore,
   keyAgent
 }: {
-  profile: ControllerProfile
+  session: SessionCore
   remoteStore: WASRemoteStore
   keyAgent: ICapabilityAgent
 }): CollectionStoreFor {
+  const { profile, persistence } = session
   const pointer = profile.accountPointer
   if (!pointer?.did) {
     throw new Error(
@@ -185,10 +186,10 @@ export function sessionCollectionStores({
     return collectionDescriptorLogStore({
       collection: remoteStore.collectionHandle({ collectionId }),
       resolveController: async () => {
-        const { log } = await verifiedAccountLog({ profile })
+        const { log } = await verifiedAccountLog({ session })
         return webvhResourceLogController({ did, log })
       },
-      pinStore: profile.persistence.logPins,
+      pinStore: persistence.logPins,
       signer
     })
   }
@@ -202,18 +203,19 @@ export function sessionCollectionStores({
  * refresh, in place of the served Collection Description member.
  *
  * @param options {object}
- * @param options.profile {ControllerProfile}   its account pointer must name a
- *   did:webvh
+ * @param options.session {object}   the live session's profile and
+ *   persistence strategy; the profile's account pointer must name a did:webvh
  * @param options.remoteStore {WASRemoteStore}
  * @returns {EncryptionDescriptorSource}
  */
 export function sessionCollectionDescriptorSource({
-  profile,
+  session,
   remoteStore
 }: {
-  profile: ControllerProfile
+  session: SessionCore
   remoteStore: WASRemoteStore
 }): EncryptionDescriptorSource {
+  const { profile, persistence } = session
   const pointer = profile.accountPointer
   if (!pointer?.did) {
     throw new Error(
@@ -228,10 +230,10 @@ export function sessionCollectionDescriptorSource({
         collection: remoteStore.collectionHandle({ collectionId })
       }),
     resolveController: async () => {
-      const { log } = await verifiedAccountLog({ profile })
+      const { log } = await verifiedAccountLog({ session })
       return webvhResourceLogController({ did, log })
     },
-    pinStore: profile.persistence.logPins,
+    pinStore: persistence.logPins,
     spaceId: remoteStore.spaceId
   })
 }
@@ -246,15 +248,16 @@ export function sessionCollectionDescriptorSource({
  * change restamps the seed mid-session.
  *
  * @param options {object}
- * @param options.profile {ControllerProfile}
+ * @param options.session {object}   the live session's profile and
+ *   persistence strategy
  * @returns {Promise<ICapabilityAgent>}
  */
 export async function descriptorLogSignerAgent({
-  profile
+  session: { profile, persistence }
 }: {
-  profile: ControllerProfile
+  session: SessionCore
 }): Promise<ICapabilityAgent> {
-  if (isBrowserLocalSession(profile.persistence)) {
+  if (isBrowserLocalSession(persistence)) {
     if (!profile.keyAgent) {
       throw new Error(
         'Signing a collection descriptor log needs this client key agent; ' +

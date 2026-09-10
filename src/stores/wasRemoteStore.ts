@@ -45,7 +45,7 @@ import {
   wasWebvhIdStore,
   type WebvhIdStore
 } from '@interop/wallet-core/webvh'
-import type { ControllerProfile, User } from '@/types/auth'
+import type { SessionCore, User } from '@/types/auth'
 import {
   DID_DOCUMENT_RESOURCE,
   DID_KEYS_RESOURCE,
@@ -747,11 +747,14 @@ export class WASRemoteStore {
   static async initClient({
     storageServerUrl,
     user,
-    profile
+    session: { profile, persistence }
   }: {
     storageServerUrl: string
     user: User
-    profile: ControllerProfile
+    // The profile the store signs as, and the session's persistence
+    // strategy, for the chain-head pin store every account-log read in this
+    // store is checked against.
+    session: SessionCore
   }) {
     // The Space id is an independent identifier carried in the account
     // pointer (minted at provisioning); the legacy derivation from the
@@ -771,7 +774,7 @@ export class WASRemoteStore {
       // A session holding only a delegated Space-subtree zcap (the transient
       // session's generation delegation) rides it on every request.
       capability: profile.invocationCapability,
-      pinStore: profile.persistence.logPins
+      pinStore: persistence.logPins
     })
 
     return { remoteStore }

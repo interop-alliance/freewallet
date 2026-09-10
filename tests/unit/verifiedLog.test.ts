@@ -90,8 +90,8 @@ function sessionWith({ pointer = POINTER } = {}): Session {
         webvhIdStore: () => ({})
       }
     },
+    persistence: browserLocalSessionPersistence(),
     profile: {
-      persistence: browserLocalSessionPersistence(),
       accountPointer: pointer,
       clientWebvhKeys: {
         updateSeed: new Uint8Array(32),
@@ -115,8 +115,8 @@ beforeEach(() => {
 describe('the verified-log memo', () => {
   it('verifies once and serves every later read from the memo', async () => {
     const session = sessionWith()
-    const first = await verifiedAccountLog({ profile: session.profile })
-    const second = await verifiedAccountLog({ profile: session.profile })
+    const first = await verifiedAccountLog({ session })
+    const second = await verifiedAccountLog({ session })
     expect(logState.verifications).toBe(1)
     expect(second).toBe(first)
   })
@@ -124,25 +124,25 @@ describe('the verified-log memo', () => {
   it('shares one in-flight verification between concurrent readers', async () => {
     const session = sessionWith()
     await Promise.all([
-      verifiedAccountLog({ profile: session.profile }),
-      verifiedAccountLog({ profile: session.profile })
+      verifiedAccountLog({ session }),
+      verifiedAccountLog({ session })
     ])
     expect(logState.verifications).toBe(1)
   })
 
   it('re-verifies after a ceremony invalidates the memo', async () => {
     const session = sessionWith()
-    await verifiedAccountLog({ profile: session.profile })
+    await verifiedAccountLog({ session })
     invalidateVerifiedLog({ profile: session.profile })
-    await verifiedAccountLog({ profile: session.profile })
+    await verifiedAccountLog({ session })
     expect(logState.verifications).toBe(2)
   })
 
   it('never serves a different pointer from the old memo', async () => {
     const session = sessionWith()
-    await verifiedAccountLog({ profile: session.profile })
+    await verifiedAccountLog({ session })
     await verifiedAccountLog({
-      profile: session.profile,
+      session,
       pointer: { ...POINTER, did: 'did:webvh:QmOther:was.example.test' }
     })
     expect(logState.verifications).toBe(2)
@@ -151,11 +151,9 @@ describe('the verified-log memo', () => {
   it('does not cache a failed verification', async () => {
     const session = sessionWith()
     logState.failWith = new Error('the host is unreachable')
-    await expect(
-      verifiedAccountLog({ profile: session.profile })
-    ).rejects.toThrow('unreachable')
+    await expect(verifiedAccountLog({ session })).rejects.toThrow('unreachable')
     logState.failWith = undefined
-    await verifiedAccountLog({ profile: session.profile })
+    await verifiedAccountLog({ session })
     expect(logState.verifications).toBe(2)
   })
 
@@ -166,7 +164,7 @@ describe('the verified-log memo', () => {
     expect(session.profile.verifiedLog).toBeUndefined()
     expect(logState.verifications).toBe(0)
 
-    await verifiedAccountLog({ profile: session.profile })
+    await verifiedAccountLog({ session })
     expect(peekVerifiedAccountLog({ profile: session.profile })).toBeTruthy()
     // The peek itself never verifies.
     expect(logState.verifications).toBe(1)
@@ -177,22 +175,20 @@ describe('the verified-log memo', () => {
 
   it('peeks at nothing while a verification is in flight or has failed', async () => {
     const session = sessionWith()
-    const pending = verifiedAccountLog({ profile: session.profile })
+    const pending = verifiedAccountLog({ session })
     expect(peekVerifiedAccountLog({ profile: session.profile })).toBeUndefined()
     await pending
 
     logState.failWith = new Error('the host is unreachable')
     invalidateVerifiedLog({ profile: session.profile })
-    await expect(
-      verifiedAccountLog({ profile: session.profile })
-    ).rejects.toThrow('unreachable')
+    await expect(verifiedAccountLog({ session })).rejects.toThrow('unreachable')
     logState.failWith = undefined
     expect(peekVerifiedAccountLog({ profile: session.profile })).toBeUndefined()
   })
 
   it('peeks at nothing for a pointer the memo was not taken against', async () => {
     const session = sessionWith()
-    await verifiedAccountLog({ profile: session.profile })
+    await verifiedAccountLog({ session })
     session.profile.accountPointer = {
       ...POINTER,
       did: 'did:webvh:QmOther:was.example.test'
@@ -206,7 +202,12 @@ describe('the verified-log memo', () => {
     })
     expect(cache.invalidate()).toBeUndefined()
     await expect(
-      verifiedAccountLog({ profile: { verifiedLog: cache } as never })
+      verifiedAccountLog({
+        session: {
+          profile: { verifiedLog: cache } as never,
+          persistence: browserLocalSessionPersistence()
+        }
+      })
     ).rejects.toThrow(/account pointer/)
   })
 })
@@ -214,7 +215,7 @@ describe('the verified-log memo', () => {
 describe("the provisioning ceremony's publish invalidation", () => {
   it('keeps a settled memo for the DID the adopt branch reported', async () => {
     const session = sessionWith()
-    await verifiedAccountLog({ profile: session.profile })
+    await verifiedAccountLog({ session })
 
     // The adopt branch: the log already stood, so nothing was published and
     // the memo this login paid for still describes it.
@@ -224,13 +225,13 @@ describe("the provisioning ceremony's publish invalidation", () => {
     })
 
     expect(peekVerifiedAccountLog({ profile: session.profile })).toBeTruthy()
-    await verifiedAccountLog({ profile: session.profile })
+    await verifiedAccountLog({ session })
     expect(logState.verifications).toBe(1)
   })
 
   it('drops a memo describing another DID', async () => {
     const session = sessionWith()
-    await verifiedAccountLog({ profile: session.profile })
+    await verifiedAccountLog({ session })
 
     invalidateVerifiedLogForPublish({
       profile: session.profile,
@@ -238,7 +239,7 @@ describe("the provisioning ceremony's publish invalidation", () => {
     })
 
     expect(peekVerifiedAccountLog({ profile: session.profile })).toBeUndefined()
-    await verifiedAccountLog({ profile: session.profile })
+    await verifiedAccountLog({ session })
     expect(logState.verifications).toBe(2)
   })
 

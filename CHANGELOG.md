@@ -38,6 +38,17 @@
 
 ### Changed
 
+- The typed persistence strategy lives at `session.persistence` instead of
+  `profile.persistence`: `ControllerProfile` is the identity bundle alone,
+  and the strategy sits beside `storage` with the rest of the
+  session-lifetime scaffolding. The helpers that only held a profile take
+  the session's profile and strategy together (`verifiedAccountLog`,
+  `primeVerifiedAccountLog`, `reprimeVerifiedAccountLog`,
+  `sessionRosterStore`, `sessionCollectionStores`,
+  `sessionCollectionDescriptorSource`, `descriptorLogSignerAgent`), and the
+  two store constructors that run before a session exists take an explicit
+  `persistence` parameter (`StorageManager.initStorageClients`,
+  `WASRemoteStore.initClient`).
 - The remaining `instanceof` checks against error classes imported from
   `@interop/*` packages match on the error's `name` instead, through
   wallet-core's `errorNameOf`: `EnrollmentPendingError`,

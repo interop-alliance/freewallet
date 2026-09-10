@@ -85,7 +85,7 @@ export async function promotedAccountView({
   if (!pointer) {
     return null
   }
-  const verified = await verifiedAccountLog({ profile: session.profile })
+  const verified = await verifiedAccountLog({ session })
   return { pointer, verified }
 }
 

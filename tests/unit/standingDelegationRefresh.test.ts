@@ -95,13 +95,13 @@ function fakeSession(): {
       zcapClient: { isFakeZcapClient: true },
       standingUnlock: { ...standingMembers() },
       keyAgreementKey: { id: 'did:key:z6LSVault#kak' },
-      keyResolver: async () => ({}),
-      persistence: {
-        unlockMethodsCache: {
-          load: loadRegistry,
-          save: vi.fn(async () => undefined),
-          delete: vi.fn(async () => undefined)
-        }
+      keyResolver: async () => ({})
+    },
+    persistence: {
+      unlockMethodsCache: {
+        load: loadRegistry,
+        save: vi.fn(async () => undefined),
+        delete: vi.fn(async () => undefined)
       }
     }
   } as unknown as Session

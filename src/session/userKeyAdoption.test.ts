@@ -53,10 +53,10 @@ function makeSession({ userKey }: { userKey?: UserKey } = {}): {
       zcapClient: {},
       keyAgreementKey: { id: 'urn:old-kak' },
       keyResolver: async () => ({}),
-      ...(userKey ? { userKey } : {}),
-      persistence: {
-        epochPins: { saveFromDescriptor: vi.fn(async () => {}) }
-      }
+      ...(userKey ? { userKey } : {})
+    },
+    persistence: {
+      epochPins: { saveFromDescriptor: vi.fn(async () => {}) }
     },
     storage
   } as unknown as Session

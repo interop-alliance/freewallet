@@ -174,7 +174,7 @@ export function DashboardPage() {
       if (!session || session.isGuest) {
         return null
       }
-      return session.profile.persistence.passkeyNotices.load({
+      return session.persistence.passkeyNotices.load({
         controller: session.user.id
       })
     },

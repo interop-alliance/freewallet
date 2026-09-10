@@ -97,8 +97,8 @@ function makeSession({
   return {
     user: { id: 'did:key:z6MkClient', email: 'user@example.test' },
     isGuest: false,
+    persistence,
     profile: {
-      persistence,
       zcapClient: { isZcapClient: true }
     },
     storage: {
@@ -195,7 +195,7 @@ describe('sweepClientAnnexGenerations -- the preconditions', () => {
       expect.objectContaining({ skipped: expect.any(String) })
     )
     expect(verifiedAccountLog).toHaveBeenCalledWith({
-      profile: session.profile,
+      session,
       pointer: POINTER
     })
     expect(runClientAnnexGc).not.toHaveBeenCalled()

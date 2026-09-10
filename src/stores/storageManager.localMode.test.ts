@@ -62,28 +62,24 @@ async function generateKey(): Promise<{
 }
 
 /**
- * A local-only session profile: the vault keys, the truthy `keyAgent` a full
- * session carries, and the browser-local persistence strategy a login builds
- * -- with the caches off for a guest, exactly as `initSession` does.
- * No `zcapClient` -- nothing on this path signs.
+ * A local-only session profile: the vault keys and the truthy `keyAgent` a
+ * full session carries. No `zcapClient` -- nothing on this path signs. The
+ * persistence strategy sits on the session beside it (see
+ * `initLocalSession`).
  *
  * @param options {object}
  * @param options.owner {object}   the session's vault key material
- * @param options.isGuest {boolean}   guests persist no descriptor caches
  * @returns {ControllerProfile}
  */
 function makeProfile({
-  owner,
-  isGuest
+  owner
 }: {
   owner: { keyAgreementKey: IKeyAgreementKey; keyResolver: IKeyResolver }
-  isGuest: boolean
 }): ControllerProfile {
   return {
     keyAgreementKey: owner.keyAgreementKey,
     keyResolver: owner.keyResolver,
-    keyAgent: { id: 'did:key:z6MkLocalModeAgent' },
-    persistence: browserLocalSessionPersistence({ persistCaches: !isGuest })
+    keyAgent: { id: 'did:key:z6MkLocalModeAgent' }
   } as unknown as ControllerProfile
 }
 
@@ -126,7 +122,12 @@ async function initLocalSession({
 }): Promise<StorageManager> {
   const { storage } = await StorageManager.initStorageClients({
     user,
-    profile: makeProfile({ owner, isGuest }),
+    session: {
+      profile: makeProfile({ owner }),
+      // The browser-local persistence strategy a login builds -- with the
+      // caches off for a guest, exactly as `initSession` does.
+      persistence: browserLocalSessionPersistence({ persistCaches: !isGuest })
+    },
     isGuest,
     storage: getRxStorageMemory()
   })

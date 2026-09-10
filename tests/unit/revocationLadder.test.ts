@@ -373,20 +373,20 @@ function transientSession(): Session {
       },
       userKey: OLD_USER_KEY,
       keyAgreementKey: { id: `${OLD_USER_KEY.id}#kak` },
-      keyResolver: async () => ({}),
-      persistence: {
-        logPins: { read: async () => null, write: async () => undefined },
-        epochPins: {
-          load: epochPinLoad,
-          saveFromDescriptor: async () => undefined
-        },
-        // The visit's annex identity, which is what makes a generation
-        // delegation renewable at all.
-        clientAnnex: {
-          clientAnnexDid: 'did:webvh:annex',
-          get invocationCapability() {
-            return state.invocationCapability
-          }
+      keyResolver: async () => ({})
+    },
+    persistence: {
+      logPins: { read: async () => null, write: async () => undefined },
+      epochPins: {
+        load: epochPinLoad,
+        saveFromDescriptor: async () => undefined
+      },
+      // The visit's annex identity, which is what makes a generation
+      // delegation renewable at all.
+      clientAnnex: {
+        clientAnnexDid: 'did:webvh:annex',
+        get invocationCapability() {
+          return state.invocationCapability
         }
       }
     }
@@ -535,7 +535,7 @@ describe('the pre-pivot stage order', () => {
     // one reading `no-pointer` states.
     state.renewInstalls = 'none'
     const session = transientSession()
-    delete (session.profile.persistence as unknown as { clientAnnex?: unknown })
+    delete (session.persistence as unknown as { clientAnnex?: unknown })
       .clientAnnex
     const outcome = await revokeEnrolledClient({ session, client: REVOKED })
     expect(outcome.mended).toEqual([
@@ -708,7 +708,7 @@ describe('the post-entry stages', () => {
       state.calls.indexOf('revokeAccountClient')
     )
     expect(vi.mocked(reprimeVerifiedAccountLog)).toHaveBeenCalledWith({
-      profile: session.profile,
+      session,
       pointer: POINTER
     })
   })

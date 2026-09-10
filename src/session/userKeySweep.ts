@@ -207,7 +207,7 @@ export async function sweepUserKeyToDocument({
   escrowedRecipients: number
   cascade: UserKeyCascadeResult
 }> {
-  const { profile, storage } = session
+  const { profile, storage, persistence } = session
   const pointer = promotedAccountPointer({ session })
   const remoteStore = storage.remoteStore
   const clientKeyAgreementKey = profile.clientKeyAgreementKey
@@ -232,11 +232,11 @@ export async function sweepUserKeyToDocument({
     userKey,
     read,
     clientKeyAgreementKey,
-    persistence: profile.persistence
+    persistence
   })
   const cascade = await cascadeCollectionsToUserKey({
     remoteStore,
-    storeFor: sessionCollectionStores({ profile, remoteStore, keyAgent }),
+    storeFor: sessionCollectionStores({ session, remoteStore, keyAgent }),
     rosterDescriptor,
     clientKeyAgreementKey,
     userKey: sweepUserKey

@@ -124,11 +124,11 @@ function makeSession({ userKey }: { userKey: UserKey }): Session {
         did: ACCOUNT_DID,
         spaceId: SPACE_ID,
         host: 'https://was.example.test'
-      },
-      persistence: browserLocalSessionPersistence({
-        idb: createFakeSessionIdb().idb
-      })
+      }
     },
+    persistence: browserLocalSessionPersistence({
+      idb: createFakeSessionIdb().idb
+    }),
     storage: {
       spaceId: SPACE_ID,
       adoptRotatedVaultKeys: async () => {}

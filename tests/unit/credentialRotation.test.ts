@@ -370,13 +370,13 @@ function sessionWith(
       ...('standingUnlock' in overrides
         ? { standingUnlock: overrides.standingUnlock }
         : {}),
-      persistence: {
-        ...browserLocalSessionPersistence(),
-        epochPins: { load: epochPinLoad, saveFromDescriptor: epochPinSave }
-      },
       persistClientKeys: vi.fn(async () => {
         state.calls.push('persistClientKeys')
       })
+    },
+    persistence: {
+      ...browserLocalSessionPersistence(),
+      epochPins: { load: epochPinLoad, saveFromDescriptor: epochPinSave }
     }
   } as unknown as Session
 }
@@ -473,7 +473,7 @@ describe('the ceremony hand-off', () => {
       })
     )
     expect(vi.mocked(sessionRosterStore)).toHaveBeenCalledWith(
-      expect.objectContaining({ profile: session.profile })
+      expect.objectContaining({ session })
     )
     expect(vi.mocked(cascadeCollections)).toHaveBeenCalledWith({
       remoteStore: session.storage.remoteStore,

@@ -111,13 +111,13 @@ async function transientSession(): Promise<Session> {
     profile: {
       zcapClient: { isAnnexVmZcapClient: true },
       keyAgreementKey,
-      keyResolver,
-      persistence: {
-        unlockMethodsCache: {
-          load: async () => null,
-          save: async () => {},
-          delete: async () => {}
-        }
+      keyResolver
+    },
+    persistence: {
+      unlockMethodsCache: {
+        load: async () => null,
+        save: async () => {},
+        delete: async () => {}
       }
     }
   } as unknown as Session

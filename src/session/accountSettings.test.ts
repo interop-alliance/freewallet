@@ -43,8 +43,8 @@ function fakeSession({
   return {
     user: { id: 'did:key:zClientA' },
     isGuest: false,
+    persistence: { storage },
     profile: {
-      persistence: { storage },
       ...(invocationCapability ? { invocationCapability } : {})
     }
   } as unknown as Session

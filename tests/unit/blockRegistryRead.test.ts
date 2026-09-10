@@ -35,13 +35,13 @@ function fakeSession(): { session: Session; load: ReturnType<typeof vi.fn> } {
     user: { id: 'did:key:z6MkClient' },
     profile: {
       keyAgreementKey: { id: 'did:key:z6LSVault#kak' },
-      keyResolver: async () => ({}),
-      persistence: {
-        unlockMethodsCache: {
-          load,
-          save: vi.fn(async () => undefined),
-          delete: vi.fn(async () => undefined)
-        }
+      keyResolver: async () => ({})
+    },
+    persistence: {
+      unlockMethodsCache: {
+        load,
+        save: vi.fn(async () => undefined),
+        delete: vi.fn(async () => undefined)
       }
     }
   } as unknown as Session

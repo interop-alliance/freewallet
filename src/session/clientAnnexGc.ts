@@ -57,8 +57,7 @@ export async function sweepClientAnnexGenerations({
         | 'no-annex-inventory'
     }
 > {
-  const persistence = session.profile.persistence
-  if (!persistence || !isBrowserLocalSession(persistence)) {
+  if (!isBrowserLocalSession(session.persistence)) {
     return { skipped: 'not-browser-local' }
   }
   const context = enrolledCeremonyContext({ session })

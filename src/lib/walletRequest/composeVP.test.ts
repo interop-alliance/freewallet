@@ -121,15 +121,15 @@ describe('composeVP from a transient session', () => {
     transient = {
       user: { id: keyAgent.id },
       profile: {
-        keyAgent,
-        persistence: inMemorySessionPersistence({
-          stores: transientSessionStores(),
-          clientAnnex: {
-            clientAnnexDid: CLIENT_ANNEX_DID,
-            invocationCapability: { id: 'urn:zcap:generation' } as never
-          }
-        })
-      }
+        keyAgent
+      },
+      persistence: inMemorySessionPersistence({
+        stores: transientSessionStores(),
+        clientAnnex: {
+          clientAnnexDid: CLIENT_ANNEX_DID,
+          invocationCapability: { id: 'urn:zcap:generation' } as never
+        }
+      })
     } as unknown as Session
   })
 
@@ -172,15 +172,15 @@ describe('composeVP from a transient session', () => {
         keyAgent,
         accountPointer: pointer,
         didWebvh: { did: accountDid },
-        verifiedLog: cache,
-        persistence: inMemorySessionPersistence({
-          stores: transientSessionStores(),
-          clientAnnex: {
-            clientAnnexDid: CLIENT_ANNEX_DID,
-            invocationCapability: { id: 'urn:zcap:generation' } as never
-          }
-        })
-      }
+        verifiedLog: cache
+      },
+      persistence: inMemorySessionPersistence({
+        stores: transientSessionStores(),
+        clientAnnex: {
+          clientAnnexDid: CLIENT_ANNEX_DID,
+          invocationCapability: { id: 'urn:zcap:generation' } as never
+        }
+      })
     } as unknown as Session
 
     const { holder, signer } = await presentationSignerFor({

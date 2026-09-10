@@ -382,8 +382,8 @@ describe('canIssueRecoveryCode', () => {
       user: { id: 'did:key:z6MkTest' },
       isGuest: overrides.isGuest ?? false,
       storage: { remoteStore: overrides.remoteStore ?? {} },
+      persistence: browserLocalSessionPersistence(),
       profile: {
-        persistence: browserLocalSessionPersistence(),
         accountPointer: {
           did: overrides.pointerDid ?? POINTER.did,
           spaceId: POINTER.spaceId,
@@ -494,8 +494,8 @@ describe('checkRecoveryHealth and the current-key-set rule', () => {
       user: { id: 'did:key:z6MkTest' },
       isGuest: false,
       storage: { remoteStore: {} },
+      persistence: browserLocalSessionPersistence(),
       profile: {
-        persistence: browserLocalSessionPersistence(),
         accountPointer: POINTER
       }
     } as unknown as Session

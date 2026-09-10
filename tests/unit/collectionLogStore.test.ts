@@ -59,7 +59,7 @@ import {
   inMemorySessionPersistence,
   transientSessionStores
 } from '@/session/persistence'
-import type { ControllerProfile } from '@/types/auth'
+import type { ControllerProfile, Session } from '@/types/auth'
 import type { WASRemoteStore } from '@/stores/wasRemoteStore'
 
 const POINTER = {
@@ -96,19 +96,25 @@ function capturedStoreOptions(): Array<{
 }
 
 /**
- * A live session's profile, cut down to the members the two session-shaped
- * builders read.
+ * A live session, cut down to the members the two session-shaped builders
+ * read: the profile's account pointer and the session's persistence
+ * strategy.
  *
  * @param options {object}
  * @param [options.did] {string}   the account pointer's DID, absent for the
  *   no-pointer refusals
- * @returns {ControllerProfile}
+ * @returns {object}
  */
-function sessionProfile({ did }: { did?: string } = {}): ControllerProfile {
+function sessionFixture({ did }: { did?: string } = {}): Pick<
+  Session,
+  'profile' | 'persistence'
+> {
   return {
-    accountPointer: did ? { ...POINTER, did } : {},
+    profile: {
+      accountPointer: did ? { ...POINTER, did } : {}
+    } as never as ControllerProfile,
     persistence: browserLocalSessionPersistence()
-  } as never as ControllerProfile
+  }
 }
 
 /**
@@ -307,9 +313,9 @@ describe('accountCollectionStores -- what it builds, and when', () => {
 
 describe('sessionCollectionStores', () => {
   it('reaches each collection through the remote store, under the session pins', () => {
-    const profile = sessionProfile({ did: POINTER.did })
+    const session = sessionFixture({ did: POINTER.did })
     const storeFor = sessionCollectionStores({
-      profile,
+      session,
       remoteStore: remoteStoreStub(),
       keyAgent: PARTS.keyAgent
     })
@@ -322,7 +328,7 @@ describe('sessionCollectionStores', () => {
       id: 'contacts',
       isRemoteHandle: true
     })
-    expect(contacts!.pinStore).toBe(profile.persistence.logPins)
+    expect(contacts!.pinStore).toBe(session.persistence.logPins)
     expect(
       collectionDescriptorLogPinId({
         spaceId: contacts!.collection.spaceId,
@@ -334,7 +340,7 @@ describe('sessionCollectionStores', () => {
   it('refuses a session whose pointer names no DID', () => {
     expect(() =>
       sessionCollectionStores({
-        profile: sessionProfile(),
+        session: sessionFixture(),
         remoteStore: remoteStoreStub(),
         keyAgent: PARTS.keyAgent
       })
@@ -344,22 +350,22 @@ describe('sessionCollectionStores', () => {
 
 describe('sessionCollectionDescriptorSource', () => {
   it("names the session's Space and rides its pins", () => {
-    const profile = sessionProfile({ did: POINTER.did })
+    const session = sessionFixture({ did: POINTER.did })
 
     sessionCollectionDescriptorSource({
-      profile,
+      session,
       remoteStore: remoteStoreStub()
     })
 
     const options = vi.mocked(logGovernedDescriptorSource).mock.calls[0]![0]
     expect(options.spaceId).toBe(POINTER.spaceId)
-    expect(options.pinStore).toBe(profile.persistence.logPins)
+    expect(options.pinStore).toBe(session.persistence.logPins)
   })
 
   it('refuses a session whose pointer names no DID', () => {
     expect(() =>
       sessionCollectionDescriptorSource({
-        profile: sessionProfile(),
+        session: sessionFixture(),
         remoteStore: remoteStoreStub()
       })
     ).toThrow(/account pointer/)
@@ -385,10 +391,10 @@ describe('descriptorLogSignerAgent', () => {
   it("signs with this client's own key agent on a browser-local session", async () => {
     const keyAgent = { id: 'did:key:zEnrolledClient' }
     const agent = await descriptorLogSignerAgent({
-      profile: {
+      session: {
         persistence: browserLocalSessionPersistence(),
-        keyAgent
-      } as never as ControllerProfile
+        profile: { keyAgent } as never as ControllerProfile
+      }
     })
 
     expect(agent).toBe(keyAgent)
@@ -397,9 +403,10 @@ describe('descriptorLogSignerAgent', () => {
   it('refuses a browser-local session holding no key agent', async () => {
     await expect(
       descriptorLogSignerAgent({
-        profile: {
-          persistence: browserLocalSessionPersistence()
-        } as never as ControllerProfile
+        session: {
+          persistence: browserLocalSessionPersistence(),
+          profile: {} as never as ControllerProfile
+        }
       })
     ).rejects.toThrow(/client key agent/)
   })
@@ -407,13 +414,15 @@ describe('descriptorLogSignerAgent', () => {
   it("signs with the credential's ladder VM on a transient session", async () => {
     const ladderSeed = new Uint8Array(32).fill(7)
     const agent = await descriptorLogSignerAgent({
-      profile: {
+      session: {
         persistence: transientPersistence(),
-        // The per-visit key stands in no account document, so a remembered
-        // client's agent beside it must not be what signs.
-        keyAgent: { id: 'did:key:zTransientVisitKey' },
-        ladderSeed
-      } as never as ControllerProfile
+        profile: {
+          // The per-visit key stands in no account document, so a remembered
+          // client's agent beside it must not be what signs.
+          keyAgent: { id: 'did:key:zTransientVisitKey' },
+          ladderSeed
+        } as never as ControllerProfile
+      }
     })
 
     const expected = await ladderVmAgent({ ladderSeed })
@@ -424,9 +433,10 @@ describe('descriptorLogSignerAgent', () => {
   it('refuses a transient session holding no ladder seed', async () => {
     await expect(
       descriptorLogSignerAgent({
-        profile: {
-          persistence: transientPersistence()
-        } as never as ControllerProfile
+        session: {
+          persistence: transientPersistence(),
+          profile: {} as never as ControllerProfile
+        }
       })
     ).rejects.toThrow(/ladder seed/)
   })

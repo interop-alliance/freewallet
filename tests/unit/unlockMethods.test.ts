@@ -325,9 +325,9 @@ async function makeSession(idb?: IDBFactory): Promise<Session> {
       keyAgent: agent,
       keyAgreementKey,
       keyResolver,
-      zcapClient: zcapClientForSigner({ signer: agent.getSigner() }),
-      persistence: browserLocalSessionPersistence({ idb })
+      zcapClient: zcapClientForSigner({ signer: agent.getSigner() })
     },
+    persistence: browserLocalSessionPersistence({ idb }),
     storage: { spaceId: DATA_SPACE_ID },
     isGuest: false
   } as unknown as Session

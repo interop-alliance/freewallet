@@ -207,7 +207,7 @@ export async function adoptRotatedUserKeyInBand({
     spaceId,
     userKey
   })
-  await session.profile.persistence.epochPins.saveFromDescriptor({
+  await session.persistence.epochPins.saveFromDescriptor({
     accountDid,
     epochId: latestEpochId,
     descriptor

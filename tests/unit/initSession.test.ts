@@ -192,7 +192,7 @@ describe('initSessionFromSeed', () => {
     const { session } = await initSessionFromSeed({ seed: randomSeed() })
     expect(StorageManager.initStorageClients).toHaveBeenCalledWith({
       user: session.user,
-      profile: session.profile,
+      session: { profile: session.profile, persistence: session.persistence },
       isGuest: false,
       remoteDirect: false
     })

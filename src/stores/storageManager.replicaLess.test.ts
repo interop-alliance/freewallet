@@ -484,8 +484,7 @@ describe('replica-less remote-direct StorageManager', () => {
     const profile = {
       zcapClient: {} as ZcapClient,
       keyAgreementKey: owner.keyAgreementKey,
-      keyResolver: owner.keyResolver,
-      persistence
+      keyResolver: owner.keyResolver
     } as ControllerProfile
 
     const initClientSpy = vi
@@ -497,7 +496,7 @@ describe('replica-less remote-direct StorageManager', () => {
     try {
       const { storage, userExists } = await StorageManager.initStorageClients({
         user,
-        profile,
+        session: { profile, persistence },
         descriptorLogs
       })
 
@@ -556,8 +555,7 @@ describe('replica-less remote-direct StorageManager', () => {
     const profile = {
       zcapClient: {} as ZcapClient,
       keyAgreementKey: owner.keyAgreementKey,
-      keyResolver: owner.keyResolver,
-      persistence
+      keyResolver: owner.keyResolver
     } as ControllerProfile
 
     const initClientSpy = vi
@@ -566,7 +564,7 @@ describe('replica-less remote-direct StorageManager', () => {
     try {
       const { storage } = await StorageManager.initStorageClients({
         user,
-        profile,
+        session: { profile, persistence },
         descriptorLogs
       })
       await storage.ready()
@@ -642,8 +640,7 @@ describe('replica-less remote-direct StorageManager', () => {
     const profile = {
       zcapClient: {} as ZcapClient,
       keyAgreementKey: owner.keyAgreementKey,
-      keyResolver: owner.keyResolver,
-      persistence
+      keyResolver: owner.keyResolver
     } as ControllerProfile
 
     const initClientSpy = vi
@@ -652,7 +649,7 @@ describe('replica-less remote-direct StorageManager', () => {
     try {
       const { storage } = await StorageManager.initStorageClients({
         user,
-        profile,
+        session: { profile, persistence },
         descriptorLogs
       })
       await storage.ready()
@@ -711,8 +708,7 @@ describe('replica-less remote-direct StorageManager', () => {
     const profile = {
       zcapClient: {} as ZcapClient,
       keyAgreementKey: owner.keyAgreementKey,
-      keyResolver: owner.keyResolver,
-      persistence
+      keyResolver: owner.keyResolver
     } as ControllerProfile
 
     const initClientSpy = vi
@@ -721,7 +717,7 @@ describe('replica-less remote-direct StorageManager', () => {
     try {
       const { storage } = await StorageManager.initStorageClients({
         user,
-        profile,
+        session: { profile, persistence },
         descriptorLogs
       })
       await storage.ready()

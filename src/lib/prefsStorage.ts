@@ -2,7 +2,7 @@
  * The UI-prefs sibling of the persistence strategy
  * (`src/session/persistence.ts` is the session half): global preferences --
  * the theme and the UI language -- are not session state, so they cannot ride
- * the profile's persistence strategy, but a transient visit must still leave
+ * the session's persistence strategy, but a transient visit must still leave
  * no browser-local residue. While the transient session is active, writes
  * land in an in-memory overlay that shadows reads and dies with the tab;
  * otherwise reads and writes go to localStorage as before. Reads outside

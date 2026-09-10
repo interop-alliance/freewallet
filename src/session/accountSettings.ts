@@ -942,7 +942,7 @@ async function documentStateOfCredential({
   }
   try {
     const { doc } = await verifiedAccountLog({
-      profile: session.profile,
+      session,
       pointer: context.pointer
     })
     const listed = await documentListsCredential({
@@ -1298,7 +1298,7 @@ async function completePasskeyEntry({
   // passkey-only safety prompt is resolved. Non-fatal.
   if (record.methods.length > 1) {
     try {
-      await session.profile.persistence.passkeyNotices.delete({
+      await session.persistence.passkeyNotices.delete({
         controller: session.user.id
       })
     } catch (err) {
@@ -1368,7 +1368,7 @@ async function recoverFailedPasskeyEstablishment({
       kdf: PASSKEY_KDF,
       credential,
       mintManageCapability: true,
-      accountLogPinStore: session.profile.persistence.logPins
+      accountLogPinStore: session.persistence.logPins
     })
   } catch (err) {
     // Cannot verify, so nothing is acted on: the bare entry and whatever the
@@ -1507,7 +1507,7 @@ async function passkeyEntryPublished({
     // entry the torn run itself published.
     invalidateVerifiedLog({ profile: session.profile })
     const { doc } = await verifiedAccountLog({
-      profile: session.profile,
+      session,
       pointer: context.pointer
     })
     return await documentListsCredential({
@@ -1556,7 +1556,7 @@ async function passkeyEstablishmentPublished({
     // A fresh read, for the same reason as `passkeyEntryPublished`.
     invalidateVerifiedLog({ profile: session.profile })
     const { doc } = await verifiedAccountLog({
-      profile: session.profile,
+      session,
       pointer: context.pointer
     })
     const listed = await documentListsCredential({
@@ -1857,7 +1857,7 @@ export async function addAccountPassphrase({
   // The account now has a passphrase backup, so the passkey-only safety
   // prompt is resolved. Best-effort.
   try {
-    await session.profile.persistence.passkeyNotices.delete({
+    await session.persistence.passkeyNotices.delete({
       controller: session.user.id
     })
   } catch (err) {
@@ -1895,7 +1895,7 @@ export async function rotateAccountUpdateKey({
   // session, but only inside a step-up, so they carry the step-up gate
   // instead.
   assertBrowserLocalSession({
-    persistence: session.profile.persistence,
+    persistence: session.persistence,
     ceremony: 'Update-key rotation'
   })
   // Not a registry writer, but a client-key-record writer: the rotation's
@@ -2280,8 +2280,7 @@ export async function deleteAccount({
   // the chain resolved long ago, and a guest session carries no chain.
   await session.registryReady
   const isGuest = !!session.isGuest
-  const { profile } = session
-  const persistence = profile.persistence
+  const { profile, persistence } = session
   const browserLocal = isBrowserLocalSession(persistence)
   // The Storage Access seam: a session begun from the CHAPI popup carries the
   // unpartitioned factory here, so every session-database delete below lands
@@ -2512,7 +2511,7 @@ export async function deleteAccount({
         // arm exists for -- an account deleted since, from another tab or by
         // an earlier run of this same walk whose 2xx was lost.
         invalidateVerifiedLog({ profile })
-        const verified = await verifiedAccountLog({ profile, pointer })
+        const verified = await verifiedAccountLog({ session, pointer })
         doc = verified.doc
         logEntries = verified.log
       } catch (err) {
@@ -3211,7 +3210,7 @@ async function repairRegistrySealForDeletion({
   }
   const rosterRead = await readUserKeyRoster({
     store: sessionRosterStore({
-      profile,
+      session,
       ...(capability ? { capability } : {})
     }),
     clientKeyAgreementKey: unwrapKey

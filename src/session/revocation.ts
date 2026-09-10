@@ -209,7 +209,7 @@ export async function revokeEnrolledClient({
   // precondition rather than a convenience: the pre-pivot refusal below is
   // computed from it, and a walk over a registry this session could not read
   // would miss exactly the state that makes the removal entry unsafe.
-  const { epochPins } = session.profile.persistence
+  const { epochPins } = session.persistence
   const [registryRecord, pinnedEpochId] = await Promise.all([
     ladder
       ? getUnlockMethods({ session }).catch((err: unknown) => {
@@ -287,7 +287,7 @@ export async function revokeEnrolledClient({
       // there rather than throwing).
       if (replacement) {
         ladderRenewal = { renewed: replacement.id !== invoked }
-      } else if ('clientAnnex' in session.profile.persistence) {
+      } else if ('clientAnnex' in session.persistence) {
         ladderRenewal = { renewed: false, skipped: 'failed' }
       } else {
         ladderRenewal = { renewed: false, skipped: 'no-pointer' }
@@ -405,7 +405,7 @@ export async function revokeEnrolledClient({
   if (ladder) {
     // Nothing else on a transient session re-settles the verified-log memo,
     // and the listing that reloads next would otherwise re-fetch anyway.
-    await reprimeVerifiedAccountLog({ profile: session.profile, pointer })
+    await reprimeVerifiedAccountLog({ session, pointer })
   }
 
   // The audit record, written after the adoption so it lands under the fresh

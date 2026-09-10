@@ -1099,8 +1099,8 @@ function makeSession({
     user: { id: 'did:key:zClient' },
     isGuest: guest,
     registryReady: Promise.resolve(),
+    persistence,
     profile: {
-      persistence,
       ...(transient ? { invocationCapability: GENERATION_DELEGATION } : {}),
       clientSeed: new Uint8Array(32),
       ...(transient ? { ladderSeed: LADDER_SEED } : {}),

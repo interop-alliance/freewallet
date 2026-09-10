@@ -301,13 +301,13 @@ function sessionWith(
       ...(overrides.ladderSeed ? { ladderSeed: overrides.ladderSeed } : {}),
       keyAgreementKey: { id: `${OLD_USER_KEY.id}#kak` },
       keyResolver: async () => ({}),
-      persistence: {
-        ...browserLocalSessionPersistence(),
-        epochPins: { load: epochPinLoad, saveFromDescriptor: epochPinSave }
-      },
       persistClientKeys: vi.fn(async () => {
         state.calls.push('persistClientKeys')
       })
+    },
+    persistence: {
+      ...browserLocalSessionPersistence(),
+      epochPins: { load: epochPinLoad, saveFromDescriptor: epochPinSave }
     }
   } as unknown as Session
 }

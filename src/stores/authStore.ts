@@ -72,7 +72,7 @@ export const useAuthStore = create<AuthState>()((set, get) => ({
     // session is live, theme/language toggles land in an in-memory overlay
     // instead of localStorage (`src/lib/prefsStorage.ts`).
     setTransientPrefs({
-      active: !isBrowserLocalSession(session.profile.persistence)
+      active: !isBrowserLocalSession(session.persistence)
     })
     // Kick off background replication (no-op for guests / no remote replica).
     // `restart` (not `start`) so a controller left running by a previous

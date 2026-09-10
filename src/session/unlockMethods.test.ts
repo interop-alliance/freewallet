@@ -36,14 +36,14 @@ function fakeSession({ storage }: { storage: string }): {
     profile: {
       keyAgreementKey: { publicKeyMultibase: 'zClientKak' },
       keyResolver: { resolve: vi.fn() },
-      unlockMethod: undefined,
-      persistence: {
-        storage,
-        unlockMethodsCache: {
-          load: cacheLoad,
-          save: vi.fn(),
-          delete: vi.fn()
-        }
+      unlockMethod: undefined
+    },
+    persistence: {
+      storage,
+      unlockMethodsCache: {
+        load: cacheLoad,
+        save: vi.fn(),
+        delete: vi.fn()
       }
     }
   } as unknown as Session

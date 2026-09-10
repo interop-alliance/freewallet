@@ -426,7 +426,7 @@ export async function getUnlockMethods({
   capability?: IZcap
 }): Promise<UnlockMethodsRecord | null> {
   const controller = session.user.id
-  const { unlockMethodsCache } = session.profile.persistence
+  const { unlockMethodsCache } = session.persistence
   const { keyAgreementKey, keyResolver } = requireVaultKeys(session)
 
   if (!WAS_SERVER_URL) {
@@ -638,7 +638,7 @@ export async function updateUnlockMethods({
   capability?: IZcap
 }): Promise<UnlockMethodsRecord | null> {
   const controller = session.user.id
-  const { unlockMethodsCache } = session.profile.persistence
+  const { unlockMethodsCache } = session.persistence
   const { keyAgreementKey, keyResolver } = requireVaultKeys(session)
 
   if (!WAS_SERVER_URL) {

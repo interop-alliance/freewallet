@@ -255,7 +255,7 @@ export async function establishStandingUnlock({
   const sealed = await sealedLadderSeed({
     credential,
     pointer,
-    accountLogPinStore: session.profile.persistence.logPins
+    accountLogPinStore: session.persistence.logPins
   })
   if (mintedLadderSeed && sealed && !equalBytes(mintedLadderSeed, sealed)) {
     // The record write below is a plain overwrite and precedes the entry's
@@ -299,7 +299,7 @@ export async function establishStandingUnlock({
     let clientAnnexDid: string | undefined
     try {
       const { doc } = await verifiedAccountLog({
-        profile: session.profile,
+        session,
         pointer
       })
       clientAnnexDid = delegatedClientsPointer({ doc })
@@ -353,7 +353,7 @@ export async function establishStandingUnlock({
               standingClient: session.profile.standingUnlock!.standingClient,
               delegatedClients: ctx.sibling
             },
-            pinStore: session.profile.persistence.logPins
+            pinStore: session.persistence.logPins
           })
         : clientAnnexReachOf({ session, pointer, clientAnnexDid })
     await commitClientAnnexRung({
@@ -654,7 +654,7 @@ export async function establishClientAnnexGeneration({
     secret,
     kdf,
     idb,
-    accountLogPinStore: session.profile.persistence.logPins
+    accountLogPinStore: session.persistence.logPins
   })
   const foundStanding = found?.standing
   const ladderSeed = foundStanding?.ladderSeed
@@ -680,7 +680,7 @@ export async function establishClientAnnexGeneration({
   // client's own document update keys, and the embedded delegation with its
   // promoted key.
   const account = await verifiedAccountLog({
-    profile: session.profile,
+    session,
     pointer
   })
   const pointed = await ensurePointedClientAnnexGeneration({

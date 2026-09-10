@@ -36,7 +36,7 @@ import type {
   VerifiedAccountLog
 } from '@interop/wallet-core/clients'
 import type { ResourceLogPinStore } from '@interop/vh-resource-log'
-import type { ControllerProfile } from '@/types/auth'
+import type { ControllerProfile, SessionCore } from '@/types/auth'
 
 /**
  * One memoized verification, keyed on the pointer it was verified against.
@@ -147,19 +147,23 @@ export function createVerifiedLogCache({
  * The cache is created on first use rather than at session construction, so
  * every path that builds a `ControllerProfile` (login, signup, guest, the
  * CHAPI popups) gets one without each remembering to install it; a session
- * that never reads the log never allocates one.
+ * that never reads the log never allocates one. It is allocated over the
+ * session's chain-head pin store, which is why the call takes the session's
+ * profile and persistence strategy together.
  *
  * @param options {object}
- * @param options.profile {ControllerProfile}   the live session's profile
+ * @param options.session {object}   the live session: its profile (which
+ *   holds the memo) and its persistence strategy (whose `logPins` the memo
+ *   verifies under)
  * @param [options.pointer] {object}   the account pointer to verify against;
  *   defaults to the profile's own
  * @returns {Promise<VerifiedAccountLog>}
  */
 export async function verifiedAccountLog({
-  profile,
+  session: { profile, persistence },
   pointer
 }: {
-  profile: ControllerProfile
+  session: SessionCore
   pointer?: { did?: string; spaceId: string; host: string }
 }): Promise<VerifiedAccountLog> {
   const target = pointer ?? profile.accountPointer
@@ -170,7 +174,7 @@ export async function verifiedAccountLog({
     )
   }
   profile.verifiedLog ??= createVerifiedLogCache({
-    pinStore: profile.persistence.logPins
+    pinStore: persistence.logPins
   })
   return await profile.verifiedLog.get({
     pointer: { did: target.did, spaceId: target.spaceId, host: target.host }
@@ -213,23 +217,24 @@ export function peekVerifiedAccountLog({
  * superseded by any later `invalidate`.
  *
  * @param options {object}
- * @param options.profile {ControllerProfile}
+ * @param options.session {object}   the live session's profile and
+ *   persistence strategy
  * @param options.pointer {AccountLogPointer}   the pointer the log was
  *   verified against
  * @param options.verified {VerifiedAccountLog}
  * @returns {void}
  */
 export function primeVerifiedAccountLog({
-  profile,
+  session: { profile, persistence },
   pointer,
   verified
 }: {
-  profile: ControllerProfile
+  session: SessionCore
   pointer: AccountLogPointer
   verified: VerifiedAccountLog
 }): void {
   profile.verifiedLog ??= createVerifiedLogCache({
-    pinStore: profile.persistence.logPins
+    pinStore: persistence.logPins
   })
   profile.verifiedLog.prime({ pointer, verified })
 }
@@ -296,21 +301,22 @@ export function invalidateVerifiedLog({
  * rather than surfaced here.
  *
  * @param options {object}
- * @param options.profile {ControllerProfile}
+ * @param options.session {object}   the live session's profile and
+ *   persistence strategy
  * @param options.pointer {AccountLogPointer}   the pointer the ceremony
  *   published under
  * @returns {Promise<void>}
  */
 export async function reprimeVerifiedAccountLog({
-  profile,
+  session,
   pointer
 }: {
-  profile: ControllerProfile
+  session: SessionCore
   pointer: AccountLogPointer
 }): Promise<void> {
-  invalidateVerifiedLog({ profile })
+  invalidateVerifiedLog({ profile: session.profile })
   try {
-    await verifiedAccountLog({ profile, pointer })
+    await verifiedAccountLog({ session, pointer })
   } catch {
     // The memo simply stays cold; the next reader fetches and reports.
   }

@@ -19,7 +19,7 @@ mender block runs afterward, settling `session.registryReady` and then
 
 **The persistence strategy** (`src/session/persistence.ts`). Which storage
 tier a session may write to is decided once at login, by the typed
-`SessionPersistence` object at `profile.persistence`. The tier is a property
+`SessionPersistence` object at `session.persistence`. The tier is a property
 of the strategy's type, so a write site consults no flag and takes no branch
 (`decisions/0001-no-memory-overlay-storage-fork.md`). Riding the strategy:
 the unlock-methods registry cache, the passkey-safety notice, the

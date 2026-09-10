@@ -243,7 +243,7 @@ export async function rotateOffUnlockCredential({
     keyAgreementKeyMultibase
   })
 
-  const { epochPins } = session.profile.persistence
+  const { epochPins } = session.persistence
   const pinnedEpochId = await epochPins.load({ accountDid: pointer.did })
 
   // The ceremony opens with a document edit, so nothing may keep reading a
@@ -296,7 +296,7 @@ export async function rotateOffUnlockCredential({
     context.kind === 'enrolled'
       ? context.rosterStore
       : sessionRosterStore({
-          profile: session.profile,
+          session,
           keyAgent: signingAgent!,
           ...(context.invoker.capability
             ? { capability: context.invoker.capability }
@@ -372,7 +372,7 @@ export async function rotateOffUnlockCredential({
         context.kind === 'enrolled'
           ? context.collectionStore
           : sessionCollectionStores({
-              profile: session.profile,
+              session,
               remoteStore,
               keyAgent: signingAgent!
             })
@@ -594,7 +594,7 @@ async function retireClientAnnexInventoryStage({
             pointer,
             doc,
             standing: standingReach,
-            pinStore: session.profile.persistence.logPins
+            pinStore: session.persistence.logPins
           })
         : clientAnnexReachFor({ session, pointer, doc })
     if (reach === null) {
@@ -787,7 +787,7 @@ async function loginLadderStanding({
   let attributed: Awaited<ReturnType<typeof attributeLadderRung>>
   try {
     const published = await verifiedAccountLog({
-      profile: session.profile,
+      session,
       pointer
     })
     attributed = await attributeLadderRung({ ladderSeed, published })

@@ -175,8 +175,8 @@ unlock secret (passphrase | passkey PRF output)
        -> agentsFromSeed -> keyAgent; ZcapClient -> zcapClient
        -> browser-local persistence strategy, local replica
 
-  -> Session { user, profile { keyAgent, zcapClient, userKey,
-                               persistence }, storage, isGuest }
+  -> Session { user, profile { keyAgent, zcapClient, userKey },
+               storage, persistence, isGuest }
 ```
 
 Navigation to the dashboard waits on `session.storageReady` alone. The
@@ -254,7 +254,7 @@ cascade"](docs/architecture/client-revocation.md).
 ## Session persistence
 
 The storage tier a session may write to is decided once at login, by the
-typed persistence strategy at `profile.persistence`. The variant IS the
+typed persistence strategy at `session.persistence`. The variant IS the
 type, so a write site consults no flag. The unlock-methods registry cache,
 the passkey-safety notice, the descriptor and meta caches, and the
 `writerId` mint ride it. Both continuity pin stores ride it in memory
@@ -910,9 +910,11 @@ base64url(SHA-256(unlock did:key))` (a discovery convention).
   the EDV envelopes: the user key's key-agreement key. It is never
   replicated in unwrapped form and never held by the KMS. Avoid: PUK.
 - **Session** -- the in-memory object (`src/types/auth.ts`) holding the
-  logged-in user, their `ControllerProfile` (keyAgent + zcapClient, and the
-  persistence strategy at `profile.persistence`), and their `StorageManager`
-  instance.
+  logged-in user, their `ControllerProfile` (keyAgent + zcapClient), their
+  `StorageManager` instance, and the persistence strategy at
+  `session.persistence`. The strategy sits beside `storage` rather than on
+  the profile: it is session-lifetime scaffolding, and the profile is the
+  identity bundle alone.
 - **Durable** -- persisted server-side, on the WAS host: the account log,
   the user key roster, the unlock records, the Collection Descriptions and
   their key epochs. It survives a cleared browser, an evicted origin, and a
@@ -933,7 +935,7 @@ base64url(SHA-256(unlock did:key))` (a discovery convention).
   two variants are browser-local and in-memory; this is not the remembered /
   transient axis, since a guest session is browser-local and is not
   remembered. Avoid: durability, posture, mode.
-- **Persistence strategy** -- the typed object at `profile.persistence`
+- **Persistence strategy** -- the typed object at `session.persistence`
   through which every tier-sensitive write travels. The variant IS the type,
   so a write site never branches: an in-memory strategy has no member
   reaching the session database

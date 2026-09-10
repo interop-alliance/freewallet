@@ -243,7 +243,7 @@ export async function forgetThisBrowser({
   idb?: IDBFactory
 }): Promise<ForgetOutcome> {
   assertBrowserLocalSession({
-    persistence: session.profile.persistence,
+    persistence: session.persistence,
     ceremony: 'Forgetting this browser'
   })
   // Wait out the login-time registry passes rather than racing their
@@ -292,7 +292,7 @@ export async function forgetThisBrowser({
   // like the revocation cascade's; the transition cannot walk entries it
   // could not read, and a record it leaves unreached would rot for good at
   // the removal entry, so there the read failure refuses up front.
-  const { epochPins } = session.profile.persistence
+  const { epochPins } = session.persistence
   let registryUnread = false
   const [registry, pinnedEpochId] = await Promise.all([
     getUnlockMethods({ session }).catch((err: unknown) => {
@@ -356,7 +356,7 @@ export async function forgetThisBrowser({
       pointer,
       delegation: standing.delegation,
       zcapClient: standing.standingClient.agents.zcapClient,
-      pinStore: session.profile.persistence.logPins
+      pinStore: session.persistence.logPins
     }),
     ladderSeed,
     forgottenClient,
@@ -411,7 +411,7 @@ export async function forgetThisBrowser({
     collections: cascadeCollections({
       remoteStore,
       storeFor: sessionCollectionStores({
-        profile: session.profile,
+        session,
         remoteStore,
         keyAgent: await ladderVmAgent({ ladderSeed })
       })
@@ -434,7 +434,7 @@ export async function forgetThisBrowser({
         // client's verification methods until a later writer's
         // `ensureDidWebProjection` caught it.
         clientLogStore: remoteStore.webvhIdStore(),
-        rosterStore: sessionRosterStore({ profile: session.profile })
+        rosterStore: sessionRosterStore({ session })
       })
       outcome = { lastClient: false, ceremony }
     } else {
@@ -453,7 +453,7 @@ export async function forgetThisBrowser({
         // (`setMinimumControllerVersion`); the requests invoke under this
         // still-standing client.
         rosterStore: sessionRosterStore({
-          profile: session.profile,
+          session,
           keyAgent: await ladderVmAgent({ ladderSeed })
         }),
         annex: annexCeremonyReach({ session, pointer }),
@@ -528,7 +528,7 @@ function annexCeremonyReach({
         was,
         spaceId,
         generationId,
-        pinStore: session.profile.persistence.logPins
+        pinStore: session.persistence.logPins
       }),
     revoke: async (delegation: Parameters<WasClient['revoke']>[0]) =>
       was.revoke(delegation),

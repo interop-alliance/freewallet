@@ -176,9 +176,9 @@ function makeSession() {
       accountController: 'did:key:zAccount',
       accountPointer: POINTER,
       zcapClient: { isZcapClient: true },
-      userKey: { id: 'did:key:zUserKey', secret: new Uint8Array(32) },
-      persistence: transientSessionStores()
-    }
+      userKey: { id: 'did:key:zUserKey', secret: new Uint8Array(32) }
+    },
+    persistence: transientSessionStores()
   } as unknown as Parameters<typeof establishStandingUnlock>[0]['session']
 }
 

@@ -1125,7 +1125,7 @@ export async function transientSessionFromKeyringHit({
   let projectionReported: Promise<void> | undefined
   if (mendReport === undefined) {
     primeVerifiedAccountLog({
-      profile: session.profile,
+      session,
       pointer: { did: accountDid, spaceId: accountSpaceId, host: accountHost },
       verified
     })

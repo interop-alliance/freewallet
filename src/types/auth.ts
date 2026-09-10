@@ -184,16 +184,6 @@ export interface ControllerProfile {
   // ceremony that extends the log. Created on first use; absent until then,
   // and on sessions that never read the log (guests, no-WAS).
   verifiedLog?: VerifiedLogCache
-  // The typed persistence strategy chosen at login
-  // (`src/session/persistence.ts`): every tier-sensitive local write -- the
-  // descriptor/meta caches, the writer id -- travels through it, so the
-  // storage tier a write lands in is a property of the strategy's type
-  // rather than a flag a write site consults. The browser-local variant
-  // alone reaches the `freewallet-session` database (it carries the `idb`
-  // factory); the in-memory variant dies with the tab. The continuity pin
-  // stores ride the strategy on both variants, in memory either way, so the
-  // strategy carries them without deciding them.
-  persistence: SessionPersistence
 }
 
 /**
@@ -213,13 +203,26 @@ export type AuthLocationState = {
 
 /**
  * Full in-memory session for a logged-in user. Holds identity (user),
- * cryptographic credentials (profile), and the active storage backend
- * (storage). Discarded on page refresh -- a refresh logs the user out.
+ * cryptographic credentials (profile), the active storage backend (storage),
+ * and the storage-tier policy every tier-sensitive write consults
+ * (persistence). Discarded on page refresh -- a refresh logs the user out.
  */
 export interface Session {
   user: User
   profile: ControllerProfile
   storage: StorageManager
+  // The typed persistence strategy chosen at login
+  // (`src/session/persistence.ts`): every tier-sensitive local write -- the
+  // descriptor/meta caches, the writer id -- travels through it, so the
+  // storage tier a write lands in is a property of the strategy's type
+  // rather than a flag a write site consults. The browser-local variant
+  // alone reaches the `freewallet-session` database (it carries the `idb`
+  // factory); the in-memory variant dies with the tab. The continuity pin
+  // stores ride the strategy on both variants, in memory either way, so the
+  // strategy carries them without deciding them. It is session-lifetime
+  // scaffolding rather than identity, which is why it sits here beside
+  // `storage` and not on the profile.
+  persistence: SessionPersistence
   // Resolves once the session's collections have been provisioned/opened by
   // the session-creation seam (`initSessionFromSeed`). It is fired -- not awaited
   // -- inside session creation, so hot post-login reads (the CHAPI popup's
@@ -279,3 +282,11 @@ export interface Session {
   }
   isGuest: boolean
 }
+
+/**
+ * The identity bundle plus the persistence strategy: the pair the log,
+ * roster, and storage helpers read off a session. A helper takes this view
+ * rather than the whole `Session`, so a caller that holds only the two
+ * (session construction, a popup) can pass them without a full session.
+ */
+export type SessionCore = Pick<Session, 'profile' | 'persistence'>

@@ -115,7 +115,7 @@ export function clientAnnexReachOf({
         was,
         spaceId,
         generationId,
-        pinStore: session.profile.persistence.logPins
+        pinStore: session.persistence.logPins
       }))
   }
 }
@@ -270,7 +270,7 @@ export async function pointedClientAnnexReach({
   | null
 > {
   const { doc, log } = await verifiedAccountLog({
-    profile: session.profile,
+    session,
     pointer
   })
   const reach = clientAnnexReachFor({ session, pointer, doc })
@@ -456,8 +456,8 @@ export async function renewTransientGenerationDelegation({
   session: Session
   retiringKeyMultibases?: string[]
 }): Promise<IZcap | null> {
-  const { profile } = session
-  const { ladderSeed, standingUnlock, accountPointer, persistence } = profile
+  const { profile, persistence } = session
+  const { ladderSeed, standingUnlock, accountPointer } = profile
   const delegatedClients = standingUnlock?.delegatedClients
   if (
     !ladderSeed ||

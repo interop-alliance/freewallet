@@ -392,7 +392,6 @@ export async function initSessionFromSeed({
   const profile: ControllerProfile = {
     keyAgent,
     zcapClient: sessionZcapClient,
-    persistence,
     keyAgreementKey: vaultKeys.keyAgreementKey,
     keyResolver: vaultKeys.keyResolver,
     // This client's own (identity) KAK, distinct from the user-key-backed vault
@@ -426,7 +425,7 @@ export async function initSessionFromSeed({
     keystorePromise,
     StorageManager.initStorageClients({
       user,
-      profile,
+      session: { profile, persistence },
       isGuest,
       remoteDirect: popup
     })
@@ -435,7 +434,7 @@ export async function initSessionFromSeed({
   // the session below references the same profile.
   profile.keystoreAgent = keystoreAgent
 
-  const session = { user, profile, storage, isGuest } as Session
+  const session = { user, profile, storage, persistence, isGuest } as Session
   if (userKeyPersistFailed) {
     session.userKeyPersistFailed = true
   }
@@ -1223,7 +1222,7 @@ async function sessionFromKeyringHit({
   // with it so the tails below read it instead of verifying it again.
   if (detectorLog && found.pointer?.did) {
     primeVerifiedAccountLog({
-      profile: session.profile,
+      session,
       pointer: {
         did: found.pointer.did,
         spaceId: found.pointer.spaceId,

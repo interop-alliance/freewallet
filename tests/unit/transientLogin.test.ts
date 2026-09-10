@@ -291,8 +291,8 @@ function primeHappyPath() {
   } as never)
   vi.mocked(initSessionFromSeed).mockResolvedValue({
     // The persistence strategy is what the verified-log memo takes its pin
-    // store from, so the assembled profile carries one.
-    session: { profile: { persistence: { logPins: {} } } },
+    // store from, so the assembled session carries one.
+    session: { profile: {}, persistence: { logPins: {} } },
     userExists: true
   } as never)
 }
@@ -1636,7 +1636,7 @@ describe("transientSessionFromKeyringHit -- the caller's account-log head", () =
       persistence: transientSessionStores()
     })
     session.profile.accountPointer = POINTER as never
-    const memoized = await verifiedAccountLog({ profile: session.profile })
+    const memoized = await verifiedAccountLog({ session })
     // The first surface after login reads the memo: no second verification.
     expect(vi.mocked(verifyAccountLog).mock.calls).toHaveLength(1)
     expect(memoized.doc).toEqual({ id: POINTER.did })
@@ -1668,7 +1668,7 @@ describe("transientSessionFromKeyringHit -- the caller's account-log head", () =
       persistence: transientSessionStores()
     })
     session.profile.accountPointer = POINTER as never
-    const memoized = await verifiedAccountLog({ profile: session.profile })
+    const memoized = await verifiedAccountLog({ session })
     expect(memoized.doc).toEqual({ id: POINTER.did, fresh: true })
     expect(vi.mocked(verifyAccountLog).mock.calls).toHaveLength(2)
   })
@@ -1696,8 +1696,8 @@ describe('transientSessionFromKeyringHit -- the login-time registry chain', () =
         user: { id: 'did:key:z6MkVisitKey' },
         isGuest: false,
         storage: { remoteStore: { isRemoteStore: true } },
+        persistence: { logPins: {} },
         profile: {
-          persistence: { logPins: {} },
           accountPointer: POINTER,
           zcapClient: { isSessionZcapClient: true },
           ...(invocationCapability ? { invocationCapability } : {})

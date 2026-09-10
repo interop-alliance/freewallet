@@ -387,7 +387,7 @@ const STANDING_DELEGATION_REFRESH: Registration<
     const refreshed = await refreshStandingDelegations({
       session,
       pointer,
-      verifiedLog: async () => verifiedAccountLog({ profile: session.profile }),
+      verifiedLog: async () => verifiedAccountLog({ session }),
       rebindStandingRecord,
       delegation,
       ...(found.standing?.delegatedClients

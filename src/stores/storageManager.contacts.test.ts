@@ -65,15 +65,17 @@ async function initLocalSession(): Promise<{
   const profile = {
     keyAgreementKey: owner.keyAgreementKey,
     keyResolver: owner.keyResolver,
-    keyAgent: { id: 'did:key:z6MkContactsAgent' },
-    // A guest login's persistence strategy: the browser-local variant with
-    // the descriptor caches off. Its pin stores are in memory, as on every
-    // variant.
-    persistence: browserLocalSessionPersistence({ persistCaches: false })
+    keyAgent: { id: 'did:key:z6MkContactsAgent' }
   } as unknown as ControllerProfile
   const { storage } = await StorageManager.initStorageClients({
     user,
-    profile,
+    session: {
+      profile,
+      // A guest login's persistence strategy: the browser-local variant
+      // with the descriptor caches off. Its pin stores are in memory, as on
+      // every variant.
+      persistence: browserLocalSessionPersistence({ persistCaches: false })
+    },
     isGuest: true,
     storage: getRxStorageMemory()
   })

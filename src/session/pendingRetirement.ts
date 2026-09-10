@@ -195,7 +195,7 @@ export async function repairTornPassphraseRetirement({
   // that completed elsewhere: retiring the entry's credential there would
   // strip the account's CURRENT passphrase.
   let { doc } = await verifiedAccountLog({
-    profile: session.profile,
+    session,
     pointer: context.pointer
   })
   let established:
@@ -250,7 +250,7 @@ export async function repairTornPassphraseRetirement({
     // The establishment extended the account log (and dropped the verified
     // memo), so the still-standing check below reads the post-edit document.
     ;({ doc } = await verifiedAccountLog({
-      profile: session.profile,
+      session,
       pointer: context.pointer
     }))
   }
@@ -487,7 +487,7 @@ async function rebuildBareEntry({
   credential?: { secret?: string | Uint8Array; derived?: UnlockCredential }
 }): Promise<'noop' | 'repaired'> {
   const { doc } = await verifiedAccountLog({
-    profile: session.profile,
+    session,
     pointer: context.pointer
   })
   let established:
@@ -598,7 +598,7 @@ export async function rebuildBarePasskeyEntry({
     return 'noop'
   }
   const { doc } = await verifiedAccountLog({
-    profile: session.profile,
+    session,
     pointer: context.pointer
   })
   if (

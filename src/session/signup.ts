@@ -617,7 +617,7 @@ async function signUpCredentialAnchoredWithPasskey({
   // persistence strategy (the establishment holds no strategy of its own).
   // Non-fatal.
   try {
-    await session.profile.persistence.passkeyNotices.save({
+    await session.persistence.passkeyNotices.save({
       controller: session.user.id,
       backupEligibility: registration.backupEligibility,
       backupState: registration.backupState
@@ -754,7 +754,7 @@ export async function signUpWithPasskey({
   // Mark this as a passkey-only account so the dashboard can prompt the
   // user to add a second unlock method. Non-fatal.
   try {
-    await session.profile.persistence.passkeyNotices.save({
+    await session.persistence.passkeyNotices.save({
       controller: session.user.id,
       backupEligibility: registration.backupEligibility,
       backupState: registration.backupState

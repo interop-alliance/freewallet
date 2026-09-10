@@ -47,9 +47,8 @@ vi.mock('@/session/initSession', () => ({
   loginWithPasskey: vi.fn(async () => ({
     session: {
       user: { id: 'did:key:z6MkFirstClient' },
-      profile: {
-        persistence: { passkeyNotices: { save: vi.fn() } }
-      },
+      profile: {},
+      persistence: { passkeyNotices: { save: vi.fn() } },
       storage: {},
       isGuest: false
     },

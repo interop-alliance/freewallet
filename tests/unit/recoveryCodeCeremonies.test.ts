@@ -346,13 +346,13 @@ function sessionFixture(): Session {
       zcapClient: {},
       ...(contextKind === 'ladder'
         ? { invocationCapability: GENERATION_DELEGATION }
-        : {}),
-      persistence: {
-        logPins: { read: async () => null, write: async () => {} },
-        epochPins: {
-          load: async () => undefined,
-          saveFromDescriptor: async () => {}
-        }
+        : {})
+    },
+    persistence: {
+      logPins: { read: async () => null, write: async () => {} },
+      epochPins: {
+        load: async () => undefined,
+        saveFromDescriptor: async () => {}
       }
     }
   } as unknown as Session

@@ -20,6 +20,7 @@ import { wasClientLabelsStore } from '@interop/wallet-core/keys'
 import { mintSpaceId, WASRemoteStore } from '../../src/stores/wasRemoteStore'
 import { deriveSpaceId } from '@interop/was-client/sync'
 import type { ControllerProfile, User } from '../../src/types/auth'
+import type { SessionPersistence } from '../../src/session/persistence'
 
 /**
  * Builds a WASRemoteStore whose `was` client has been replaced with a stub, so
@@ -510,11 +511,15 @@ describe('WASRemoteStore.initClient', () => {
     const { remoteStore } = await WASRemoteStore.initClient({
       storageServerUrl: 'https://example.test',
       user: { id: 'user-id-that-is-not-controller' } as unknown as User,
-      profile: {
-        keyAgent: { id: controller },
-        zcapClient: { request: vi.fn() },
-        persistence: { logPins: memoryResourceLogPinStore() }
-      } as unknown as ControllerProfile
+      session: {
+        profile: {
+          keyAgent: { id: controller },
+          zcapClient: { request: vi.fn() }
+        } as unknown as ControllerProfile,
+        persistence: {
+          logPins: memoryResourceLogPinStore()
+        } as unknown as SessionPersistence
+      }
     })
 
     const expectedSpaceId = deriveSpaceId(controller)
@@ -527,12 +532,16 @@ describe('WASRemoteStore.initClient', () => {
     const { remoteStore } = await WASRemoteStore.initClient({
       storageServerUrl: 'https://example.test',
       user: { id: clientDid } as unknown as User,
-      profile: {
-        keyAgent: { id: clientDid },
-        zcapClient: { request: vi.fn() },
-        persistence: { logPins: memoryResourceLogPinStore() },
-        accountPointer: { spaceId: 'minted-space-id', host: 'https://h' }
-      } as unknown as ControllerProfile
+      session: {
+        profile: {
+          keyAgent: { id: clientDid },
+          zcapClient: { request: vi.fn() },
+          accountPointer: { spaceId: 'minted-space-id', host: 'https://h' }
+        } as unknown as ControllerProfile,
+        persistence: {
+          logPins: memoryResourceLogPinStore()
+        } as unknown as SessionPersistence
+      }
     })
 
     expect(remoteStore.spaceId).toBe('minted-space-id')
@@ -545,16 +554,20 @@ describe('WASRemoteStore.initClient', () => {
     const { remoteStore } = await WASRemoteStore.initClient({
       storageServerUrl: 'https://example.test',
       user: { id: clientDid } as unknown as User,
-      profile: {
-        keyAgent: { id: clientDid },
-        zcapClient: { request: vi.fn() },
-        persistence: { logPins: memoryResourceLogPinStore() },
-        accountPointer: {
-          did: webvhDid,
-          spaceId: 'minted-space-id',
-          host: 'https://h'
-        }
-      } as unknown as ControllerProfile
+      session: {
+        profile: {
+          keyAgent: { id: clientDid },
+          zcapClient: { request: vi.fn() },
+          accountPointer: {
+            did: webvhDid,
+            spaceId: 'minted-space-id',
+            host: 'https://h'
+          }
+        } as unknown as ControllerProfile,
+        persistence: {
+          logPins: memoryResourceLogPinStore()
+        } as unknown as SessionPersistence
+      }
     })
 
     expect(remoteStore.spaceId).toBe('minted-space-id')

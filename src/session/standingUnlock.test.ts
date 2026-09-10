@@ -225,9 +225,9 @@ function fakeSession(): Session {
     profile: {
       userKey: { id: 'did:key:zUserKey' },
       clientSeed: new Uint8Array(32).fill(1),
-      accountController: ACCOUNT_DID,
-      persistence: { logPins: memoryResourceLogPinStore() }
-    }
+      accountController: ACCOUNT_DID
+    },
+    persistence: { logPins: memoryResourceLogPinStore() }
   } as unknown as Session
 }
 

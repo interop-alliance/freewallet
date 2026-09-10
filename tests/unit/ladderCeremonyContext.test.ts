@@ -111,7 +111,6 @@ function ladderSession(
       zcapClient: { isAnnexVmZcapClient: true },
       accountPointer: POINTER,
       accountController: 'did:key:z6MkAccountController',
-      persistence: { logPins: LOG_PINS },
       ladderSeed:
         'ladderSeed' in overrides ? overrides.ladderSeed : LADDER_SEED,
       standingUnlock:
@@ -138,7 +137,8 @@ function ladderSession(
         'invocationCapability' in overrides
           ? overrides.invocationCapability
           : GENERATION_DELEGATION
-    }
+    },
+    persistence: { logPins: LOG_PINS }
   } as unknown as Session
 }
 

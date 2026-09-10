@@ -226,7 +226,7 @@ describe('the ladder kind (a transient session on a standing credential)', () =>
       'reprimeVerifiedAccountLog'
     ])
     expect(vi.mocked(reprimeVerifiedAccountLog)).toHaveBeenCalledWith({
-      profile: session.profile,
+      session,
       pointer: POINTER
     })
   })

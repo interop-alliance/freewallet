@@ -97,7 +97,6 @@ function transientSession() {
       accountPointer: POINTER,
       invocationCapability: STALE_DELEGATION,
       ladderSeed: LADDER_SEED,
-      persistence: handle,
       standingUnlock: {
         delegation: { id: 'urn:zcap:bridge' },
         delegatedClients: SIBLING_DELEGATION,
@@ -107,7 +106,8 @@ function transientSession() {
         },
         unlockSpaceId: 'unlock-space-1'
       }
-    }
+    },
+    persistence: handle
   } as unknown as Session
   return { session, handle, adoptInvocationCapability }
 }
