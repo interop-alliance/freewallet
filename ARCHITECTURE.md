@@ -668,6 +668,9 @@ cascades, and the permanent wire-level constants.
   - `/sync` (contacts head-conflict resolution,
     `resolveContactHeadConflict`, over social-core's comparison; the change
     engine beside it is the mobile wallet's).
+  - `/testing` (test fixtures only, lint-restricted to test files: the
+    recorded-grant builder and the account signer check the revocation
+    tests on both sides of the package boundary assert against)
 - **`@interop/wallet-request`** -- the request pipeline shared with DCW:
   wallet-input classification, VPR parsing, QueryByExample matching,
   cryptosuite negotiation, VP composition, the App Connect app-key

@@ -4,6 +4,11 @@
 
 ### Added
 
+- The revocation-skip tests build their recorded grants and the account
+  signer check from `@interop/wallet-core/testing`, the one copy wallet-core's
+  own `classifyGrantRevocationRefusal` tests assert against. The lint
+  restriction keeping `@interop/was-sync/testing` out of application code
+  covers that subpath too.
 - Both login chains run through the mender runner
   (`@interop/wallet-core/menders`) over the registration lists in
   `src/session/menders/registrations.ts`: registration order is execution

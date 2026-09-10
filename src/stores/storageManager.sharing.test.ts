@@ -66,6 +66,14 @@ import {
   type DocCipher
 } from '@interop/was-client/edv'
 import { StorageManager } from './storageManager'
+import {
+  accountSignerCheck,
+  ENROLLED_SIGNER,
+  GONE_SIGNER,
+  LADDER_SIGNER,
+  recordedGrant,
+  SIGNER_FIXTURE
+} from '@interop/wallet-core/testing'
 import { EXTERNAL_REQUEST_ORIGIN } from '@/lib/walletRequest/externalRequest'
 import type { WASRemoteStore } from './wasRemoteStore'
 
@@ -781,58 +789,7 @@ describe('StorageManager.unshareCollection', () => {
 
 describe('StorageManager.revokeAppGrants', () => {
   const APP_ORIGIN = 'https://app.example'
-  const APP_SUBJECT = 'did:key:z6MkAppSubject'
-
-  /**
-   * A minimal delegated zcap document (enough to satisfy the revocation scan:
-   * a `parentCapability` marks it delegated, a `controller` binds it to the app
-   * key, and `expires` gates the already-expired skip).
-   */
-  function delegatedZcap({
-    id,
-    controller = APP_SUBJECT,
-    expires,
-    signerKeyId,
-    parent
-  }: {
-    id: string
-    controller?: string
-    expires: string
-    /**
-     * The delegation proof's `verificationMethod`, for the orphaned reading.
-     */
-    signerKeyId?: string
-    /**
-     * When given, the zcap chains under this parent delegation, embedded as
-     * the last link of `proof.capabilityChain` the way the delegation suite
-     * writes it -- a transient session's grant under its generation
-     * delegation (`controller` the annex DID, signed by the ladder VM).
-     */
-    parent?: { controller: string; signerKeyId: string }
-  }): IZcap {
-    const root = 'urn:zcap:root:https%3A%2F%2Fwas.example%2Fspace%2Fx'
-    const embedded = parent && {
-      id: 'urn:zcap:delegated:generation',
-      controller: parent.controller,
-      parentCapability: root,
-      proof: { verificationMethod: parent.signerKeyId }
-    }
-    return {
-      '@context': ['https://w3id.org/zcap/v1'],
-      id,
-      parentCapability: embedded ? embedded.id : root,
-      controller,
-      invocationTarget: 'https://was.example/space/x/private-credentials',
-      allowedAction: ['GET', 'HEAD'],
-      expires,
-      proof: {
-        capabilityChain: embedded ? [root, embedded] : [root],
-        ...(signerKeyId === undefined
-          ? {}
-          : { verificationMethod: signerKeyId })
-      }
-    } as unknown as IZcap
-  }
+  const APP_SUBJECT = SIGNER_FIXTURE.appDid
 
   /**
    * A `StorageManager` over a revoke-recording remote, for the tests that
@@ -857,31 +814,8 @@ describe('StorageManager.revokeAppGrants', () => {
     return { storage, user }
   }
 
-  const ACCOUNT_DID = 'did:webvh:scid:was.example:x'
-  const ENROLLED_KEY = 'z6MkEnrolledClient'
-  const LADDER_VM = 'z6MkLadderVm'
-  const ANNEX_DID = 'did:webvh:scid:was.example:space:x:gen-AAAAAAAAAAAAAAAA'
-  const OLD_ANNEX_DID =
-    'did:webvh:scid:was.example:space:x:gen-BBBBBBBBBBBBBBBB'
-  const SIGNER_CHECK = {
-    accountDid: ACCOUNT_DID,
-    currentSigningKeys: new Set([ENROLLED_KEY]),
-    doc: {
-      verificationMethod: [
-        {
-          id: `${ACCOUNT_DID}#${ENROLLED_KEY}`,
-          publicKeyMultibase: ENROLLED_KEY
-        },
-        { id: `${ACCOUNT_DID}#${LADDER_VM}`, publicKeyMultibase: LADDER_VM }
-      ],
-      capabilityDelegation: [
-        `${ACCOUNT_DID}#${ENROLLED_KEY}`,
-        `${ACCOUNT_DID}#${LADDER_VM}`
-      ]
-    },
-    clientAnnexDid: ANNEX_DID
-  }
-  const LADDER_SIGNER = `${ACCOUNT_DID}#${LADDER_VM}`
+  const { annexDid: ANNEX_DID, oldAnnexDid: OLD_ANNEX_DID } = SIGNER_FIXTURE
+  const SIGNER_CHECK = accountSignerCheck()
 
   /**
    * A remote store whose `spaceHandle().revoke` is the supplied recorder.
@@ -948,14 +882,14 @@ describe('StorageManager.revokeAppGrants', () => {
         target: 'https://was.example/space/x/private-credentials',
         allowedActions: ['GET', 'HEAD'],
         expires: future,
-        zcap: delegatedZcap({ id: 'z-active', expires: future })
+        zcap: recordedGrant({ id: 'z-active', expires: future })
       },
       {
         id: 'g-expired',
         target: 'https://was.example/space/x/wallet-activity',
         allowedActions: ['GET'],
         expires: past,
-        zcap: delegatedZcap({ id: 'z-expired', expires: past })
+        zcap: recordedGrant({ id: 'z-expired', expires: past })
       },
       {
         id: 'g-legacy',
@@ -1002,7 +936,7 @@ describe('StorageManager.revokeAppGrants', () => {
         target: 'https://was.example/space/x/private-credentials',
         allowedActions: ['GET'],
         expires: future,
-        zcap: delegatedZcap({
+        zcap: recordedGrant({
           id: 'z-other',
           controller: 'did:key:z6MkSomeoneElse',
           expires: future
@@ -1045,7 +979,7 @@ describe('StorageManager.revokeAppGrants', () => {
         target: 'https://was.example/space/x/private-credentials',
         allowedActions: ['GET'],
         expires: future,
-        zcap: delegatedZcap({ id: 'z-active', expires: future })
+        zcap: recordedGrant({ id: 'z-active', expires: future })
       }
     ])
 
@@ -1081,14 +1015,14 @@ describe('StorageManager.revokeAppGrants', () => {
           target: 'https://was.example/space/x/private-credentials',
           allowedActions: ['GET'],
           expires: future,
-          zcap: delegatedZcap({ id: 'z-refused', expires: future })
+          zcap: recordedGrant({ id: 'z-refused', expires: future })
         },
         {
           id: 'g-live',
           target: 'https://was.example/space/x/public-credentials',
           allowedActions: ['GET'],
           expires: future,
-          zcap: delegatedZcap({ id: 'z-live', expires: future })
+          zcap: recordedGrant({ id: 'z-live', expires: future })
         }
       ])
 
@@ -1115,14 +1049,14 @@ describe('StorageManager.revokeAppGrants', () => {
           target: 'https://was.example/space/x/private-credentials',
           allowedActions: ['GET'],
           expires: future,
-          zcap: delegatedZcap({ id: 'z-done', expires: future })
+          zcap: recordedGrant({ id: 'z-done', expires: future })
         },
         {
           id: 'g-live',
           target: 'https://was.example/space/x/public-credentials',
           allowedActions: ['GET'],
           expires: future,
-          zcap: delegatedZcap({ id: 'z-live', expires: future })
+          zcap: recordedGrant({ id: 'z-live', expires: future })
         }
       ]
     })
@@ -1147,7 +1081,7 @@ describe('StorageManager.revokeAppGrants', () => {
         target: 'https://was.example/space/x/private-credentials',
         allowedActions: ['GET'],
         expires: past,
-        zcap: delegatedZcap({ id: 'z-expired', expires: past })
+        zcap: recordedGrant({ id: 'z-expired', expires: past })
       }
     ])
 
@@ -1178,7 +1112,7 @@ describe('StorageManager.revokeAppGrants', () => {
         target: 'https://was.example/space/x/private-credentials',
         allowedActions: ['GET'],
         expires: future,
-        zcap: delegatedZcap({
+        zcap: recordedGrant({
           id: 'z-swapped',
           expires: future,
           signerKeyId: `${OLD_ANNEX_DID}#z6MkVisit`,
@@ -1190,7 +1124,7 @@ describe('StorageManager.revokeAppGrants', () => {
         target: 'https://was.example/space/x/public-credentials',
         allowedActions: ['GET'],
         expires: future,
-        zcap: delegatedZcap({
+        zcap: recordedGrant({
           id: 'z-current',
           expires: future,
           signerKeyId: `${ANNEX_DID}#z6MkVisit`,
@@ -1225,7 +1159,7 @@ describe('StorageManager.revokeAppGrants', () => {
         target: 'https://was.example/space/x/private-credentials',
         allowedActions: ['GET'],
         expires: future,
-        zcap: delegatedZcap({
+        zcap: recordedGrant({
           id: 'z-rotted',
           expires: future,
           signerKeyId: `${ANNEX_DID}#z6MkVisit`,
@@ -1233,7 +1167,7 @@ describe('StorageManager.revokeAppGrants', () => {
           // re-minted within it and its old signer struck.
           parent: {
             controller: ANNEX_DID,
-            signerKeyId: `${ACCOUNT_DID}#z6MkStruckSigner`
+            signerKeyId: GONE_SIGNER
           }
         })
       }
@@ -1266,10 +1200,10 @@ describe('StorageManager.revokeAppGrants', () => {
         target: 'https://was.example/space/x/private-credentials',
         allowedActions: ['GET'],
         expires: future,
-        zcap: delegatedZcap({
+        zcap: recordedGrant({
           id: 'z-orphaned',
           expires: future,
-          signerKeyId: `${ACCOUNT_DID}#z6MkDisconnectedClient`
+          signerKeyId: GONE_SIGNER
         })
       },
       {
@@ -1277,10 +1211,10 @@ describe('StorageManager.revokeAppGrants', () => {
         target: 'https://was.example/space/x/public-credentials',
         allowedActions: ['GET'],
         expires: future,
-        zcap: delegatedZcap({
+        zcap: recordedGrant({
           id: 'z-enrolled',
           expires: future,
-          signerKeyId: `${ACCOUNT_DID}#${ENROLLED_KEY}`
+          signerKeyId: ENROLLED_SIGNER
         })
       }
     ])
@@ -1307,10 +1241,10 @@ describe('StorageManager.revokeAppGrants', () => {
         target: 'https://was.example/space/x/private-credentials',
         allowedActions: ['GET'],
         expires: future,
-        zcap: delegatedZcap({
+        zcap: recordedGrant({
           id: 'z-orphaned',
           expires: future,
-          signerKeyId: `${ACCOUNT_DID}#z6MkDisconnectedClient`
+          signerKeyId: GONE_SIGNER
         })
       }
     ])
@@ -1348,7 +1282,7 @@ describe('StorageManager.revokeAppGrants', () => {
         target: 'https://was.example/space/x/private-credentials',
         allowedActions: ['GET'],
         expires: future,
-        zcap: delegatedZcap({ id: 'z-active', expires: future })
+        zcap: recordedGrant({ id: 'z-active', expires: future })
       }
     ])
 
@@ -1609,27 +1543,6 @@ describe('StorageManager.revokeAppCollectionRecipients', () => {
   const APP_ORIGIN = 'https://app.example'
   const APP_SUBJECT = 'did:key:z6MkAppSubjectR'
 
-  function delegatedZcap({
-    id,
-    target,
-    expires
-  }: {
-    id: string
-    target: string
-    expires: string
-  }): IZcap {
-    return {
-      '@context': ['https://w3id.org/zcap/v1'],
-      id,
-      parentCapability: 'urn:zcap:root:https%3A%2F%2Fwas.example%2Fspace%2Fx',
-      controller: APP_SUBJECT,
-      invocationTarget: target,
-      allowedAction: ['GET', 'HEAD'],
-      expires,
-      proof: {} as unknown
-    } as unknown as IZcap
-  }
-
   it('rotates the app off each app-provisioned collection and revokes its grant', async () => {
     const owner = await generateKey()
     const app = await generateKey()
@@ -1664,7 +1577,12 @@ describe('StorageManager.revokeAppCollectionRecipients', () => {
           target,
           allowedActions: ['GET', 'HEAD'],
           expires: future,
-          zcap: delegatedZcap({ id: 'z-app-docs', target, expires: future })
+          zcap: recordedGrant({
+            id: 'z-app-docs',
+            invocationTarget: target,
+            expires: future,
+            controller: APP_SUBJECT
+          })
         }
       ],
       appConnect: { name: 'Example App', firstRun: true }
@@ -1731,7 +1649,12 @@ describe('StorageManager.revokeAppCollectionRecipients', () => {
           target,
           allowedActions: ['GET', 'HEAD'],
           expires: future,
-          zcap: delegatedZcap({ id: 'z-app-docs', target, expires: future })
+          zcap: recordedGrant({
+            id: 'z-app-docs',
+            invocationTarget: target,
+            expires: future,
+            controller: APP_SUBJECT
+          })
         }
       ],
       appConnect: { name: 'Example App', firstRun: true }
@@ -1789,7 +1712,12 @@ describe('StorageManager.revokeAppCollectionRecipients', () => {
           target,
           allowedActions: ['GET', 'HEAD'],
           expires: future,
-          zcap: delegatedZcap({ id: 'z-app-docs', target, expires: future })
+          zcap: recordedGrant({
+            id: 'z-app-docs',
+            invocationTarget: target,
+            expires: future,
+            controller: APP_SUBJECT
+          })
         }
       ],
       appConnect: { name: 'Example App', firstRun: true }
@@ -1850,7 +1778,12 @@ describe('StorageManager.revokeAppCollectionRecipients', () => {
           target,
           allowedActions: ['GET', 'HEAD'],
           expires: future,
-          zcap: delegatedZcap({ id: 'z-std', target, expires: future })
+          zcap: recordedGrant({
+            id: 'z-std',
+            invocationTarget: target,
+            expires: future,
+            controller: APP_SUBJECT
+          })
         }
       ],
       appConnect: { name: 'Example App', firstRun: true }
