@@ -625,6 +625,8 @@
     "groupWalletContents": "Contenido de la billetera",
     "groupAppCollections": "Colecciones de aplicaciones",
     "groupAppCollectionsDescription": "Estas colecciones fueron registradas por aplicaciones y sitios conectados.",
+    "createdByApp": "Creado por <app>{{name}}</app>",
+    "createdByWallet": "Creado por esta cartera",
     "groupSystemCollections": "Colecciones del sistema de la billetera",
     "emptyCollectionsTitle": "Aún no hay colecciones",
     "emptyCollectionsDescription": "Las colecciones aparecerán aquí cuando su billetera cree carpetas de almacenamiento.",

@@ -46,6 +46,7 @@ import {
 import { isSelfIssued, subjectId } from '@/lib/vcShape'
 import type { IVerifiableCredential } from '@interop/data-integrity-core'
 import type { StorageManager } from '@/stores/storageManager'
+import type { AccountSignerCheck } from '@/lib/connectedApps'
 import { createLogger } from '@/lib/log'
 
 const log = createLogger('fw:session:appkeys')
@@ -89,14 +90,22 @@ async function isStrandedAppKey(
  * identity to look up and is deleted directly.
  *
  * A row whose revocation does not fully land is left in place: a rotation
- * reporting failures, or a grant revocation that throws, skips that row's
- * delete. The sweep is unattended, so an app that is only half rotated must
- * stay retryable at the next login rather than lose its revocation handle --
- * deliberately stricter than the interactive `revokeAppAccess`, where a user
- * sees the outcome. Delete failures (a public copy that cannot be retracted, a
- * network failure) are logged and skipped the same way, so one bad row cannot
- * strand every later seed until some future login. The sweep is idempotent, so
- * the skipped rows are retried at the next one.
+ * reporting failures, or a grant revocation that throws (`revokeAppGrants`
+ * throws for any refused POST, a plain `ValidationError` included, after its
+ * sibling POSTs settle), skips that row's delete. The sweep is unattended, so
+ * an app that is only half rotated must stay retryable at the next login
+ * rather than lose its revocation handle -- deliberately stricter than the
+ * interactive `revokeAppAccess`, where a user sees the outcome. The
+ * `readSignerCheck` thunk is what keeps a dead grant from wedging its row
+ * forever: read once, best-effort, when the first row needs revoking, it
+ * lets `revokeAppGrants` skip the POST for a grant the verified document
+ * already reads as dead (expired, orphaned, or chained under a rotted
+ * parent delegation) instead of having the server refuse it at every login; a
+ * read that throws degrades to POSTing everything unexpired. Delete
+ * failures (a public copy that cannot be retracted, a network
+ * failure) are logged and skipped the same way, so one bad row cannot strand
+ * every later seed until some future login. The sweep is idempotent, so the
+ * skipped rows are retried at the next one.
  *
  * The activity history both revocation calls scan is fetched once, and only
  * when at least one row needs revoking.
@@ -112,13 +121,17 @@ async function isStrandedAppKey(
  *
  * @param options {object}
  * @param options.storage {StorageManager}
+ * @param [options.readSignerCheck] {Function}   resolves the verified
+ *   account document's reading, or undefined when the session has none
  * @returns {Promise<{ deleted: number; retracted: number }>}   how many
  *   private rows were deleted, and how many orphan public copies retracted
  */
 export async function sweepStrandedAppKeys({
-  storage
+  storage,
+  readSignerCheck
 }: {
   storage: StorageManager
+  readSignerCheck?: () => Promise<AccountSignerCheck | undefined>
 }): Promise<{ deleted: number; retracted: number }> {
   const credentials = await storage.listCredentials()
   const stranded: Array<{
@@ -136,6 +149,7 @@ export async function sweepStrandedAppKeys({
     }
   }
 
+  const signerCheck = onceSignerCheck({ readSignerCheck })
   let items: Awaited<ReturnType<StorageManager['listHistoryItems']>> | undefined
   let deleted = 0
   for (const { cid, origin, subjectDid } of stranded) {
@@ -157,7 +171,12 @@ export async function sweepStrandedAppKeys({
           )
           continue
         }
-        await storage.revokeAppGrants({ origin, subjectDid, items })
+        await storage.revokeAppGrants({
+          origin,
+          subjectDid,
+          items,
+          ...(await signerCheck())
+        })
       }
       // Through the ordinary delete path, so a stranded key that was ever
       // published as a public link has that world-readable copy retracted
@@ -174,9 +193,47 @@ export async function sweepStrandedAppKeys({
   const retracted = await retractOrphanPublicAppKeys({
     storage,
     privateCids: new Set(credentials.map(({ cid }) => cid)),
-    items
+    items,
+    signerCheck
   })
   return { deleted, retracted }
+}
+
+/**
+ * The verified document's reading as a memoized, best-effort read: the thunk
+ * runs at most once per sweep, on the first row that needs revoking, and a
+ * throw is logged and read as "no check" rather than failing the sweep.
+ * Resolves the `signerCheck` member to spread into a `revokeAppGrants` call,
+ * empty when there is none.
+ *
+ * @param options {object}
+ * @param [options.readSignerCheck] {Function}
+ * @returns {Function}   `() => Promise<{ signerCheck?: AccountSignerCheck }>`
+ */
+function onceSignerCheck({
+  readSignerCheck
+}: {
+  readSignerCheck?: () => Promise<AccountSignerCheck | undefined>
+}): () => Promise<{ signerCheck?: AccountSignerCheck }> {
+  let pending: Promise<{ signerCheck?: AccountSignerCheck }> | undefined
+  return () => {
+    pending ??= (async () => {
+      if (!readSignerCheck) {
+        return {}
+      }
+      try {
+        const signerCheck = await readSignerCheck()
+        return signerCheck ? { signerCheck } : {}
+      } catch (err) {
+        log.warn(
+          'Could not read the account key set for the app-key sweep; posting every unexpired grant',
+          { err }
+        )
+        return {}
+      }
+    })()
+    return pending
+  }
 }
 
 /**
@@ -190,16 +247,20 @@ export async function sweepStrandedAppKeys({
  * @param options.storage {StorageManager}
  * @param options.privateCids {Set<string>}   the cids the private pass covered
  * @param [options.items] {Array}   the activity history, if already fetched
+ * @param options.signerCheck {Function}   the sweep's memoized signer-check
+ *   read ({@link onceSignerCheck})
  * @returns {Promise<number>}   how many public copies were retracted
  */
 async function retractOrphanPublicAppKeys({
   storage,
   privateCids,
-  items
+  items,
+  signerCheck
 }: {
   storage: StorageManager
   privateCids: Set<string>
   items?: Awaited<ReturnType<StorageManager['listHistoryItems']>>
+  signerCheck: () => Promise<{ signerCheck?: AccountSignerCheck }>
 }): Promise<number> {
   let publicCopies: Awaited<ReturnType<StorageManager['listCredentials']>>
   try {
@@ -237,7 +298,12 @@ async function retractOrphanPublicAppKeys({
           )
           continue
         }
-        await storage.revokeAppGrants({ origin, subjectDid, items: history })
+        await storage.revokeAppGrants({
+          origin,
+          subjectDid,
+          items: history,
+          ...(await signerCheck())
+        })
       }
       await storage.retractPublicCopy({ cid, consultRemote: true })
       retracted += 1

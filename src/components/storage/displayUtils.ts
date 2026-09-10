@@ -37,6 +37,22 @@ const CANONICAL_COLLECTION_NAMES = new Map<string, string>([
 ])
 
 /**
+ * Whether the wallet provisions this collection itself (a contents or a system
+ * collection), as opposed to a collection registered by a connected
+ * application. The Storage page's grouping and its "Created by" attribution
+ * read the same answer.
+ *
+ * @param collectionId {string}
+ * @returns {boolean}
+ */
+export function isWalletCollection(collectionId: string): boolean {
+  return (
+    CONTENTS_COLLECTION_IDS.includes(collectionId) ||
+    SYSTEM_COLLECTION_IDS.includes(collectionId)
+  )
+}
+
+/**
  * Splits the listed collections into the Storage page's three display groups,
  * each sorted alphabetically by display name (anything whose id the wallet
  * does not recognize is, by definition, externally registered and lands in the
@@ -65,11 +81,7 @@ export function groupCollections({
   const known = (ids: string[]) =>
     collections.filter(({ id }) => ids.includes(id)).sort(byDisplayName)
   const app = collections
-    .filter(
-      ({ id }) =>
-        !CONTENTS_COLLECTION_IDS.includes(id) &&
-        !SYSTEM_COLLECTION_IDS.includes(id)
-    )
+    .filter(({ id }) => !isWalletCollection(id))
     .sort(byDisplayName)
   return {
     contents: known(CONTENTS_COLLECTION_IDS),

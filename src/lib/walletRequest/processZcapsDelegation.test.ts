@@ -15,6 +15,10 @@ import type { ICapabilityQueryDetail, IZcap } from './types'
 const SPACE_URL = 'https://was.example/space/abc'
 const NOW = Date.parse('2026-08-22T12:00:00Z')
 const DAY_MS = 24 * 60 * 60 * 1000
+// A real Ed25519 did:key: the App Connect path derives the app's recipient
+// key-agreement key from it, which a placeholder string cannot satisfy.
+const APP_DID = 'did:key:z6MkqojacRDqmQgDi4ESKKhGDqnZx4C6cChAbQZXvnUFX7D7'
+const APP = { name: 'Docs App', origin: 'https://app.example' }
 const WRITE_DESCRIPTOR: ICapabilityQueryDetail = {
   referenceId: 'docs',
   allowedAction: ['GET', 'PUT'],
@@ -23,6 +27,19 @@ const WRITE_DESCRIPTOR: ICapabilityQueryDetail = {
     name: 'docs'
   },
   controller: 'did:key:z6MkTest'
+}
+const APP_WRITE_DESCRIPTOR: ICapabilityQueryDetail = {
+  ...WRITE_DESCRIPTOR,
+  controller: APP_DID
+}
+const APP_PUBLIC_DESCRIPTOR: ICapabilityQueryDetail = {
+  referenceId: 'gallery',
+  allowedAction: ['GET', 'PUT'],
+  invocationTarget: {
+    type: 'https://w3id.org/byoe#public-collection',
+    name: 'gallery'
+  },
+  controller: APP_DID
 }
 
 /**
@@ -106,16 +123,18 @@ function memoListing(delegationKeys: string[]) {
  */
 function fakeSession({
   invocationCapability,
-  verifiedLog
+  verifiedLog,
+  collections = []
 }: {
   invocationCapability?: IZcap
   verifiedLog?: ReturnType<typeof memoListing>
+  collections?: Array<{ id: string; isPublic?: boolean }>
 } = {}) {
   const delegate = vi.fn(async (args: Record<string, unknown>) => ({
     id: 'urn:zcap:delegated',
     ...args
   }))
-  const listCollectionPublicStates = vi.fn(async () => [])
+  const listCollectionPublicStates = vi.fn(async () => collections)
   const session = {
     user: { id: 'did:key:z6MkUser' },
     storage: {
@@ -315,5 +334,78 @@ describe('processZcaps delegation parent', () => {
       `urn:zcap:root:${encodeURIComponent(SPACE_URL)}`
     )
     expect((args.expires as Date).getTime()).toBe(NOW + RP_ZCAP_WRITE_TTL_MS)
+  })
+})
+
+describe('processZcaps collection attribution', () => {
+  it('stamps the app DID and origin on an App Connect encrypted collection', async () => {
+    const { session } = fakeSession()
+    await processZcaps({
+      zcapRequests: [APP_WRITE_DESCRIPTOR],
+      session,
+      appProvisioning: true,
+      app: APP
+    })
+    expect(session.storage.provisionAppCollection).toHaveBeenCalledWith(
+      expect.objectContaining({
+        collectionId: 'docs',
+        generator: APP_DID,
+        generatorOrigin: APP.origin
+      })
+    )
+  })
+
+  it('stamps the same attribution on an App Connect public collection', async () => {
+    const { session } = fakeSession()
+    await processZcaps({
+      zcapRequests: [APP_PUBLIC_DESCRIPTOR],
+      session,
+      appProvisioning: true,
+      app: APP
+    })
+    expect(session.storage.ensureCollection).toHaveBeenCalledWith({
+      id: 'gallery',
+      isPublic: true,
+      generator: APP_DID,
+      generatorOrigin: APP.origin
+    })
+  })
+
+  it('stamps the origin in its canonical form', async () => {
+    const { session } = fakeSession()
+    await processZcaps({
+      zcapRequests: [APP_PUBLIC_DESCRIPTOR],
+      session,
+      appProvisioning: true,
+      app: { ...APP, origin: 'https://App.example:443/' }
+    })
+    expect(session.storage.ensureCollection).toHaveBeenCalledWith(
+      expect.objectContaining({ generatorOrigin: 'https://app.example' })
+    )
+  })
+
+  it('leaves a standing private collection its attribution on re-admit', async () => {
+    const { session } = fakeSession({ collections: [{ id: 'docs' }] })
+    await processZcaps({
+      zcapRequests: [APP_WRITE_DESCRIPTOR],
+      session,
+      appProvisioning: true,
+      app: APP
+    })
+    expect(session.storage.provisionAppCollection).toHaveBeenCalledTimes(1)
+    const [args] = vi.mocked(session.storage.provisionAppCollection).mock
+      .calls[0]
+    expect(args.collectionId).toBe('docs')
+    expect(args).not.toHaveProperty('generator')
+    expect(args).not.toHaveProperty('generatorOrigin')
+  })
+
+  it('stamps nothing when the request is not an App Connect one', async () => {
+    const { session } = fakeSession()
+    await processZcaps({ zcapRequests: [WRITE_DESCRIPTOR], session })
+    expect(session.storage.ensureCollection).toHaveBeenCalledWith({
+      id: 'docs',
+      isPublic: false
+    })
   })
 })

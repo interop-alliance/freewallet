@@ -56,6 +56,7 @@ import {
   ensureGenerationDelegation
 } from '@/session/annexReach'
 import { sweepStrandedAppKeys } from '@/session/appKeySweep'
+import { currentAccountSignerCheck } from '@/session/clients'
 import { sweepClientAnnexGenerations } from '@/session/clientAnnexGc'
 import { refreshTransientManageCapability } from '@/session/unlockMethods'
 
@@ -590,7 +591,12 @@ const GENERATION_DELEGATION_HEAL: Registration<
  * The stranded app-key sweep, first of the tail: it is registered behind the
  * registry-writing entries, so it settles under `session.mends` alone, and
  * ahead of the keystore report, so it does not queue behind a KMS round
- * trip.
+ * trip. The verified document's reading is handed along as a thunk the sweep
+ * reads best-effort, and only once a row needs revoking, so a stranded key
+ * whose grants are dead already (an orphaned signer, a rotted generation
+ * delegation)
+ * is deleted rather than left behind a revocation the server would refuse at
+ * every login, and a clean account verifies nothing extra.
  */
 const APP_KEY_SWEEP: Registration<LoginMenderDeps, FreewalletCeremonyId> = {
   trigger: 'remembered-login-chain',
@@ -598,7 +604,8 @@ const APP_KEY_SWEEP: Registration<LoginMenderDeps, FreewalletCeremonyId> = {
   async converge(deps) {
     const { session } = remembered(deps)
     const { deleted, retracted } = await sweepStrandedAppKeys({
-      storage: session.storage
+      storage: session.storage,
+      readSignerCheck: () => currentAccountSignerCheck({ session })
     })
     return [
       {

@@ -199,11 +199,27 @@ activity. An app whose recorded signers have all left the document shows as
 orphaned, and reconnecting through the ordinary App Connect flow is the
 recovery path. A grant minted in a transient session is signed by an annex
 key the account document never lists, so that signer derives as unknown and
-the row carries no marker. The marker is display-only and does not gate
-revocation: revoking an app POSTs every recorded revocation, rotates the
-app-provisioned collections' epochs, and deletes the app key, and a dead
-chain comes back as a skipped revocation. The check is best-effort, so with
-no verified document this session the page lists without the marker rather
-than failing. Agent rows run the identical check over the recorded grant's
-`controller` instead of an app-key subject, and revoking an agent likewise
-always POSTs the recorded revocations.
+the row carries no marker. The marker is display-only; what gates each
+grant's POST is `grantRevocationSkip`, the same document read per grant at
+revocation time: a grant that is expired, orphaned (delegated under the
+Space root, signer gone), or chained under an embedded parent delegation
+that has rotted (the parent's own proof key gone from the document under
+`capabilityDelegation`, wallet-core's `delegationKeyInDocument`, which
+covers a generation delegation replaced within its generation; or a parent
+whose `controller` parses as an annex DID other than the pointed one) is
+dead already and skipped without a POST. Every fail-open case POSTs: a
+parent with no proof key, a parent of another shape, a document pointing at
+no generation. Every other grant is POSTed, and of the POSTs only the
+server's `AlreadyRevokedError` counts as skipped. Any other refusal, a plain
+`ValidationError` included (a read-replica lag on a live grant answers the
+same way as a dead chain), is thrown after the sibling POSTs settle, before
+the app key is deleted or the Revoke recorded, so the row stays listed and a
+retry re-runs. A failure leaves the app-provisioned collections already
+rotated off the app's recipient key (the rotation stage runs first) with
+the credential kept and no Revoke recorded; the rotation is idempotent and
+the landed revocations answer `AlreadyRevokedError`, so the retry converges
+once the refused POST succeeds. The check is best-effort, so
+with no verified document this session the page lists without the marker
+rather than failing, and the revocation skips on expiry alone. Agent rows
+run the identical check over the recorded grant's `controller` instead of an
+app-key subject, and revoking an agent follows the same per-grant reading.

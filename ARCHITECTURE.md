@@ -405,6 +405,16 @@ helpers, which join onto the storage server's base path, so on a sub-path
 deployment (a server URL like `https://host/was`) the link addresses exactly
 the resource replication wrote, with per-segment encoding.
 
+A collection provisioned for a connected application carries its attribution
+on the Collection Description: `generator`, the app's did:key, and
+`generatorOrigin`, the Web origin that DID was bound to. Both are stamped
+when App Connect provisioning creates the collection, and a collection that
+already stands keeps its attribution, so a second app admitted to it does not
+rename the creator. The storage browser reads them through
+`attributeCollectionsToApps` (`src/lib/collectionAttribution.ts`), which
+names a collection's app by matching `generator` against the connected apps'
+subject DIDs.
+
 A user's remote Space is identified by an independent random `spaceId`
 minted at signup and carried in the account pointer; unlock Spaces keep
 `spaceId = base64url(SHA-256(unlock did:key))` as a discovery convention.

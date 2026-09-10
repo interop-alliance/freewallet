@@ -74,10 +74,12 @@ export async function listApplicationsView({
 /**
  * Revokes one connected app's access and words the outcome. The grant state
  * is derived first, against the same verified key set the listing marked the
- * row with, and feeds the wording alone. It does not gate the revocation
- * itself: the recorded revocations are always POSTed, for the reason
- * `revokeAppAccess` states (a transient session's grants derive as unknown,
- * and only the server can say whether their chain is still alive).
+ * row with, and feeds the wording. The same `signerCheck` is handed to
+ * `revokeAppAccess`, which skips the POST for a grant that document already
+ * reads as dead (expired, orphaned, or chained under a rotted parent
+ * delegation)
+ * and POSTs every other one, a transient session's grants included, since
+ * those derive as unknown while their generation delegation may still stand.
  *
  * @param options {object}
  * @param options.session {Session}
@@ -100,12 +102,13 @@ export async function revokeApplication({
   const outcome = await revokeAppAccess({
     storage: session.storage,
     user: session.user,
-    app
+    app,
+    ...(signerCheck ? { signerCheck } : {})
   })
   // The rotation revokes an app-provisioned collection's pull grant with the
   // epoch, and the second stage's re-POST of that same capability comes back
-  // "already revoked" and counts as skipped -- so `revoked` alone reads as
-  // zero for an app whose only grant was just withdrawn.
+  // `AlreadyRevokedError` and counts as skipped -- so `revoked` alone reads
+  // as zero for an app whose only grant was just withdrawn.
   return {
     outcomeKey: revokeOutcomeKey({
       grantsState,
@@ -124,9 +127,10 @@ export async function revokeApplication({
  * revoked. When nothing was withdrawn, an orphaned row names the disconnect
  * that ended its access; any other row reads as access that had already
  * ended, with no cause claimed, since the account document cannot name one:
- * its recorded grants were all refused or expired (a transient session's
- * grant after its generation was collected, or one past its own expiry), or
- * it recorded no revocable capability at all.
+ * its recorded grants were all skipped (a transient session's grant after
+ * its generation delegation rotted, one past its own expiry, or one the
+ * server had already revoked), or it recorded no revocable capability at
+ * all.
  *
  * @param options {object}
  * @param options.grantsState {GrantSignerState}
@@ -149,28 +153,34 @@ export function revokeOutcomeKey({
 }
 
 /**
- * Revokes one connected agent's storage grants. Unlike the app path this takes
- * no grant state: an agent grant delegated from a transient session is signed
- * by an annex key the account document never lists yet keeps verifying under
- * the generation delegation, so only the server can say whether the chain is
- * dead. A genuinely dead chain comes back from the server as a skipped no-op.
+ * Revokes one connected agent's storage grants. The `signerCheck` is handed
+ * through to `revokeAgentAccess`, which reads it exactly as the app path
+ * does: a grant the verified document already reads as dead is skipped
+ * without a POST, and every other one is POSTed, a transient session's
+ * included, since its annex signer derives as unknown while its generation
+ * delegation may still stand.
  *
  * @param options {object}
  * @param options.session {Session}
  * @param options.agent {ConnectedAgent}
+ * @param [options.signerCheck] {AccountSignerCheck}   the verified account
+ *   document's reading, or undefined when the check was unavailable
  * @returns {Promise<{ revoked: number }>}
  */
 export async function revokeAgent({
   session,
-  agent
+  agent,
+  signerCheck
 }: {
   session: Session
   agent: ConnectedAgent
+  signerCheck?: AccountSignerCheck
 }): Promise<{ revoked: number }> {
   const outcome = await revokeAgentAccess({
     storage: session.storage,
     user: session.user,
-    agent
+    agent,
+    ...(signerCheck ? { signerCheck } : {})
   })
   return { revoked: outcome.revoked }
 }

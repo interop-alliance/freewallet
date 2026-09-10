@@ -35,6 +35,18 @@
   the annex GC, so `session.registryReady` does not wait on a KMS round
   trip; `session.mends` carries the entry. The gap allowlist's row for it
   moves from kind `none` to `unreachable`, as does the pointer heal's own.
+- Collection-to-app attribution in the storage browser. App Connect
+  provisioning stamps `generator` (the app's did:key) and `generatorOrigin`
+  (the requesting origin, canonicalized) on the Collection Description when
+  it creates a collection; a standing collection keeps its attribution. The
+  storage listing and the collection-contents header show a "Created by"
+  line: the app name, linking to its Applications page from the collection
+  header, the stamped origin when the wallet holds no key for that app, and
+  "this wallet" for the collections the wallet provisions itself.
+- `WASRemoteStore.ensureCollection` rides was-client's plaintext ensure, so a
+  grant on a standing log-governed collection no longer re-sends the
+  server-derived `encryption` member (refused as
+  `encryption-history-log-governed`).
 
 ### Changed
 
@@ -127,6 +139,36 @@
 - The four shared registry passes are four registrations under the runner's
   discipline, one registry read per block, one authority-kind decision in
   `accountCeremonyContext`, and one `startLoginMenderBlock`.
+- App and agent grant revocation (`revokeAppGrants`, `revokeAgentGrants`)
+  reads each recorded grant against the verified account document before
+  any POST (`grantRevocationSkip` in `src/lib/connectedApps.ts`): an expired
+  grant, an orphaned root-delegated grant, and a grant whose embedded parent
+  delegation (read from `proof.capabilityChain`) has rotted, its proof key
+  gone from the verified document (`delegationKeyInDocument`) or, for a
+  generation delegation, its generation no longer the pointed one, are
+  skipped locally. `AccountSignerCheck` carries the verified document
+  (`doc`) and the delegated-clients pointer (`clientAnnexDid`) for that
+  reading, and `revokeAppAccess`,
+  `revokeAgentAccess`, `revokeAgent`, and the app-key sweep
+  (`readSignerCheck`, read once and only when a row needs revoking) take it.
+- The recorded-grant lookup's expiry reading is wallet-core's
+  `isDelegationExpired` over the zcap's own `expires`; an absent or
+  unparseable value is not expired, and the summary record's `expires` is no
+  longer a fallback. The Applications listing reads the same value: an
+  `AppGrant`'s `expires` is the recorded capability's own where the full
+  zcap was recorded, the summary's only on a legacy summary-only record.
+- The credential retirement's generation-swap warning names why the old
+  delegation needed no POST (expired, signer gone, no delegation, no log)
+  instead of reporting every skip as "found no old delegation".
+
+### Fixed
+
+- Grant revocation no longer records a refused POST as revoked. Only the
+  server's `AlreadyRevokedError` counts as skipped; any other failure, a
+  plain `ValidationError` included (a read-replica lag on a live grant
+  answers the same way as a dead chain), is thrown after every POST settles,
+  so the app key stays, no Revoke is recorded, the row stays listed, and a
+  retry re-runs. `revokedIds` lists only the grants whose POST succeeded.
 
 ## 0.50.0 - TBD
 

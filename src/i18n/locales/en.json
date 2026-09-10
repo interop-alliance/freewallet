@@ -625,6 +625,8 @@
     "groupWalletContents": "Wallet Contents",
     "groupAppCollections": "Application Collections",
     "groupAppCollectionsDescription": "These collections were registered by connected applications and sites.",
+    "createdByApp": "Created by <app>{{name}}</app>",
+    "createdByWallet": "Created by this wallet",
     "groupSystemCollections": "Wallet System Collections",
     "emptyCollectionsTitle": "No collections yet",
     "emptyCollectionsDescription": "Collections will appear here once your wallet creates storage folders.",

@@ -24,6 +24,8 @@ import type { StorageQuotaStatus } from '@/types/storageQuota'
 import type { ImportSpaceSummary } from '@/stores/storageManager'
 import { parseImportTarFile } from '@/lib/import'
 import { listSharedCollections, type CollectionShare } from '@/session/shares'
+import { useConnectedApps } from '@/hooks/useConnectedApps'
+import { attributeCollectionsToApps } from '@/lib/collectionAttribution'
 import { SYNCED_COLLECTIONS } from '@/app.config'
 import { createLogger } from '@/lib/log'
 
@@ -191,6 +193,14 @@ export const StoragePage = () => {
   const sharesByCollection = useMemo(
     () => (sharesError ? {} : (loadedShares ?? {})),
     [loadedShares, sharesError]
+  )
+
+  // The connected applications behind each collection's "Created by" line.
+  const apps = useConnectedApps({ storage: session?.storage })
+
+  const appsByCollection = useMemo(
+    () => attributeCollectionsToApps({ collections, apps }),
+    [apps, collections]
   )
 
   const handleExportSpace = async () => {
@@ -392,6 +402,7 @@ export const StoragePage = () => {
               ])
             )}
             sharesByCollection={sharesByCollection}
+            appsByCollection={appsByCollection}
             onShowShares={setSharesDialogCollectionId}
           />
         )}

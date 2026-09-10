@@ -195,7 +195,8 @@ export function ApplicationsPage() {
     try {
       const { revoked } = await revokeAgent({
         session,
-        agent: revokeAgentTarget
+        agent: revokeAgentTarget,
+        signerCheck
       })
       setRevokeAgentTarget(null)
       showToast({

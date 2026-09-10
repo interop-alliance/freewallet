@@ -63,9 +63,14 @@ every agent Login for that controller newer than the latest matching Revoke
 activity (same origin marker, no `appConnect`, the controller in
 `object.controller`), since a later request can add a grant without retiring
 an earlier one. A row whose grants have all expired is dropped. Revoking a
-row POSTs every recorded capability's revocation regardless of the orphaned
-marker, and stamps the Revoke's `created` at least one millisecond past the
-latest Login, so a fast-clocked terminal cannot leave the row standing.
+row reads each recorded capability against the verified account document
+(`grantRevocationSkip`: expired, orphaned, or chained under a parent
+delegation whose signer has left the document or whose generation is no
+longer the pointed one is skipped without a POST) and POSTs the rest, the orphaned
+marker gating nothing on its own; a refused POST other than the server's
+`AlreadyRevokedError` is thrown before any Revoke is recorded. The Revoke's
+`created` is stamped at least one millisecond past the latest Login, so a
+fast-clocked terminal cannot leave the row standing.
 There is no app key to delete and no collection epoch to rotate, an agent
 never being a key-epoch recipient.
 

@@ -5,8 +5,8 @@
  * a connected agent (`listConnectedAgents` -- the Login predicate, the Revoke
  * join, the all-expired drop, and the name / key-fingerprint fallback), and
  * the revocation `revokeAgentAccess` performs (the server revocation before
- * the recorded activity, the never-skip rule, and the forward-floored Revoke
- * stamp).
+ * the recorded activity, the signer check handed through so the storage
+ * layer settles the skips, and the forward-floored Revoke stamp).
  */
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import {
@@ -187,6 +187,27 @@ describe('listConnectedAgents', () => {
     ).toEqual([])
   })
 
+  it('reads expiry off the recorded capability, not the summary', async () => {
+    // The revocation lookup reads the zcap's own `expires`; a summary that
+    // disagrees (a stale display value) must not drop or keep a row on its
+    // own. A summary-only legacy record still falls back to the summary.
+    const summaryStale = grantEntry({ expires: FUTURE })
+    summaryStale.expires = PAST
+    expect(
+      await listConnectedAgents({
+        storage: storageWith([agentLogin({ zcaps: [summaryStale] })])
+      })
+    ).toHaveLength(1)
+
+    const zcapExpired = grantEntry({ expires: PAST })
+    zcapExpired.expires = FUTURE
+    expect(
+      await listConnectedAgents({
+        storage: storageWith([agentLogin({ zcaps: [zcapExpired] })])
+      })
+    ).toEqual([])
+  })
+
   it('unions the grants of every live Login for the controller', async () => {
     // The newest request's grant has lapsed, but an older request's has not:
     // the row stays, carrying both, since the revocation scans every Login.
@@ -331,11 +352,12 @@ describe('revokeAgentAccess', () => {
     expect(storage.addHistoryAgentRevoke).not.toHaveBeenCalled()
   })
 
-  it('still posts the revocations for a transient-signed (orphaned) grant', async () => {
+  it('hands the signer check through and records what was skipped', async () => {
     // A grant delegated from a transient session is signed by an annex key the
-    // account document never lists, so the listing marks it orphaned while it
-    // is very much alive under the generation delegation. The dead-chain case
-    // is what the server answers with, as a skipped no-op.
+    // account document never lists, so the row's marker says nothing about
+    // it; whether its generation still stands is the storage layer's
+    // reading of the verified document, so the check is passed through
+    // whole rather than gating anything here.
     const storage = {
       revokeAgentGrants: vi.fn(async () => ({
         revoked: 0,
@@ -344,6 +366,12 @@ describe('revokeAgentAccess', () => {
       })),
       addHistoryAgentRevoke: vi.fn()
     } as unknown as StorageManager
+    const signerCheck = {
+      accountDid: 'did:webvh:s:h:x',
+      currentSigningKeys: new Set(['zKey']),
+      doc: {},
+      clientAnnexDid: 'did:webvh:annex:was.example:gen-2'
+    }
 
     const annexSigned = {
       ...agent,
@@ -361,13 +389,35 @@ describe('revokeAgentAccess', () => {
     const outcome = await revokeAgentAccess({
       storage,
       user,
-      agent: annexSigned
+      agent: annexSigned,
+      signerCheck
     })
 
     expect(outcome).toEqual({ revoked: 0, skipped: 1 })
     expect(storage.revokeAgentGrants).toHaveBeenCalledWith({
-      controller: AGENT_DID
+      controller: AGENT_DID,
+      signerCheck
     })
+  })
+
+  it('records nothing when the server refuses a revocation', async () => {
+    // A plain ValidationError is a refusal the storage layer throws after
+    // its sibling POSTs settle; recording the Revoke would hide a row whose
+    // grant may still be live.
+    const refused = Object.assign(new Error('chain does not verify'), {
+      name: 'ValidationError'
+    })
+    const storage = {
+      revokeAgentGrants: vi.fn(async () => {
+        throw refused
+      }),
+      addHistoryAgentRevoke: vi.fn()
+    } as unknown as StorageManager
+
+    await expect(revokeAgentAccess({ storage, user, agent })).rejects.toBe(
+      refused
+    )
+    expect(storage.addHistoryAgentRevoke).not.toHaveBeenCalled()
   })
 
   it('floors the Revoke stamp past the Login when the clock is behind', async () => {

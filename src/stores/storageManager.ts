@@ -91,7 +91,10 @@ import {
 } from '@interop/wallet-core/webvh'
 import { ensureAccountGenesis } from '@interop/wallet-core/genesis'
 import { errorNameOf, type MendOutcome } from '@interop/wallet-core/menders'
-import { clampGrantExpires } from '@interop/wallet-core/clientAnnex'
+import {
+  clampGrantExpires,
+  isDelegationExpired
+} from '@interop/wallet-core/clientAnnex'
 import { promoteKeystoreController, rebindKeystoreAgent } from '@/lib/kms'
 import { accountRosterStore } from '@/session/rosterStore'
 import { mintRecordEncryption } from '@interop/wallet-core/keyring'
@@ -126,6 +129,10 @@ import {
   type SyncedCollectionStore
 } from '@/stores/remoteDirectStore'
 import { EXTERNAL_REQUEST_ORIGIN } from '@/lib/walletRequest/externalRequest'
+import {
+  grantRevocationSkip,
+  type AccountSignerCheck
+} from '@/lib/connectedApps'
 import type { CredentialActivityVerb } from '@/lib/historyActivity'
 import { uuidv7 } from 'uuidv7'
 import {
@@ -2099,25 +2106,38 @@ export class StorageManager {
    * remote backend. With `isPublic`, the collection also gets a
    * collection-level world-readable (PublicCanRead) policy.
    *
+   * `generator` and `generatorOrigin` are the collection's app attribution,
+   * stamped on the create (see {@link WASRemoteStore.ensureCollection}).
+   *
    * @param options {object}
    * @param options.id {string}
    * @param [options.name] {string}
    * @param [options.isPublic] {boolean}
+   * @param [options.generator] {string}   the DID of the application this
+   *   collection is provisioned for
+   * @param [options.generatorOrigin] {string}   the Web origin that DID was
+   *   bound to at provisioning time
    * @returns {Promise<void>}
    */
   async ensureCollection({
     id,
     name,
-    isPublic
+    isPublic,
+    generator,
+    generatorOrigin
   }: {
     id: string
     name?: string
     isPublic?: boolean
+    generator?: string
+    generatorOrigin?: string
   }): Promise<void> {
     await this.#requireRemote('Provisioning a collection').ensureCollection({
       id,
       name,
-      isPublic
+      isPublic,
+      generator,
+      generatorOrigin
     })
   }
 
@@ -2153,14 +2173,22 @@ export class StorageManager {
    * @param options.appRecipient {RecipientPublicKey}   the app's identity
    *   public key-agreement key, the X25519 twin of its controller `did:key`
    *   (its `id` is the recipient `kid`)
+   * @param [options.generator] {string}   the DID of the application this
+   *   collection is provisioned for, stamped as the collection's attribution
+   * @param [options.generatorOrigin] {string}   the Web origin that DID was
+   *   bound to at provisioning time
    * @returns {Promise<CollectionEncryption>}   the current descriptor
    */
   async provisionAppCollection({
     collectionId,
-    appRecipient
+    appRecipient,
+    generator,
+    generatorOrigin
   }: {
     collectionId: string
     appRecipient: RecipientPublicKey
+    generator?: string
+    generatorOrigin?: string
   }): Promise<CollectionEncryption> {
     const remote = this.#requireRemote('Provisioning an app collection')
     if (!this.#vaultKeys) {
@@ -2173,7 +2201,11 @@ export class StorageManager {
     // `encryption` member from the governing log), then install epoch[0]
     // (owner as recipient zero) as that log's genesis -- create-if-absent,
     // so an existing roster is adopted, never overwritten.
-    await remote.ensureGovernedCollection({ id: collectionId })
+    await remote.ensureGovernedCollection({
+      id: collectionId,
+      generator,
+      generatorOrigin
+    })
     const store = await this.#collectionStore({
       collectionId,
       action: 'Provisioning an app collection'
@@ -3047,13 +3079,16 @@ export class StorageManager {
    * delegated). The app never receives decryption key material, so unlike a
    * collection un-share this rotates no epoch and touches no recipient roster.
    *
-   * Best-effort per capability: an already-revoked, expired, or foreign zcap
-   * makes the server throw `ValidationError`, which is swallowed (counted as
-   * skipped) so revoking twice is a no-op; any other failure (e.g. the server
-   * unreachable) propagates so the caller can retry rather than silently drop
-   * the credential. Legacy records that stored only a display summary (no full
-   * zcap) are nothing to revoke -- expiry is their backstop -- and count as
-   * skipped. A no-op returning zero counts when no remote store is configured.
+   * Per capability, `#revokeZcaps`'s contract: a grant the verified account
+   * document already reads as dead (expired, orphaned, or chained under a
+   * parent delegation that has rotted) is skipped without a POST, the server's
+   * `AlreadyRevokedError` counts as skipped, and any other failure -- a plain
+   * `ValidationError` included -- is thrown after every POST settles, so the
+   * caller keeps the credential and retries rather than recording a
+   * revocation the server never accepted. Legacy records that stored only a
+   * display summary (no full zcap) are nothing to revoke -- expiry is their
+   * backstop -- and count as skipped. A no-op returning zero counts when no
+   * remote store is configured.
    *
    * @param options {object}
    * @param options.origin {string}   the connected app's origin
@@ -3061,16 +3096,20 @@ export class StorageManager {
    *   the controller the grants were delegated to
    * @param [options.items] {Array<{ id: string; doc: WalletActivity }>}   a
    *   pre-fetched history scan, when the caller already holds one
+   * @param [options.signerCheck] {AccountSignerCheck}   the verified account
+   *   document's reading; without it only the expiry skip applies
    * @returns {Promise<{ revoked: number; skipped: number }>}
    */
   async revokeAppGrants({
     origin,
     subjectDid,
-    items
+    items,
+    signerCheck
   }: {
     origin: string
     subjectDid: string
     items?: Array<{ id: string; doc: WalletActivity }>
+    signerCheck?: AccountSignerCheck
   }): Promise<{ revoked: number; skipped: number }> {
     const remote = this.#remoteStore
     if (!remote) {
@@ -3084,7 +3123,7 @@ export class StorageManager {
       controller: subjectDid,
       items: items ?? (await this.listHistoryItems())
     })
-    const outcome = await this.#revokeZcaps({ zcaps })
+    const outcome = await this.#revokeZcaps({ zcaps, signerCheck })
     return {
       revoked: outcome.revoked,
       skipped: outcome.skipped + nonRevocable
@@ -3093,19 +3132,41 @@ export class StorageManager {
 
   /**
    * Revokes a set of recorded capabilities on the WAS server, one POST each.
-   * The POSTs are independent, so they run together and the results are
-   * folded in the order the capabilities were given. A capability the server
-   * no longer considers revocable (already revoked, expired, or foreign)
-   * counts into `skipped` rather than failing the run; anything else
-   * propagates. `revokedIds` names the capabilities whose revocation actually
-   * went through, which is what an agent revocation records as its audit
-   * trail.
+   * Before any POST, a capability the verified account document already
+   * reads as dead is skipped locally (`grantRevocationSkip`: its own
+   * `expires` has passed, it is an orphaned account-signed grant, or it is an
+   * grant chained under a parent delegation whose signer has left the
+   * document or, for a generation delegation, whose generation the document
+   * no longer points at). The remaining POSTs are independent, so they run together
+   * and all of them settle before the outcome is folded in the order the
+   * capabilities were given. Of the POSTs, only was-client's
+   * `AlreadyRevokedError` -- the server's genuine capability-already-revoked
+   * answer -- counts into `skipped`. Every other error, a plain
+   * `ValidationError` included (a root-capability refusal, a foreign target,
+   * a malformed body, an id mismatch, a chain the server cannot verify right
+   * now -- which is also what a read-replica lag on a LIVE grant answers --
+   * or an HTTP 415), counts as failed, and once every POST has settled the
+   * first failure is thrown verbatim, `err.name` intact, so the caller
+   * neither deletes the credential nor records the Revoke and a retry re-runs
+   * the set; the ids that did land ride the warn logged before the throw,
+   * since the caller records nothing. `revokedIds` names only the
+   * capabilities whose POST succeeded, which is what an agent revocation
+   * records as its audit trail. Errors are matched on `name`: was-client may
+   * resolve twice in the tree.
    *
    * @param options {object}
    * @param options.zcaps {IDelegatedZcap[]}
+   * @param [options.signerCheck] {AccountSignerCheck}   the verified account
+   *   document's reading; without it only the expiry skip applies
    * @returns {Promise<{ revoked: number; skipped: number; revokedIds: string[] }>}
    */
-  async #revokeZcaps({ zcaps }: { zcaps: IDelegatedZcap[] }): Promise<{
+  async #revokeZcaps({
+    zcaps,
+    signerCheck
+  }: {
+    zcaps: IDelegatedZcap[]
+    signerCheck?: AccountSignerCheck
+  }): Promise<{
     revoked: number
     skipped: number
     revokedIds: string[]
@@ -3115,29 +3176,46 @@ export class StorageManager {
       return { revoked: 0, skipped: 0, revokedIds: [] }
     }
     const space = remote.spaceHandle()
-    const outcomes = await Promise.all(
+    const now = Date.now()
+    const outcomes = await Promise.allSettled(
       zcaps.map(async zcap => {
+        const skip = grantRevocationSkip({ zcap, signerCheck, now })
+        if (skip !== undefined) {
+          return { id: zcap.id, skipped: skip }
+        }
         try {
           await space.revoke(zcap)
           return { id: zcap.id }
         } catch (err) {
-          // Matched on `name`: was-client may resolve twice in the tree.
-          if (errorNameOf(err) === 'ValidationError') {
-            // Already revoked, expired, or foreign -- treat as a no-op.
-            return { skipped: true }
+          if (errorNameOf(err) === 'AlreadyRevokedError') {
+            return { id: zcap.id, skipped: 'already-revoked' }
           }
           throw err
         }
       })
     )
     const revokedIds: string[] = []
+    const failed: Array<{ id: string; err: unknown }> = []
     let skipped = 0
-    for (const { id, skipped: wasSkipped } of outcomes) {
-      if (wasSkipped) {
+    outcomes.forEach((outcome, index) => {
+      if (outcome.status === 'rejected') {
+        failed.push({ id: zcaps[index].id, err: outcome.reason })
+      } else if (outcome.value.skipped !== undefined) {
         skipped += 1
-      } else if (id !== undefined) {
-        revokedIds.push(id)
+      } else {
+        revokedIds.push(outcome.value.id)
       }
+    })
+    if (failed.length > 0) {
+      // The ids that DID land are diagnosable here and nowhere else: the
+      // throw carries the first failure alone, and the caller records
+      // nothing.
+      log.warn('Could not revoke every recorded grant; none recorded', {
+        failed: failed.map(entry => entry.id),
+        revokedIds,
+        skipped
+      })
+      throw failed[0].err
     }
     return { revoked: revokedIds.length, skipped, revokedIds }
   }
@@ -3146,20 +3224,28 @@ export class StorageManager {
    * Revokes the storage grants recorded for a connected agent: the
    * capabilities delegated to `controller` on the interaction-URL request
    * page's Login activities. There is no app key and no epoch roster involved
-   * -- an agent is a grantee only.
+   * -- an agent is a grantee only. Per capability this is `#revokeZcaps`'s
+   * contract: a grant the verified document reads as dead is skipped without
+   * a POST, `AlreadyRevokedError` counts as skipped, and any other failure is
+   * thrown after every POST settles, so the caller records no Revoke and the
+   * row stays listed for a retry.
    *
    * @param options {object}
    * @param options.controller {string}   the grantee did:key
    * @param [options.items] {Array<{ id: string; doc: WalletActivity }>}   a
    *   pre-fetched history scan, when the caller already holds one
+   * @param [options.signerCheck] {AccountSignerCheck}   the verified account
+   *   document's reading; without it only the expiry skip applies
    * @returns {Promise<{ revoked: number; skipped: number; revokedIds: string[] }>}
    */
   async revokeAgentGrants({
     controller,
-    items
+    items,
+    signerCheck
   }: {
     controller: string
     items?: Array<{ id: string; doc: WalletActivity }>
+    signerCheck?: AccountSignerCheck
   }): Promise<{ revoked: number; skipped: number; revokedIds: string[] }> {
     if (!this.#remoteStore) {
       return { revoked: 0, skipped: 0, revokedIds: [] }
@@ -3170,7 +3256,7 @@ export class StorageManager {
       controller,
       items: items ?? (await this.listHistoryItems())
     })
-    const outcome = await this.#revokeZcaps({ zcaps })
+    const outcome = await this.#revokeZcaps({ zcaps, signerCheck })
     return {
       revoked: outcome.revoked,
       skipped: outcome.skipped + nonRevocable,
@@ -3345,10 +3431,11 @@ export class StorageManager {
   /**
    * The full delegated zcaps recorded for one grantee, scanned from the
    * `Login` history activities `matches` accepts: those whose recorded `zcap`
-   * was delegated to `controller` and has not already expired. Deduplicated by
-   * capability id. `skipped` counts the entries that carry no revocable
-   * capability (legacy summary-only records, a different controller, or an
-   * already-expired grant). The predicate is what tells the two grantee kinds
+   * was delegated to `controller` and has not already expired by its own
+   * `expires` (wallet-core's `isDelegationExpired`; an absent or unparseable
+   * value is not expired). Deduplicated by capability id. `skipped` counts
+   * the entries that carry no revocable capability (legacy summary-only
+   * records, a different controller, or an already-expired grant). The predicate is what tells the two grantee kinds
    * apart: an App Connect app (an origin plus an `appConnect` member) and an
    * agent (the interaction-URL origin marker and no `appConnect`).
    *
@@ -3390,8 +3477,7 @@ export class StorageManager {
         continue
       }
       for (const entry of object.zcaps) {
-        const record = (entry ?? {}) as { expires?: string; zcap?: IZcap }
-        const zcap = record.zcap
+        const zcap = ((entry ?? {}) as { zcap?: IZcap }).zcap
         // A legacy summary-only entry has no revocable capability; expiry is
         // the backstop.
         if (!zcap || !('parentCapability' in zcap)) {
@@ -3410,12 +3496,9 @@ export class StorageManager {
           continue
         }
         seen.add(zcap.id)
-        const expiresAt = zcap.expires
-          ? new Date(zcap.expires).getTime()
-          : record.expires
-            ? new Date(record.expires).getTime()
-            : 0
-        if (expiresAt && expiresAt <= now) {
+        // The one expiry reading every revocation path shares: the zcap's
+        // own `expires`, and an absent or unparseable one is NOT expired.
+        if (isDelegationExpired({ delegation: zcap, now })) {
           skipped += 1
           continue
         }

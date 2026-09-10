@@ -29,6 +29,7 @@ import type {
 } from '@interop/data-integrity-core'
 import { X25519KeyAgreementKey2020 } from '@interop/x25519-key-agreement-key'
 import {
+  AlreadyRevokedError,
   ValidationError,
   type CollectionEncryption,
   type IZcap,
@@ -65,6 +66,7 @@ import {
   type DocCipher
 } from '@interop/was-client/edv'
 import { StorageManager } from './storageManager'
+import { EXTERNAL_REQUEST_ORIGIN } from '@/lib/walletRequest/externalRequest'
 import type { WASRemoteStore } from './wasRemoteStore'
 
 /**
@@ -789,23 +791,97 @@ describe('StorageManager.revokeAppGrants', () => {
   function delegatedZcap({
     id,
     controller = APP_SUBJECT,
-    expires
+    expires,
+    signerKeyId,
+    parent
   }: {
     id: string
     controller?: string
     expires: string
+    /**
+     * The delegation proof's `verificationMethod`, for the orphaned reading.
+     */
+    signerKeyId?: string
+    /**
+     * When given, the zcap chains under this parent delegation, embedded as
+     * the last link of `proof.capabilityChain` the way the delegation suite
+     * writes it -- a transient session's grant under its generation
+     * delegation (`controller` the annex DID, signed by the ladder VM).
+     */
+    parent?: { controller: string; signerKeyId: string }
   }): IZcap {
+    const root = 'urn:zcap:root:https%3A%2F%2Fwas.example%2Fspace%2Fx'
+    const embedded = parent && {
+      id: 'urn:zcap:delegated:generation',
+      controller: parent.controller,
+      parentCapability: root,
+      proof: { verificationMethod: parent.signerKeyId }
+    }
     return {
       '@context': ['https://w3id.org/zcap/v1'],
       id,
-      parentCapability: 'urn:zcap:root:https%3A%2F%2Fwas.example%2Fspace%2Fx',
+      parentCapability: embedded ? embedded.id : root,
       controller,
       invocationTarget: 'https://was.example/space/x/private-credentials',
       allowedAction: ['GET', 'HEAD'],
       expires,
-      proof: {} as unknown
+      proof: {
+        capabilityChain: embedded ? [root, embedded] : [root],
+        ...(signerKeyId === undefined
+          ? {}
+          : { verificationMethod: signerKeyId })
+      }
     } as unknown as IZcap
   }
+
+  /**
+   * A `StorageManager` over a revoke-recording remote, for the tests that
+   * exercise the revocation policy alone.
+   */
+  async function revokeStorage(revoke: (zcap: unknown) => Promise<void>) {
+    const owner = await generateKey()
+    const stores = memoryDescriptorStores()
+    const remoteStore = makeRevokeRemote(revoke)
+    const descriptors = await provisionGovernedCollections(owner, stores)
+    const ciphers = await buildCiphers(owner, descriptors)
+    const { localStore, user } = await initLocalStore(ciphers)
+    const storage = new StorageManager({
+      persistence: browserLocalSessionPersistence(),
+      localStore,
+      remoteStore,
+      descriptorLogs: descriptorLogsFrom(stores),
+      ciphers,
+      vaultKeys: owner,
+      descriptors
+    })
+    return { storage, user }
+  }
+
+  const ACCOUNT_DID = 'did:webvh:scid:was.example:x'
+  const ENROLLED_KEY = 'z6MkEnrolledClient'
+  const LADDER_VM = 'z6MkLadderVm'
+  const ANNEX_DID = 'did:webvh:scid:was.example:space:x:gen-AAAAAAAAAAAAAAAA'
+  const OLD_ANNEX_DID =
+    'did:webvh:scid:was.example:space:x:gen-BBBBBBBBBBBBBBBB'
+  const SIGNER_CHECK = {
+    accountDid: ACCOUNT_DID,
+    currentSigningKeys: new Set([ENROLLED_KEY]),
+    doc: {
+      verificationMethod: [
+        {
+          id: `${ACCOUNT_DID}#${ENROLLED_KEY}`,
+          publicKeyMultibase: ENROLLED_KEY
+        },
+        { id: `${ACCOUNT_DID}#${LADDER_VM}`, publicKeyMultibase: LADDER_VM }
+      ],
+      capabilityDelegation: [
+        `${ACCOUNT_DID}#${ENROLLED_KEY}`,
+        `${ACCOUNT_DID}#${LADDER_VM}`
+      ]
+    },
+    clientAnnexDid: ANNEX_DID
+  }
+  const LADDER_SIGNER = `${ACCOUNT_DID}#${LADDER_VM}`
 
   /**
    * A remote store whose `spaceHandle().revoke` is the supplied recorder.
@@ -943,11 +1019,11 @@ describe('StorageManager.revokeAppGrants', () => {
     expect(revoked).toHaveLength(0)
   })
 
-  it('swallows ValidationError from an already-revoked grant', async () => {
+  it("counts the server's AlreadyRevokedError as skipped", async () => {
     const owner = await generateKey()
     const stores = memoryDescriptorStores()
     const remoteStore = makeRevokeRemote(async () => {
-      throw new ValidationError('already revoked')
+      throw new AlreadyRevokedError('already revoked')
     })
     const descriptors = await provisionGovernedCollections(owner, stores)
     const ciphers = await buildCiphers(owner, descriptors)
@@ -981,7 +1057,266 @@ describe('StorageManager.revokeAppGrants', () => {
     expect(outcome).toEqual({ revoked: 0, skipped: 1 })
   })
 
-  it('propagates a non-ValidationError revoke failure', async () => {
+  it.each([
+    ['a 400', 400],
+    ['a 415', 415]
+  ])(
+    'throws a plain ValidationError (%s) after the other POSTs settle',
+    async (_label, status) => {
+      const revoked: string[] = []
+      const { storage, user } = await revokeStorage(async zcap => {
+        const { id } = zcap as { id: string }
+        if (id === 'z-refused') {
+          throw new ValidationError('chain does not verify', { status })
+        }
+        // The refused POST rejects first; the sibling must still land.
+        await new Promise(resolve => setTimeout(resolve, 5))
+        revoked.push(id)
+      })
+      const future = new Date(Date.now() + 1_000_000).toISOString()
+
+      await seedLogin(storage, user, [
+        {
+          id: 'g-refused',
+          target: 'https://was.example/space/x/private-credentials',
+          allowedActions: ['GET'],
+          expires: future,
+          zcap: delegatedZcap({ id: 'z-refused', expires: future })
+        },
+        {
+          id: 'g-live',
+          target: 'https://was.example/space/x/public-credentials',
+          allowedActions: ['GET'],
+          expires: future,
+          zcap: delegatedZcap({ id: 'z-live', expires: future })
+        }
+      ])
+
+      await expect(
+        storage.revokeAppGrants({ origin: APP_ORIGIN, subjectDid: APP_SUBJECT })
+      ).rejects.toMatchObject({ name: 'ValidationError', status })
+      expect(revoked).toEqual(['z-live'])
+    }
+  )
+
+  it('lists only the grants whose POST succeeded in revokedIds', async () => {
+    const { storage, user } = await revokeStorage(async zcap => {
+      if ((zcap as { id: string }).id === 'z-done') {
+        throw new AlreadyRevokedError('already revoked', { status: 400 })
+      }
+    })
+    const future = new Date(Date.now() + 1_000_000).toISOString()
+    await storage.addHistoryLogin({
+      user,
+      origin: EXTERNAL_REQUEST_ORIGIN,
+      grants: [
+        {
+          id: 'g-done',
+          target: 'https://was.example/space/x/private-credentials',
+          allowedActions: ['GET'],
+          expires: future,
+          zcap: delegatedZcap({ id: 'z-done', expires: future })
+        },
+        {
+          id: 'g-live',
+          target: 'https://was.example/space/x/public-credentials',
+          allowedActions: ['GET'],
+          expires: future,
+          zcap: delegatedZcap({ id: 'z-live', expires: future })
+        }
+      ]
+    })
+
+    const outcome = await storage.revokeAgentGrants({
+      controller: APP_SUBJECT
+    })
+
+    expect(outcome).toEqual({ revoked: 1, skipped: 1, revokedIds: ['z-live'] })
+  })
+
+  it('skips an expired grant without a POST', async () => {
+    const revoked: unknown[] = []
+    const { storage, user } = await revokeStorage(async zcap => {
+      revoked.push(zcap)
+    })
+    const past = new Date(Date.now() - 1_000).toISOString()
+
+    await seedLogin(storage, user, [
+      {
+        id: 'g-expired',
+        target: 'https://was.example/space/x/private-credentials',
+        allowedActions: ['GET'],
+        expires: past,
+        zcap: delegatedZcap({ id: 'z-expired', expires: past })
+      }
+    ])
+
+    const outcome = await storage.revokeAppGrants({
+      origin: APP_ORIGIN,
+      subjectDid: APP_SUBJECT,
+      signerCheck: SIGNER_CHECK
+    })
+
+    expect(outcome).toEqual({ revoked: 0, skipped: 1 })
+    expect(revoked).toHaveLength(0)
+  })
+
+  it('skips an annex-signed grant under a swapped generation without a POST', async () => {
+    const revoked: string[] = []
+    const { storage, user } = await revokeStorage(async zcap => {
+      revoked.push((zcap as { id: string }).id)
+    })
+    const future = new Date(Date.now() + 1_000_000).toISOString()
+
+    await seedLogin(storage, user, [
+      {
+        id: 'g-swapped',
+        target: 'https://was.example/space/x/private-credentials',
+        allowedActions: ['GET'],
+        expires: future,
+        zcap: delegatedZcap({
+          id: 'z-swapped',
+          expires: future,
+          signerKeyId: `${OLD_ANNEX_DID}#z6MkVisit`,
+          parent: { controller: OLD_ANNEX_DID, signerKeyId: LADDER_SIGNER }
+        })
+      },
+      {
+        id: 'g-current',
+        target: 'https://was.example/space/x/public-credentials',
+        allowedActions: ['GET'],
+        expires: future,
+        zcap: delegatedZcap({
+          id: 'z-current',
+          expires: future,
+          signerKeyId: `${ANNEX_DID}#z6MkVisit`,
+          parent: { controller: ANNEX_DID, signerKeyId: LADDER_SIGNER }
+        })
+      }
+    ])
+
+    const outcome = await storage.revokeAppGrants({
+      origin: APP_ORIGIN,
+      subjectDid: APP_SUBJECT,
+      signerCheck: SIGNER_CHECK
+    })
+
+    // The current generation's grant is live and POSTed; the swapped one is
+    // dead already.
+    expect(outcome).toEqual({ revoked: 1, skipped: 1 })
+    expect(revoked).toEqual(['z-current'])
+  })
+
+  it('skips a grant whose generation delegation was signed by a struck key', async () => {
+    const revoked: string[] = []
+    const { storage, user } = await revokeStorage(async zcap => {
+      revoked.push((zcap as { id: string }).id)
+    })
+    const future = new Date(Date.now() + 1_000_000).toISOString()
+
+    await seedLogin(storage, user, [
+      {
+        id: 'g-rotted',
+        target: 'https://was.example/space/x/private-credentials',
+        allowedActions: ['GET'],
+        expires: future,
+        zcap: delegatedZcap({
+          id: 'z-rotted',
+          expires: future,
+          signerKeyId: `${ANNEX_DID}#z6MkVisit`,
+          // The pointer still names this generation; the delegation was
+          // re-minted within it and its old signer struck.
+          parent: {
+            controller: ANNEX_DID,
+            signerKeyId: `${ACCOUNT_DID}#z6MkStruckSigner`
+          }
+        })
+      }
+    ])
+
+    const outcome = await storage.revokeAppGrants({
+      origin: APP_ORIGIN,
+      subjectDid: APP_SUBJECT,
+      signerCheck: SIGNER_CHECK
+    })
+
+    expect(outcome).toEqual({ revoked: 0, skipped: 1 })
+    expect(revoked).toEqual([])
+  })
+
+  it('skips an orphaned account-signed grant without a POST', async () => {
+    const revoked: string[] = []
+    const { storage, user } = await revokeStorage(async zcap => {
+      revoked.push((zcap as { id: string }).id)
+    })
+    const future = new Date(Date.now() + 1_000_000).toISOString()
+
+    await seedLogin(storage, user, [
+      {
+        id: 'g-orphaned',
+        target: 'https://was.example/space/x/private-credentials',
+        allowedActions: ['GET'],
+        expires: future,
+        zcap: delegatedZcap({
+          id: 'z-orphaned',
+          expires: future,
+          signerKeyId: `${ACCOUNT_DID}#z6MkDisconnectedClient`
+        })
+      },
+      {
+        id: 'g-enrolled',
+        target: 'https://was.example/space/x/public-credentials',
+        allowedActions: ['GET'],
+        expires: future,
+        zcap: delegatedZcap({
+          id: 'z-enrolled',
+          expires: future,
+          signerKeyId: `${ACCOUNT_DID}#${ENROLLED_KEY}`
+        })
+      }
+    ])
+
+    const outcome = await storage.revokeAppGrants({
+      origin: APP_ORIGIN,
+      subjectDid: APP_SUBJECT,
+      signerCheck: SIGNER_CHECK
+    })
+
+    expect(outcome).toEqual({ revoked: 1, skipped: 1 })
+    expect(revoked).toEqual(['z-enrolled'])
+  })
+
+  it('POSTs an orphaned-looking grant when no signer check is supplied', async () => {
+    const revoked: string[] = []
+    const { storage, user } = await revokeStorage(async zcap => {
+      revoked.push((zcap as { id: string }).id)
+    })
+    const future = new Date(Date.now() + 1_000_000).toISOString()
+
+    await seedLogin(storage, user, [
+      {
+        id: 'g-orphaned',
+        target: 'https://was.example/space/x/private-credentials',
+        allowedActions: ['GET'],
+        expires: future,
+        zcap: delegatedZcap({
+          id: 'z-orphaned',
+          expires: future,
+          signerKeyId: `${ACCOUNT_DID}#z6MkDisconnectedClient`
+        })
+      }
+    ])
+
+    const outcome = await storage.revokeAppGrants({
+      origin: APP_ORIGIN,
+      subjectDid: APP_SUBJECT
+    })
+
+    expect(outcome).toEqual({ revoked: 1, skipped: 0 })
+    expect(revoked).toEqual(['z-orphaned'])
+  })
+
+  it('propagates any other revoke failure', async () => {
     const owner = await generateKey()
     const stores = memoryDescriptorStores()
     const remoteStore = makeRevokeRemote(async () => {

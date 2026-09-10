@@ -804,6 +804,12 @@ export const storageStyles = {
   folderMeta: {
     color: 'text.secondary'
   },
+  // The "Created by ..." line under a collection's meta line, on the folder
+  // card and in the collection-contents header alike.
+  collectionAttribution: {
+    color: 'text.secondary',
+    display: 'block'
+  },
   folderCount: {
     color: 'text.secondary',
     flexShrink: 0,

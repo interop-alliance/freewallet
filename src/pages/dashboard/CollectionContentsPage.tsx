@@ -54,8 +54,12 @@ import {
 } from '@/components/storage/useResourceSource'
 import {
   getCollectionDisplayName,
-  getResourceDisplayName
+  getResourceDisplayName,
+  isWalletCollection
 } from '@/components/storage/displayUtils'
+import { CollectionAttribution } from '@/components/storage/CollectionAttribution'
+import { useConnectedApps } from '@/hooks/useConnectedApps'
+import { attributeCollectionsToApps } from '@/lib/collectionAttribution'
 import { createLogger } from '@/lib/log'
 
 const log = createLogger('fw:ui:storage')
@@ -155,6 +159,23 @@ export function CollectionContentsPage() {
       }
     }
   )
+
+  // The connected application this collection belongs to, for the header's
+  // "Created by" line. A wallet collection names no app, so the load is off
+  // there rather than decrypting the activity log for nothing.
+  const apps = useConnectedApps({
+    storage,
+    enabled: collectionId !== undefined && !isWalletCollection(collectionId)
+  })
+
+  const attributedApp = useMemo(() => {
+    if (!collection) {
+      return undefined
+    }
+    return attributeCollectionsToApps({ collections: [collection], apps }).get(
+      collection.id
+    )
+  }, [apps, collection])
 
   const resources = contentsError ? [] : (contents?.resources ?? [])
   const errorKey = contentsError
@@ -337,6 +358,12 @@ export function CollectionContentsPage() {
                   </Box>
                 )}
               </Typography>
+            )}
+            {collection && (
+              <CollectionAttribution
+                collection={collection}
+                app={attributedApp}
+              />
             )}
           </Stack>
           {collection && (

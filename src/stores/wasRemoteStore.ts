@@ -128,6 +128,33 @@ function controllerDid(controller: string): IDID {
   return controller as IDID
 }
 
+/**
+ * The app-attribution pair as the provisioning ensures take it. The
+ * `generator` is narrowed onto the DID type: an app-provisioned collection's
+ * generator is the connected app's did:key, and a value that is not a DID is
+ * dropped rather than stamped, since attribution is advisory and no
+ * provisioning should fail over it. The origin says which origin that DID was
+ * bound to, so it is dropped with it. Both provisioning paths pass the pair
+ * through this one helper, so they stamp the same thing.
+ *
+ * @param options {object}
+ * @param [options.generator] {string}
+ * @param [options.generatorOrigin] {string}
+ * @returns {{ generator?: IDID, generatorOrigin?: string }}
+ */
+function collectionAttribution({
+  generator,
+  generatorOrigin
+}: {
+  generator?: string
+  generatorOrigin?: string
+}): { generator?: IDID; generatorOrigin?: string } {
+  if (!generator?.startsWith('did:')) {
+    return {}
+  }
+  return { generator: generator as IDID, generatorOrigin }
+}
+
 export class WASRemoteStore {
   public storageServerUrl: string
   public was: WasClient
@@ -624,36 +651,62 @@ export class WASRemoteStore {
    * provisioning time, so anyone on the web can read it without
    * authorization (writes stay capability-only). Policy endpoints are
    * capability-only on the server, so only the wallet -- holding the space
-   * root -- can set it. This is the `ensureUserCollections` pattern minus the
-   * encryption descriptor.
+   * root -- can set it.
+   *
+   * This is was-client's ensure with `encryption: 'plaintext'`: a guarded
+   * create (`If-None-Match: *`) that leaves a standing collection untouched.
+   * A standing collection may be log-governed (an App Connect provisioning
+   * made it so), and its served `encryption` member is the server's own
+   * projection, which a Description PUT may not carry
+   * (`encryption-history-log-governed`); the ensure never re-sends it. The
+   * Space half is skipped by supplying the description of the Space this
+   * session already runs in, since the bound capability may be scoped below
+   * the bare Space URL.
+   *
+   * `generator` and `generatorOrigin` are the collection's app attribution
+   * (the DID of the application it is provisioned for, and the Web origin
+   * that DID was bound to), stamped on the create.
    *
    * @param options {object}
    * @param options.id {string}   the WAS collection id (validated by the caller)
    * @param [options.name] {string}   display name; defaults to the id
-   * @param [options.isPublic] {boolean}   set a collection-level PublicCanRead
-   *   policy after configuring
+   * @param [options.isPublic] {boolean}   grant collection-level world read
+   * @param [options.generator] {string}   the DID of the application this
+   *   collection is provisioned for
+   * @param [options.generatorOrigin] {string}   the Web origin that DID was
+   *   bound to at provisioning time
    * @returns {Promise<string>}   the collection's base URL
    */
   async ensureCollection({
     id,
     name,
-    isPublic
+    isPublic,
+    generator,
+    generatorOrigin
   }: {
     id: string
     name?: string
     isPublic?: boolean
+    generator?: string
+    generatorOrigin?: string
   }): Promise<string> {
     try {
-      const collection = this.#space().collection(id)
-      // `force`: this provisioning upsert runs with the root capability, so
-      // a 404 from the pre-merge describe means the collection is absent.
-      await collection.configure({
-        name: name ?? id,
-        force: true
+      await ensureSpaceAndCollection({
+        was: this.was,
+        spaceId: this.spaceId,
+        controllerDid: this.controller,
+        collectionId: id,
+        collectionName: name ?? id,
+        encryption: 'plaintext',
+        isPublic,
+        ...collectionAttribution({ generator, generatorOrigin }),
+        spaceDescription: {
+          id: this.spaceId,
+          type: ['Space'],
+          controller: this.controller
+        },
+        capability: this.#capability
       })
-      if (isPublic) {
-        await collection.setPublic()
-      }
     } catch (err) {
       log.error('Error provisioning collection', { id, err })
       throw new Error(
@@ -682,17 +735,28 @@ export class WASRemoteStore {
    * URL, so the ensure's Space half is skipped by supplying the description
    * of the Space this session already runs in.
    *
+   * `generator` and `generatorOrigin` are the collection's app attribution,
+   * stamped on the guarded create.
+   *
    * @param options {object}
    * @param options.id {string}   the WAS collection id
    * @param [options.name] {string}   display name; defaults to the id
+   * @param [options.generator] {string}   the DID of the application this
+   *   collection is provisioned for
+   * @param [options.generatorOrigin] {string}   the Web origin that DID was
+   *   bound to at provisioning time
    * @returns {Promise<void>}
    */
   async ensureGovernedCollection({
     id,
-    name
+    name,
+    generator,
+    generatorOrigin
   }: {
     id: string
     name?: string
+    generator?: string
+    generatorOrigin?: string
   }): Promise<void> {
     await ensureSpaceAndCollection({
       was: this.was,
@@ -701,6 +765,7 @@ export class WASRemoteStore {
       collectionId: id,
       collectionName: name ?? id,
       encryption: 'governed',
+      ...collectionAttribution({ generator, generatorOrigin }),
       spaceDescription: {
         id: this.spaceId,
         type: ['Space'],
@@ -872,7 +937,9 @@ export class WASRemoteStore {
         return {
           ...item,
           isPublic,
-          isEncrypted: Boolean(description?.encryption)
+          isEncrypted: Boolean(description?.encryption),
+          generator: description?.generator,
+          generatorOrigin: description?.generatorOrigin
         }
       })
     )

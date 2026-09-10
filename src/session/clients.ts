@@ -11,12 +11,13 @@
  * - `listAccountClients` -- the shared listing, with this session's own client
  *   marked and the label store supplied.
  * - `currentAccountSignerCheck` -- the same verified log reduced to the
- *   account DID plus the enrolled clients' signing-key multibases, for the
- *   Applications surface to check recorded grant signers against (the
- *   current-key-set rule: a grant signed by a since-disconnected client no
- *   longer verifies). The gating on whether a session HAS a promoted account
- *   is app-side, so this wrapper resolves `undefined` rather than throwing
- *   for a guest.
+ *   account DID, the enrolled clients' signing-key multibases, and the
+ *   delegated-clients pointer, for the Applications surface to check
+ *   recorded grants against (the current-key-set rule: a grant signed by a
+ *   since-disconnected client no longer verifies; a transient session's
+ *   grant dies with the generation it chains under). The gating on whether
+ *   a session HAS a promoted account is app-side, so this wrapper resolves
+ *   `undefined` rather than throwing for a guest.
  * - `renameAccountClient` -- writes one label (chosen at enrollment approval,
  *   editable afterwards; the document carries key material, never labels).
  * - `disconnectAccountClient` -- drives the client-revocation epoch cascade
@@ -28,6 +29,7 @@
  * a labels read and nothing else.
  */
 import { clientSigningKeyMultibase } from '@interop/wallet-core/webvh'
+import { delegatedClientsPointer } from '@interop/wallet-core/clientAnnex'
 import { removeClientLabel, setClientLabel } from '@interop/wallet-core/keys'
 import {
   currentAccountSigningKeys as sharedCurrentAccountSigningKeys,
@@ -164,12 +166,13 @@ export async function listAccountClients({
 }
 
 /**
- * The account DID and the signing-key multibases of the account's currently
- * enrolled wallet clients, what a recorded grant signer is checked against.
- * Resolves `undefined` when this session has no promoted did:webvh account to
- * check against (a guest or no-storage session); throws when the log cannot
- * be fetched or verified (callers treating the check as best-effort catch and
- * degrade to "unknown").
+ * The account DID, the signing-key multibases of the account's currently
+ * enrolled wallet clients, the verified document itself, and the annex DID
+ * it currently points at (absent when it points at none), what a recorded
+ * grant is checked against. Resolves `undefined` when this session has no promoted did:webvh
+ * account to check against (a guest or no-storage session); throws when the
+ * log cannot be fetched or verified (callers treating the check as
+ * best-effort catch and degrade to "unknown").
  *
  * @param options {object}
  * @param options.session {Session}
@@ -184,18 +187,22 @@ export async function currentAccountSignerCheck({
     return undefined
   }
   const { pointer } = await requireClientListing(session)
+  const verifiedLog = await verifiedAccountLog({ session, pointer })
   const currentSigningKeys = await sharedCurrentAccountSigningKeys({
     pointer: {
       did: pointer.did,
       spaceId: pointer.spaceId,
       host: pointer.host
     },
-    verifiedLog: await verifiedAccountLog({
-      session,
-      pointer
-    })
+    verifiedLog
   })
-  return { accountDid: pointer.did, currentSigningKeys }
+  const clientAnnexDid = delegatedClientsPointer({ doc: verifiedLog.doc })
+  return {
+    accountDid: pointer.did,
+    currentSigningKeys,
+    doc: verifiedLog.doc,
+    ...(clientAnnexDid !== undefined ? { clientAnnexDid } : {})
+  }
 }
 
 /**

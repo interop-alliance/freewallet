@@ -5,16 +5,20 @@
  * timestamp), skipping rows that do not carry the `AppKeyCredential` marker;
  * `deriveGrantsState` reads the recorded delegation signers against the
  * account's current key set (the current-key-set rule), deriving a
- * client-annex signer as unknown rather than orphaned; `revokeAppAccess`
- * deletes the app key from that collection and records the revocation,
- * POSTing every recorded grant's revocation whatever the row derived as.
+ * client-annex signer as unknown rather than orphaned; `grantRevocationSkip`
+ * reads one recorded grant the same way at revocation time (expired,
+ * orphaned, or chained under a swapped generation is skipped without a
+ * POST); `revokeAppAccess` deletes the app key from that collection and
+ * records the revocation only once every POST has landed.
  */
 import { describe, expect, it, vi } from 'vitest'
 import type { StorageManager } from '@/stores/storageManager'
 import type { StoredCredential } from '@/types/credential'
 import type { User } from '@/types/auth'
+import type { IZcap } from '@interop/data-integrity-core'
 import {
   deriveGrantsState,
+  grantRevocationSkip,
   listConnectedApps,
   revokeAppAccess,
   type AppGrant,
@@ -440,7 +444,8 @@ describe('deriveGrantsState', () => {
   const ANNEX_DID = 'did:webvh:a:h:gen-1'
   const check = {
     accountDid: ACCOUNT_DID,
-    currentSigningKeys: new Set(['zKey'])
+    currentSigningKeys: new Set(['zKey']),
+    doc: {}
   }
 
   it('is unknown without a verified key set to check against', () => {
@@ -487,14 +492,223 @@ describe('deriveGrantsState', () => {
 
   it('is unknown for a grant a transient session minted (annex signer)', () => {
     // The annex VM is never in the account document, so its absence is not
-    // evidence of a disconnect; only the revocation can say whether the
-    // chain under the generation delegation is still alive.
+    // evidence of a disconnect; whether the chain under the generation
+    // delegation is still alive is the pointer's question, not the signer's.
     expect(
       deriveGrantsState({
         grants: grantsSignedBy([`${ANNEX_DID}#zVisit`]),
         signerCheck: check
       })
     ).toBe('unknown')
+  })
+})
+
+describe('grantRevocationSkip', () => {
+  const ACCOUNT_DID = 'did:webvh:s:h:x'
+  const ANNEX_DID = 'did:webvh:scid:h:space:s1:gen-AAAAAAAAAAAAAAAA'
+  const OLD_ANNEX_DID = 'did:webvh:scid:h:space:s1:gen-BBBBBBBBBBBBBBBB'
+  const ROOT = 'urn:zcap:root:x'
+  const NOW = Date.parse('2026-09-10T00:00:00Z')
+  const FUTURE = '2026-09-11T00:00:00Z'
+  // The ladder VM that signed the current generation delegation, and the
+  // enrolled client key, are the two `capabilityDelegation` members.
+  const check = {
+    accountDid: ACCOUNT_DID,
+    currentSigningKeys: new Set(['zKey']),
+    doc: {
+      verificationMethod: [
+        { id: `${ACCOUNT_DID}#zKey`, publicKeyMultibase: 'zKey' },
+        { id: `${ACCOUNT_DID}#zLadderVm`, publicKeyMultibase: 'zLadderVm' }
+      ],
+      capabilityDelegation: [`${ACCOUNT_DID}#zKey`, `${ACCOUNT_DID}#zLadderVm`]
+    },
+    clientAnnexDid: ANNEX_DID
+  }
+
+  /**
+   * A recorded grant as the delegation suite writes it: the chain sits in
+   * the proof, the parent embedded as its last link when there is one.
+   */
+  function grant({
+    expires = FUTURE,
+    signerKeyId,
+    parent
+  }: {
+    expires?: string
+    signerKeyId?: string
+    parent?: { controller: string; signerKeyId?: string }
+  }): IZcap {
+    const embedded = parent && {
+      id: 'urn:zcap:generation',
+      controller: parent.controller,
+      parentCapability: ROOT,
+      ...(parent.signerKeyId
+        ? { proof: { verificationMethod: parent.signerKeyId } }
+        : {})
+    }
+    return {
+      id: 'urn:zcap:one',
+      controller: APP_DID,
+      parentCapability: embedded ? embedded.id : ROOT,
+      expires,
+      proof: {
+        capabilityChain: embedded ? [ROOT, embedded] : [ROOT],
+        ...(signerKeyId ? { verificationMethod: signerKeyId } : {})
+      }
+    } as unknown as IZcap
+  }
+
+  const currentGeneration = {
+    controller: ANNEX_DID,
+    signerKeyId: `${ACCOUNT_DID}#zLadderVm`
+  }
+
+  it('skips an expired grant, with or without a check', () => {
+    const expired = grant({ expires: '2026-09-09T00:00:00Z' })
+    expect(grantRevocationSkip({ zcap: expired, now: NOW })).toBe('expired')
+    expect(
+      grantRevocationSkip({ zcap: expired, signerCheck: check, now: NOW })
+    ).toBe('expired')
+  })
+
+  it('does not read an absent or unparseable expires as expired', () => {
+    expect(
+      grantRevocationSkip({ zcap: grant({ expires: 'soon' }), now: NOW })
+    ).toBeUndefined()
+    expect(
+      grantRevocationSkip({
+        zcap: grant({ expires: undefined as unknown as string }),
+        now: NOW
+      })
+    ).toBeUndefined()
+  })
+
+  it('POSTs everything unexpired without a check', () => {
+    expect(
+      grantRevocationSkip({
+        zcap: grant({ signerKeyId: `${ACCOUNT_DID}#zGone` }),
+        now: NOW
+      })
+    ).toBeUndefined()
+  })
+
+  it('skips an orphaned account-signed grant', () => {
+    expect(
+      grantRevocationSkip({
+        zcap: grant({ signerKeyId: `${ACCOUNT_DID}#zGone` }),
+        signerCheck: check,
+        now: NOW
+      })
+    ).toBe('orphaned')
+  })
+
+  it('POSTs an account-signed grant whose signer is still enrolled', () => {
+    expect(
+      grantRevocationSkip({
+        zcap: grant({ signerKeyId: `${ACCOUNT_DID}#zKey` }),
+        signerCheck: check,
+        now: NOW
+      })
+    ).toBeUndefined()
+  })
+
+  it('POSTs a legacy grant that recorded no signer', () => {
+    expect(
+      grantRevocationSkip({ zcap: grant({}), signerCheck: check, now: NOW })
+    ).toBeUndefined()
+  })
+
+  it('skips a grant whose embedded parent was signed by a key the document dropped', () => {
+    // The current-key-set rule on the PARENT: a generation delegation
+    // replaced within its generation (a revocation remint, a signer-death
+    // renewal) leaves the old one signed by a struck key, whatever the
+    // pointer still says.
+    expect(
+      grantRevocationSkip({
+        zcap: grant({
+          signerKeyId: `${ANNEX_DID}#zVisit`,
+          parent: { controller: ANNEX_DID, signerKeyId: `${ACCOUNT_DID}#zGone` }
+        }),
+        signerCheck: check,
+        now: NOW
+      })
+    ).toBe('signer-gone')
+  })
+
+  it('skips an annex-signed grant whose generation was swapped', () => {
+    expect(
+      grantRevocationSkip({
+        zcap: grant({
+          signerKeyId: `${OLD_ANNEX_DID}#zVisit`,
+          parent: {
+            controller: OLD_ANNEX_DID,
+            signerKeyId: `${ACCOUNT_DID}#zLadderVm`
+          }
+        }),
+        signerCheck: check,
+        now: NOW
+      })
+    ).toBe('generation-swapped')
+  })
+
+  it('POSTs an annex-signed grant when the document points at no generation', () => {
+    // Fail-open: no pointer is no evidence about the generation.
+    expect(
+      grantRevocationSkip({
+        zcap: grant({
+          signerKeyId: `${ANNEX_DID}#zVisit`,
+          parent: currentGeneration
+        }),
+        signerCheck: { ...check, clientAnnexDid: undefined },
+        now: NOW
+      })
+    ).toBeUndefined()
+  })
+
+  it('POSTs a grant whose embedded parent carries no proof key', () => {
+    // Fail-open, as wallet-core's revocation reads it: an uncheckable chain
+    // is not a dead one.
+    expect(
+      grantRevocationSkip({
+        zcap: grant({
+          signerKeyId: `${ANNEX_DID}#zVisit`,
+          parent: { controller: ANNEX_DID }
+        }),
+        signerCheck: check,
+        now: NOW
+      })
+    ).toBeUndefined()
+  })
+
+  it('takes no pointer reading on an embedded parent that is not an annex delegation', () => {
+    expect(
+      grantRevocationSkip({
+        zcap: grant({
+          signerKeyId: 'did:key:zOther#zOther',
+          parent: {
+            controller: 'did:key:zOther',
+            signerKeyId: `${ACCOUNT_DID}#zKey`
+          }
+        }),
+        signerCheck: check,
+        now: NOW
+      })
+    ).toBeUndefined()
+  })
+
+  it('POSTs an annex-signed grant under the pointed generation', () => {
+    // The visit key is never in the account document, so the orphaned
+    // reading must not apply to a grant whose generation still stands.
+    expect(
+      grantRevocationSkip({
+        zcap: grant({
+          signerKeyId: `${ANNEX_DID}#zVisit`,
+          parent: currentGeneration
+        }),
+        signerCheck: check,
+        now: NOW
+      })
+    ).toBeUndefined()
   })
 })
 
@@ -538,20 +752,26 @@ describe('revokeAppAccess', () => {
     })
   })
 
-  it('posts the grant revocations whatever the row derived as', async () => {
+  it('hands the signer check to the grant revocation, which settles the skips', async () => {
     const storage = fakeStorage({ appKeys: [], history: [] })
+    const signerCheck = {
+      accountDid: 'did:webvh:s:h:x',
+      currentSigningKeys: new Set(['zKey']),
+      doc: {},
+      clientAnnexDid: 'did:webvh:a:h:gen-current'
+    }
 
-    const outcome = await revokeAppAccess({ storage, user, app })
+    const outcome = await revokeAppAccess({ storage, user, app, signerCheck })
 
-    // A grant minted in a transient session is signed by an annex key the
-    // account document never lists, so its row derives as unknown while its
-    // chain may still be alive under the generation delegation. The
-    // revocations are POSTed whatever the marker says.
+    // The row's marker gates nothing here: which recorded grants are POSTed
+    // and which are dead already is `revokeAppGrants`'s reading of the same
+    // verified document, so the check is passed through whole.
     expect(outcome).toEqual({ revoked: 1, skipped: 0, rotated: 0 })
     expect(storage.revokeAppGrants).toHaveBeenCalledWith({
       origin: 'https://app.example',
       subjectDid: APP_DID,
-      items: []
+      items: [],
+      signerCheck
     })
     expect(storage.deleteAppKey).toHaveBeenCalledWith({ cid: 'c-app' })
   })
@@ -565,6 +785,23 @@ describe('revokeAppAccess', () => {
     await expect(revokeAppAccess({ storage, user, app })).rejects.toThrow(
       'network down'
     )
+    expect(storage.deleteAppKey).not.toHaveBeenCalled()
+    expect(storage.addHistoryAppRevoke).not.toHaveBeenCalled()
+  })
+
+  it('does not delete the credential when the server refuses a revocation', async () => {
+    // A plain ValidationError is a refusal, not a no-op: a read-replica lag
+    // on a live grant answers the same way, so recording the Revoke here
+    // would list the app as revoked while it keeps access.
+    const storage = fakeStorage({ appKeys: [], history: [] })
+    const refused = Object.assign(new Error('chain does not verify'), {
+      name: 'ValidationError'
+    })
+    ;(storage.revokeAppGrants as ReturnType<typeof vi.fn>).mockRejectedValue(
+      refused
+    )
+
+    await expect(revokeAppAccess({ storage, user, app })).rejects.toBe(refused)
     expect(storage.deleteAppKey).not.toHaveBeenCalled()
     expect(storage.addHistoryAppRevoke).not.toHaveBeenCalled()
   })

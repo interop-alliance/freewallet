@@ -18,6 +18,15 @@ export type StorageCollection = {
   public?: boolean
   isPublic?: boolean
   isEncrypted?: boolean
+  /**
+   * The DID of the application this collection was provisioned for,
+   * controller-asserted at App Connect provisioning time.
+   */
+  generator?: string
+  /**
+   * The Web origin the `generator` DID was bound to at provisioning time.
+   */
+  generatorOrigin?: string
 }
 
 export type StorageResource = {

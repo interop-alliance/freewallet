@@ -586,44 +586,117 @@ describe('mintSpaceId', () => {
 })
 
 describe('WASRemoteStore.ensureCollection', () => {
-  it('configures a plaintext collection and skips setPublic by default', async () => {
-    const configure = vi.fn().mockResolvedValue(undefined)
+  /**
+   * The server's echo of a create, the shape `replaceDescription` resolves.
+   */
+  const echo = vi.fn(async (description: unknown) => ({
+    description,
+    etag: 'v1'
+  }))
+
+  it('creates a plaintext collection and skips setPublic by default', async () => {
+    const describeWithEtag = vi.fn().mockResolvedValue(null)
+    const replaceDescription = vi.fn(echo)
     const setPublic = vi.fn().mockResolvedValue(undefined)
-    const collection = vi.fn().mockReturnValue({ configure, setPublic })
+    const collection = vi
+      .fn()
+      .mockReturnValue({ describeWithEtag, replaceDescription, setPublic })
     const store = storeWithStubbedClient({
       space: vi.fn().mockReturnValue({ collection })
     })
 
     await store.ensureCollection({ id: 'example-app-data' })
     expect(collection).toHaveBeenCalledWith('example-app-data')
-    // No encryption descriptor: the collection is provisioned plaintext.
-    expect(configure).toHaveBeenCalledWith({
-      name: 'example-app-data',
-      force: true
-    })
+    // No encryption descriptor: the collection is provisioned plaintext, by
+    // a guarded create.
+    expect(replaceDescription).toHaveBeenCalledWith(
+      { name: 'example-app-data' },
+      { ifNoneMatch: true }
+    )
     expect(setPublic).not.toHaveBeenCalled()
   })
 
+  it('stamps the attribution pair on the create', async () => {
+    const describeWithEtag = vi.fn().mockResolvedValue(null)
+    const replaceDescription = vi.fn(echo)
+    const collection = vi
+      .fn()
+      .mockReturnValue({ describeWithEtag, replaceDescription })
+    const store = storeWithStubbedClient({
+      space: vi.fn().mockReturnValue({ collection })
+    })
+
+    await store.ensureCollection({
+      id: 'example-app-data',
+      generator: 'did:key:z6MkApp',
+      generatorOrigin: 'https://app.example'
+    })
+    expect(replaceDescription).toHaveBeenCalledWith(
+      {
+        name: 'example-app-data',
+        generator: 'did:key:z6MkApp',
+        generatorOrigin: 'https://app.example'
+      },
+      { ifNoneMatch: true }
+    )
+  })
+
+  it('leaves a standing log-governed collection untouched', async () => {
+    const describeWithEtag = vi.fn().mockResolvedValue({
+      description: {
+        name: 'Example App Data',
+        encryption: {
+          scheme: 'edv',
+          currentEpoch: 'epoch-0',
+          history: {
+            method: 'resource-log:0.1',
+            resource:
+              'https://example.test/space/space-id/example-app-data/meta/log'
+          }
+        }
+      },
+      etag: 'v0'
+    })
+    const replaceDescription = vi.fn().mockResolvedValue(undefined)
+    const collection = vi
+      .fn()
+      .mockReturnValue({ describeWithEtag, replaceDescription })
+    const store = storeWithStubbedClient({
+      space: vi.fn().mockReturnValue({ collection })
+    })
+
+    await store.ensureCollection({ id: 'example-app-data' })
+    // The served `encryption` is the server's projection of the governing
+    // log; a Description PUT carrying it would be refused, so none is sent.
+    expect(replaceDescription).not.toHaveBeenCalled()
+  })
+
   it('sets a collection-level PublicCanRead policy with isPublic', async () => {
-    const configure = vi.fn().mockResolvedValue(undefined)
+    const describeWithEtag = vi.fn().mockResolvedValue(null)
+    const replaceDescription = vi.fn(echo)
     const setPublic = vi.fn().mockResolvedValue(undefined)
-    const collection = vi.fn().mockReturnValue({ configure, setPublic })
+    const collection = vi
+      .fn()
+      .mockReturnValue({ describeWithEtag, replaceDescription, setPublic })
     const store = storeWithStubbedClient({
       space: vi.fn().mockReturnValue({ collection })
     })
 
     await store.ensureCollection({ id: 'example-app-public', isPublic: true })
-    expect(configure).toHaveBeenCalledWith({
-      name: 'example-app-public',
-      force: true
-    })
+    expect(replaceDescription).toHaveBeenCalledWith(
+      { name: 'example-app-public' },
+      { ifNoneMatch: true }
+    )
     expect(setPublic).toHaveBeenCalledOnce()
   })
 
   it('wraps a setPublic failure in the provisioning error', async () => {
-    const configure = vi.fn().mockResolvedValue(undefined)
+    const describeWithEtag = vi.fn().mockResolvedValue(null)
+    const replaceDescription = vi.fn(echo)
     const setPublic = vi.fn().mockRejectedValue(new Error('policy boom'))
-    const collection = vi.fn().mockReturnValue({ configure, setPublic })
+    const collection = vi
+      .fn()
+      .mockReturnValue({ describeWithEtag, replaceDescription, setPublic })
     const store = storeWithStubbedClient({
       space: vi.fn().mockReturnValue({ collection })
     })
