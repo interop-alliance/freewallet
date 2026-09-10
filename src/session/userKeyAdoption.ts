@@ -24,11 +24,7 @@
  * one (the delegation re-mint), so a helper living in either would close a
  * cycle.
  */
-import type {
-  IKeyAgreementKey,
-  IKeyResolver,
-  IZcap
-} from '@interop/data-integrity-core'
+import type { IZcap } from '@interop/data-integrity-core'
 import type { ZcapClient } from '@interop/ezcap'
 import { userKeyVaultKeys, type UserKey } from '@interop/wallet-core/keys'
 import { WAS_SERVER_URL } from '@/app.config'
@@ -50,12 +46,8 @@ const log = createLogger('fw:session:userkey')
  * @param options.storageServerUrl {string}
  * @param options.zcapClient {ZcapClient}   an enrolled client's signing client
  * @param options.spaceId {string}   the data Space id
- * @param options.from {object}   the pre-rotation vault keys
- * @param options.from.keyAgreementKey {IKeyAgreementKey}
- * @param options.from.keyResolver {IKeyResolver}
- * @param options.to {object}   the post-rotation vault keys
- * @param options.to.keyAgreementKey {IKeyAgreementKey}
- * @param options.to.keyResolver {IKeyResolver}
+ * @param options.from {UserKey}   the pre-rotation user key
+ * @param options.to {UserKey}   the post-rotation user key
  * @param [options.capability] {IZcap}   an invocation capability every request
  *   rides (a transient session's generation delegation); the root capability
  *   is invoked otherwise
@@ -72,8 +64,8 @@ export async function rewrapUnlockRegistryToUserKey({
   storageServerUrl: string
   zcapClient: ZcapClient
   spaceId: string
-  from: { keyAgreementKey: IKeyAgreementKey; keyResolver: IKeyResolver }
-  to: { keyAgreementKey: IKeyAgreementKey; keyResolver: IKeyResolver }
+  from: UserKey
+  to: UserKey
   capability?: IZcap
 }): Promise<boolean> {
   try {
@@ -108,7 +100,7 @@ export async function rewrapUnlockRegistryToUserKey({
  * the record is still on the old one.
  *
  * Guarded on a configured storage server (and on the session actually
- * holding vault keys) because the registry has exactly one home, the remote
+ * holding a user key) because the registry has exactly one home, the remote
  * Space: with no server there is nothing to re-seal, which counts as
  * success, as does an account with no registry written yet.
  *
@@ -128,8 +120,8 @@ export async function resealUnlockRegistryForRotation({
   spaceId: string
   userKey: UserKey
 }): Promise<boolean> {
-  const { keyAgreementKey, keyResolver } = session.profile
-  if (!keyAgreementKey || !keyResolver || !WAS_SERVER_URL) {
+  const from = session.profile.userKey
+  if (!from || !WAS_SERVER_URL) {
     return true
   }
   // The visit's own authority, read here rather than threaded by every
@@ -141,8 +133,8 @@ export async function resealUnlockRegistryForRotation({
     storageServerUrl: WAS_SERVER_URL,
     zcapClient: session.profile.zcapClient,
     spaceId,
-    from: { keyAgreementKey, keyResolver },
-    to: userKeyVaultKeys({ userKey }),
+    from,
+    to: userKey,
     ...(capability ? { capability } : {})
   })
 }

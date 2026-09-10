@@ -94,6 +94,7 @@ function fakeSession(): {
     profile: {
       zcapClient: { isFakeZcapClient: true },
       standingUnlock: { ...standingMembers() },
+      userKey: { id: 'did:key:z6LSVault', secret: new Uint8Array(32) },
       keyAgreementKey: { id: 'did:key:z6LSVault#kak' },
       keyResolver: async () => ({})
     },

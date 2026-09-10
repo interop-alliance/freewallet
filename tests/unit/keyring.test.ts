@@ -625,9 +625,6 @@ describe('the client key set under the unlock layer', () => {
     expect(Array.from(found!.clientKeys!.userKey!.secret)).toEqual(
       Array.from(userKey.secret)
     )
-    expect(Array.from(found!.clientKeys!.userKey!.signingSeed!)).toEqual(
-      Array.from(userKey.signingSeed)
-    )
   })
 
   it('round-trips the did:webvh update-key seeds and re-wraps via persistClientKeys', async () => {

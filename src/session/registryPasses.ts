@@ -269,13 +269,13 @@ export async function backfillRegistryPass({
 }: SharedRegistryPassOptions): Promise<MendOutcome> {
   const record = await backfillPassphraseUnlockMethod({ session })
   registry.invalidate()
-  // A null return covers two states. A session holding no vault keys can
-  // read no registry at all, which is a refusal; a registry needing no
-  // change is a no-op.
+  // A null return covers two states. A session holding no user key can read
+  // no registry at all, which is a refusal; a registry needing no change is a
+  // no-op.
   if (record) {
     return { outcome: 'clean' }
   }
-  return session.profile.keyAgreementKey
+  return session.profile.userKey
     ? { outcome: 'noop' }
-    : { outcome: 'refused', detail: { reason: 'no-vault-keys' } }
+    : { outcome: 'refused', detail: { reason: 'no-user-key' } }
 }

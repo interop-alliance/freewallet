@@ -198,6 +198,13 @@ fired beside the block (the did:web projection mend). It carries this
 login's mend report: one entry per invariant a mender reported, the routing
 entries first.
 
+The unlock-methods registry record is signed as well as sealed: an
+eddsa-jcs-2022 proof by the Ed25519 key the account's user key derives,
+verified before the record is decrypted. It bounds authorship, since no host
+holds that key. It does not bound replay of a body the account itself signed
+under a superseded key generation the roster still escrows, which is an open
+item.
+
 The `Session` object lives in the Zustand `authStore` and is in-memory only,
 so reloading the browser logs the user out. Record authenticity, the replay
 bound, the rotation ceremony, and each registry repair are in ["Session &

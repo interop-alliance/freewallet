@@ -4,6 +4,12 @@
 
 ### Added
 
+- The unlock-methods registry record carries a Data Integrity proof over its
+  frame members, signed by the Ed25519 key the account's user key derives and
+  verified before the record is decrypted, so a storage host cannot author a
+  registry the wallet acts on. A record whose proof does not verify refuses
+  with the new `UnlockRegistryProofError`; the re-seal repair rethrows it
+  rather than carrying the body forward.
 - The revocation-skip tests build their recorded grants and the account
   signer check from `@interop/wallet-core/testing`, the one copy wallet-core's
   own `classifyGrantRevocationRefusal` tests assert against. The lint
@@ -58,6 +64,9 @@
 
 ### Changed
 
+- The stored unlock-methods envelope moves to frame version 2. A version-1
+  (unsigned) record is refused as unusable rather than migrated. The
+  browser-local client-key record stays unsigned at its own version.
 - The CHAPI popup canonicalizes the requesting origin once where it reads it
   (`requestingOriginOf` in `src/lib/walletRequest/classify.ts`), so the
   app-key credential's `credentialSubject.origin`, the returning-app match,

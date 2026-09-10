@@ -22,7 +22,6 @@ import type { IKeyAgreementKey, IZcap } from '@interop/data-integrity-core'
 import type { ZcapClient } from '@interop/ezcap'
 import {
   unwrapUserKeyGenerations,
-  userKeyVaultKeys,
   type UserKey,
   type UserKeyRosterReadResult
 } from '@interop/wallet-core/keys'
@@ -33,6 +32,7 @@ import { RecordEnvelopeDecryptError } from '@/session/recordEnvelope'
 import {
   getUnlockMethods,
   rewrapUnlockMethodsRecord,
+  UnlockRegistryProofError,
   UnlockRegistryStaleSealError,
   type UnlockMethodsRecord
 } from '@/session/unlockMethods'
@@ -152,12 +152,19 @@ export async function repairStaleUnlockRegistrySeal({
  * the credential's own standing key-agreement key rather than an enrolled
  * client's, and every request rides the visit's generation delegation.
  *
- * The two failure modes are kept apart. A generation that does not open the
+ * The three failure modes are kept apart. A generation that does not open the
  * record is the expected outcome for every candidate but one, so the walk
  * moves on; a failure AFTER the record opened (the re-wrap, or the PUT) stops
  * the walk -- the right generation has been found and the mend is one
  * transient error away, so retrying the remaining generations would only
- * report the wrong thing.
+ * report the wrong thing. A record that opened under a generation's key and
+ * whose proof did not verify is tampering, and the refusal is rethrown rather
+ * than reported: re-sealing it would carry a forged body forward under the
+ * current key, signed by the account itself.
+ *
+ * A forged record signed by some key of the host's own opens under no
+ * generation at all, so the walk runs out and reports `unrepaired`, and
+ * nothing is written.
  *
  * @param options {object}
  * @param options.zcapClient {ZcapClient}   the client the reads and the PUT
@@ -191,7 +198,6 @@ export async function resealRegistryFromEscrow({
   if (!WAS_SERVER_URL) {
     return 'unrepaired'
   }
-  const to = userKeyVaultKeys({ userKey })
   const generations = await unwrapUserKeyGenerations({
     descriptor,
     clientKeyAgreementKey: unwrapKey
@@ -207,11 +213,18 @@ export async function resealRegistryFromEscrow({
         storageServerUrl: WAS_SERVER_URL,
         zcapClient,
         spaceId,
-        from: userKeyVaultKeys({ userKey: generation }),
-        to,
+        from: generation,
+        to: userKey,
         ...(capability ? { capability } : {})
       })
     } catch (err) {
+      if (err instanceof UnlockRegistryProofError) {
+        // The record opened under this generation's key and its proof did
+        // not verify: the host tampered with it. Re-sealing it would launder
+        // a forged body into an account-signed one, so the walk stops here
+        // and the refusal reaches the caller.
+        throw err
+      }
       if (err instanceof RecordEnvelopeDecryptError) {
         // The wrong generation: expected for every candidate but one, so it
         // is not worth a warning. The caller reports the state once the loop

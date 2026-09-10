@@ -84,11 +84,19 @@ vi.mock('@interop/wallet-core/keys', async importOriginal => ({
   unwrapUserKeyGenerations: vi.fn(async () => wasState.generations)
 }))
 
-import { mintUserKey, userKeyVaultKeys } from '@interop/wallet-core/keys'
+import {
+  mintUserKey,
+  userKeySigningKeyMultibase,
+  userKeyVaultKeys
+} from '@interop/wallet-core/keys'
+import { recordSignerFromSeed } from '@interop/wallet-core/keyring'
+import { UNLOCK_METHODS_COLLECTION } from '@/app.config'
+import { wrapRecordEnvelope } from '@/session/recordEnvelope'
 import { browserLocalSessionPersistence } from '@/session/persistence'
 import {
   getUnlockMethods,
   updateUnlockMethods,
+  UnlockRegistryProofError,
   UnlockRegistryStaleSealError,
   type UnlockMethodsRecord
 } from '@/session/unlockMethods'
@@ -257,7 +265,7 @@ describe('the stale-seal detector', () => {
     await seedRegistry({ session, record: sampleRecord() })
     // A frame stamped by a future client: refused before any decrypt is
     // attempted, so it is not a seal problem.
-    ;(wasState.records.get(SPACE_ID) as { version: number }).version = 2
+    ;(wasState.records.get(SPACE_ID) as { version: number }).version = 3
 
     await expect(getUnlockMethods({ session })).rejects.not.toBeInstanceOf(
       UnlockRegistryStaleSealError
@@ -326,6 +334,108 @@ describe('the login-time re-seal repair', () => {
     })
 
     expect(outcome).toBe('unrepaired')
+  })
+})
+
+describe('the re-seal repair and the record proof', () => {
+  /**
+   * Seals a registry body to a user key's vault KAK and signs it with a key
+   * of the caller's own -- the storage host authoring a record it can make
+   * decrypt but cannot make verify.
+   *
+   * @param options {object}
+   * @param options.userKey {UserKey}   the key the body is sealed to
+   * @param options.signerSeed {Uint8Array}   the forger's Ed25519 seed
+   * @returns {Promise<unknown>}   the stored frame
+   */
+  async function forgedRecord({
+    userKey,
+    signerSeed
+  }: {
+    userKey: UserKey
+    signerSeed: Uint8Array
+  }): Promise<unknown> {
+    const { keyAgreementKey, keyResolver } = userKeyVaultKeys({ userKey })
+    return await wrapRecordEnvelope({
+      data: sampleRecord() as never,
+      version: 2,
+      collectionId: UNLOCK_METHODS_COLLECTION.id,
+      keyAgreementKey,
+      keyResolver,
+      signer: await recordSignerFromSeed({ seed: signerSeed })
+    })
+  }
+
+  it('reports unrepaired for a record the host signed with a key of its own', async () => {
+    const oldKey = await mintUserKey()
+    const currentKey = await mintUserKey()
+    const session = makeSession({ userKey: currentKey })
+    // Sealed so an escrowed generation's KAK opens it, signed by nobody the
+    // account knows.
+    wasState.records.set(
+      SPACE_ID,
+      await forgedRecord({
+        userKey: oldKey,
+        signerSeed: new Uint8Array(32).fill(9)
+      })
+    )
+    wasState.versions.set(SPACE_ID, 1)
+    wasState.generations = [oldKey, currentKey]
+
+    const outcome = await repairStaleUnlockRegistrySeal({
+      session,
+      rosterRead: rosterReadFor({ userKey: currentKey }),
+      context: enrolledContext()
+    })
+
+    // The forged body is never carried forward: no generation's signing key
+    // signed it, so the walk runs out with nothing written.
+    expect(outcome).toBe('unrepaired')
+  })
+
+  it('re-signs the repaired record under the current user key', async () => {
+    const oldKey = await mintUserKey()
+    const currentKey = await mintUserKey()
+    const session = makeSession({ userKey: oldKey })
+    await seedRegistry({ session, record: sampleRecord() })
+    swapVaultKeys({ session, userKey: currentKey })
+    wasState.generations = [oldKey, currentKey]
+
+    await repairStaleUnlockRegistrySeal({
+      session,
+      rosterRead: rosterReadFor({ userKey: currentKey }),
+      context: enrolledContext()
+    })
+
+    const stored = wasState.records.get(SPACE_ID) as {
+      proof: { verificationMethod: string }
+    }
+    const multibase = await userKeySigningKeyMultibase({ userKey: currentKey })
+    expect(stored.proof.verificationMethod).toBe(
+      `did:key:${multibase}#${multibase}`
+    )
+  })
+
+  it('rethrows rather than re-sealing a record the superseded generation signed but whose proof fails', async () => {
+    const oldKey = await mintUserKey()
+    const currentKey = await mintUserKey()
+    const session = makeSession({ userKey: oldKey })
+    await seedRegistry({ session, record: sampleRecord() })
+    // The host kept the account's own proof and swapped the ciphertext.
+    const stored = wasState.records.get(SPACE_ID) as {
+      wrapped: { jwe: { ciphertext?: string } }
+    }
+    stored.wrapped.jwe.ciphertext = 'dGFtcGVyZWQ'
+    swapVaultKeys({ session, userKey: currentKey })
+    wasState.generations = [oldKey, currentKey]
+
+    await expect(
+      repairStaleUnlockRegistrySeal({
+        session,
+        rosterRead: rosterReadFor({ userKey: currentKey }),
+        context: enrolledContext()
+      })
+    ).rejects.toBeInstanceOf(UnlockRegistryProofError)
   })
 })
 

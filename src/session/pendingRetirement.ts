@@ -41,7 +41,10 @@
  * only when that marker names the credential logging in at its own unlock
  * Space; a completed change never leaves a marker behind, so the forbidden
  * direction -- an old passphrase establishing itself back into an account
- * it was rotated off, and retiring the current one -- cannot fire.
+ * it was rotated off, and retiring the current one -- cannot fire. The
+ * marker is read through `getUnlockMethods`, which verifies the registry
+ * record's proof against the account's own user key before it decrypts, so
+ * the arm only ever sees a marker the account itself wrote.
  *
  * The same entry point mends the other damaged shape of that entry: a BARE
  * entry, one whose identity members are absent while the login credential's

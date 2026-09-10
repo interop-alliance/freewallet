@@ -34,6 +34,7 @@ function fakeSession({ storage }: { storage: string }): {
     user: { id: 'did:key:zClientA' },
     isGuest: false,
     profile: {
+      userKey: { id: 'did:key:zClientUserKey', secret: new Uint8Array(32) },
       keyAgreementKey: { publicKeyMultibase: 'zClientKak' },
       keyResolver: { resolve: vi.fn() },
       unlockMethod: undefined

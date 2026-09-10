@@ -26,6 +26,9 @@ const state = vi.hoisted(() => ({
   enrolled: true,
   // Whether a registry record exists at all.
   registry: true,
+  // Whether the served registry record fails its proof check under this
+  // session's user key -- another key generation's record, or a forgery.
+  registryStaleSeal: false,
   // The registry's passphrase entry, as this login reads it.
   entry: null as unknown,
   // The registry's passkey entries, as a passkey login reads them.
@@ -140,6 +143,9 @@ vi.mock('@/session/unlockMethods', async importOriginal => {
     await importOriginal<typeof import('@/session/unlockMethods')>()
   const read = async () => {
     state.calls.push('getUnlockMethods')
+    if (state.registryStaleSeal) {
+      throw new actual.UnlockRegistryStaleSealError()
+    }
     if (!state.registry) {
       return null
     }
@@ -350,6 +356,7 @@ beforeEach(() => {
   state.calls = []
   state.enrolled = true
   state.registry = true
+  state.registryStaleSeal = false
   state.entry = entryFor({ keyAgreementKeyMultibase: OTHER_KAK })
   state.passkeyEntries = []
   state.loginPasskeyStanding = true
@@ -865,6 +872,26 @@ describe('repairTornPassphraseRetirement', () => {
     })
     expect(state.calls).toEqual(['getUnlockMethods'])
     expect(state.calls).not.toContain('putUnlockMethods')
+  })
+
+  it('drives no arm from a registry record another key signed', async () => {
+    // The record verifies under nobody the session holds, so the read refuses
+    // before it decrypts and no marker is ever in hand.
+    state.registryStaleSeal = true
+    state.loginCredentialStanding = false
+    state.entry = tornChangeEntry()
+
+    await expect(
+      repairTornPassphraseRetirement({
+        session: makeSession(),
+        found: makeFound(),
+        credential: { secret: 'new-pass' }
+      })
+    ).rejects.toMatchObject({ name: 'UnlockRegistryStaleSealError' })
+
+    expect(state.calls).toEqual(['getUnlockMethods'])
+    expect(vi.mocked(establishStandingUnlock)).not.toHaveBeenCalled()
+    expect(vi.mocked(rotateOffUnlockCredential)).not.toHaveBeenCalled()
   })
 
   it('skips a passkey login', async () => {

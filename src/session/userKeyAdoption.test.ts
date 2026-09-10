@@ -29,7 +29,16 @@ const { adoptRotatedUserKey, adoptRotatedUserKeyInBand } =
   await import('@/session/userKeyAdoption')
 
 /**
- * A session stub carrying only what the adoption touches: the vault keys it
+ * The pre-rotation user key a session stub carries when the caller names
+ * none: what the registry re-seal reads `from`.
+ */
+const OLD_USER_KEY = {
+  id: 'did:key:z6LSAdoptionOldUserKey',
+  secret: new Uint8Array(32)
+} as UserKey
+
+/**
+ * A session stub carrying only what the adoption touches: the user key it
  * re-seals from, the epoch pin store and client-key persist hook the in-band
  * step drives, and a storage double recording which adoption method ran.
  *
@@ -53,7 +62,9 @@ function makeSession({ userKey }: { userKey?: UserKey } = {}): {
       zcapClient: {},
       keyAgreementKey: { id: 'urn:old-kak' },
       keyResolver: async () => ({}),
-      ...(userKey ? { userKey } : {})
+      // The pre-rotation key the re-seal reads `from`, unless the caller
+      // names the key this session is already on.
+      userKey: userKey ?? OLD_USER_KEY
     },
     persistence: {
       epochPins: { saveFromDescriptor: vi.fn(async () => {}) }

@@ -124,7 +124,7 @@ const DECLARATIONS: ReadonlyArray<
       'forget-client',
       'last-client-transition'
     ],
-    evidence: ['served-registry'],
+    evidence: ['verified-registry'],
     // The CHAPI popup stands this pass down: it writes no registry.
     when: (route: { popup: boolean }) => !route.popup
   },
@@ -141,7 +141,7 @@ const DECLARATIONS: ReadonlyArray<
     authority: 'account',
     triggers: ['remembered-login-chain', 'transient-login-chain'],
     ceremonies: ['unlock-credential-rotation', 'credential-anchored-genesis'],
-    evidence: ['served-registry'],
+    evidence: ['verified-registry'],
     // The CHAPI popup stands this pass down: it writes no registry.
     when: (route: { popup: boolean }) => !route.popup,
     async holdsWhen(
@@ -165,7 +165,7 @@ const DECLARATIONS: ReadonlyArray<
     authority: 'account',
     triggers: ['remembered-login-chain', 'transient-login-chain'],
     ceremonies: ['unlock-credential-rotation'],
-    evidence: ['served-registry'],
+    evidence: ['verified-registry'],
     // The CHAPI popup stands this pass down: it writes no registry.
     when: (route: { popup: boolean }) => !route.popup
   },
@@ -180,7 +180,7 @@ const DECLARATIONS: ReadonlyArray<
     authority: 'account',
     triggers: ['remembered-login-chain', 'transient-login-chain'],
     ceremonies: [],
-    evidence: ['served-registry'],
+    evidence: ['verified-registry'],
     // The CHAPI popup stands this pass down: it writes no registry.
     when: (route: { popup: boolean }) => !route.popup
   },
@@ -203,7 +203,7 @@ const DECLARATIONS: ReadonlyArray<
       'client-revocation',
       'recovery-code-revocation'
     ],
-    evidence: ['served-registry', 'local-clock']
+    evidence: ['verified-registry', 'local-clock']
   },
   // 9
   // converger: the ladder-rung refresh closure (`attributeLadderRung`, then
@@ -218,9 +218,9 @@ const DECLARATIONS: ReadonlyArray<
     authority: 'enrolled',
     triggers: ['remembered-login-chain'],
     ceremonies: ['self-enrollment'],
-    // The recorded rung is a served registry field; the committed rung is
+    // The recorded rung is a verified registry field; the committed rung is
     // read off the account log under the visit's pins.
-    evidence: ['served-registry', 'verified-log']
+    evidence: ['verified-registry', 'verified-log']
   },
   // 10
   // converger: `mendCredentialAnchoredAccount`'s establishment arm
@@ -294,7 +294,7 @@ const DECLARATIONS: ReadonlyArray<
     authority: 'ladder',
     triggers: ['login-routing'],
     ceremonies: ['credential-anchored-genesis'],
-    evidence: ['served-registry']
+    evidence: ['verified-registry']
   },
   // 15
   // converger: `ensureClientAnnexGenerationReady`
@@ -342,7 +342,7 @@ const DECLARATIONS: ReadonlyArray<
     authority: 'ladder',
     triggers: ['transient-login-chain'],
     ceremonies: [],
-    evidence: ['served-registry'],
+    evidence: ['verified-registry'],
     // The CHAPI popup stands this pass down: it writes no registry.
     when: (route: { popup: boolean }) => !route.popup
   },
@@ -450,8 +450,8 @@ const DECLARATIONS: ReadonlyArray<
     triggers: ['login-routing'],
     ceremonies: ['recovery-code-spend'],
     // The pending record carries the spend's `builtOnHead` witness; which
-    // stages landed is read off the served record and registry.
-    evidence: ['local-record', 'served-unlock-record', 'served-registry']
+    // stages landed is read off the served record and the verified registry.
+    evidence: ['local-record', 'served-unlock-record', 'verified-registry']
   },
   // 25
   // converger: the rotation's `retireClientAnnexInventoryStage`
@@ -535,7 +535,7 @@ const DECLARATIONS: ReadonlyArray<
     authority: 'account',
     triggers: [],
     ceremonies: ['recovery-code-issuance', 'unlock-credential-rotation'],
-    evidence: ['verified-log', 'served-registry']
+    evidence: ['verified-log', 'verified-registry']
   },
   // 30
   // No converger.
@@ -553,7 +553,7 @@ const DECLARATIONS: ReadonlyArray<
     ],
     // A detector would compare the registry's live credentials against the
     // Spaces the host still serves.
-    evidence: ['served-registry', 'host-listing']
+    evidence: ['verified-registry', 'host-listing']
   },
   // 31
   // No converger; a server-side reaper is not a wallet mender.
@@ -587,9 +587,9 @@ const DECLARATIONS: ReadonlyArray<
       'recovery-code-revocation',
       'unlock-credential-rotation'
     ],
-    // The recovery entries come from the served registry; their standing is
+    // The recovery entries come from the verified registry; their standing is
     // settled against the verified account log.
-    evidence: ['served-registry', 'verified-log'],
+    evidence: ['verified-registry', 'verified-log'],
     async holdsWhen(
       deps: Parameters<typeof checkRecoveryHealth>[0]
     ): Promise<'holds' | 'violated' | 'undetermined'> {

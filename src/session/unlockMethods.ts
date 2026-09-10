@@ -11,13 +11,25 @@
  * authenticator pickers show one account rather than N) and one entry per
  * method. Its stored
  * body is a JWE wrapped to the session's vault KAK (it names credential ids the
- * server must not read), stored as `{ version, encryption, wrapped }` -- the
- * same self-contained envelope shape the keyring record uses (the record seals
- * under its own one-epoch descriptor; see `recordEnvelope.ts`). The remote
- * copy in the data Space is the
+ * server must not read), stored as `{ version, encryption, wrapped, proof }` --
+ * the same self-contained envelope shape the keyring record uses (the record
+ * seals under its own one-epoch descriptor; see `recordEnvelope.ts`). The
+ * remote copy in the data Space is the
  * source of truth and is consulted first; a local cache in the
  * `freewallet-session` IndexedDB (keyed by the data controller did:key) serves
  * no-WAS deployments and refreshes on every remote hit.
+ *
+ * The `proof` member is the authenticity layer, and it is load-bearing: the
+ * seal is to a recipient public key the host reads off the record's own
+ * descriptor, so a storage host can author a body that decrypts cleanly. The
+ * record therefore carries an eddsa-jcs-2022 Data Integrity proof over its
+ * sibling members, signed by the Ed25519 half the account's user key derives
+ * (`userKeyRecordSigner`), which every holder of the user key holds and no
+ * host ever does. It is verified BEFORE the record is decrypted, with the one
+ * derived key as the allowlist, and there is no unwrap path that skips it. A
+ * record signed by another key reads as a stale seal
+ * (`UnlockRegistryStaleSealError`); one signed by this key whose signature
+ * fails reads as {@link UnlockRegistryProofError}.
  *
  * Each entry also carries, when one was minted, the management zcap the unlock
  * identity delegated to the data identity at bind time -- the authority that
@@ -28,11 +40,7 @@
  * entries predating the capability fall back to
  * `revokeUnlockMethodByCeremony` (a tap on the passkey being removed).
  */
-import type {
-  IKeyAgreementKey,
-  IKeyResolver,
-  IZcap
-} from '@interop/data-integrity-core'
+import type { IZcap } from '@interop/data-integrity-core'
 import type { ZcapClient } from '@interop/ezcap'
 import { PreconditionFailedError } from '@interop/was-client'
 import { isPreconditionFailed } from '@/lib/storageErrors'
@@ -58,7 +66,8 @@ import {
   standingLadderSeed
 } from '@/session/keyring'
 import { zcapExpiring } from '@interop/wallet-core/recovery'
-import type { AccountPointer } from '@interop/wallet-core/keyring'
+import type { AccountPointer, RecordProof } from '@interop/wallet-core/keyring'
+import { errorNameOf } from '@interop/wallet-core/menders'
 import type { PersistableClientKeys } from '@/session/keyring'
 import {
   didKeyZcapClient,
@@ -70,7 +79,12 @@ import {
   type CredentialRotationOutcome
 } from '@/session/credentialRotation'
 import { reportCeremonyTail } from '@/session/menders/ceremonyTail'
-import { userKeyVaultKeys, type UserKey } from '@interop/wallet-core/keys'
+import {
+  userKeyRecordSigner,
+  userKeySigningKeyMultibase,
+  userKeyVaultKeys,
+  type UserKey
+} from '@interop/wallet-core/keys'
 import {
   RecordEnvelopeDecryptError,
   unwrapRecordEnvelope,
@@ -243,92 +257,112 @@ export interface UnlockMethodsRecord {
 }
 
 /**
- * The version stamped on the stored `{ version, encryption, wrapped }`
+ * The version stamped on the stored `{ version, encryption, wrapped, proof }`
  * envelope -- the outer frame around the JWE, distinct from the registry's own
- * `version`.
+ * `version`. Version 2 is the signed frame; a version-1 record (the unsigned
+ * frame this one replaced) is refused as unusable rather than migrated.
  */
-const STORED_RECORD_VERSION = 1
+const STORED_RECORD_VERSION = 2
 
 /**
- * Resolves the session's vault key material for wrap/unwrap. The vault KAK is
- * present for the life of every session, so these keys are expected to resolve;
- * the guard throws only defensively.
+ * Resolves the session's user key -- the key whose vault KAK the registry
+ * record seals to and whose derived Ed25519 half signs it. It is present for
+ * the life of every session that reaches this registry, so the guard throws
+ * only defensively.
  *
  * @param session {Session}
- * @returns {{ keyAgreementKey: IKeyAgreementKey, keyResolver: IKeyResolver }}
+ * @returns {UserKey}
  */
-function requireVaultKeys(session: Session): {
-  keyAgreementKey: IKeyAgreementKey
-  keyResolver: IKeyResolver
-} {
-  const { keyAgreementKey, keyResolver } = session.profile
-  if (!keyAgreementKey || !keyResolver) {
+function requireUserKey(session: Session): UserKey {
+  const { userKey } = session.profile
+  if (!userKey) {
     throw new Error(
       'The vault must be unlocked to read or write unlock methods.'
     )
   }
-  return { keyAgreementKey, keyResolver }
+  return userKey
 }
 
 /**
  * Wraps an unlock-methods record into its stored envelope: the record encrypted
- * (JWE, sealed under a fresh record-own epoch whose key wraps to the vault
- * KAK) under the `{ version, encryption, wrapped }` shape.
+ * (JWE, sealed under a fresh record-own epoch whose key wraps to the user key's
+ * vault KAK) under the `{ version, encryption, wrapped }` shape, then signed by
+ * the user key's derived Ed25519 half so a reader can tell the account's own
+ * record from one the storage host authored.
  *
  * @param options {object}
  * @param options.record {UnlockMethodsRecord}
- * @param options.keyAgreementKey {IKeyAgreementKey}   the vault KAK
- * @param options.keyResolver {IKeyResolver}
- * @returns {Promise<{ version: number, encryption: unknown, wrapped: unknown }>}
+ * @param options.userKey {UserKey}   the user key the record seals to and is
+ *   signed by
+ * @returns {Promise<object>}   the `{ version, encryption, wrapped, proof }`
+ *   frame
  */
 async function wrapRecord({
   record,
-  keyAgreementKey,
-  keyResolver
+  userKey
 }: {
   record: UnlockMethodsRecord
-  keyAgreementKey: IKeyAgreementKey
-  keyResolver: IKeyResolver
-}): Promise<{ version: number; encryption: unknown; wrapped: unknown }> {
+  userKey: UserKey
+}): Promise<{
+  version: number
+  encryption: unknown
+  wrapped: unknown
+  proof?: RecordProof
+}> {
+  const { keyAgreementKey, keyResolver } = userKeyVaultKeys({ userKey })
   return wrapRecordEnvelope({
     data: record as unknown as Parameters<typeof wrapRecordEnvelope>[0]['data'],
     version: STORED_RECORD_VERSION,
     collectionId: UNLOCK_METHODS_COLLECTION.id,
     keyAgreementKey,
-    keyResolver
+    keyResolver,
+    signer: await userKeyRecordSigner({ userKey })
   })
 }
 
 /**
  * Unwraps and validates a stored unlock-methods envelope: validates the
- * `{ version, encryption, wrapped }` frame (a record with no `encryption`
- * descriptor -- the retired direct-to-KAK form -- is refused), decrypts the
- * payload, then sanity-checks the registry shape (its own `version`, a string
- * `webAuthnUserId`, an array of methods).
+ * `{ version, encryption, wrapped, proof }` frame (a record with no
+ * `encryption` descriptor, and a version-1 unsigned record, are both refused),
+ * verifies the proof against the user key's own signing key BEFORE decrypting,
+ * decrypts the payload, then sanity-checks the registry shape (its own
+ * `version`, a string `webAuthnUserId`, an array of methods).
+ *
+ * A record signed by some other key is another user key generation's (or a
+ * forgery), which is the same state to a caller as an envelope this key cannot
+ * open, so it refuses as `RecordEnvelopeDecryptError`. A record signed by THIS
+ * key whose proof does not verify is tampering, and refuses as
+ * {@link UnlockRegistryProofError}.
  *
  * @param options {object}
  * @param options.record {unknown}   the stored `{ version, encryption,
- *   wrapped }` envelope
- * @param options.keyAgreementKey {IKeyAgreementKey}   the vault KAK
- * @param options.keyResolver {IKeyResolver}
+ *   wrapped, proof }` envelope
+ * @param options.userKey {UserKey}   the user key the record must be sealed to
+ *   and signed by
  * @returns {Promise<UnlockMethodsRecord>}
+ * @throws {UnlockRegistryProofError}
  */
 async function unwrapRecord({
   record,
-  keyAgreementKey,
-  keyResolver
+  userKey
 }: {
   record: unknown
-  keyAgreementKey: IKeyAgreementKey
-  keyResolver: IKeyResolver
+  userKey: UserKey
 }): Promise<UnlockMethodsRecord> {
+  const { keyAgreementKey, keyResolver } = userKeyVaultKeys({ userKey })
   const plaintext = (await unwrapRecordEnvelope({
     record,
     version: STORED_RECORD_VERSION,
     collectionId: UNLOCK_METHODS_COLLECTION.id,
     keyAgreementKey,
     keyResolver,
-    label: 'unlock-methods'
+    label: 'unlock-methods',
+    verify: { keyMultibase: await userKeySigningKeyMultibase({ userKey }) }
+  }).catch(err => {
+    if (errorNameOf(err) === 'RecordProofError') {
+      throw new UnlockRegistryProofError({ cause: err })
+    }
+    throw err
   })) as {
     version?: unknown
     webAuthnUserId?: unknown
@@ -355,6 +389,24 @@ async function unwrapRecord({
     version: 1,
     webAuthnUserId: plaintext.webAuthnUserId,
     methods: plaintext.methods as UnlockMethod[]
+  }
+}
+
+/**
+ * The stored registry record's proof names this session's own user key signing
+ * half and does not verify over the record's members: the storage host served
+ * a record it tampered with (or one whose frame it rebuilt around a body it
+ * authored). Its own class, distinct from the stale-seal refusal and from the
+ * frame refusals, so no caller reads it as "no registry" and clobbers the
+ * record, and no repair carries the body forward.
+ */
+export class UnlockRegistryProofError extends Error {
+  constructor(options?: { cause?: unknown }) {
+    super(
+      'The storage host served an unlock-methods registry record whose proof does not verify.',
+      options
+    )
+    this.name = 'UnlockRegistryProofError'
   }
 }
 
@@ -427,7 +479,7 @@ export async function getUnlockMethods({
 }): Promise<UnlockMethodsRecord | null> {
   const controller = session.user.id
   const { unlockMethodsCache } = session.persistence
-  const { keyAgreementKey, keyResolver } = requireVaultKeys(session)
+  const userKey = requireUserKey(session)
 
   if (!WAS_SERVER_URL) {
     const cached = await unlockMethodsCache.load({ controller })
@@ -435,11 +487,7 @@ export async function getUnlockMethods({
       return null
     }
     try {
-      return await unwrapRecord({
-        record: cached,
-        keyAgreementKey,
-        keyResolver
-      })
+      return await unwrapRecord({ record: cached, userKey })
     } catch (err) {
       log.warn('Discarding an unusable cached unlock-methods record', { err })
       await unlockMethodsCache.delete({ controller })
@@ -459,11 +507,7 @@ export async function getUnlockMethods({
   }
   let parsed: UnlockMethodsRecord
   try {
-    parsed = await unwrapRecord({
-      record: stored.record,
-      keyAgreementKey,
-      keyResolver
-    })
+    parsed = await unwrapRecord({ record: stored.record, userKey })
   } catch (err) {
     if (err instanceof RecordEnvelopeDecryptError) {
       throw new UnlockRegistryStaleSealError({ cause: err })
@@ -639,18 +683,14 @@ export async function updateUnlockMethods({
 }): Promise<UnlockMethodsRecord | null> {
   const controller = session.user.id
   const { unlockMethodsCache } = session.persistence
-  const { keyAgreementKey, keyResolver } = requireVaultKeys(session)
+  const userKey = requireUserKey(session)
 
   if (!WAS_SERVER_URL) {
     const cached = await unlockMethodsCache.load({ controller })
     let current: UnlockMethodsRecord | null = null
     if (cached) {
       try {
-        current = await unwrapRecord({
-          record: cached,
-          keyAgreementKey,
-          keyResolver
-        })
+        current = await unwrapRecord({ record: cached, userKey })
       } catch (err) {
         log.warn('Discarding an unusable cached unlock-methods record', {
           err
@@ -662,11 +702,7 @@ export async function updateUnlockMethods({
     if (next === null) {
       return current
     }
-    const wrapped = await wrapRecord({
-      record: next,
-      keyAgreementKey,
-      keyResolver
-    })
+    const wrapped = await wrapRecord({ record: next, userKey })
     await unlockMethodsCache.save({ controller, record: wrapped })
     return next
   }
@@ -684,11 +720,7 @@ export async function updateUnlockMethods({
       }),
     unwrap: async stored => {
       try {
-        return await unwrapRecord({
-          record: stored,
-          keyAgreementKey,
-          keyResolver
-        })
+        return await unwrapRecord({ record: stored, userKey })
       } catch (err) {
         if (err instanceof RecordEnvelopeDecryptError) {
           throw new UnlockRegistryStaleSealError({ cause: err })
@@ -696,7 +728,7 @@ export async function updateUnlockMethods({
         throw err
       }
     },
-    wrap: record => wrapRecord({ record, keyAgreementKey, keyResolver }),
+    wrap: record => wrapRecord({ record, userKey }),
     write: async (record, precondition) => {
       await putUnlockMethodsRecord({
         storageServerUrl,
@@ -770,10 +802,7 @@ export async function updateUnlockMethodsWithClient({
     )
   }
   const storageServerUrl = WAS_SERVER_URL
-  const readKeys = userKeyVaultKeys({ userKey })
-  const writeKeys = writeUserKey
-    ? userKeyVaultKeys({ userKey: writeUserKey })
-    : readKeys
+  const writeKey = writeUserKey ?? userKey
   return await casUpdateRegistryRecord({
     read: () =>
       getUnlockMethodsRecord({
@@ -782,18 +811,8 @@ export async function updateUnlockMethodsWithClient({
         spaceId,
         ...(capability ? { capability } : {})
       }),
-    unwrap: stored =>
-      unwrapRecord({
-        record: stored,
-        keyAgreementKey: readKeys.keyAgreementKey,
-        keyResolver: readKeys.keyResolver
-      }),
-    wrap: record =>
-      wrapRecord({
-        record,
-        keyAgreementKey: writeKeys.keyAgreementKey,
-        keyResolver: writeKeys.keyResolver
-      }),
+    unwrap: stored => unwrapRecord({ record: stored, userKey }),
+    wrap: record => wrapRecord({ record, userKey: writeKey }),
     write: async (record, precondition) => {
       await putUnlockMethodsRecord({
         storageServerUrl,
@@ -851,12 +870,7 @@ export async function getUnlockMethodsWithClient({
   if (!stored) {
     return null
   }
-  const { keyAgreementKey, keyResolver } = userKeyVaultKeys({ userKey })
-  return await unwrapRecord({
-    record: stored.record,
-    keyAgreementKey,
-    keyResolver
-  })
+  return await unwrapRecord({ record: stored.record, userKey })
 }
 
 /**
@@ -879,12 +893,8 @@ export async function getUnlockMethodsWithClient({
  * @param options.storageServerUrl {string}
  * @param options.zcapClient {ZcapClient}   an enrolled client's root client
  * @param options.spaceId {string}   the data Space id
- * @param options.from {object}   the pre-rotation vault keys
- * @param options.from.keyAgreementKey {IKeyAgreementKey}
- * @param options.from.keyResolver {IKeyResolver}
- * @param options.to {object}   the post-rotation vault keys
- * @param options.to.keyAgreementKey {IKeyAgreementKey}
- * @param options.to.keyResolver {IKeyResolver}
+ * @param options.from {UserKey}   the pre-rotation user key
+ * @param options.to {UserKey}   the post-rotation user key
  * @param [options.capability] {IZcap}   an invocation capability every request
  *   rides (a transient session's generation delegation); the root capability
  *   is invoked otherwise
@@ -901,8 +911,8 @@ export async function rewrapUnlockMethodsRecord({
   storageServerUrl: string
   zcapClient: ZcapClient
   spaceId: string
-  from: { keyAgreementKey: IKeyAgreementKey; keyResolver: IKeyResolver }
-  to: { keyAgreementKey: IKeyAgreementKey; keyResolver: IKeyResolver }
+  from: UserKey
+  to: UserKey
   capability?: IZcap
 }): Promise<void> {
   await casUpdateRegistryRecord({
@@ -917,18 +927,8 @@ export async function rewrapUnlockMethodsRecord({
     // The decrypt refusal a base no longer sealed to `from` raises stays
     // `RecordEnvelopeDecryptError`: callers read it as "not sealed to these
     // keys" rather than as the read path's stale-seal state.
-    unwrap: record =>
-      unwrapRecord({
-        record,
-        keyAgreementKey: from.keyAgreementKey,
-        keyResolver: from.keyResolver
-      }),
-    wrap: record =>
-      wrapRecord({
-        record,
-        keyAgreementKey: to.keyAgreementKey,
-        keyResolver: to.keyResolver
-      }),
+    unwrap: record => unwrapRecord({ record, userKey: from }),
+    wrap: record => wrapRecord({ record, userKey: to }),
     // An identity mutate: the record's content is unchanged and only its
     // envelope is re-keyed. A registry that does not exist yet reads as
     // `null`, which declines the write.
@@ -1984,9 +1984,10 @@ export async function backfillPassphraseUnlockMethod({
   createIfMissing?: boolean
   capability?: IZcap
 }): Promise<UnlockMethodsRecord | null> {
-  const { unlockMethod, keyAgreementKey, keyResolver } = session.profile
-  // The vault keys are needed to read (let alone write) the registry.
-  if (!keyAgreementKey || !keyResolver) {
+  const { unlockMethod, userKey } = session.profile
+  // The user key is needed to read (let alone write) the registry: it seals
+  // the record and signs it.
+  if (!userKey) {
     return null
   }
 

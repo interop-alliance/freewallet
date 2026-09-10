@@ -499,10 +499,7 @@ describe('the cascade, rotated path', () => {
 
   it('adopts the rotated user key into the live session', async () => {
     const session = sessionWith()
-    const previousVaultKeys = {
-      keyAgreementKey: session.profile.keyAgreementKey,
-      keyResolver: session.profile.keyResolver
-    }
+    const previousUserKey = session.profile.userKey
     await revokeEnrolledClient({ session, client: REVOKED })
 
     expect(session.profile.userKey).toBe(FRESH_USER_KEY)
@@ -510,10 +507,8 @@ describe('the cascade, rotated path', () => {
     expect(vi.mocked(rewrapUnlockMethodsRecord)).toHaveBeenCalledWith(
       expect.objectContaining({
         spaceId: POINTER.spaceId,
-        from: previousVaultKeys,
-        to: expect.objectContaining({
-          keyAgreementKey: { id: `${FRESH_USER_KEY.id}#kak` }
-        })
+        from: previousUserKey,
+        to: FRESH_USER_KEY
       })
     )
     expect(session.storage.adoptRotatedVaultKeys).toHaveBeenCalledWith(

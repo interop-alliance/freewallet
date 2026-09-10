@@ -20,13 +20,7 @@ import {
 } from 'vitest'
 import { addSink, captureSink } from '@interop/logger'
 import { CapabilityAgent } from '@interop/capability-agent'
-import { X25519KeyAgreementKey2020 } from '@interop/x25519-key-agreement-key'
-import type {
-  IDelegatedZcap,
-  IKeyAgreementKey,
-  IKeyResolver,
-  IZcap
-} from '@interop/data-integrity-core'
+import type { IDelegatedZcap, IZcap } from '@interop/data-integrity-core'
 import type { ZcapClient } from '@interop/ezcap'
 import type { Session } from '@/types/auth'
 import type { AccountCeremonyContext } from '@/session/accountCeremonyContext'
@@ -191,6 +185,8 @@ import {
   revokeUnlockMethod,
   revokeUnlockMethodByCeremony,
   rewrapUnlockMethodsRecord,
+  UnlockRegistryProofError,
+  UnlockRegistryStaleSealError,
   updateUnlockMethods,
   updateUnlockMethodsWithClient,
   upsertPassphraseUnlockMethod,
@@ -202,14 +198,23 @@ import {
   PreconditionFailedError,
   zcapClientForSigner
 } from '@interop/was-client'
-import { RecordEnvelopeDecryptError } from '@/session/recordEnvelope'
+import {
+  RecordEnvelopeDecryptError,
+  wrapRecordEnvelope
+} from '@/session/recordEnvelope'
 import { deleteUnlockSpace } from '@interop/wallet-core/keyring'
 import { rotateOffUnlockCredential } from '@/session/credentialRotation'
 import { reportCeremonyTail } from '@/session/menders/ceremonyTail'
 import { browserLocalSessionPersistence } from '@/session/persistence'
+import { UNLOCK_METHODS_COLLECTION } from '@/app.config'
 import { rootCapabilityId } from '@interop/was-client/paths'
 import { DELETION_ZCAP_TTL_MS } from '@interop/wallet-core/clientAnnex'
-import { mintUserKey, type UserKey } from '@interop/wallet-core/keys'
+import {
+  mintUserKey,
+  userKeyRecordSigner,
+  userKeyVaultKeys,
+  type UserKey
+} from '@interop/wallet-core/keys'
 import {
   getUnlockMethodsRecord,
   putUnlockMethodsRecord
@@ -311,18 +316,17 @@ async function makeSession(idb?: IDBFactory): Promise<Session> {
     handle: 'test-data',
     keyName: 'test-data-key'
   })
-  const keyAgreementKey = X25519KeyAgreementKey2020.fromEd25519(
-    agent.getVerificationKeyPair()
-  )
-  const keyResolver = async () => ({
-    id: keyAgreementKey.id,
-    type: keyAgreementKey.type,
-    publicKeyMultibase: keyAgreementKey.publicKeyMultibase
-  })
+  // One user key for every session this file builds, so two sessions built
+  // from the same fake IndexedDB read each other's registry (the vault KAK
+  // and the record's signing key both derive from it).
+  SHARED_USER_KEY ??= await mintUserKey()
+  const userKey = SHARED_USER_KEY
+  const { keyAgreementKey, keyResolver } = userKeyVaultKeys({ userKey })
   return {
     user: { id: DATA_CONTROLLER },
     profile: {
       keyAgent: agent,
+      userKey,
       keyAgreementKey,
       keyResolver,
       zcapClient: zcapClientForSigner({ signer: agent.getSigner() })
@@ -331,6 +335,35 @@ async function makeSession(idb?: IDBFactory): Promise<Session> {
     storage: { spaceId: DATA_SPACE_ID },
     isGuest: false
   } as unknown as Session
+}
+
+/**
+ * The one user key `makeSession` hands every session it builds, minted on
+ * first use.
+ */
+let SHARED_USER_KEY: UserKey | undefined
+
+/**
+ * Repoints a session stand-in at another user key: the vault KAK and the
+ * record signing key both derive from it, so a reader built this way opens
+ * exactly the records that key sealed and signed.
+ *
+ * @param options {object}
+ * @param options.session {Session}
+ * @param options.userKey {UserKey}
+ * @returns {void}
+ */
+function setSessionUserKey({
+  session,
+  userKey
+}: {
+  session: Session
+  userKey: UserKey
+}): void {
+  const { keyAgreementKey, keyResolver } = userKeyVaultKeys({ userKey })
+  session.profile.userKey = userKey
+  session.profile.keyAgreementKey = keyAgreementKey
+  session.profile.keyResolver = keyResolver
 }
 
 function sampleRecord(): UnlockMethodsRecord {
@@ -556,9 +589,11 @@ describe('put / get round-trip', () => {
     const stored = wasState.records.get(DATA_SPACE_ID) as {
       version: number
       wrapped: { jwe?: unknown }
+      proof?: { proofValue?: string }
     }
-    expect(stored.version).toBe(1)
+    expect(stored.version).toBe(2)
     expect(stored.wrapped.jwe).toBeDefined()
+    expect(stored.proof?.proofValue).toBeDefined()
     expect(JSON.stringify(stored)).not.toContain('unlock-space-abc')
 
     vi.mocked(getUnlockMethodsRecord).mockClear()
@@ -573,11 +608,65 @@ describe('put / get round-trip', () => {
     expect(found).toBeNull()
   })
 
-  it('rejects a stored record whose outer version is not 1', async () => {
+  it('rejects a stored record whose outer version is not 2', async () => {
     const session = await makeSession()
-    wasState.records.set(DATA_SPACE_ID, { version: 2, wrapped: {} })
+    wasState.records.set(DATA_SPACE_ID, { version: 3, wrapped: {} })
 
     await expect(getUnlockMethods({ session })).rejects.toThrow(/version/)
+  })
+
+  it('refuses a record whose proof does not verify as tampering, not as an absent registry', async () => {
+    const session = await makeSession(createFakeIdb())
+    await seedRegistry({ session, record: sampleRecord() })
+    // The host kept the account's own proof and swapped the ciphertext.
+    const stored = wasState.records.get(DATA_SPACE_ID) as {
+      wrapped: { jwe: { ciphertext: string } }
+    }
+    stored.wrapped.jwe.ciphertext = 'dGFtcGVyZWQ'
+
+    await expect(getUnlockMethods({ session })).rejects.toBeInstanceOf(
+      UnlockRegistryProofError
+    )
+  })
+
+  it('reads a record signed by another user key as a stale seal', async () => {
+    const session = await makeSession(createFakeIdb())
+    const { keyAgreementKey, keyResolver } = userKeyVaultKeys({
+      userKey: session.profile.userKey!
+    })
+    // Sealed so this session's vault KAK opens it, signed by a key the
+    // account never held.
+    wasState.records.set(
+      DATA_SPACE_ID,
+      await wrapRecordEnvelope({
+        data: sampleRecord() as never,
+        version: 2,
+        collectionId: UNLOCK_METHODS_COLLECTION.id,
+        keyAgreementKey,
+        keyResolver,
+        signer: await userKeyRecordSigner({ userKey: await mintUserKey() })
+      })
+    )
+    wasState.versions.set(DATA_SPACE_ID, 1)
+
+    await expect(getUnlockMethods({ session })).rejects.toBeInstanceOf(
+      UnlockRegistryStaleSealError
+    )
+  })
+
+  it('refuses the retired unsigned version-1 record rather than migrating it', async () => {
+    const session = await makeSession()
+    // A well-formed version-1 frame: the shape this account's registry had
+    // before the record carried a proof.
+    wasState.records.set(DATA_SPACE_ID, {
+      version: 1,
+      encryption: { epochs: [] },
+      wrapped: { jwe: {} }
+    })
+
+    await expect(getUnlockMethods({ session })).rejects.toThrow(
+      /retired unsigned version 1 shape/
+    )
   })
 })
 
@@ -2568,42 +2657,13 @@ describe('the authority a registry read and write ride', () => {
 })
 
 describe('rewrapUnlockMethodsRecord', () => {
-  /**
-   * A second, distinct vault key set (a different seed), standing in for the
-   * post-rotation user key's vault keys.
-   */
-  async function makeVaultKeys(fillByte: number) {
-    const seed = new Uint8Array(32)
-    seed.fill(fillByte)
-    const agent = await CapabilityAgent.fromSeed({
-      seed,
-      handle: `test-rewrap-${fillByte}`,
-      keyName: 'test-rewrap-key'
-    })
-    const keyAgreementKey = X25519KeyAgreementKey2020.fromEd25519(
-      agent.getVerificationKeyPair()
-    )
-    const keyResolver = async () => ({
-      id: keyAgreementKey.id,
-      type: keyAgreementKey.type,
-      publicKeyMultibase: keyAgreementKey.publicKeyMultibase
-    })
-    return {
-      keyAgreementKey: keyAgreementKey as IKeyAgreementKey,
-      keyResolver: keyResolver as IKeyResolver
-    }
-  }
-
   it('re-seals the stored record so only the new keys decrypt it', async () => {
     const idb = createFakeIdb()
     const session = await makeSession(idb)
     await seedRegistry({ session, record: sampleRecord() })
 
-    const from = {
-      keyAgreementKey: session.profile.keyAgreementKey! as IKeyAgreementKey,
-      keyResolver: session.profile.keyResolver! as IKeyResolver
-    }
-    const to = await makeVaultKeys(9)
+    const from = session.profile.userKey!
+    const to = await mintUserKey()
     await rewrapUnlockMethodsRecord({
       storageServerUrl: 'https://was.example.test',
       zcapClient: {} as never,
@@ -2614,8 +2674,7 @@ describe('rewrapUnlockMethodsRecord', () => {
 
     // A session holding the NEW vault keys reads the registry.
     const rotatedSession = await makeSession(idb)
-    rotatedSession.profile.keyAgreementKey = to.keyAgreementKey as never
-    rotatedSession.profile.keyResolver = to.keyResolver as never
+    setSessionUserKey({ session: rotatedSession, userKey: to })
     const read = await getUnlockMethods({ session: rotatedSession })
     expect(read).toEqual(sampleRecord())
 
@@ -2624,8 +2683,8 @@ describe('rewrapUnlockMethodsRecord', () => {
   })
 
   it('is a no-op when no registry exists', async () => {
-    const from = await makeVaultKeys(3)
-    const to = await makeVaultKeys(4)
+    const from = await mintUserKey()
+    const to = await mintUserKey()
     vi.mocked(putUnlockMethodsRecord).mockClear()
     await rewrapUnlockMethodsRecord({
       storageServerUrl: 'https://was.example.test',
@@ -2639,32 +2698,6 @@ describe('rewrapUnlockMethodsRecord', () => {
 })
 
 describe('the registry compare-and-swap (FW-299)', () => {
-  /**
-   * A distinct vault key set (a different seed), standing in for another
-   * writer's post-rotation user key.
-   */
-  async function makeVaultKeys(fillByte: number) {
-    const seed = new Uint8Array(32)
-    seed.fill(fillByte)
-    const agent = await CapabilityAgent.fromSeed({
-      seed,
-      handle: `test-cas-${fillByte}`,
-      keyName: 'test-cas-key'
-    })
-    const keyAgreementKey = X25519KeyAgreementKey2020.fromEd25519(
-      agent.getVerificationKeyPair()
-    )
-    const keyResolver = async () => ({
-      id: keyAgreementKey.id,
-      type: keyAgreementKey.type,
-      publicKeyMultibase: keyAgreementKey.publicKeyMultibase
-    })
-    return {
-      keyAgreementKey: keyAgreementKey as IKeyAgreementKey,
-      keyResolver: keyResolver as IKeyResolver
-    }
-  }
-
   it('closes the seal-downgrade race: a stale re-seal conflicts and cannot undo a fresh one', async () => {
     // Tab A holds the pre-rotation keys; tab B rotates the user key and
     // re-seals the registry between A's read and A's PUT. A's stale-based
@@ -2672,12 +2705,9 @@ describe('the registry compare-and-swap (FW-299)', () => {
     // cannot open -- not land a record sealed back to the old keys.
     const session = await makeSession(createFakeIdb())
     await seedRegistry({ session, record: sampleRecord() })
-    const from = {
-      keyAgreementKey: session.profile.keyAgreementKey! as IKeyAgreementKey,
-      keyResolver: session.profile.keyResolver! as IKeyResolver
-    }
-    const freshSeal = await makeVaultKeys(11)
-    const staleTarget = await makeVaultKeys(12)
+    const from = session.profile.userKey!
+    const freshSeal = await mintUserKey()
+    const staleTarget = await mintUserKey()
     // B's rotation re-seal lands between A's read and A's first PUT.
     wasState.beforePut = async () => {
       await rewrapUnlockMethodsRecord({
@@ -2705,8 +2735,7 @@ describe('the registry compare-and-swap (FW-299)', () => {
 
     // The landed record still opens under B's fresh seal -- no downgrade.
     const reader = await makeSession(createFakeIdb())
-    reader.profile.keyAgreementKey = freshSeal.keyAgreementKey as never
-    reader.profile.keyResolver = freshSeal.keyResolver as never
+    setSessionUserKey({ session: reader, userKey: freshSeal })
     await expect(getUnlockMethods({ session: reader })).resolves.toEqual(
       sampleRecord()
     )

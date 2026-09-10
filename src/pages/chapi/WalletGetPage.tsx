@@ -262,7 +262,7 @@ export function WalletGetPage() {
       const web = event.credentialRequestOptions?.web
       const origin = requestingOriginOf(event.credentialRequestOrigin)
       setCHAPIEvent(event)
-      setRequestOrigin(origin)
+      setRequestOrigin(origin ?? '')
 
       // A verifier that names a VC API exchange sends an empty VPR body and
       // keeps the real request behind the exchange URL. Open it to retrieve

@@ -77,7 +77,6 @@ import {
   replaceUserKeyRosterRecipients,
   userKeyRosterDescriptorStore,
   userKeyRosterLogSigner,
-  userKeyVaultKeys,
   readUserKeyRoster,
   rotateUserKeyRoster,
   type UserKey
@@ -1747,8 +1746,8 @@ export async function recoverAccountWithCode({
       storageServerUrl: pointer.host,
       zcapClient: newZcapClient,
       spaceId: pointer.spaceId,
-      from: userKeyVaultKeys({ userKey: oldUserKey }),
-      to: userKeyVaultKeys({ userKey: newUserKey })
+      from: oldUserKey,
+      to: newUserKey
     })
   }
 

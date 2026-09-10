@@ -12,7 +12,7 @@
  * rather than reverting the concurrent writer.
  */
 import { beforeEach, describe, expect, it, vi } from 'vitest'
-import { X25519KeyAgreementKey2020 } from '@interop/x25519-key-agreement-key'
+import { mintUserKey, userKeyVaultKeys } from '@interop/wallet-core/keys'
 import type { IZcap } from '@interop/data-integrity-core'
 import type { Session } from '@/types/auth'
 
@@ -97,19 +97,18 @@ import {
 const GENERATION_DELEGATION = { id: 'urn:zcap:generation' } as unknown as IZcap
 
 /**
- * A transient session with real vault keys, so the registry record is really
- * sealed and really re-opened across the compare-and-swap retry.
+ * A transient session with a real user key, so the registry record is really
+ * sealed, signed, and re-opened across the compare-and-swap retry.
  */
 async function transientSession(): Promise<Session> {
-  const keyAgreementKey = await X25519KeyAgreementKey2020.generate({
-    controller: 'did:key:z6MkVisitKey'
-  })
-  const keyResolver = async () => keyAgreementKey
+  const userKey = await mintUserKey()
+  const { keyAgreementKey, keyResolver } = userKeyVaultKeys({ userKey })
   return {
     user: { id: 'did:key:z6MkVisitKey' },
     storage: { spaceId: 'space-123' },
     profile: {
       zcapClient: { isAnnexVmZcapClient: true },
+      userKey,
       keyAgreementKey,
       keyResolver
     },

@@ -34,6 +34,7 @@ function fakeSession(): { session: Session; load: ReturnType<typeof vi.fn> } {
   const session = {
     user: { id: 'did:key:z6MkClient' },
     profile: {
+      userKey: { id: 'did:key:z6LSVault', secret: new Uint8Array(32) },
       keyAgreementKey: { id: 'did:key:z6LSVault#kak' },
       keyResolver: async () => ({})
     },
@@ -87,8 +88,8 @@ describe("the block's registry read", () => {
 
   it('hands every asker the same refusal a single read would raise', async () => {
     const { session } = fakeSession()
-    // A session with no vault keys cannot read the registry at all.
-    delete (session.profile as { keyAgreementKey?: unknown }).keyAgreementKey
+    // A session with no user key cannot read the registry at all.
+    delete (session.profile as { userKey?: unknown }).userKey
     const registry = blockRegistryRead({ session })
 
     await expect(registry.read()).rejects.toThrow('The vault must be unlocked')

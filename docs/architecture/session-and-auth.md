@@ -333,13 +333,33 @@ publishes that passkey's `keyAgreement` key verbatim. An entry never written
 is left alone, since rebuilding it needs the WebAuthn credential id a login
 does not carry.
 
+**The registry record carries a proof.** The stored record is
+`{ version, encryption, wrapped, proof }` at frame version 2. The seal alone
+authenticates nothing: it goes to a recipient public key the host reads off
+the record's own descriptor, so a host can author a body that decrypts
+cleanly. The `proof` is an eddsa-jcs-2022 Data Integrity proof over the
+sibling members, signed by the Ed25519 key the account's user key derives.
+Every holder of the user key holds that signing key and no host does. It is
+verified before the record is decrypted, against that one derived key as the
+allowlist, and there is no unwrap path that skips it. A record signed by
+another key is another generation's (or a forgery) and reads as a stale seal;
+one signed by this key whose signature fails is tampering and refuses with
+`UnlockRegistryProofError`, which the login runner logs and skips rather than
+reading as an absent registry. A version-1 record, the unsigned frame this
+one replaced, is refused as unusable rather than migrated.
+
 **Stale registry seal.** A registry sealed to a superseded user key gets its
 own login-time repair (`repairStaleUnlockRegistrySeal`,
 `src/session/registryReseal.ts`). A served record that fails to decrypt
 under the current vault keys throws `UnlockRegistryStaleSealError` rather
 than reading as absent. The repair tries each prior user key generation the
-roster still escrows, newest first, then re-seals to the current key.
-Best-effort, and read-only when nothing is stale.
+roster still escrows, newest first, then re-seals to the current key, signed
+afresh under it. Each attempt verifies the proof under the generation it
+opens with, so a record no generation signed opens under none and the walk
+reports it unrepaired; a record a superseded generation signed whose proof
+fails stops the walk and rethrows, since re-sealing it would carry a forged
+body forward under the account's own signature. Best-effort, and read-only
+when nothing is stale.
 
 At a remembered login the user key sweep, the re-seal repair, the
 torn-retirement repair, the bare-passkey rebuild, the registry backfill, the
@@ -400,8 +420,12 @@ there.
 Every registry PUT is also a compare-and-swap on the ETag of the fresh read
 it was based on, with a bounded re-read retry on a lost race. A concurrent
 writer the ordered chain cannot serialize re-applies on the fresh record
-instead of silently reverting it. The guard covers honest concurrency only;
-the registry's bound is unchanged against a tampering host.
+instead of silently reverting it. The guard covers honest concurrency only.
+The record proof above bounds authorship: no host holds the user key, so it
+can neither author a registry body nor alter one. It does not bound replay of
+a body the account itself signed under a superseded generation the roster
+still escrows, since the re-seal walk opens exactly those and re-signs them
+under the current key. That replay window is open.
 
 The `Session` object lives in the Zustand `authStore` and is in-memory only
 (the passphrase is never persisted), so reloading the browser logs the user
