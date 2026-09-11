@@ -850,7 +850,14 @@
       "title": "Store credential",
       "authenticating": "Authenticating with the issuer...",
       "storedSuccess": "{{count}} credentials stored successfully.",
-      "storedSuccess_one": "Credential stored successfully."
+      "storedSuccess_one": "Credential stored successfully.",
+      "didAuthNotice": "Logging in will prove your wallet identity to {{host}} so it can hand over the credential.",
+      "refusals": {
+        "unsupportedRequest": "The issuer asked for something other than a proof of your wallet identity before offering a credential, which this wallet doesn't support.",
+        "noDomain": "The issuer's identity request names no domain, so it can't be safely answered.",
+        "domainMismatch": "This request's domain doesn't match where it came from, so it can't be safely authenticated.",
+        "foreignDelivery": "This request would send your identity proof somewhere other than the issuer's own server, so it was refused."
+      }
     }
   },
   "externalRequest": {

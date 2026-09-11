@@ -36,16 +36,19 @@ import { chapiStyles } from '@/styles/appStyles'
 import { ChapiInitializing } from '@/pages/chapi/ChapiInitializing'
 import {
   beginExchange,
+  checkStoreDIDAuthRequest,
   classifyCHAPIStoreEvent,
-  classifyRequest,
   collectIssuedPresentation,
   composeVP,
   credentialsOf,
   negotiateCryptosuite,
   queriesOf,
+  requestingOriginOf,
+  StoreRequestRefusedError,
   vcApiExchangeUrl,
   type CHAPIStoreEvent,
-  type IVPRDetails
+  type IVPRDetails,
+  type StoreRequestRefusal
 } from '@/lib/walletRequest'
 // The exchange client's request param is the shared (spec) VPR shape, narrower
 // than Freewallet's local `IVPRDetails` (widened with the App Connect query).
@@ -67,12 +70,14 @@ type PageState =
 
 /**
  * The holder-binding step an issuance exchange may open with: the exchange URL
- * to answer, and the DID-Auth VPR it asked. Held until the user logs in, since
- * signing the answer needs their key.
+ * to answer, the DID-Auth VPR it asked, and the host the answer will be sent
+ * to (named in the consent notice). Held until the user logs in, since signing
+ * the answer needs their key.
  */
 type PendingDIDAuth = {
   exchangeUrl: string
   request: IVPRDetails
+  exchangeHost: string
 }
 
 /**
@@ -113,6 +118,9 @@ export function WalletStorePage() {
   const [session, setSession] = useState<Session | null>(null)
   const [loginError, setLoginError] = useState<string | null>(null)
   const [initError, setInitError] = useState<string | null>(null)
+  // Set instead of `initError` when the request was refused before login, so
+  // the page renders the refusal's own copy cell rather than a raw message.
+  const [refusal, setRefusal] = useState<StoreRequestRefusal | null>(null)
   const [storeError, setStoreError] = useState<string | null>(null)
   const [storing, setStoring] = useState(false)
   const initialized = useRef(false)
@@ -133,8 +141,9 @@ export function WalletStorePage() {
       const event =
         injected ?? ((await receiveCredentialEvent()) as CHAPIStoreEvent)
       const { dataType, data, options } = event.credential ?? {}
+      const origin = requestingOriginOf(event.credentialRequestOrigin)
       log.debug('CHAPI store incoming event', {
-        origin: event.credentialRequestOrigin ?? '(unknown origin)',
+        origin: origin ?? '(unknown origin)',
         dataType: dataType ?? '(none)',
         protocols: options?.protocols ?? {}
       })
@@ -158,18 +167,13 @@ export function WalletStorePage() {
         // exchange is resumed once they have logged in.
         const request = opening.verifiablePresentationRequest
         if (!opening.verifiablePresentation && request) {
-          const { didAuth, vcQueries, zcapRequests } = classifyRequest({
-            request
+          const { exchangeHost } = checkStoreDIDAuthRequest({
+            request,
+            exchangeUrl: exchange,
+            origin
           })
-          if (!didAuth || vcQueries.length > 0 || zcapRequests.length > 0) {
-            throw new Error(
-              `The exchange at ${exchange} asked for something other than DID ` +
-                'Authentication before offering a credential; such exchanges ' +
-                'are not supported.'
-            )
-          }
           setCHAPIEvent(event)
-          setPendingDIDAuth({ exchangeUrl: exchange, request })
+          setPendingDIDAuth({ exchangeUrl: exchange, request, exchangeHost })
           setPageState('awaiting-login')
           return
         }
@@ -196,11 +200,15 @@ export function WalletStorePage() {
 
     init().catch((err: unknown) => {
       log.error('CHAPI store could not read the incoming offer', { err })
-      setInitError(
-        err instanceof Error
-          ? err.message
-          : 'Could not read the incoming offer.'
-      )
+      if (err instanceof StoreRequestRefusedError) {
+        setRefusal(err.refusal)
+      } else {
+        setInitError(
+          err instanceof Error
+            ? err.message
+            : 'Could not read the incoming offer.'
+        )
+      }
       setPageState('failed')
     })
   }, [])
@@ -237,9 +245,9 @@ export function WalletStorePage() {
   /**
    * Answers the issuance exchange's holder-binding step: signs a DID-Auth
    * presentation over the exchange's challenge and trades it for the offered
-   * credentials. The `domain` falls back to the exchange's own origin, which is
-   * where the answer is POSTed, for issuers that state a challenge but no
-   * domain.
+   * credentials. The `domain` is the one the exchange stated: the pre-login
+   * check refused a request that named none, and one naming a domain other
+   * than the requesting origin.
    */
   async function authenticate({
     session: loggedIn,
@@ -259,7 +267,7 @@ export function WalletStorePage() {
         queries,
         didAuthRequested: true,
         challenge: request.challenge,
-        domain: request.domain ?? new URL(exchangeUrl).origin,
+        domain: request.domain!,
         cryptosuite: negotiateCryptosuite(queries)
       })
       log.debug('CHAPI store authenticating to the exchange', {
@@ -373,7 +381,9 @@ export function WalletStorePage() {
 
         {pageState === 'failed' && (
           <Stack spacing={2}>
-            <Alert severity="error">{initError}</Alert>
+            <Alert severity="error">
+              {refusal ? t(`chapi.store.refusals.${refusal}`) : initError}
+            </Alert>
             <Button
               variant="outlined"
               sx={{ alignSelf: 'flex-start' }}
@@ -409,7 +419,16 @@ export function WalletStorePage() {
         ))}
 
         {pageState === 'awaiting-login' && (
-          <CHAPILoginForm onSubmit={handleLogin} error={loginError} />
+          <Stack spacing={2}>
+            {pendingDIDAuth && (
+              <Alert severity="info">
+                {t('chapi.store.didAuthNotice', {
+                  host: pendingDIDAuth.exchangeHost
+                })}
+              </Alert>
+            )}
+            <CHAPILoginForm onSubmit={handleLogin} error={loginError} />
+          </Stack>
         )}
 
         {pageState === 'confirming' && (

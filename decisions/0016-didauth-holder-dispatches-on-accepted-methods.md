@@ -69,9 +69,13 @@ place of the consent panel. That is a hard constraint on the
 implementation: the post-login refusal replaces the consent panel and
 adds no step, screen, or click to the flow.
 
-The dispatch itself never throws. Two of its callers have no refusal
-surface: the CHAPI store page renders a raw error message, and the
-external-request delivery path resolves a signer it never uses.
+The dispatch itself never throws. The external-request delivery path
+resolves a signer it never uses, and has no refusal surface. The CHAPI
+store page has one for the request it will not sign at all: it checks the
+exchange's DID-Auth request before the login form renders, and refuses on
+the request's shape, on a missing or mismatched `domain`, and on a
+presentation endpoint outside the exchange's own origin. A dispatch
+failure past that check still surfaces there as a raw error message.
 
 ## Rejected Alternatives
 
@@ -137,3 +141,8 @@ Reopen this decision when one or more of the following holds:
 - 2026-09-03: Revisit criterion 2 was refined rather than reversed. The
   projection's standing staleness is closed by `decisions/0018`; the
   criterion now names the window that remains.
+
+- 2026-09-11: The store page gained a pre-login refusal surface for the
+  DID-Auth requests it will not sign (shape, `domain`, delivery origin).
+  The dispatch still never throws, and the store page still surfaces a
+  dispatch failure as a raw message.

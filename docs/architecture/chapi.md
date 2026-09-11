@@ -48,6 +48,27 @@ refused before a password box renders. After login, a session that can
 present none of the listed methods gets the block screen in place of the
 consent panel.
 
+**The store popup refuses a DID-Auth request before login.** A
+`navigator.credentials.store()` may name a VC API exchange that opens with a
+DID-Auth request. `checkStoreDIDAuthRequest`
+(`src/lib/walletRequest/storeRequest.ts`) runs on the reply, before the
+passphrase form renders, and each refusal raises `StoreRequestRefusedError`
+with its own copy under `chapi.store.refusals.*`. The order is: the exchange
+asked for something other than DID Authentication alone
+(`unsupportedRequest`); the request states no `domain` (`noDomain`); the
+`domain` does not match the attested requesting origin (`domainMismatch`);
+the presentation endpoint is on another origin (`foreignDelivery`). A
+`domain` is now required rather than defaulted to the exchange origin, and
+it is compared by `domainMatchesOrigin` against
+`requestingOriginOf(event.credentialRequestOrigin)`, the same predicate the
+get page uses. Delivery goes to the exchange's own origin alone, the
+endpoint being `interact.service` when the reply names one and the exchange
+URL otherwise. Together these refuse a site that relays a third-party
+verifier's challenge and collects the proof. Consent stays one gesture: the
+login form carries a notice naming the exchange host and saying that logging
+in proves the wallet identity to it (`chapi.store.didAuthNotice`), and the
+passphrase submit is the approval.
+
 **The popup follows the browser's routing.** It runs the same post-KDF
 routing every login runs (`routeUnlockLogin`, see "Session persistence" in session-persistence.md),
 with the Storage Access API handle threaded in as the record probe's `idb`

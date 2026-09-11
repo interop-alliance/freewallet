@@ -850,7 +850,14 @@
       "title": "Guardar credencial",
       "authenticating": "Autenticando con el emisor...",
       "storedSuccess": "{{count}} credenciales almacenadas correctamente.",
-      "storedSuccess_one": "Credencial almacenada correctamente."
+      "storedSuccess_one": "Credencial almacenada correctamente.",
+      "didAuthNotice": "Al iniciar sesión demostrará la identidad de su billetera a {{host}} para que pueda entregarle la credencial.",
+      "refusals": {
+        "unsupportedRequest": "El emisor pidió algo distinto de una prueba de la identidad de su billetera antes de ofrecer una credencial, lo cual esta billetera no admite.",
+        "noDomain": "La solicitud de identidad del emisor no indica ningún dominio, por lo que no se puede responder de forma segura.",
+        "domainMismatch": "El dominio de esta solicitud no coincide con su procedencia, por lo que no se puede autenticar de forma segura.",
+        "foreignDelivery": "Esta solicitud enviaría su prueba de identidad a un lugar distinto del servidor del propio emisor, por lo que fue rechazada."
+      }
     }
   },
   "externalRequest": {

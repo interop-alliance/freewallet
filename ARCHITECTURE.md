@@ -315,7 +315,9 @@ at login, and the popup pages under `src/pages/chapi/` sit outside
 `ProtectedRoute` and the main app layout. The popup makes no routing choice
 of its own. It runs the same post-KDF routing every login runs, with the
 Storage Access API handle threaded in as the record probe's `idb` factory,
-so a denied or unsupported handle finds no record and routes transient.
+so a denied or unsupported handle finds no record and routes transient. The
+store popup refuses a DID-Auth request whose `domain` is absent or does not
+match the requesting origin before its login form renders.
 
 App Connect is a CHAPI `get` whose VPR carries one `AppConnectQuery`,
 answered in one signed presentation with an app-key credential plus

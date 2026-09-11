@@ -209,6 +209,21 @@
 
 ### Fixed
 
+- The CHAPI store popup checks a VC API exchange's DID-Auth request before
+  the login form renders (`checkStoreDIDAuthRequest` in
+  `src/lib/walletRequest/storeRequest.ts`, refusing with
+  `StoreRequestRefusedError`). It refuses a request for anything other than
+  DID Authentication alone, one stating no `domain`, one whose `domain` does
+  not match the attested requesting origin, and one whose presentation
+  endpoint sits on an origin other than the exchange's own. The page no
+  longer defaults an absent `domain` to the exchange origin, so a site
+  cannot have the wallet sign a relayed third-party login challenge and
+  deliver the proof elsewhere.
+
+- The store popup's login form names the exchange host and states that
+  logging in proves the wallet identity to it. The passphrase submit stays
+  the one gesture, with no added step.
+
 - The Storage page reads and decrypts the activity history once per visit,
   in `useStorageListings`, and hands the scan to both the shares listing and
   the connected-apps listing. `listSharedCollections` takes an optional
