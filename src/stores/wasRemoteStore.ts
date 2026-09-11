@@ -641,7 +641,7 @@ export class WASRemoteStore {
    * @param options.id {string}   the WAS collection id (validated by the caller)
    * @param [options.name] {string}   display name; defaults to the id
    * @param [options.isPublic] {boolean}   grant collection-level world read
-   * @param [options.generator] {string}   the DID of the application this
+   * @param [options.generator] {IDID}   the DID of the application this
    *   collection is provisioned for
    * @param [options.generatorOrigin] {string}   the Web origin that DID was
    *   bound to at provisioning time
@@ -657,7 +657,7 @@ export class WASRemoteStore {
     id: string
     name?: string
     isPublic?: boolean
-    generator?: string
+    generator?: IDID
     generatorOrigin?: string
   }): Promise<string> {
     try {
@@ -698,7 +698,7 @@ export class WASRemoteStore {
    * @param options {object}
    * @param options.id {string}   the WAS collection id
    * @param [options.name] {string}   display name; defaults to the id
-   * @param [options.generator] {string}   the DID of the application this
+   * @param [options.generator] {IDID}   the DID of the application this
    *   collection is provisioned for
    * @param [options.generatorOrigin] {string}   the Web origin that DID was
    *   bound to at provisioning time
@@ -712,7 +712,7 @@ export class WASRemoteStore {
   }: {
     id: string
     name?: string
-    generator?: string
+    generator?: IDID
     generatorOrigin?: string
   }): Promise<void> {
     await this.#ensureCollectionInSpace({
@@ -738,7 +738,7 @@ export class WASRemoteStore {
    * @param [options.name] {string}   display name; defaults to the id
    * @param options.encryption {'plaintext' | 'governed'}
    * @param [options.isPublic] {boolean}
-   * @param [options.generator] {string}
+   * @param [options.generator] {IDID}
    * @param [options.generatorOrigin] {string}
    * @returns {Promise<void>}
    */
@@ -754,7 +754,7 @@ export class WASRemoteStore {
     name?: string
     encryption: 'plaintext' | 'governed'
     isPublic?: boolean
-    generator?: string
+    generator?: IDID
     generatorOrigin?: string
   }): Promise<void> {
     await ensureSpaceAndCollection({

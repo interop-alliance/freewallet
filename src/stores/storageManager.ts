@@ -27,6 +27,7 @@
  * BrowserStore.
  */
 import type {
+  IDID,
   IKeyAgreementKey,
   IKeyResolver,
   IVerifiableCredential,
@@ -2131,7 +2132,7 @@ export class StorageManager {
    * @param options.id {string}
    * @param [options.name] {string}
    * @param [options.isPublic] {boolean}
-   * @param [options.generator] {string}   the DID of the application this
+   * @param [options.generator] {IDID}   the DID of the application this
    *   collection is provisioned for
    * @param [options.generatorOrigin] {string}   the Web origin that DID was
    *   bound to at provisioning time
@@ -2147,7 +2148,7 @@ export class StorageManager {
     id: string
     name?: string
     isPublic?: boolean
-    generator?: string
+    generator?: IDID
     generatorOrigin?: string
   }): Promise<void> {
     await this.#requireRemote('Provisioning a collection').ensureCollection({
@@ -2191,7 +2192,7 @@ export class StorageManager {
    * @param options.appRecipient {RecipientPublicKey}   the app's identity
    *   public key-agreement key, the X25519 twin of its controller `did:key`
    *   (its `id` is the recipient `kid`)
-   * @param [options.generator] {string}   the DID of the application this
+   * @param [options.generator] {IDID}   the DID of the application this
    *   collection is provisioned for, stamped as the collection's attribution
    * @param [options.generatorOrigin] {string}   the Web origin that DID was
    *   bound to at provisioning time
@@ -2205,7 +2206,7 @@ export class StorageManager {
   }: {
     collectionId: string
     appRecipient: RecipientPublicKey
-    generator?: string
+    generator?: IDID
     generatorOrigin?: string
   }): Promise<CollectionEncryption> {
     const remote = this.#requireRemote('Provisioning an app collection')

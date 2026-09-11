@@ -96,6 +96,7 @@ import {
   isEd25519DidKey,
   x25519RecipientFromDidKey
 } from '@interop/was-client/edv'
+import type { IDID } from '@interop/data-integrity-core'
 import type { ICapabilityQueryDetail, IZcap } from './types'
 
 /**
@@ -1209,9 +1210,16 @@ export async function processZcaps({
     isPublic: boolean
     controller?: string
   }): Promise<void> {
-    const attribution = appProvisioning
-      ? { generator: controller, generatorOrigin: app?.origin }
-      : {}
+    // `generator` is typed as a DID downstream, and the controller arrives
+    // here as a plain request string. `isEd25519DidKey` is the check that
+    // earns the `IDID` -- it proves the `did:key:` prefix the type asserts --
+    // and a controller that fails it was never a stampable app identity, so
+    // it stamps nothing rather than recording a non-DID as the creator.
+    // was-client drops a lone `generatorOrigin` on the same terms.
+    const attribution =
+      appProvisioning && isEd25519DidKey(controller)
+        ? { generator: controller as IDID, generatorOrigin: app?.origin }
+        : {}
     if (appProvisioning && !isPublic) {
       await session.storage.provisionAppCollection({
         collectionId,

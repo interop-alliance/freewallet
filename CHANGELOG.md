@@ -64,6 +64,11 @@
 
 ### Changed
 
+- The collection app-attribution `generator` is typed `IDID` through the
+  provisioning path (`StorageManager` and `WASRemoteStore`), matching
+  was-client 0.60.0. The grantee controller is narrowed at the one place it
+  arrives as a request string: a controller `isEd25519DidKey` refuses is no
+  longer stamped as the creator, and `generatorOrigin` goes with it.
 - The per-collection descriptor store lookups come from
   `@interop/wallet-core/keys`: the geneses and the recovery continuations
   call the shared `accountCollectionStores`, and `sessionCollectionStores`
