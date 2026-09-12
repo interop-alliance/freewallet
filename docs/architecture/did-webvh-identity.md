@@ -227,6 +227,18 @@ with that credential offers to remove it instead. A wipe failure past the
 pivot is accepted the same way, naming the surviving replica as an
 unverified residue.
 
+A re-run over an account that is already gone -- a second tab, or a re-click
+after a delete whose 2xx was lost -- meets a 404 from the account log at
+discovery and carries straight to the acting credential's own unlock Space
+and the local wipe. That arm reads no unlock-methods registry and never can,
+since the registry lived in the account Space the first run destroyed. Its
+local wipe is narrowed to the acting credential, and it says so: the walk
+passes `registryUnread`, the executor reports the failed
+`unlock-methods-registry` stage, and the outcome carries
+`localWipeNarrowed`. The result is `deleted-unverified` rather than
+`deleted`, and Settings names the other sign-in methods whose browser-local
+state may still stand, offering the browser-scoped wipe.
+
 **The shared wipe enumeration** (`src/session/wipe.ts`) is the one list of
 browser-local state an account leaves on a browser, and the one executor
 that deletes it. Account deletion, the guest wipe, and the forget ceremony

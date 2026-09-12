@@ -1950,10 +1950,11 @@ export async function rotateAccountUpdateKey({
  * - `deleted` -- the account Space is gone and the caller should clear the
  *   session and leave the app.
  * - `deleted-unverified` -- the account is gone, but this browser's local
- *   replica did not verifiably go with it: either the delete failed, or it
- *   ran and could not be CONFIRMED (the engine cannot enumerate its
- *   databases). Past the pivot this REPLACES `failed`, which would tell the
- *   user their account survived.
+ *   state did not verifiably go with it: the replica delete failed, or it ran
+ *   and could not be CONFIRMED (the engine cannot enumerate its databases),
+ *   or the unlock-method enumeration was narrowed to the acting credential
+ *   (`localWipeNarrowed`). Past the pivot this REPLACES `failed`, which would
+ *   tell the user their account survived.
  */
 export type AccountDeletionResult =
   'wrong-passphrase' | 'refused' | 'failed' | 'deleted' | 'deleted-unverified'
@@ -2068,6 +2069,15 @@ export interface AccountDeletionOutcome {
    * unlock Spaces the walk could not name
    */
   unnamed: UnnamedUnlockSpace[]
+  /**
+   * Whether the local wipe's unlock-method enumeration was narrowed to the
+   * acting credential, the unlock-methods registry having gone unread. Every
+   * other sign-in method's browser-local state on this browser -- its keyring
+   * cache and its wrapped client-key record -- may still stand, and nothing
+   * re-derives the enumeration later, so the caller offers the
+   * browser-scoped wipe.
+   */
+  localWipeNarrowed: boolean
   /**
    * The KMS keystore stage. Shipped skipped and reported: a keystore's
    * server-side deletion route is its own item, and an orphaned keystore is a
@@ -2288,10 +2298,12 @@ export async function deleteAccount({
   const idb = browserLocal ? persistence.idb : undefined
   const spaces: SpaceDeletionReport[] = []
   const unnamed: UnnamedUnlockSpace[] = []
+  let localWipeNarrowed = false
   const done = (result: AccountDeletionResult): AccountDeletionOutcome => ({
     result,
     spaces,
     unnamed,
+    localWipeNarrowed,
     keystore: 'skipped'
   })
   const refuse = (
@@ -2301,6 +2313,7 @@ export async function deleteAccount({
     refusal,
     spaces,
     unnamed,
+    localWipeNarrowed,
     keystore: 'skipped'
   })
 
@@ -3142,6 +3155,14 @@ export async function deleteAccount({
   const targets = snapshotWipeTargets({
     session,
     registry,
+    // A run that reached here without reading the registry took the
+    // already-gone arm, and on an account whose Space is destroyed the
+    // registry can never be read again: the unlock-method enumeration
+    // narrows to the acting credential, so every OTHER method's local state
+    // on this browser -- its keyring cache and its wrapped client-key
+    // record, which carries the cached user key -- survives. Say so, rather
+    // than letting a narrowed wipe report as clean.
+    registryUnread: remote && !registryLoaded,
     enrolledClientDids
   })
   const { failed, unverified } = await executeLocalWipe({
@@ -3149,10 +3170,11 @@ export async function deleteAccount({
     storage: session.storage ?? undefined,
     idb
   })
+  localWipeNarrowed = failed.includes('unlock-methods-registry')
   if (failed.includes('replica')) {
     return done(accountGone ? 'deleted-unverified' : 'failed')
   }
-  if (unverified.includes('replica')) {
+  if (unverified.includes('replica') || localWipeNarrowed) {
     return done('deleted-unverified')
   }
   return done('deleted')

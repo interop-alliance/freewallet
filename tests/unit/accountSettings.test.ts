@@ -933,10 +933,12 @@ vi.mock('@/session/wipe', () => ({
   snapshotWipeTargets: vi.fn(
     ({
       session,
-      registry
+      registry,
+      registryUnread = false
     }: {
       session: { user: { id: string } }
       registry?: { methods?: { unlockSpaceId: string }[] } | null
+      registryUnread?: boolean
     }) => {
       state.calls.push('snapshotWipeTargets')
       return {
@@ -945,17 +947,26 @@ vi.mock('@/session/wipe', () => ({
         unlockSpaceIds: (registry?.methods ?? []).map(
           entry => entry.unlockSpaceId
         ),
+        registryUnread,
         cacheScopes: []
       }
     }
   ),
-  executeLocalWipe: vi.fn(async () => {
-    state.calls.push('executeLocalWipe')
-    return {
-      failed: state.localWipeFailed,
-      unverified: state.localWipeUnverified
+  // The executor's own narrowing rule stands in here, so what these tests
+  // exercise is the walk: an enumeration built over a registry the consumer
+  // could not read reports the `unlock-methods-registry` stage as failed.
+  executeLocalWipe: vi.fn(
+    async ({ targets }: { targets: { registryUnread?: boolean } }) => {
+      state.calls.push('executeLocalWipe')
+      return {
+        failed: [
+          ...(targets.registryUnread ? ['unlock-methods-registry'] : []),
+          ...state.localWipeFailed
+        ],
+        unverified: state.localWipeUnverified
+      }
     }
-  })
+  )
 }))
 
 const {
@@ -1632,10 +1643,41 @@ describe('deleteAccount (the (a2) refusals)', () => {
       session: makeSession({ transient: true }),
       passphrase: PASSPHRASE
     })
-    expect(outcome.result).toBe('deleted')
+    // Not a clean `deleted`: this arm read no registry, so the local
+    // enumeration is narrowed (see the FW-485 case below).
+    expect(outcome.result).toBe('deleted-unverified')
     expect(state.calls).not.toContain('wipeRemoteStorage')
     expect(state.calls).toContain(`spaceDelete:${ACTING_SPACE}`)
     expect(state.calls).toContain('executeLocalWipe')
+  })
+
+  it('reports the narrowed local wipe on an account already deleted, leaving the sibling method named (FW-485)', async () => {
+    // The account Space that held the unlock-methods registry is destroyed,
+    // so this arm can never read it: the enumeration narrows to the acting
+    // credential and every OTHER sign-in method's local state on this
+    // browser -- its keyring cache and its wrapped client-key record, which
+    // carries the cached user key -- stands. Nothing re-derives the
+    // enumeration later, so the run must say so rather than report a clean
+    // wipe.
+    state.accountLogMissing = true
+    const outcome = await deleteAccount({
+      session: makeSession({ transient: true }),
+      passphrase: PASSPHRASE
+    })
+    expect(vi.mocked(getUnlockMethods)).not.toHaveBeenCalled()
+    expect(vi.mocked(snapshotWipeTargets).mock.calls[0]?.[0]).toMatchObject({
+      registry: null,
+      registryUnread: true
+    })
+    const targets = vi.mocked(snapshotWipeTargets).mock.results[0]?.value as {
+      unlockSpaceIds: string[]
+    }
+    expect(targets.unlockSpaceIds).not.toContain(PASSKEY_SPACE)
+    expect(vi.mocked(deleteUnlockLocalState)).not.toHaveBeenCalledWith(
+      expect.objectContaining({ spaceId: PASSKEY_SPACE })
+    )
+    expect(outcome.localWipeNarrowed).toBe(true)
+    expect(outcome.result).toBe('deleted-unverified')
   })
 
   it('verifies the account log FRESH, not from the session memo', async () => {

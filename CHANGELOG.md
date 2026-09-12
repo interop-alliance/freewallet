@@ -209,6 +209,16 @@
 
 ### Fixed
 
+- The account deletion walk's already-gone arm no longer reports a clean
+  wipe. A re-run over an account whose log answers 404 reads no
+  unlock-methods registry and can never read one again, so the local wipe's
+  unlock-method enumeration narrows to the acting credential: the walk now
+  passes `registryUnread`, the executor reports the narrowing as the failed
+  `unlock-methods-registry` stage, and the outcome carries
+  `localWipeNarrowed`. The result is `deleted-unverified` rather than
+  `deleted`, and Settings names the sibling sign-in methods whose local
+  state may still stand, offering the browser-scoped wipe.
+
 - The CHAPI store popup checks a VC API exchange's DID-Auth request before
   the login form renders (`checkStoreDIDAuthRequest` in
   `src/lib/walletRequest/storeRequest.ts`, refusing with

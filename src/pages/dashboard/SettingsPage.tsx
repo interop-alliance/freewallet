@@ -164,6 +164,7 @@ export function SettingsPage() {
   const [deleteRefusalKey, setDeleteRefusalKey] = useState<string | null>(null)
   const [deleteResidueCount, setDeleteResidueCount] = useState(0)
   const [deleteActingResidue, setDeleteActingResidue] = useState(false)
+  const [deleteLocalNarrowed, setDeleteLocalNarrowed] = useState(false)
   // The Spaces a refused run had already deleted, for the refusal's own copy:
   // "nothing was removed" is false once (b3) or part of (b1) has run.
   const [deleteRefusalDeleted, setDeleteRefusalDeleted] = useState<string[]>([])
@@ -722,7 +723,9 @@ export function SettingsPage() {
   /**
    * The browser-scoped wipe offered beside a `deleted-unverified` outcome:
    * the login page's no-unlock-material forget grade, run from here because
-   * this browser could not confirm its own replica is gone.
+   * this browser could not confirm its own replica is gone, or because the
+   * wipe's unlock-method enumeration was narrowed to the acting credential
+   * and the sibling methods' local state may stand.
    *
    * @returns {Promise<void>}
    */
@@ -742,6 +745,7 @@ export function SettingsPage() {
     }
     setDeleteError(false)
     setDeleteUnverified(false)
+    setDeleteLocalNarrowed(false)
     setDeletePassphraseIncorrect(false)
     setDeleteRefusalKey(null)
     setDeleting(true)
@@ -789,12 +793,17 @@ export function SettingsPage() {
       }
       // Past the pivot: the account is gone, so every remaining outcome logs
       // out. One with residue -- a standing unlock Space, an unnamed
-      // credential, a failed (b6), or a replica this browser could not
-      // confirm gone -- shows its copy first and logs out on the
-      // acknowledge, since the hard reload would otherwise take the copy
-      // with it.
+      // credential, a failed (b6), a replica this browser could not confirm
+      // gone, or a narrowed local enumeration -- shows its copy first and
+      // logs out on the acknowledge, since the hard reload would otherwise
+      // take the copy with it.
+      //
+      // The two local-residue copies are exclusive: a narrowed enumeration
+      // names the sibling sign-in methods specifically, which the generic
+      // unconfirmed-replica copy would only blur.
       const unverified = outcome.result === 'deleted-unverified'
-      setDeleteUnverified(unverified)
+      setDeleteUnverified(unverified && !outcome.localWipeNarrowed)
+      setDeleteLocalNarrowed(outcome.localWipeNarrowed)
       if (
         unverified ||
         actingResidue ||
@@ -1433,6 +1442,11 @@ export function SettingsPage() {
                     {t('settings.deleteUnverified')}
                   </Alert>
                 )}
+                {deleteLocalNarrowed && (
+                  <Alert severity="warning">
+                    {t('settings.deleteLocalNarrowed')}
+                  </Alert>
+                )}
               </Stack>
             ) : (
               <>
@@ -1502,7 +1516,7 @@ export function SettingsPage() {
           <DialogActions>
             {deleteFarewell ? (
               <>
-                {deleteUnverified && (
+                {(deleteUnverified || deleteLocalNarrowed) && (
                   <Button
                     onClick={handleForgetBrowserAfterDelete}
                     loading={forgettingBrowser}
