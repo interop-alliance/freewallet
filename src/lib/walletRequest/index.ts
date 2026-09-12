@@ -5,6 +5,7 @@
 export * from './types'
 export * from './appConnect'
 export * from './classify'
+export * from './getRequest'
 export * from './presentationSuite'
 export * from './vcMatches'
 export * from './composeVP'

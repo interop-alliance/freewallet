@@ -48,6 +48,28 @@ refused before a password box renders. After login, a session that can
 present none of the listed methods gets the block screen in place of the
 consent panel.
 
+**The get popup's pre-consent matrix runs before login.** It lives in
+`src/lib/walletRequest/getRequest.ts` as plain functions, the way
+`storeRequest.ts` carries the store popup's check and `externalRequest.ts` the
+interaction-URL page's, so the matrix is exercisable with no DOM. Each refusal
+raises `GetRequestRefusedError` carrying a `GetRequestRefusal`, which the page
+sets as its `BlockReason` and renders from the matching `chapi.get.*` copy
+cell. The order is: an origin this wallet cannot attribute
+(`unattributedOrigin`), a body carrying no readable query and a body the
+classifier rejects (both `malformedRequest`), a `DIDAuthentication`
+constrained to DID methods no session on this deployment could present
+(`unsupported`), and a `domain` that does not match the attested origin
+(`domainMismatch`). The origin cell is read ahead of the request body, so an
+unattributable request is refused before the popup opens a VC API exchange on
+the requester's behalf. The consent screen's requester label and the Login
+activity's `origin` both come from that attested value, and
+`requestingOriginOf` returns undefined for a value that does not parse as well
+as for one whose origin is opaque (`mailto:`, `data:`, `file:`, which
+serialize their origin as the string `null`). Consent therefore renders with a
+requester to name rather than with a blank chip. A path that has no attested
+origin at all states that fact instead, on the model of the interaction-URL
+page's `EXTERNAL_REQUEST_ORIGIN` marker.
+
 **The store popup refuses a DID-Auth request before login.** A
 `navigator.credentials.store()` may name a VC API exchange that opens with a
 DID-Auth request. `checkStoreDIDAuthRequest`

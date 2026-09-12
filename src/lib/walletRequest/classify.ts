@@ -45,7 +45,10 @@ export {
  * the returning-app match, the Login activity, the Collection Description's
  * `generatorOrigin`) joins on the value byte-for-byte, so one serialization
  * is fixed here. A value that does not parse is treated as no origin at all,
- * which an App Connect request then refuses.
+ * and so is one whose scheme has an opaque origin (`mailto:`, `data:`,
+ * `file:`), which serializes as the string `null` and attributes the request
+ * to nobody. Both leave the request unattributed, which the get popup and an
+ * App Connect request then refuse.
  *
  * @param [origin] {string} - The origin as the event carried it.
  * @returns {string | undefined}
@@ -54,11 +57,13 @@ export function requestingOriginOf(origin?: string): string | undefined {
   if (!origin) {
     return undefined
   }
+  let canonical: string
   try {
-    return new URL(origin).origin
+    canonical = new URL(origin).origin
   } catch {
     return undefined
   }
+  return canonical === 'null' ? undefined : canonical
 }
 
 /**

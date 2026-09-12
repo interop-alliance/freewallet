@@ -64,7 +64,11 @@ export class WalletResponseFailure extends Error {
  * @param options {object}
  * @param options.session {Session}
  * @param options.profile {WalletRequestProfile}   the classified request
- * @param options.requestOrigin {string}
+ * @param options.requestOrigin {string}   who the entry is attributed to,
+ *   never empty: the CHAPI popup refuses a request it cannot attribute to a
+ *   website before consent (`precheckGetRequest`), and the interaction-URL
+ *   page, which has no attested origin at all, passes the explicit
+ *   `EXTERNAL_REQUEST_ORIGIN` marker its Applications rows key on
  * @param options.zcaps {IZcap[]}   the capabilities actually delegated
  * @param [options.appConnectResult] {WalletResponse['appConnect']}
  * @returns {Promise<void>}
@@ -150,7 +154,9 @@ async function recordLoginActivity({
  * @param options.request {IVPRDetails}
  * @param options.session {Session}
  * @param options.profile {WalletRequestProfile}   the classified request
- * @param options.requestOrigin {string}   the CHAPI requesting origin
+ * @param options.requestOrigin {string}   the CHAPI requesting origin, or the
+ *   interaction-URL page's `EXTERNAL_REQUEST_ORIGIN` marker; never empty, so
+ *   the recorded activity always names a requester
  * @param options.selectedVCs {IVerifiableCredential[]}
  * @param [options.exchangeUrl] {string}   set when the verifier deferred the
  *   request to a VC API exchange

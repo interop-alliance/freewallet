@@ -45,6 +45,8 @@ src/lib/            Pure business logic (no React)
   connectedApps.ts  Connected-app and agent listings for the Applications page
   viewMappers/      Transform raw credential data into display-ready values
   walletRequest/    VPR classification + response assembly for CHAPI requests
+    getRequest.ts   The CHAPI get popup's pre-consent refusal matrix,
+                    the attested requesting origin included
     respond.ts      Compose, persist the Login activity, then deliver (the
                     CHAPI `get` approval sequence)
     externalRequest.ts  The interaction-URL entry point's pure half: the
@@ -317,7 +319,9 @@ of its own. It runs the same post-KDF routing every login runs, with the
 Storage Access API handle threaded in as the record probe's `idb` factory,
 so a denied or unsupported handle finds no record and routes transient. The
 store popup refuses a DID-Auth request whose `domain` is absent or does not
-match the requesting origin before its login form renders.
+match the requesting origin before its login form renders. The get popup
+refuses, before its own login form renders, a request whose attested origin
+does not parse, so the consent screen always names a requester.
 
 App Connect is a CHAPI `get` whose VPR carries one `AppConnectQuery`,
 answered in one signed presentation with an app-key credential plus

@@ -805,6 +805,7 @@
       "didAuthUnsupported": "Esta solicitud solo acepta métodos DID bajo los que esta billetera no puede publicar una identidad.",
       "didAuthUnpresentable": "Esta solicitud solo acepta métodos DID bajo los que esta billetera no puede presentar una identidad.",
       "domainMismatch": "El dominio de esta solicitud no coincide con su procedencia, por lo que no se puede autenticar de forma segura.",
+      "unattributedOrigin": "Esta billetera no pudo determinar de qué sitio web proviene esta solicitud, por lo que no se puede responder.",
       "processFailed": "Ocurrió un problema al preparar la respuesta. Inténtelo de nuevo.",
       "malformedRequest": "Este sitio no envió una solicitud que esta cartera pueda leer.",
       "exchangeFailed": "No se pudo contactar con el servidor de intercambio del sitio. Inténtelo de nuevo.",

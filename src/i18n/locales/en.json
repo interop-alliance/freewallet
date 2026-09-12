@@ -805,6 +805,7 @@
       "didAuthUnsupported": "This request only accepts DID methods this wallet can't publish an identity under.",
       "didAuthUnpresentable": "This request only accepts DID methods this wallet can't present an identity under.",
       "domainMismatch": "This request's domain doesn't match where it came from, so it can't be safely authenticated.",
+      "unattributedOrigin": "This wallet couldn't tell which website this request came from, so it can't be answered.",
       "processFailed": "Something went wrong preparing the response. Please try again.",
       "malformedRequest": "This site didn't send a request this wallet can read.",
       "exchangeFailed": "Could not reach the site's exchange server. Please try again.",

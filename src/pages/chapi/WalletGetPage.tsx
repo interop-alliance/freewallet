@@ -54,19 +54,18 @@ import type { StoredCredential } from '@/types/credential'
 import {
   appConnectZcapRequests,
   appKeyMintRefused,
-  classifyRequest,
+  attestedRequestOrigin,
   composeAndDeliverResponse,
   credentialQueriesOf,
   didAuthHolderPresentable,
-  didAuthMethodSupported,
-  domainMatchesOrigin,
   existingCollectionsFrom,
+  GetRequestRefusedError,
   grantTtlDays,
   hasTypedExample,
   hasZcapStorage,
-  requestingOriginOf,
   isDidAuthOnly,
   isSatisfiable,
+  precheckGetRequest,
   queriesOf,
   requestsCredentialType,
   resolveGrants,
@@ -76,6 +75,7 @@ import {
   vcMatchesFor,
   WalletResponseFailure,
   type CHAPIGetEvent,
+  type GetRequestRefusal,
   type IVerifiableCredential,
   type IVPRDetails,
   type IVPRQuery,
@@ -103,22 +103,22 @@ type PageState =
 
 /**
  * Why a request cannot proceed; maps to a `chapi.get.*` message key. Set before
- * login for the statically-detectable DID-Auth cases, an unreadable request, or
- * an exchange that could not be opened; after login for a DID method the routed
- * session cannot present, a zcap request this wallet cannot back, or a failed
- * compose / delivery.
+ * login for the pre-consent matrix's refusals (`precheckGetRequest`: an origin
+ * this wallet cannot attribute, an unreadable request, the statically
+ * detectable DID-Auth cases) or an exchange that could not be opened; after
+ * login for a DID method the routed session cannot present, a zcap request
+ * this wallet cannot back, or a failed compose / delivery.
  */
 type BlockReason =
-  | 'unsupported'
+  | GetRequestRefusal
   | 'unpresentableDidMethod'
-  | 'domainMismatch'
   | 'zcapUnavailable'
   | 'appKeysUnreadable'
   | 'processFailed'
-  | 'malformedRequest'
   | 'exchangeFailed'
 
 const BLOCK_MESSAGE_KEY: Record<BlockReason, string> = {
+  unattributedOrigin: 'chapi.get.unattributedOrigin',
   unsupported: 'chapi.get.didAuthUnsupported',
   unpresentableDidMethod: 'chapi.get.didAuthUnpresentable',
   domainMismatch: 'chapi.get.domainMismatch',
@@ -260,67 +260,63 @@ export function WalletGetPage() {
       const event =
         injected ?? ((await receiveCredentialEvent()) as CHAPIGetEvent)
       const web = event.credentialRequestOptions?.web
-      const origin = requestingOriginOf(event.credentialRequestOrigin)
       setCHAPIEvent(event)
-      setRequestOrigin(origin ?? '')
 
-      // A verifier that names a VC API exchange sends an empty VPR body and
-      // keeps the real request behind the exchange URL. Open it to retrieve
-      // the request the user is actually being asked to answer.
-      const exchange = vcApiExchangeUrl({ protocols: web?.protocols })
-      let details = web?.VerifiablePresentation
-      if (exchange && queriesOf(details ?? {}).length === 0) {
-        setExchangeUrl(exchange)
-        try {
-          details = await startExchange({ exchangeUrl: exchange })
-        } catch (err) {
-          log.error('Could not open the VC API exchange', { err })
-          setBlockReason('exchangeFailed')
+      try {
+        // The mediator attests which site is asking, and the consent screen
+        // names it. A value that does not parse attributes the request to
+        // nobody, so it is refused here -- ahead of the exchange below, which
+        // would otherwise be opened on behalf of a requester this wallet
+        // cannot name.
+        setRequestOrigin(attestedRequestOrigin(event.credentialRequestOrigin))
+
+        // A verifier that names a VC API exchange sends an empty VPR body and
+        // keeps the real request behind the exchange URL. Open it to retrieve
+        // the request the user is actually being asked to answer.
+        const exchange = vcApiExchangeUrl({ protocols: web?.protocols })
+        let details = web?.VerifiablePresentation
+        if (exchange && queriesOf(details ?? {}).length === 0) {
+          setExchangeUrl(exchange)
+          try {
+            details = await startExchange({ exchangeUrl: exchange })
+          } catch (err) {
+            log.error('Could not open the VC API exchange', { err })
+            setBlockReason('exchangeFailed')
+            setPageState('blocked')
+            return
+          }
+        }
+        if (!details) {
+          log.error('CHAPI get event carries no readable request', { web })
+          setBlockReason('malformedRequest')
           setPageState('blocked')
           return
         }
-      }
 
-      const queries = details ? queriesOf(details) : []
-      if (!details || queries.length === 0) {
-        log.error('CHAPI get event carries no readable request', { web })
-        setBlockReason('malformedRequest')
-        setPageState('blocked')
-        return
-      }
-      const requestProfile = classifyRequest({ request: details, origin })
+        // The rest of the pre-consent matrix: an unreadable body, a DID method
+        // no session on this deployment could present, a `domain` that does
+        // not match the attested origin. An exchange-sourced VPR names the
+        // verifier's own origin as its `domain`, never the (possibly
+        // third-party) host the exchange runs on, so the matrix reads the same
+        // either way.
+        const { profile: requestProfile, queries } = precheckGetRequest({
+          request: details,
+          credentialRequestOrigin: event.credentialRequestOrigin,
+          didMethods: DEPLOYMENT_DID_METHODS
+        })
 
-      setRequest(details)
-      setRequestReason(reasonFrom(queries))
-      setProfile(requestProfile)
-
-      // When DID Auth is involved the wallet must sign, so reject up front a
-      // DID method no session on this deployment could ever present. Nothing
-      // pre-login can know more: the routing between the transient and
-      // remembered compositions is post-KDF, so which of the account's holder
-      // forms THIS visit can present is the post-login gate's question
-      // (below). An exchange-sourced VPR names the verifier's own origin as
-      // its `domain`, never the (possibly third-party) host the exchange runs
-      // on, so this stays the same either way.
-      if (
-        requestProfile.didAuth &&
-        !didAuthMethodSupported(queries, DEPLOYMENT_DID_METHODS)
-      ) {
-        setBlockReason('unsupported')
-        setPageState('blocked')
-        return
-      }
-      // A domain that does not match the channel origin (VCALM domain-binding)
-      // can never be satisfied, so reject it before consent. This applies to
-      // any request carrying a `domain`, not only DID-Auth ones: a VPR can pin
-      // a foreign domain without a DIDAuthentication query, and it deserves the
-      // specific domain-mismatch message rather than a generic processing
-      // failure surfaced later.
-      if (
-        details.domain &&
-        !domainMatchesOrigin({ domain: details.domain, origin })
-      ) {
-        setBlockReason('domainMismatch')
+        setRequest(details)
+        setRequestReason(reasonFrom(queries))
+        setProfile(requestProfile)
+      } catch (err) {
+        if (!(err instanceof GetRequestRefusedError)) {
+          throw err
+        }
+        log.error('CHAPI get request refused before consent', {
+          refusal: err.refusal,
+          err
+        })
+        setBlockReason(err.refusal)
         setPageState('blocked')
         return
       }
@@ -636,70 +632,76 @@ export function WalletGetPage() {
           {title}
         </Typography>
 
-        <Box>
-          <Typography variant="body2" sx={{ fontWeight: 600 }}>
-            {t('chapi.get.requestedBy')}
-          </Typography>
-          {appConnect && (
-            <Stack
-              direction="row"
-              spacing={1}
-              sx={{ mt: 0.5, alignItems: 'center' }}
-            >
-              {appManifest?.iconUrl ? (
-                <Box
-                  component="img"
-                  src={appManifest.iconUrl}
-                  alt=""
-                  sx={{ width: 32, height: 32, borderRadius: 1 }}
-                />
-              ) : null}
-              <Typography variant="body2" color="text.secondary">
-                {t('chapi.get.appConnect.nameLabel')}
-              </Typography>
-              <Typography
-                variant="body1"
-                sx={{ fontWeight: 500, overflowWrap: 'anywhere' }}
+        {/* The attested requesting origin is the consent screen's one
+            trusted requester label, and the pre-consent matrix refuses a
+            request carrying none, so this block renders only with an origin
+            to name rather than with a blank chip. */}
+        {requestOrigin && (
+          <Box>
+            <Typography variant="body2" sx={{ fontWeight: 600 }}>
+              {t('chapi.get.requestedBy')}
+            </Typography>
+            {appConnect && (
+              <Stack
+                direction="row"
+                spacing={1}
+                sx={{ mt: 0.5, alignItems: 'center' }}
               >
-                {appName}
-              </Typography>
-            </Stack>
-          )}
-          {appConnect ? (
-            <Stack
-              direction="row"
-              spacing={1}
-              sx={{ mt: 0.5, alignItems: 'center' }}
-            >
-              <Typography variant="body2" color="text.secondary">
-                {t('chapi.get.appConnect.originLabel')}
-              </Typography>
+                {appManifest?.iconUrl ? (
+                  <Box
+                    component="img"
+                    src={appManifest.iconUrl}
+                    alt=""
+                    sx={{ width: 32, height: 32, borderRadius: 1 }}
+                  />
+                ) : null}
+                <Typography variant="body2" color="text.secondary">
+                  {t('chapi.get.appConnect.nameLabel')}
+                </Typography>
+                <Typography
+                  variant="body1"
+                  sx={{ fontWeight: 500, overflowWrap: 'anywhere' }}
+                >
+                  {appName}
+                </Typography>
+              </Stack>
+            )}
+            {appConnect ? (
+              <Stack
+                direction="row"
+                spacing={1}
+                sx={{ mt: 0.5, alignItems: 'center' }}
+              >
+                <Typography variant="body2" color="text.secondary">
+                  {t('chapi.get.appConnect.originLabel')}
+                </Typography>
+                <Chip
+                  size="small"
+                  label={requestOrigin}
+                  sx={chapiStyles.originChip}
+                />
+              </Stack>
+            ) : (
               <Chip
                 size="small"
                 label={requestOrigin}
                 sx={chapiStyles.originChip}
               />
-            </Stack>
-          ) : (
-            <Chip
-              size="small"
-              label={requestOrigin}
-              sx={chapiStyles.originChip}
-            />
-          )}
-          {/* The manifest description is fetched from the requesting
-              origin's own web-app manifest -- site-authored free text, so it
-              gets the same attributed, clamped treatment as a request
-              `reason` rather than rendering as wallet copy. */}
-          {appConnect && appManifest?.description && (
-            <Box sx={{ mt: 0.5 }}>
-              <SiteProvidedText
-                text={appManifest.description}
-                label={t('chapi.get.zcapReasonLabel')}
-              />
-            </Box>
-          )}
-        </Box>
+            )}
+            {/* The manifest description is fetched from the requesting
+                origin's own web-app manifest -- site-authored free text, so it
+                gets the same attributed, clamped treatment as a request
+                `reason` rather than rendering as wallet copy. */}
+            {appConnect && appManifest?.description && (
+              <Box sx={{ mt: 0.5 }}>
+                <SiteProvidedText
+                  text={appManifest.description}
+                  label={t('chapi.get.zcapReasonLabel')}
+                />
+              </Box>
+            )}
+          </Box>
+        )}
 
         {requestReason && (
           <Box>

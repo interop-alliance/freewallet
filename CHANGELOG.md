@@ -224,6 +224,21 @@
   logging in proves the wallet identity to it. The passphrase submit stays
   the one gesture, with no added step.
 
+- The CHAPI get popup refuses a request whose attested origin does not parse,
+  or parses to an opaque origin, before consent renders
+  (`unattributedOrigin`, with its own `chapi.get.unattributedOrigin` copy).
+  The check runs ahead of opening a VC API exchange, and the consent panel's
+  "Requested by" block renders only when there is an origin to name, so an
+  approval no longer records a Login activity attributed to nobody.
+  `requestingOriginOf` returns undefined for an opaque origin.
+
+- The get page's whole pre-consent refusal matrix moves to
+  `src/lib/walletRequest/getRequest.ts` as plain functions
+  (`attestedRequestOrigin`, `precheckGetRequest`, refusing with
+  `GetRequestRefusedError`), the shape the store popup's and the
+  interaction-URL page's checks already have. The page sets its `BlockReason`
+  from the thrown refusal.
+
 - The Storage page reads and decrypts the activity history once per visit,
   in `useStorageListings`, and hands the scan to both the shares listing and
   the connected-apps listing. `listSharedCollections` takes an optional
