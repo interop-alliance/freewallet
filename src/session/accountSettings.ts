@@ -2166,7 +2166,9 @@ async function accountLogAnswers({
     path: resourcePath(pointer.spaceId, ID_COLLECTION.id, DID_LOG_RESOURCE)
   })
   try {
-    const response = await fetch(url)
+    // A HEAD: only the status matters, and the log grows by one entry per
+    // visit, so a GET would download a body the check never reads.
+    const response = await fetch(url, { method: 'HEAD' })
     return response.status !== 404
   } catch (err) {
     log.warn(
@@ -2932,7 +2934,7 @@ export async function deleteAccount({
   if (remote && accountSpaceId && !accountAlreadyGone) {
     onPhase?.({ phase: 'account-space', spaceId: accountSpaceId })
     // The account's own world-readable log is the corroboration the 404 rule
-    // rests on, and reading it costs one unauthenticated GET; memoized so a
+    // rests on, and reading it costs one unauthenticated HEAD; memoized so a
     // path that consults it twice fetches once.
     let logGone: boolean | undefined
     const accountLogIsGone = async (): Promise<boolean> => {
