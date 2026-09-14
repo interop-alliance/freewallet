@@ -152,6 +152,14 @@ derives only an unlock identity (`src/session/keyring.ts`), which locates
 the account's unlock record in its own minimal unlock Space. That record
 carries none of the account's content keys.
 
+Reading a SIBLING credential's record is a second matter. An enrolled client
+invokes that entry's stored management zcap. A ladder-anchored session cannot,
+so it mints a GET-only child of that zcap naming the keyring record itself:
+the child's `invocationTarget` is the Resource URL beneath the unlock Space
+and its `allowedAction` is exactly `['GET']`. A bare `GET` child names the
+Space Metadata object instead, which is what the Space existence probes ask
+for and carries no record.
+
 One post-KDF question decides the rest (`routeUnlockLogin` in
 `src/session/transientLogin.ts`). Does this browser hold a client-key record
 for this credential? A browser holding none takes the transient
@@ -380,7 +388,7 @@ the credential `cid` or activity `id`, recovered by decrypting at read time.
 JWE encryption is nondeterministic, so dedupe keys on that content identity
 rather than on the row id. `public-credentials` is plaintext and keyed
 directly by `cid`. Each encrypted collection's key epochs come from the
-verified head of its own governing log rather than from a Description member
+verified head of its own governing log rather than from a metadata member
 the host serves (see "Per-collection descriptor logs" in docs/architecture/keys-and-descriptor-logs.md).
 
 When `VITE_WAS_SERVER_URL` is set and the session is not a guest, a remote
@@ -420,7 +428,7 @@ deployment (a server URL like `https://host/was`) the link addresses exactly
 the resource replication wrote, with per-segment encoding.
 
 A collection provisioned for a connected application carries its attribution
-on the Collection Description: `generator`, the app's did:key, and
+on the Collection Metadata object: `generator`, the app's did:key, and
 `generatorOrigin`, the Web origin that DID was bound to. Both are stamped
 when App Connect provisioning creates the collection, and a collection that
 already stands keeps its attribution, so a second app admitted to it does not
@@ -808,6 +816,18 @@ base64url(SHA-256(unlock did:key))` (a discovery convention).
   `wallet-activity`, `contacts`, `contacts-history`, `app-connections`.
 - **Resource** -- an individual stored item (JSON or binary) within a
   Collection.
+- **Collection Metadata object** -- a Collection's configuration together
+  with its user-writable `custom` member, served as one object at the
+  Collection's `meta` path under one `metaVersion` validator. It carries the
+  `encryption` descriptor the server derives from the governing log head. A
+  Space carries the same shape at its own `meta` path, the **Space Metadata
+  object**, which is where the Space's `controller` is written and read.
+  Avoid: Collection Description, Space Description, the Description.
+- **Container URL** -- the URL of a Space or a Collection, written with a
+  trailing slash (`/space/{spaceId}/`, `/space/{spaceId}/{collectionId}/`).
+  The slash-less form only redirects. A Resource URL carries no trailing
+  slash. Both are built through was-client's path builders rather than by
+  string concatenation. Avoid: collection URL prefix, space base URL.
 - **Controller** -- the DID that owns a Space: the account's `did:webvh`
   once promoted, and a `did:key` before promotion and on an unlock Space.
 - **Current-key-set rule** -- the server's authorization policy for a Space
@@ -945,8 +965,8 @@ base64url(SHA-256(unlock did:key))` (a discovery convention).
   the profile: it is session-lifetime scaffolding, and the profile is the
   identity bundle alone.
 - **Durable** -- persisted server-side, on the WAS host: the account log,
-  the user key roster, the unlock records, the Collection Descriptions and
-  their key epochs. It survives a cleared browser, an evicted origin, and a
+  the user key roster, the unlock records, the Collection Metadata objects
+  and their key epochs. It survives a cleared browser, an evicted origin, and a
   lost machine, and the word names this tier alone
   (`decisions/0011-durable-names-server-storage-only.md`). Avoid: durable
   session, durable client, durable login, durable pin.

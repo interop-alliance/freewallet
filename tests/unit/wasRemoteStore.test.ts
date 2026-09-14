@@ -3,7 +3,7 @@ import { describe, it, expect, vi } from 'vitest'
 import { memoryResourceLogPinStore } from '@interop/vh-resource-log'
 import type { ZcapClient } from '@interop/ezcap'
 import type { IZcap } from '@interop/data-integrity-core'
-import type { SpaceDescription, WasClient } from '@interop/was-client'
+import type { SpaceMetadata, WasClient } from '@interop/was-client'
 
 vi.mock('@interop/wallet-core/keys', async importOriginal => ({
   ...(await importOriginal<typeof import('@interop/wallet-core/keys')>()),
@@ -287,28 +287,28 @@ describe('WASRemoteStore.fetchCollectionResource', () => {
   })
 })
 
-describe('WASRemoteStore.collectionMeta', () => {
+describe('WASRemoteStore.collectionMetadata', () => {
   /**
-   * A stubbed `was` client whose collection handle answers `meta()` with the
-   * given value (or rejects with the given error), plus the `collection` spy so
-   * a test can assert the plaintext-override handle it was opened with.
+   * A stubbed `was` client whose collection handle answers `describe()` with
+   * the given value (or rejects with the given error), plus the `collection`
+   * spy so a test can assert how the handle was opened.
    *
    * @param options {object}
-   * @param [options.meta] {unknown}   what `meta()` resolves to
-   * @param [options.error] {unknown}  what `meta()` rejects with instead
+   * @param [options.metadata] {unknown}   what `describe()` resolves to
+   * @param [options.error] {unknown}      what `describe()` rejects with
    * @returns {object}   the store plus the `collection` spy
    */
-  function storeWithMeta({
-    meta,
+  function storeWithMetadata({
+    metadata,
     error
   }: {
-    meta?: unknown
+    metadata?: unknown
     error?: unknown
   }): { store: WASRemoteStore; collection: ReturnType<typeof vi.fn> } {
-    const metaFn = error
+    const describeFn = error
       ? vi.fn().mockRejectedValue(error)
-      : vi.fn().mockResolvedValue(meta)
-    const collection = vi.fn().mockReturnValue({ meta: metaFn })
+      : vi.fn().mockResolvedValue(metadata)
+    const collection = vi.fn().mockReturnValue({ describe: describeFn })
     const space = vi.fn().mockReturnValue({ collection })
     return {
       store: storeWithStubbedClient({ space }),
@@ -316,59 +316,54 @@ describe('WASRemoteStore.collectionMeta', () => {
     }
   }
 
-  it('returns the stored custom envelope verbatim', async () => {
+  it('serves the descriptor and the stored custom from one read', async () => {
     const custom = { jwe: { ciphertext: 'opaque-metadata' } }
-    const { store, collection } = storeWithMeta({
-      meta: { custom, name: 'ignored' }
+    const encryption = { epochs: [{ id: 'urn:uuid:e0' }] }
+    const { store, collection } = storeWithMetadata({
+      metadata: { custom, encryption, name: 'ignored' }
     })
 
+    await expect(
+      store.collectionMetadata({ collectionId: 'private-credentials' })
+    ).resolves.toMatchObject({ custom, encryption })
+    await expect(
+      store.collectionEncryption({ collectionId: 'private-credentials' })
+    ).resolves.toEqual(encryption)
     await expect(
       store.collectionMeta({ collectionId: 'private-credentials' })
     ).resolves.toEqual({ custom })
-    // The raw (still encrypted) value is what the cipher decodes, so the
-    // handle must be opened with the plaintext codec override.
-    expect(collection).toHaveBeenCalledWith('private-credentials', {
-      encryption: 'plaintext'
-    })
+    // The configuration read, which never resolves the codec, so no
+    // plaintext override is needed to keep `custom` opaque.
+    expect(collection).toHaveBeenCalledWith('private-credentials')
   })
 
-  it('returns undefined when the collection has no metadata resource', async () => {
-    const { store } = storeWithMeta({ meta: null })
+  it('returns undefined when the collection is missing or unreadable', async () => {
+    const { store } = storeWithMetadata({ metadata: null })
 
     await expect(
+      store.collectionMetadata({ collectionId: 'private-credentials' })
+    ).resolves.toBeUndefined()
+    await expect(
       store.collectionMeta({ collectionId: 'private-credentials' })
+    ).resolves.toBeUndefined()
+    await expect(
+      store.collectionEncryption({ collectionId: 'private-credentials' })
     ).resolves.toBeUndefined()
   })
 
   it('returns undefined for an absent custom value', async () => {
-    // The plaintext-override codec reports an absent `custom` as `{}`.
-    const { store } = storeWithMeta({ meta: { custom: {} } })
-
-    await expect(
-      store.collectionMeta({ collectionId: 'private-credentials' })
-    ).resolves.toBeUndefined()
-
-    const { store: noCustom } = storeWithMeta({ meta: { name: 'no custom' } })
+    // A cleared `custom` (`null` or `{}` as stored) is dropped by was-client's
+    // read itself, so the one shape the store sees for absence is no member.
+    const { store: noCustom } = storeWithMetadata({
+      metadata: { name: 'no custom' }
+    })
     await expect(
       noCustom.collectionMeta({ collectionId: 'private-credentials' })
     ).resolves.toBeUndefined()
   })
 
-  it('returns undefined when the server lacks metadata support', async () => {
-    // Matched on `name`, not `instanceof`: the error class may come from
-    // another copy of was-client.
-    const notImplemented = Object.assign(new Error('no metadata here'), {
-      name: 'NotImplementedError'
-    })
-    const { store } = storeWithMeta({ error: notImplemented })
-
-    await expect(
-      store.collectionMeta({ collectionId: 'private-credentials' })
-    ).resolves.toBeUndefined()
-  })
-
-  it('rethrows any other error', async () => {
-    const { store } = storeWithMeta({ error: new Error('network down') })
+  it('rethrows a read error', async () => {
+    const { store } = storeWithMetadata({ error: new Error('network down') })
 
     await expect(
       store.collectionMeta({ collectionId: 'private-credentials' })
@@ -862,7 +857,7 @@ describe('WASRemoteStore.ensureGovernedCollection', () => {
 
 describe('WASRemoteStore.promoteSpaceController', () => {
   it('forwards a supplied `current` to the Space configure', async () => {
-    const current: SpaceDescription = {
+    const current: SpaceMetadata = {
       id: 'space-id',
       type: ['Space'],
       controller: 'did:key:test'

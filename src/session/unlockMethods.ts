@@ -98,7 +98,8 @@ const log = createLogger('fw:session:methods')
 import { deleteUnlockSpace, KEYRING_KDF } from '@interop/wallet-core/keyring'
 import {
   DELETION_ZCAP_TTL_MS,
-  mintSpaceVerbCapability
+  mintSpaceVerbCapability,
+  mintUnlockKeyringReadCapability
 } from '@interop/wallet-core/clientAnnex'
 import {
   getUnlockMethodsRecord,
@@ -1224,10 +1225,14 @@ export function unlockSpaceDeletionRefusal({
  * acting through a standing credential's ladder cannot: that capability is
  * delegated to the account DID, and the ladder VM carries no invocation
  * relation. It mints a GET-only child of the stored capability instead and
- * sends it as the ladder VM's own bare did:key -- the same single-verb child
- * the deletion walk mints, and all the server admits from a ladder. A parent
- * that allows no GET makes the entry unreadable rather than refusing the
- * caller, so the reader resolves `undefined` and the caller decides.
+ * sends it as the ladder VM's own bare did:key. The child names the keyring
+ * record itself: its `invocationTarget` is that Resource's URL beneath the
+ * unlock Space (`keyring/keyring.json`) and its `allowedAction` is exactly
+ * `['GET']`, which is what the server's ladder clause admits for a Resource
+ * read. A bare `GET` child names the Space Metadata object instead, so it
+ * reads no record. A parent that allows no GET makes the entry unreadable
+ * rather than refusing the caller, so the reader resolves `undefined` and the
+ * caller decides.
  *
  * @param options {object}
  * @param options.session {Session}
@@ -1260,10 +1265,9 @@ export function unlockEntryReaderFor({
     }
     return {
       zcapClient: signer.invoker,
-      capability: await mintSpaceVerbCapability({
+      capability: await mintUnlockKeyringReadCapability({
         zcapClient: signer.zcapClient,
         parent,
-        verb: 'GET',
         controller: signer.controller,
         ttlMs: DELETION_ZCAP_TTL_MS
       })

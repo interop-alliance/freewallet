@@ -134,7 +134,9 @@ function makeFakeRemote({ stores }: { stores: MemoryDescriptorStores }): {
   }): void
 } {
   const spaceId = 's-space'
-  const spaceUrl = 'https://was.example/space/s-space'
+  const storageServerUrl = 'https://was.example'
+  // The canonical container form, which the path builders emit.
+  const spaceUrl = 'https://was.example/space/s-space/'
   const revoked: unknown[] = []
   const governed: string[] = []
   // The stored `/meta` value per collection, as `collectionMeta` serves it.
@@ -164,6 +166,9 @@ function makeFakeRemote({ stores }: { stores: MemoryDescriptorStores }): {
   const remoteStore = {
     spaceId,
     spaceUrl,
+    storageServerUrl,
+    collectionTargetUrl: (collectionId: string) =>
+      `${spaceUrl}${collectionId}/`,
     async collectionEncryption({ collectionId }: { collectionId: string }) {
       return stores.descriptorOf(collectionId)
     },
@@ -481,7 +486,10 @@ async function resolveHmacOutcome({
   try {
     const key = await resolveHmacKey({
       encryption: descriptor,
-      keyAgreementKey
+      keyAgreementKey,
+      // A current recipient's view: an entry this key cannot unwrap is a
+      // refusal rather than a silently unindexed cipher.
+      required: true
     })
     return { id: key?.id }
   } catch (err) {
@@ -544,7 +552,7 @@ describe('StorageManager.shareCollection', () => {
     expect(calls[0].allowedActions).toEqual(['GET', 'HEAD'])
     expect(calls[0].controller).toBe('did:key:z6MkReader')
     expect(calls[0].invocationTarget).toBe(
-      'https://was.example/space/s-space/private-credentials'
+      'https://was.example/space/s-space/private-credentials/'
     )
 
     // The share was recorded (with the delegated zcap for later revocation).
@@ -834,7 +842,7 @@ describe('StorageManager.revokeAppGrants', () => {
     const space = { revoke } as unknown as Space
     return {
       spaceId: 's-space',
-      spaceUrl: 'https://was.example/space/s-space',
+      spaceUrl: 'https://was.example/space/s-space/',
       spaceHandle() {
         return space
       }
@@ -1818,53 +1826,85 @@ describe('StorageManager.revokeAppCollectionRecipients', () => {
     ).toEqual({ id: hmacId })
   })
 
-  it('ignores grants on standard/protected collections', async () => {
-    const owner = await generateKey()
-    const stores = memoryDescriptorStores()
-    const { remoteStore, revoked } = makeFakeRemote({ stores })
-    const descriptors = await provisionGovernedCollections(owner, stores)
-    const ciphers = await buildCiphers(owner, descriptors)
-    const { localStore, user } = await initLocalStore(ciphers)
-    const storage = new StorageManager({
-      persistence: browserLocalSessionPersistence(),
-      localStore,
-      remoteStore,
-      descriptorLogs: descriptorLogsFrom(stores),
-      ciphers,
-      vaultKeys: owner,
-      descriptors
-    })
+  it.each([
+    [
+      'a collection target',
+      'https://was.example/space/s-space/app-docs/',
+      { collections: 1, rotated: 1, failed: 0 },
+      ['z-app-docs']
+    ],
+    [
+      'a reserved sub-endpoint target',
+      'https://was.example/space/s-space/app-docs/meta',
+      { collections: 0, rotated: 0, failed: 0 },
+      []
+    ],
+    [
+      'a protected collection target',
+      'https://was.example/space/s-space/private-credentials',
+      { collections: 0, rotated: 0, failed: 0 },
+      []
+    ]
+  ])(
+    'recovers the collection id from %s recorded in history',
+    async (_label, target, expected, expectedRevoked) => {
+      const owner = await generateKey()
+      const app = await generateKey()
+      const stores = memoryDescriptorStores()
+      const { remoteStore, revoked } = makeFakeRemote({ stores })
+      const descriptors = await provisionGovernedCollections(owner, stores)
+      const ciphers = await buildCiphers(owner, descriptors)
+      const { localStore, user } = await initLocalStore(ciphers)
+      const storage = new StorageManager({
+        persistence: browserLocalSessionPersistence(),
+        localStore,
+        remoteStore,
+        descriptorLogs: descriptorLogsFrom(stores),
+        ciphers,
+        vaultKeys: owner,
+        descriptors
+      })
 
-    const future = new Date(Date.now() + 1_000_000).toISOString()
-    const target = 'https://was.example/space/s-space/private-credentials'
-    await storage.addHistoryLogin({
-      user,
-      origin: APP_ORIGIN,
-      grants: [
-        {
-          id: 'g-std',
-          target,
-          allowedActions: ['GET', 'HEAD'],
-          expires: future,
-          zcap: recordedGrant({
-            id: 'z-std',
-            invocationTarget: target,
+      await storage.provisionAppCollection({
+        collectionId: 'app-docs',
+        appRecipient: ownerRecipient({ keyAgreementKey: app.keyAgreementKey })
+      })
+
+      const future = new Date(Date.now() + 1_000_000).toISOString()
+      await storage.addHistoryLogin({
+        user,
+        origin: APP_ORIGIN,
+        grants: [
+          {
+            id: 'g-app-docs',
+            target,
+            allowedActions: ['GET', 'HEAD'],
             expires: future,
-            controller: APP_SUBJECT
-          })
-        }
-      ],
-      appConnect: { name: 'Example App', firstRun: true }
-    })
+            zcap: recordedGrant({
+              id: 'z-app-docs',
+              invocationTarget: target,
+              expires: future,
+              controller: APP_SUBJECT
+            })
+          }
+        ],
+        appConnect: { name: 'Example App', firstRun: true }
+      })
 
-    const outcome = await storage.revokeAppCollectionRecipients({
-      origin: APP_ORIGIN,
-      subjectDid: APP_SUBJECT
-    })
+      const outcome = await storage.revokeAppCollectionRecipients({
+        origin: APP_ORIGIN,
+        subjectDid: APP_SUBJECT
+      })
 
-    expect(outcome).toEqual({ collections: 0, rotated: 0, failed: 0 })
-    expect(revoked).toHaveLength(0)
-  })
+      // Only an app Collection target names a collection to rotate; a
+      // reserved sub-endpoint beneath one, or a standard/protected
+      // collection, does not.
+      expect(outcome).toEqual(expected)
+      expect((revoked as Array<{ id: string }>).map(zcap => zcap.id)).toEqual(
+        expectedRevoked
+      )
+    }
+  )
 })
 
 describe('StorageManager.decryptCollectionResource (app collection)', () => {

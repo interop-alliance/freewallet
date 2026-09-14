@@ -425,7 +425,9 @@ test.describe.serial('Account deletion torn after the pivot', () => {
           pastThePivot = true
         }
       })
-      await page.route('**/space/*', async route => {
+      // The Space container URL in its canonical form: a trailing slash,
+      // which a bare `*` would not match.
+      await page.route('**/space/*/', async route => {
         if (route.request().method() === 'DELETE' && pastThePivot) {
           await route.abort('failed')
           return

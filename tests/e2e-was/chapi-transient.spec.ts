@@ -225,7 +225,7 @@ test.describe.serial('the CHAPI popup on a transient session', () => {
       // generation delegation, never the Space root, because the signing key
       // is an annex key the account document does not list.
       const grant = response.data.zcap.find(zcap =>
-        zcap.invocationTarget.endsWith(`/${APP_COLLECTION}`)
+        zcap.invocationTarget.endsWith(`/${APP_COLLECTION}/`)
       )
       expect(grant, 'the app collection grant').toBeDefined()
       expect(grant!.allowedAction).toContain('PUT')
@@ -244,19 +244,23 @@ test.describe.serial('the CHAPI popup on a transient session', () => {
       // published for invocation alone every one of these calls came back
       // 404, which is how WAS renders an unauthorized request.
       const app = await appZcapClient(appKeySeed(response))
-      // The Collection Description: what was-react reads first to build its
-      // epoch-aware cipher.
+      // The granted target is the Collection's canonical container URL, so
+      // it already carries its trailing slash and every URL below is joined
+      // onto it.
+      const collectionUrl = grant!.invocationTarget
+      // The Collection Metadata object: what was-react reads first to build
+      // its epoch-aware cipher.
       const described = await app.request({
-        url: grant!.invocationTarget,
+        url: new URL('meta', collectionUrl).toString(),
         capability: grant,
         method: 'GET',
         action: 'GET'
       })
       expect(described.status).toBe(200)
-      // The listing: the collection's items path (the trailing slash), which
-      // is what the app's sync pull drives.
+      // The listing, which is what the app's sync pull drives: the container
+      // URL itself now that a container lists its own members.
       const listed = await app.request({
-        url: `${grant!.invocationTarget}/`,
+        url: collectionUrl,
         capability: grant,
         method: 'GET',
         action: 'GET'
@@ -269,7 +273,7 @@ test.describe.serial('the CHAPI popup on a transient session', () => {
       // The server validates the shape and never decrypts, and what this
       // assertion measures is the authorization, not the cryptography.
       const written = await app.request({
-        url: `${grant!.invocationTarget}/e2e-note`,
+        url: new URL('e2e-note', collectionUrl).toString(),
         capability: grant,
         method: 'PUT',
         action: 'PUT',
@@ -326,7 +330,7 @@ test.describe.serial('the CHAPI popup on a transient session', () => {
       // collection, and nothing addressing the Space.
       expect(response.data.zcap).toHaveLength(1)
       expect(response.data.zcap[0].invocationTarget).toMatch(
-        new RegExp(`/${APP_COLLECTION}$`)
+        new RegExp(`/${APP_COLLECTION}/$`)
       )
     } finally {
       await context.close()

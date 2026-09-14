@@ -390,7 +390,7 @@ function sampleRecord(): UnlockMethodsRecord {
  * the value is only ever passed through and compared by reference -- its shape
  * is never validated.
  */
-const UNLOCK_SPACE_URL = 'https://was.example.test/space/unlock-space-abc'
+const UNLOCK_SPACE_URL = 'https://was.example.test/space/unlock-space-abc/'
 
 /**
  * A REAL management zcap on the unlock Space: GET/PUT/DELETE, a year out,
@@ -450,7 +450,7 @@ function capExpiringIn({
 }): IZcap {
   return {
     id: `urn:zcap:test-management-${msFromNow}-${(allowedAction ?? []).join('')}`,
-    invocationTarget: 'https://was.example.test/space/unlock-space-abc',
+    invocationTarget: 'https://was.example.test/space/unlock-space-abc/',
     expires: new Date(Date.now() + msFromNow).toISOString(),
     ...(allowedAction ? { allowedAction } : {})
   } as unknown as IZcap
@@ -1095,7 +1095,7 @@ describe('deleteUnlockMethodSpace', () => {
     const entry = passkeyEntry({
       manageCapability: {
         ...(FAKE_CAP as unknown as Record<string, unknown>),
-        invocationTarget: 'https://was.example.test/was/space/unlock-space-abc'
+        invocationTarget: 'https://was.example.test/was/space/unlock-space-abc/'
       } as unknown as IZcap
     })
 
@@ -1372,7 +1372,7 @@ describe('refreshTransientManageCapability', () => {
           // was-client's path helpers: unusable on a sub-path deployment, and
           // neither expiring nor narrower, so only the target comparison
           // catches it.
-          invocationTarget: 'https://was.example.test/space/other-space'
+          invocationTarget: 'https://was.example.test/space/other-space/'
         } as unknown as IZcap
       })
     })

@@ -427,6 +427,8 @@ export function WalletGetPage() {
           )
         : existingCollectionsFrom([])
 
+      const space = loggedIn.storage.spaceLocation
+
       // App Connect: look up the stored app key for this app + origin, for
       // the first-run vs returning consent copy and the grants preview. The
       // approve-time processing repeats the lookup authoritatively.
@@ -455,10 +457,7 @@ export function WalletGetPage() {
         const existingDid = existing ? (appKeySubjectDid(existing) ?? '') : ''
         setAppKeyFirstRun(!existing)
         setPreviewedAppKeyDid(existingDid || null)
-        if (
-          profile.appConnect.capabilityQueries.length > 0 &&
-          loggedIn.storage.spaceUrl
-        ) {
+        if (profile.appConnect.capabilityQueries.length > 0 && space) {
           setResolvedGrants(
             resolveGrants({
               zcapRequests: appConnectZcapRequests({
@@ -470,7 +469,7 @@ export function WalletGetPage() {
                 // case; the approved path re-derives with the real subject DID.
                 controller: existingDid
               }),
-              spaceUrl: loggedIn.storage.spaceUrl,
+              space,
               collections: existingCollections,
               allowMissingController: true,
               generationDelegationParent:
@@ -500,11 +499,11 @@ export function WalletGetPage() {
         : null
       setSelectedCids(new Set(loginMatch ? [loginMatch.cid] : []))
 
-      if (profile.zcapRequests.length > 0 && loggedIn.storage.spaceUrl) {
+      if (profile.zcapRequests.length > 0 && space) {
         setResolvedGrants(
           resolveGrants({
             zcapRequests: profile.zcapRequests,
-            spaceUrl: loggedIn.storage.spaceUrl,
+            space,
             collections: existingCollections,
             generationDelegationParent:
               sessionGrantsAreGenerationScoped(loggedIn)

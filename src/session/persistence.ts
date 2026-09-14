@@ -205,6 +205,11 @@ export type SessionPersistence =
  * encrypting under its current epoch. Reads treat a corrupt entry (or a
  * non-browser environment) as absent; writes no-op without localStorage.
  *
+ * What is stored is the `encryption` descriptor alone, with no other part of
+ * the Collection Metadata object, so WAS v0.5 merging a Collection's
+ * configuration into that object leaves every stored entry valid and needs
+ * no invalidation.
+ *
  * @param options {object}
  * @param options.scope {string}
  * @returns {EncryptionDescriptorCache}

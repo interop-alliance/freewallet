@@ -2,6 +2,46 @@
 
 ## 0.51.0 - TBD
 
+### Changed
+
+- BREAKING: Freewallet requires a WAS v0.5 storage server
+  (was-teaching-server 0.33.0 or newer). `@interop/was-client` moves to
+  `^0.62.0` and `@interop/storage-core` to `^0.15.0`.
+- Container URLs are written in their canonical trailing-slash form. The
+  Space URL, the share grant's collection target, the three collection
+  targets `resolveInvocationTarget` builds (private, public, and shared
+  wallet collections), and the Space root capability id are built through
+  was-client's path builders.
+- A Collection's `encryption` descriptor and its stored `custom` come from
+  one Collection Metadata object rather than from two endpoints.
+- The recorded-grant matcher and the grant resolver's plain-URL targets both
+  classify with was-client's `parseSpaceTarget`. For the matcher, only a
+  Collection URL in this Space names a collection to rotate. For the
+  resolver, a string target resolves only to the Space, a Collection, or a
+  Resource, re-emitted in canonical form; a reserved sub-endpoint or a path
+  deeper than a Resource is unsatisfiable.
+- `resolveGrants` and `resolveInvocationTarget` take the Space as
+  `{ serverUrl, spaceId }` (`storage.spaceLocation`) instead of parsing the
+  Space URL back apart.
+- A collection descriptor naming a reserved path segment (`meta`, `query`,
+  `export`, and the rest of the registry) resolves to an unsatisfiable grant
+  instead of throwing out of grant resolution.
+- The account-deletion Space probe reads the Space Metadata object, the
+  target a single-verb GET capability names.
+- The two keyring readers (`unlockEntryReaderFor`, and the account-deletion
+  walk's pending-entry discovery, which now reuses it) mint their GET-only
+  child of a sibling's management zcap through wallet-core's
+  `mintUnlockKeyringReadCapability`, so the child names the keyring record's
+  Resource URL rather than the Space Metadata object. A storage server admits
+  a ladder-signed Resource read only in that shape. The Space existence
+  probes keep the bare `GET`, and read the URL wallet-core's
+  `spaceVerbTarget` names for it.
+- Grant resolution refuses a reserved collection name through was-client's
+  `isReservedCollectionId`, and the account-deletion probe classifies a 404
+  through was-client's `httpStatus`; the app-side copies of both are gone.
+  `@interop/was-client` is consumed from the local checkout until its next
+  publish.
+
 ### Added
 
 - The unlock-methods registry record carries a Data Integrity proof over its

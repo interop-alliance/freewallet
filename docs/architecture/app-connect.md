@@ -165,9 +165,10 @@ provisioned before blind-index support stays unindexable.
 
 The wallet's own writes carry the same blinded `indexed` entries a
 Collection-handle write does. Each encrypted collection's doc cipher
-installs the persisted index schema from the collection's stored `/meta`, an
-opaque encrypted envelope the cipher decrypts. The schema is cached beside
-the encryption descriptors and refetched on the same unknown-epoch refresh.
+installs the persisted index schema from the `custom` member of the
+collection's Metadata object, an opaque encrypted envelope the cipher
+decrypts. The schema is cached beside the encryption descriptors and
+refetched on the same unknown-epoch refresh.
 The wallet ensures the collection exists without writing a descriptor of its
 own, so an established epoch roster is never dropped.
 
@@ -276,7 +277,7 @@ and the epoch cascade" for why, and what a removed grantee keeps).
 **The grantee's half lives in `@interop/was-react`.** An app declares the
 wallet-owned collections it wants in `WasAppConfig.sharedCollections`, which
 adds the descriptors to its App Connect request. On approval a
-`SharedCollectionReader` reads the Collection Description through the
+`SharedCollectionReader` reads the Collection Metadata object through the
 delegated read zcap, builds the epoch-aware cipher from it, and decrypts the
 envelopes locally with the X25519 twin of its own controller DID, the key
 the wallet derived, so both sides land on the same `kid` with nothing on the

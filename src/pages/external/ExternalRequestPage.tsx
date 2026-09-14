@@ -151,13 +151,14 @@ export function ExternalRequestPage() {
     setPageState('preparing')
     await loggedIn.storage.ready()
     await loggedIn.storageReady
-    if (!hasZcapStorage(loggedIn) || !loggedIn.storage.spaceUrl) {
+    const space = loggedIn.storage.spaceLocation
+    if (!hasZcapStorage(loggedIn) || !space) {
       block('zcapUnavailable')
       return
     }
     const grants = resolveGrants({
       zcapRequests: requestProfile.zcapRequests,
-      spaceUrl: loggedIn.storage.spaceUrl,
+      space,
       collections: existingCollectionsFrom(
         await loggedIn.storage.listCollectionPublicStates()
       )

@@ -32,8 +32,14 @@ import {
   type IZcap,
   type Resource,
   type Space,
-  type SpaceDescription
+  type SpaceMetadata
 } from '@interop/was-client'
+import {
+  collectionPath,
+  resourcePath,
+  spacePath,
+  toUrl
+} from '@interop/was-client/paths'
 import { createEdvEncryption } from '@interop/was-client/edv'
 import { publicCredentialUrl as buildPublicCredentialUrl } from '@interop/wallet-core/space'
 import {
@@ -174,7 +180,14 @@ export class WASRemoteStore {
     this.spaceId = spaceId
     this.controller = controllerDid(controller)
     this.#capability = capability
-    this.spaceUrl = new URL(`/space/${spaceId}`, storageServerUrl).toString()
+    // Through the path builders rather than by hand: the Space URL is a zcap
+    // `invocationTarget`, which the server matches by exact bytes, and the
+    // canonical container form (a trailing slash) and the sub-path join are
+    // was-client's rules to own.
+    this.spaceUrl = toUrl({
+      serverUrl: storageServerUrl,
+      path: spacePath(spaceId)
+    })
   }
 
   /**
@@ -322,20 +335,46 @@ export class WASRemoteStore {
   }: {
     collectionId: string
   }): Promise<CollectionEncryption | undefined> {
-    const description = await this.#space().collection(collectionId).describe()
-    return description?.encryption ?? undefined
+    const metadata = await this.collectionMetadata({ collectionId })
+    return metadata?.encryption ?? undefined
   }
 
   /**
-   * Reads a collection's stored `/meta` value raw, through a
-   * plaintext-override handle -- so on an encrypted collection `custom` stays
-   * the opaque encrypted metadata envelope (which carries the persisted
-   * blinded-index schema), the shape `createEdvDocCipher`'s `meta` input and
-   * `applyMeta` take. No keys are needed for the fetch; the envelope is
-   * decrypted later, by the cipher it is handed to. Returns `undefined` when
-   * the collection is missing, the server has no metadata support, or no
-   * `custom` value is stored. Network errors throw through: callers treat the
-   * fetch as best-effort and fall back to a cached copy.
+   * Reads one Collection Metadata object -- the Collection's configuration
+   * (`encryption` among it) and its user-writable `custom`, which WAS v0.5
+   * serves as one object at one path under one `metaVersion` validator. The
+   * read is `describe()`, which never resolves the codec, so `custom` comes
+   * back exactly as stored: on an encrypted collection that is the opaque
+   * envelope carrying the persisted blinded-index schema, the shape
+   * `createEdvDocCipher`'s `meta` input and `applyMeta` take. No keys are
+   * needed for the fetch.
+   *
+   * Returns `undefined` when the collection is missing or not visible
+   * (was-client resolves `null` for both). Network errors throw through:
+   * callers treat the fetch as best-effort and fall back to a cached copy.
+   *
+   * @param options {object}
+   * @param options.collectionId {string}   the WAS collection id
+   * @returns {Promise<{ encryption?: CollectionEncryption, custom?: unknown } | undefined>}
+   */
+  async collectionMetadata({
+    collectionId
+  }: {
+    collectionId: string
+  }): Promise<
+    { encryption?: CollectionEncryption; custom?: unknown } | undefined
+  > {
+    const metadata = await this.#space().collection(collectionId).describe()
+    return metadata ?? undefined
+  }
+
+  /**
+   * A collection's stored `custom` value raw -- the same Collection Metadata
+   * object {@link collectionMetadata} reads, narrowed to the member the index
+   * schema rides in. The envelope is decrypted later, by the cipher it is
+   * handed. Returns `undefined` when the collection is missing or no `custom`
+   * value is stored (was-client's read drops a cleared `custom`, so absence
+   * has one shape here).
    *
    * @param options {object}
    * @param options.collectionId {string}   the WAS collection id
@@ -346,30 +385,8 @@ export class WASRemoteStore {
   }: {
     collectionId: string
   }): Promise<{ custom?: unknown } | undefined> {
-    let meta
-    try {
-      meta = await this.#space()
-        .collection(collectionId, { encryption: 'plaintext' })
-        .meta()
-    } catch (err) {
-      // Matched on name, not instanceof: the error class may come from a
-      // different copy of was-client than the one this module imported.
-      if ((err as Error)?.name === 'NotImplementedError') {
-        return undefined
-      }
-      throw err
-    }
-    if (!meta) {
-      return undefined
-    }
-    // The plaintext-override codec reports an absent `custom` as `{}`; an
-    // actual stored value on an encrypted collection is a non-empty envelope.
-    const { custom } = meta
-    const isAbsent =
-      custom === undefined ||
-      custom === null ||
-      (typeof custom === 'object' && Object.keys(custom).length === 0)
-    return isAbsent ? undefined : { custom }
+    const custom = (await this.collectionMetadata({ collectionId }))?.custom
+    return custom === undefined ? undefined : { custom }
   }
 
   /**
@@ -433,7 +450,7 @@ export class WASRemoteStore {
   bindCollectionMap(): void {
     const collections: ICollectionsSet = new Map()
     for (const { key, id } of WALLET_STANDARD_COLLECTIONS) {
-      collections.set(key, this.#collectionBaseUrl(id))
+      collections.set(key, this.collectionTargetUrl(id))
     }
     this.collections = collections
   }
@@ -485,9 +502,9 @@ export class WASRemoteStore {
    *
    * @param options {object}
    * @param options.controller {string}   the account's did:webvh DID
-   * @param [options.current] {SpaceDescription | null}   the caller's own
-   *   just-made read of this same Space, with no Description write in
-   *   between; supplying it skips `configure`'s pre-merge re-describe.
+   * @param [options.current] {SpaceMetadata | null}   the caller's own
+   *   just-made read of this same Space, with no Space Metadata object write
+   *   in between; supplying it skips `configure`'s pre-merge re-describe.
    *   Omit it (rather than passing `null`) when no such read is in hand, so
    *   `configure` makes the read itself under this store's signing client.
    * @returns {Promise<void>}
@@ -497,7 +514,7 @@ export class WASRemoteStore {
     current
   }: {
     controller: string
-    current?: SpaceDescription | null
+    current?: SpaceMetadata | null
   }): Promise<void> {
     await this.#space().configure({
       name: 'Wallet Space',
@@ -610,10 +627,10 @@ export class WASRemoteStore {
    * @returns {string}
    */
   didDocumentUrl(): string {
-    return new URL(
-      `/space/${this.spaceId}/${ID_COLLECTION.id}/${DID_DOCUMENT_RESOURCE}`,
-      this.storageServerUrl
-    ).toString()
+    return toUrl({
+      serverUrl: this.storageServerUrl,
+      path: resourcePath(this.spaceId, ID_COLLECTION.id, DID_DOCUMENT_RESOURCE)
+    })
   }
 
   /**
@@ -676,7 +693,7 @@ export class WASRemoteStore {
         { cause: err }
       )
     }
-    return this.#collectionBaseUrl(id)
+    return this.collectionTargetUrl(id)
   }
 
   /**
@@ -797,17 +814,18 @@ export class WASRemoteStore {
   }
 
   /**
-   * Builds the trailing-slash base URL of a collection within this user's
-   * space, suitable for use as a stable identifier (e.g. in history entries).
+   * The canonical (trailing-slash) URL of one Collection in this user's
+   * Space, keyed by WAS collection id: the target a grant on it names, and a
+   * stable identifier for history entries.
    *
    * @param collectionId {string}
    * @returns {string}
    */
-  #collectionBaseUrl(collectionId: string): string {
-    return new URL(
-      `/space/${this.spaceId}/${collectionId}/`,
-      this.storageServerUrl
-    ).toString()
+  collectionTargetUrl(collectionId: string): string {
+    return toUrl({
+      serverUrl: this.storageServerUrl,
+      path: collectionPath(this.spaceId, collectionId)
+    })
   }
 
   static async initClient({
@@ -1096,9 +1114,7 @@ export class WASRemoteStore {
     const collectionId = this.#collectionId(logicalKey)
     try {
       return await this.was.request({
-        path: `/space/${this.spaceId}/${collectionId}/${encodeURIComponent(
-          resourceId
-        )}`,
+        path: resourcePath(this.spaceId, collectionId, resourceId),
         method: 'GET',
         capability: this.#capability
       })
@@ -1194,9 +1210,7 @@ export class WASRemoteStore {
     }
     try {
       await this.was.request({
-        path: `/space/${this.spaceId}/${collectionId}/${encodeURIComponent(
-          resourceId
-        )}`,
+        path: resourcePath(this.spaceId, collectionId, resourceId),
         method: 'PUT',
         json: body as object,
         headers,
@@ -1239,9 +1253,7 @@ export class WASRemoteStore {
     const collectionId = this.#collectionId(logicalKey)
     try {
       await this.was.request({
-        path: `/space/${this.spaceId}/${collectionId}/${encodeURIComponent(
-          resourceId
-        )}`,
+        path: resourcePath(this.spaceId, collectionId, resourceId),
         method: 'DELETE',
         ...(ifMatch !== undefined ? { headers: { 'if-match': ifMatch } } : {}),
         capability: this.#capability

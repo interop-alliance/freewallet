@@ -7,7 +7,7 @@ import {
 } from './processZcaps'
 import type { ICapabilityQueryDetail } from './types'
 
-const SPACE_URL = 'https://was.example/space/abc'
+const SPACE = { serverUrl: 'https://was.example/', spaceId: 'abc' }
 const DESCRIPTOR: ICapabilityQueryDetail = {
   referenceId: 'docs',
   allowedAction: ['GET'],
@@ -22,7 +22,7 @@ describe('resolveGrant recipient presence', () => {
   it('resolves satisfiable with a controller present', () => {
     const { target } = resolveGrant({
       descriptor: DESCRIPTOR,
-      spaceUrl: SPACE_URL,
+      space: SPACE,
       collections: existingCollectionsFrom([])
     })
     expect(isSatisfiable(target)).toBe(true)
@@ -35,7 +35,7 @@ describe('resolveGrant recipient presence', () => {
     const { controller: _controller, ...omitted } = DESCRIPTOR
     const { target } = resolveGrant({
       descriptor: omitted as ICapabilityQueryDetail,
-      spaceUrl: SPACE_URL,
+      space: SPACE,
       collections: existingCollectionsFrom([])
     })
     expect(target.targetClass).toBeUndefined()
@@ -47,7 +47,7 @@ describe('resolveGrant recipient presence', () => {
     // DID before resolving again (without the opt-out).
     const { target } = resolveGrant({
       descriptor: { ...DESCRIPTOR, controller: '' },
-      spaceUrl: SPACE_URL,
+      space: SPACE,
       collections: existingCollectionsFrom([]),
       allowMissingController: true
     })

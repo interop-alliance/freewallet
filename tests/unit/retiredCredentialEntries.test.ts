@@ -158,7 +158,7 @@ describe('unlockSpaceDeletionRefusal with no session', () => {
       id: 'urn:zcap:delegated:manage',
       controller: DID,
       invocationTarget:
-        'https://was.example.test/space/unlock-retired-passphrase',
+        'https://was.example.test/space/unlock-retired-passphrase/',
       allowedAction: ['GET', 'PUT', 'DELETE']
     } as unknown as IZcap
   } as unknown as UnlockMethod

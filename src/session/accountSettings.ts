@@ -9,7 +9,7 @@
 import { base64urlnopad } from '@scure/base'
 import type { IKeyAgreementKey, IZcap } from '@interop/data-integrity-core'
 import type { ZcapClient } from '@interop/ezcap'
-import { WasClient } from '@interop/was-client'
+import { httpStatus, WasClient } from '@interop/was-client'
 import type { DIDLog } from '@interop/did-method-webvh'
 import {
   clientKeyAgreementController,
@@ -30,11 +30,12 @@ import {
   ladderVmKeyMultibase,
   ladderVmZcapClient,
   mintSpaceRootVerbCapability,
-  mintSpaceVerbCapability
+  mintSpaceVerbCapability,
+  spaceVerbTarget
 } from '@interop/wallet-core/clientAnnex'
 import { readUserKeyRoster } from '@interop/wallet-core/keys'
 import { KEYRING_KDF } from '@interop/wallet-core/keyring'
-import { resourcePath, spacePath, toUrl } from '@interop/was-client/paths'
+import { resourcePath, toUrl } from '@interop/was-client/paths'
 import {
   DATE_FMT,
   DID_LOG_RESOURCE,
@@ -71,6 +72,7 @@ import {
   getUnlockMethods,
   managementZcapClient,
   revokeUnlockMethod,
+  unlockEntryReaderFor,
   UnlockRegistryStaleSealError,
   unlockSpaceDeletionRefusal,
   updateUnlockMethods,
@@ -2095,8 +2097,8 @@ export interface AccountDeletionOutcome {
  * @param options {object}
  * @param options.zcapClient {ZcapClient}
  * @param options.spaceId {string}
- * @param [options.capability] {IZcap}   a GET capability on the Space's own
- *   URL; the root capability is invoked otherwise
+ * @param [options.capability] {IZcap}   a GET capability on the Space's
+ *   Metadata object; the root capability is invoked otherwise
  * @returns {Promise<'present' | 'absent'>}
  */
 async function probeSpace({
@@ -2113,34 +2115,27 @@ async function probeSpace({
   // parse (`dataOrNull`), so a live Space could be recorded absent, and an
   // absence recorded here is what lets a later 404 grade as a deletion. Only
   // a 404 is absence; every other failure propagates and refuses the run.
+  //
+  // The URL read is the one a single-verb GET capability names, asked of the
+  // module that owns the verb-to-target mapping: the Space Metadata object,
+  // which exists exactly as long as the Space does, so its 404 is the same
+  // evidence as the container's.
   try {
     await zcapClient.read({
-      url: toUrl({
-        serverUrl: WAS_SERVER_URL as string,
-        path: spacePath(spaceId)
+      url: spaceVerbTarget({
+        storageServerUrl: WAS_SERVER_URL as string,
+        spaceId,
+        verb: 'GET'
       }),
       ...(capability ? { capability } : {})
     })
   } catch (err) {
-    if (httpStatusOf(err) === 404) {
+    if (httpStatus(err) === 404) {
       return 'absent'
     }
     throw err
   }
   return 'present'
-}
-
-/**
- * The HTTP status a thrown request error carries, or `undefined` when it
- * carries none (a transport failure). Mirrors was-client's own `httpStatus`,
- * which its export map does not reach.
- *
- * @param err {unknown}
- * @returns {number | undefined}
- */
-function httpStatusOf(err: unknown): number | undefined {
-  const raw = err as { status?: number; response?: { status?: number } }
-  return raw?.status ?? raw?.response?.status
 }
 
 /**
@@ -2634,38 +2629,10 @@ export async function deleteAccount({
         const pending = await findPendingPassphraseEntries({
           registry,
           host: pointer.host,
-          readerFor: async entry => {
-            const parent = entry.manageCapability as IZcap
-            if (!deleter) {
-              return {
-                zcapClient: managementZcapClient({
-                  session,
-                  capability: parent
-                }),
-                capability: parent
-              }
-            }
-            if (
-              unlockSpaceDeletionRefusal({
-                session,
-                entry,
-                signer: deleter,
-                verb: 'GET'
-              })
-            ) {
-              return undefined
-            }
-            return {
-              zcapClient: deleter.invoker,
-              capability: await mintSpaceVerbCapability({
-                zcapClient: deleter.zcapClient,
-                parent,
-                verb: 'GET',
-                controller: deleter.controller,
-                ttlMs: DELETION_ZCAP_TTL_MS
-              })
-            }
-          }
+          readerFor: unlockEntryReaderFor({
+            session,
+            ...(deleter ? { signer: deleter } : {})
+          })
         })
         for (const entry of pending) {
           unnamed.push({ reason: 'pending-entry', method: entry.type })

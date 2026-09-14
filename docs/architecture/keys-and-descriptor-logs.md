@@ -87,8 +87,8 @@ and the changes feed, and outside the encrypted collection's envelope rule,
 so it stays plaintext JSON Lines and replication never ships it as a row.
 
 **The wallet writes the log alone.** The server derives the Collection
-Description's `encryption` member from the log head. No ceremony writes that
-member, and no `configure` call carries it forward. Provisioning creates an
+Metadata object's `encryption` member from the log head. No ceremony writes
+that member, and no `configure` call carries it forward. Provisioning creates an
 encrypted collection bare (`WASRemoteStore.ensureGovernedCollection`, a
 guarded create), and the epoch[0] install through the collection's own store
 is the genesis that declares it governed (`ensureIndexedFirstEpoch`). A
@@ -96,7 +96,7 @@ re-run adopts the standing log, and a lost create race resolves on the
 collection that stands, so exactly one epoch[0] ever exists per collection.
 A collection already carrying a client-written `encryption` member cannot be
 governed, and provisioning refuses it up front. The wallet opens a governed
-log by its placement rather than following a pointer in the Description.
+log by its placement rather than following a pointer in the metadata.
 Every recipient change is one signed full-state append: a share, an unshare,
 an App Connect provisioning, an app revoke, and each collection's rotation
 in the user key cascade.

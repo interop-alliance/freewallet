@@ -223,7 +223,7 @@ test.describe('The Applications revocation surface', () => {
     const response = await connectViaPopup(page, { passphrase, challenge })
     const credential = appKeyCredential(response)
     const grant = response.data.zcap.find(zcap =>
-      zcap.invocationTarget.endsWith(`/${APP_COLLECTION}`)
+      zcap.invocationTarget.endsWith(`/${APP_COLLECTION}/`)
     )!
     expect(grant).toBeDefined()
 

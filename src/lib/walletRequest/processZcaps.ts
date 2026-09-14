@@ -75,7 +75,6 @@
  * Write grants (any action beyond GET/HEAD) are delegated for a shorter TTL
  * than read-only grants.
  */
-import { generateZcapUri } from '@interop/ezcap'
 import type { Session } from '@/types/auth'
 import { APP_CONNECTIONS_COLLECTION } from '@interop/wallet-core/space'
 import {
@@ -96,6 +95,15 @@ import {
   isEd25519DidKey,
   x25519RecipientFromDidKey
 } from '@interop/was-client/edv'
+import {
+  collectionPath,
+  isReservedCollectionId,
+  parseSpaceTarget,
+  resourcePath,
+  rootCapabilityId,
+  spacePath,
+  toUrl
+} from '@interop/was-client/paths'
 import type { IDID } from '@interop/data-integrity-core'
 import type { ICapabilityQueryDetail, IZcap } from './types'
 
@@ -558,84 +566,146 @@ function standardCollection(
 }
 
 /**
- * Whether a descriptor's `name` can be a collection id at all.
+ * Whether a descriptor's `name` can be a collection id at all: the naming rule
+ * plus the spec's Reserved Path Segment Registry, asked of was-client's own
+ * predicate so this module and the path builders agree by construction.
+ *
+ * A reserved segment (`meta`, `policy`, `query`, `export`, `import`,
+ * `backends`, `collections`, `linkset`, `quotas`) satisfies the naming rule
+ * while addressing a server facet rather than a Collection. Two things ride on
+ * refusing it here. was-client's `collectionPath` throws a `ValidationError`
+ * on one, so admitting it would throw out of resolution instead of refusing
+ * the grant, and `${spaceUrl}/meta` is the Space Metadata object, which a
+ * full-vocabulary collection grant would hand an RP write access to -- the
+ * Space's `controller` included.
  *
  * @param [name] {string}
  * @returns {boolean}
  */
 function isCollectionName(name: string | undefined): name is string {
-  return !!name && COLLECTION_NAME_RE.test(name)
+  return (
+    !!name && COLLECTION_NAME_RE.test(name) && !isReservedCollectionId(name)
+  )
 }
 
 /**
- * Parses a plain-URL invocation target against the Space URL, returning the
- * normalized target and the path segment naming its collection (empty for the
- * Space itself), or `undefined` if the URL is not inside the Space.
+ * Where the user's Space lives, structurally: the storage server's base URL
+ * and the Space id. Every target this module builds is formed from the pair
+ * through was-client's path builders, since a target must match the server's
+ * `allowedTarget` byte for byte and the trailing-slash and percent-encoding
+ * rules are the builders' to own. `StorageManager.spaceLocation` hands a
+ * session's pair to the callers.
+ */
+export interface SpaceLocation {
+  serverUrl: string
+  spaceId: string
+}
+
+/**
+ * The canonical URL of the Space itself.
  *
- * String matching alone is not enough to decide "inside the Space", which is
- * what the collection ceilings hang off: `${spaceUrl}/private-credentials?x=1`
- * and `${spaceUrl}/private-credentials#frag` both start with `${spaceUrl}/`
- * while their first segment is not the collection id the server would route
- * them to, and `${spaceUrl}/../other-space/x` starts with it while pointing
- * outside the Space entirely. So parse: `new URL` resolves dot segments, and
- * the query and fragment come off the path before the segment is taken. A
- * target carrying a query or a fragment is refused outright rather than
- * silently rewritten -- a WAS resource URL has neither, and dropping part of a
- * target the user is about to consent to would show them something other than
- * what gets delegated.
+ * @param space {SpaceLocation}
+ * @returns {string}
+ */
+function spaceTargetIn({ serverUrl, spaceId }: SpaceLocation): string {
+  return toUrl({ serverUrl, path: spacePath(spaceId) })
+}
+
+/**
+ * The canonical URL of one Collection in the user's Space. `collectionId` has
+ * already passed {@link isCollectionName}, so the reserved segments the path
+ * builder refuses never reach it.
+ *
+ * @param options {object}
+ * @param options.space {SpaceLocation}
+ * @param options.collectionId {string}
+ * @returns {string}
+ */
+function collectionTargetIn({
+  space,
+  collectionId
+}: {
+  space: SpaceLocation
+  collectionId: string
+}): string {
+  return toUrl({
+    serverUrl: space.serverUrl,
+    path: collectionPath(space.spaceId, collectionId)
+  })
+}
+
+/**
+ * Classifies a plain-URL invocation target against the user's Space with
+ * was-client's own grammar (`parseSpaceTarget`): the Space itself, a
+ * Collection in it, or a Resource in one, with the ids the builders re-emit
+ * from. `undefined` is anything else -- a foreign origin or another Space, a
+ * reserved sub-endpoint such as `meta` or `policy` at any depth, a path
+ * deeper than a Resource -- so a string target can name nothing the typed
+ * descriptors cannot. A container classifies the same whichever way it
+ * arrived, with or without the trailing slash.
+ *
+ * Two refusals stay here, ahead of the grammar. `new URL` resolves dot
+ * segments, so `${spaceUrl}../other-space/x` lands outside this Space and the
+ * Space-id check refuses it. A query or a fragment is refused outright rather
+ * than silently dropped: a WAS URL has neither, and showing the user one
+ * target while delegating another is not consent.
  *
  * @param options {object}
  * @param options.target {string}
- * @param options.spaceUrl {string}
- * @returns {{ url: string, segment: string } | undefined}
+ * @param options.space {SpaceLocation}
+ * @returns {{ collectionId?: string, resourceId?: string } | undefined}
  */
-function parseSpaceUrl({
+function classifySpaceTarget({
   target,
-  spaceUrl
+  space
 }: {
   target: string
-  spaceUrl: string
-}): { url: string; segment: string } | undefined {
+  space: SpaceLocation
+}): { collectionId?: string; resourceId?: string } | undefined {
   let url: URL
-  let space: URL
   try {
     url = new URL(target)
-    space = new URL(spaceUrl)
   } catch {
     return undefined
   }
-  if (url.search || url.hash || url.origin !== space.origin) {
+  if (url.search || url.hash) {
     return undefined
   }
-  const spacePath = space.pathname.replace(/\/+$/, '')
-  const path = url.pathname.replace(/\/+$/, '')
-  if (path === spacePath) {
-    return { url: `${url.origin}${path}`, segment: '' }
-  }
-  if (!path.startsWith(`${spacePath}/`)) {
+  const parsed = parseSpaceTarget({
+    serverUrl: space.serverUrl,
+    target: url.href
+  })
+  if (!parsed || parsed.spaceId !== space.spaceId) {
     return undefined
   }
-  return {
-    url: `${url.origin}${path}`,
-    segment: path.slice(spacePath.length + 1).split('/')[0]
+  if (parsed.kind === 'space') {
+    return {}
   }
+  if (parsed.kind === 'collection') {
+    return { collectionId: parsed.collectionId }
+  }
+  if (parsed.kind === 'resource') {
+    return { collectionId: parsed.collectionId, resourceId: parsed.resourceId }
+  }
+  return undefined
 }
 
 /**
  * Resolves an abstract `invocationTarget` descriptor against the user's Space:
  *
- * - a plain URL string inside the Space -- parsed and normalized against
- *   `spaceUrl` (`parseSpaceUrl`), with the collection id taken from the first
- *   path segment after the Space URL, so a URL under a standard collection (or
- *   at a resource inside one) is flagged `collectionId` / `encrypted` and gets
- *   the same cap as its descriptor form -- including the public-collection
- *   class when the named collection is already world-readable. The Space URL
- *   itself, with or without
- *   a trailing slash, is a whole-Space grant. Any other string -- a foreign
+ * - a plain URL string inside the Space -- classified with was-client's
+ *   grammar (`classifySpaceTarget`) and re-emitted through its path builders,
+ *   so a URL under a standard collection (or at a Resource inside one) is
+ *   flagged `collectionId` / `encrypted` and gets the same cap as its
+ *   descriptor form -- including the public-collection class when the named
+ *   collection is already world-readable. A container target is normalized
+ *   to its canonical trailing-slash form whichever way it arrived, and the
+ *   Space URL itself is a whole-Space grant. Any other string -- a foreign
  *   origin, a path that escapes the Space, a target carrying a query or
- *   fragment, a first segment that is not a valid collection id --
- *   unsatisfiable;
- * - `{ type: 'https://w3id.org/byoe#private-collection', name }` -- `${spaceUrl}/${name}` after
+ *   fragment, a reserved sub-endpoint, a path deeper than a Resource, a
+ *   collection segment that is not a valid collection id -- unsatisfiable;
+ * - `{ type: 'https://w3id.org/byoe#private-collection', name }` -- the
+ *   Collection's canonical URL in the Space (`collectionPath`) after
  *   validating `name`, flagged `needsProvisioning` unless it is a standard
  *   collection (and `encrypted` for the two EDV collections). Like the string
  *   form, classed public-collection when the collection already is -- with
@@ -656,66 +726,73 @@ function parseSpaceUrl({
  *   RP collection, the whole Space, `app-connections`) is unsatisfiable -- a
  *   share is only meaningful where an epoch roster exists, and `app-connections`
  *   holds the connected apps' private seeds;
- * - `{ type: 'https://w3id.org/byoe#space' }` -- `spaceUrl`, classed space;
+ * - `{ type: 'https://w3id.org/byoe#space' }` -- the Space URL, classed space;
  * - anything else -- unsatisfiable.
  *
  * @param options {object}
  * @param options.descriptor {string | { type: string; name?: string }}
- * @param options.spaceUrl {string}
+ * @param options.space {SpaceLocation}   the user's Space, structurally
  * @param options.collections {ExistingCollections}   the Space's existing
  *   collections and their public state
  * @returns {ResolvedTarget}
  */
 export function resolveInvocationTarget({
   descriptor,
-  spaceUrl,
+  space,
   collections
 }: {
   descriptor: string | { type?: string; name?: string }
-  spaceUrl: string
+  space: SpaceLocation
   collections: ExistingCollections
 }): ResolvedTarget {
   if (typeof descriptor === 'string') {
-    const parsed = parseSpaceUrl({ target: descriptor, spaceUrl })
+    const parsed = classifySpaceTarget({ target: descriptor, space })
     if (!parsed) {
       return UNSATISFIABLE
     }
-    const { url, segment } = parsed
-    // No collection segment: the target is the Space itself (with or without a
+    const { collectionId, resourceId } = parsed
+    // No collection: the target is the Space itself (with or without a
     // trailing slash), which is a whole-Space grant.
-    if (!segment) {
+    if (collectionId === undefined) {
       return {
         ...SATISFIABLE_DEFAULTS,
-        invocationTarget: url,
+        invocationTarget: spaceTargetIn(space),
         targetClass: 'space'
       }
     }
     // A segment that cannot be a collection id names nothing the Space can
     // hold, so there is nothing to delegate against.
-    if (!isCollectionName(segment)) {
+    if (!isCollectionName(collectionId)) {
       return UNSATISFIABLE
     }
-    // A URL inside a never-grantable collection (or at a resource inside one)
+    // A URL inside a never-grantable collection (or at a Resource inside one)
     // is refused exactly like its descriptor form.
-    if (isNeverGrantableCollection(segment)) {
+    if (isNeverGrantableCollection(collectionId)) {
       return UNSATISFIABLE
     }
-    // The collection id is the first path segment after the Space URL, so a
-    // URL under a standard collection (or at a resource inside one) is capped
-    // exactly like its `https://w3id.org/byoe#private-collection` descriptor form.
+    // A URL under a standard collection (or at a Resource inside one) is
+    // capped exactly like its `https://w3id.org/byoe#private-collection`
+    // descriptor form. The target is re-emitted through the builders, so the
+    // grant names the canonical form whatever bytes the RP sent.
     return {
       ...SATISFIABLE_DEFAULTS,
-      invocationTarget: url,
-      collectionId: segment,
-      encrypted: !!standardCollection(segment)?.encryption,
-      targetClass: collectionClassFor({ collectionId: segment, collections })
+      invocationTarget:
+        resourceId === undefined
+          ? collectionTargetIn({ space, collectionId })
+          : toUrl({
+              serverUrl: space.serverUrl,
+              path: resourcePath(space.spaceId, collectionId, resourceId)
+            }),
+      collectionId,
+      encrypted: !!standardCollection(collectionId)?.encryption,
+      targetClass: collectionClassFor({ collectionId, collections })
     }
   }
 
   if (descriptor?.type === 'https://w3id.org/byoe#space') {
     return {
       ...SATISFIABLE_DEFAULTS,
-      invocationTarget: spaceUrl,
+      invocationTarget: spaceTargetIn(space),
       targetClass: 'space'
     }
   }
@@ -735,7 +812,7 @@ export function resolveInvocationTarget({
     })
     return {
       ...SATISFIABLE_DEFAULTS,
-      invocationTarget: `${spaceUrl}/${name}`,
+      invocationTarget: collectionTargetIn({ space, collectionId: name }),
       // A protected collection -- a standard one or a system one (`id`,
       // `key-map`, `unlock-methods`) -- is provisioned and maintained by the
       // wallet itself, never here. An existing private RP collection still
@@ -781,7 +858,7 @@ export function resolveInvocationTarget({
     // re-grant only delegates.
     return {
       ...SATISFIABLE_DEFAULTS,
-      invocationTarget: `${spaceUrl}/${name}`,
+      invocationTarget: collectionTargetIn({ space, collectionId: name }),
       needsProvisioning: !existing,
       collectionId: name,
       targetClass: 'public-collection'
@@ -806,8 +883,8 @@ export function resolveInvocationTarget({
     }
     return {
       ...SATISFIABLE_DEFAULTS,
-      invocationTarget: `${spaceUrl}/${name}`,
-      collectionId: name,
+      invocationTarget: collectionTargetIn({ space, collectionId: shared.id }),
+      collectionId: shared.id,
       encrypted: true,
       targetClass: 'share'
     }
@@ -888,7 +965,7 @@ function capActions({
  *
  * @param options {object}
  * @param options.descriptor {ICapabilityQueryDetail}
- * @param options.spaceUrl {string}
+ * @param options.space {SpaceLocation}
  * @param options.collections {ExistingCollections}
  * @param [options.allowMissingController] {boolean}   App Connect
  *   consent-preview only: the app-key DID may not exist yet, so an absent
@@ -900,34 +977,32 @@ function capActions({
  */
 export function resolveGrant({
   descriptor,
-  spaceUrl,
+  space,
   collections,
   allowMissingController = false,
   generationDelegationParent = false
 }: {
   descriptor: ICapabilityQueryDetail
-  spaceUrl: string
+  space: SpaceLocation
   collections: ExistingCollections
   allowMissingController?: boolean
   generationDelegationParent?: boolean
 }): ResolvedGrant {
   let target = resolveInvocationTarget({
     descriptor: descriptor.invocationTarget,
-    spaceUrl,
+    space,
     collections
   })
   // A transient session's grants chain under the generation delegation, whose
-  // `invocationTarget` is the Space's ITEMS subtree -- the Space URL with a
-  // trailing slash. A whole-Space target resolves to the slashless Space URL,
-  // which is neither equal to nor contained in that subtree, so the zcap
-  // containment rule refuses the pair at invocation time. The delegation
-  // library performs no parent-containment check when minting, so without
-  // this the wallet would consent to, sign, and deliver a capability that
-  // verifies nowhere -- the same dead-grant symptom, one layer down. Refuse
-  // the class at resolution instead, alongside a grant left with no permitted
-  // action, and word the refusal on the consent screen. Recorded here and
-  // applied last, so a generic refusal below cannot overwrite the reason with
-  // the wordless one.
+  // `invocationTarget` is the Space's items subtree. That subtree is now
+  // written the same way as the Space itself (WAS v0.5 makes the
+  // trailing-slash container URL canonical), so containment no longer refuses
+  // the pair on its own. The class stays refused here deliberately: a
+  // transient visit's per-generation authority is not the place to hand a
+  // third party the whole Space, and the server's container rule refuses the
+  // Space-level writes such a grant would appear to carry anyway. Recorded
+  // here and applied last, so a generic refusal below cannot overwrite the
+  // reason with the wordless one.
   const wholeSpaceUnderGeneration =
     target.targetClass === 'space' && generationDelegationParent
   // A grant with no recipient cannot be delegated: the wire type requires a
@@ -984,7 +1059,7 @@ export function resolveGrant({
  *
  * @param options {object}
  * @param options.zcapRequests {ICapabilityQueryDetail[]}
- * @param options.spaceUrl {string}
+ * @param options.space {SpaceLocation}
  * @param options.collections {ExistingCollections}
  * @param [options.allowMissingController] {boolean}   App Connect
  *   consent-preview only (see {@link resolveGrant})
@@ -995,13 +1070,13 @@ export function resolveGrant({
  */
 export function resolveGrants({
   zcapRequests,
-  spaceUrl,
+  space,
   collections,
   allowMissingController,
   generationDelegationParent
 }: {
   zcapRequests: ICapabilityQueryDetail[]
-  spaceUrl: string
+  space: SpaceLocation
   collections: ExistingCollections
   allowMissingController?: boolean
   generationDelegationParent?: boolean
@@ -1009,7 +1084,7 @@ export function resolveGrants({
   return zcapRequests.map(descriptor =>
     resolveGrant({
       descriptor,
-      spaceUrl,
+      space,
       collections,
       allowMissingController,
       generationDelegationParent
@@ -1069,7 +1144,11 @@ export async function processZcaps({
     throw new ZcapUnavailableError()
   }
 
-  // `hasZcapStorage` above guarantees a resolved `spaceUrl`.
+  // `hasZcapStorage` above guarantees a remote backend, so the Space's
+  // structural coordinates and its URL both stand. Every collection target
+  // below is built from the coordinates through was-client's path builders;
+  // the Space URL is the store's own, the one its root capability id names.
+  const space = session.storage.spaceLocation!
   const spaceUrl = session.storage.spaceUrl!
   const now = Date.now()
   const { zcapClient } = session.profile
@@ -1125,7 +1204,7 @@ export async function processZcaps({
   const collections = new Map(
     existingCollectionsFrom(await session.storage.listCollectionPublicStates())
   )
-  const spaceRootCapability = await generateZcapUri({ url: spaceUrl })
+  const spaceRootCapability = rootCapabilityId(spaceUrl)
   const parentCapability = invocationCapability ?? spaceRootCapability
 
   /**
@@ -1242,7 +1321,7 @@ export async function processZcaps({
   for (const descriptor of zcapRequests) {
     const { target, allowedActions, write } = resolveGrant({
       descriptor,
-      spaceUrl,
+      space,
       collections,
       generationDelegationParent: !!invocationCapability
     })

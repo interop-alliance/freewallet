@@ -185,6 +185,14 @@ entry's management zcap, the parent's `invocationTarget` copied verbatim. A
 remembered session root-invokes the account and annex Spaces and signs a
 sibling's child with the enrolled client's own account key.
 
+Reading a sibling's record takes a different child. The walk's pending-entry
+discovery and the last-client transition's pre-pivot refusal both go through
+`unlockEntryReaderFor`, which on a ladder-anchored session mints a GET-only
+child naming the keyring record: `invocationTarget` is that Resource's URL
+beneath the unlock Space, and `allowedAction` is exactly `['GET']`. The Space
+existence probes keep the bare `GET`, whose target is the Space Metadata
+object.
+
 Five states on a sibling refuse locally before anything is minted and are
 reported as named residues rather than refusing the run or skipping in
 silence: an entry recording no management zcap, one already expired, one
@@ -410,7 +418,7 @@ one did:webvh may control several Spaces on the host.
 
 Every WAS signup bootstraps the Space under the ladder VM's bare did:key
 inside the credential-anchored establishment, publishes the log, and PUTs
-the Space Description carrying `controller: <did:webvh>`, before any
+the Space Metadata object carrying `controller: <did:webvh>`, before any
 enrolled client exists. `StorageManager.ensurePromotedController` is the
 login-time healer: it swaps the live session's signing to the promoted keyId
 and re-runs the promotion PUT when a session finds it missing. Only a no-WAS

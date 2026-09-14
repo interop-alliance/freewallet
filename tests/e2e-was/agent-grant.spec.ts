@@ -143,8 +143,9 @@ async function publishAndFetch({
     { contentType: PAGE_CONTENT_TYPE }
   )
   // No authorization header at all: a public collection is world-readable,
-  // which is exactly what the agent asked the wallet for.
-  return fetch(`${zcap.invocationTarget}/${resourceId}`)
+  // which is exactly what the agent asked the wallet for. The granted target
+  // is a container URL, so it already carries its trailing slash.
+  return fetch(new URL(resourceId, zcap.invocationTarget).toString())
 }
 
 /**
@@ -172,7 +173,7 @@ async function expectPublishedPage({
   const zcaps = await grantedZcaps({ exchangeUrl })
   expect(zcaps.length).toBe(1)
   const zcap = zcaps[0]!
-  expect(zcap.invocationTarget.endsWith(`/${collectionName}`)).toBe(true)
+  expect(zcap.invocationTarget.endsWith(`/${collectionName}/`)).toBe(true)
   expect(zcap.controller).toBe(agent.id)
 
   const published = await publishAndFetch({ agent, zcap, resourceId })

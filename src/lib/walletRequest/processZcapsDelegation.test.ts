@@ -13,7 +13,8 @@ import { requestingOriginOf } from './classify'
 import { GenerationDelegationStaleError, processZcaps } from './processZcaps'
 import type { ICapabilityQueryDetail, IZcap } from './types'
 
-const SPACE_URL = 'https://was.example/space/abc'
+const SPACE = { serverUrl: 'https://was.example/', spaceId: 'abc' }
+const SPACE_URL = 'https://was.example/space/abc/'
 const NOW = Date.parse('2026-08-22T12:00:00Z')
 const DAY_MS = 24 * 60 * 60 * 1000
 // A real Ed25519 did:key: the App Connect path derives the app's recipient
@@ -141,6 +142,7 @@ function fakeSession({
     storage: {
       hasRemoteStorage: true,
       spaceUrl: SPACE_URL,
+      spaceLocation: SPACE,
       listCollectionPublicStates,
       ensureCollection: vi.fn(async () => {}),
       provisionAppCollection: vi.fn(async () => {})

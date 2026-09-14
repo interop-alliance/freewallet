@@ -235,7 +235,7 @@ test('first-run App Connect mints an app key and grants over its collection', as
   // A grant over the app's collection, delegated to the app-key subject DID.
   expect(response.data.zcap.length).toBeGreaterThanOrEqual(1)
   const grant = response.data.zcap.find(zcap =>
-    zcap.invocationTarget.endsWith(`/${APP_COLLECTION}`)
+    zcap.invocationTarget.endsWith(`/${APP_COLLECTION}/`)
   )!
   expect(grant).toBeDefined()
   expect(grant.controller).toBe(subjectDid)

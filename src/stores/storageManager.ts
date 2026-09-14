@@ -33,7 +33,6 @@ import type {
   IVerifiableCredential,
   IZcap
 } from '@interop/data-integrity-core'
-import { generateZcapUri } from '@interop/ezcap'
 import type { ZcapClient } from '@interop/ezcap'
 import {
   CONTACTS_COLLECTION,
@@ -44,7 +43,7 @@ import type { RxCollection, RxStorage } from 'rxdb/plugins/core'
 import type {
   CollectionEncryption,
   IDelegatedZcap,
-  SpaceDescription
+  SpaceMetadata
 } from '@interop/was-client'
 import {
   acquireDescriptor,
@@ -57,6 +56,7 @@ import {
   type EncryptionDescriptorStore,
   type RecipientPublicKey
 } from '@interop/was-client/edv'
+import { parseSpaceTarget, rootCapabilityId } from '@interop/was-client/paths'
 import {
   accountCollectionStores,
   ensureIndexedFirstEpoch,
@@ -135,6 +135,7 @@ import {
   type SyncedCollectionStore
 } from '@/stores/remoteDirectStore'
 import { EXTERNAL_REQUEST_ORIGIN } from '@/lib/walletRequest/externalRequest'
+import type { SpaceLocation } from '@/lib/walletRequest/processZcaps'
 import type { CredentialActivityVerb } from '@/lib/historyActivity'
 import { uuidv7 } from 'uuidv7'
 import {
@@ -777,6 +778,21 @@ export class StorageManager {
    */
   get spaceUrl(): string | undefined {
     return this.#remoteStore?.spaceUrl
+  }
+
+  /**
+   * The remote Space's structural coordinates -- the storage server's base URL
+   * and the Space id -- or undefined when there is no remote backend. Zcap
+   * grant resolution takes the pair rather than the Space URL, so it forms
+   * every target through was-client's path builders instead of parsing a URL
+   * back apart.
+   */
+  get spaceLocation(): SpaceLocation | undefined {
+    const remote = this.#remoteStore
+    if (!remote) {
+      return undefined
+    }
+    return { serverUrl: remote.storageServerUrl, spaceId: remote.spaceId }
   }
 
   /**
@@ -2383,7 +2399,7 @@ export class StorageManager {
       // on a hiccup would be wrong, and this is the one provisioning step
       // awaited un-guarded -- so a transport failure warns and skips like
       // the neighbouring steps, and the next login re-checks.
-      let description: SpaceDescription | null
+      let description: SpaceMetadata | null
       try {
         description = await remote.spaceHandle().describe()
       } catch (err) {
@@ -3284,28 +3300,31 @@ export class StorageManager {
   }
 
   /**
-   * The WAS collection id a grant zcap targets, when its `invocationTarget` is a
-   * collection (or a resource within one) directly under the given Space URL --
-   * the first path segment after `${spaceUrl}/`. Returns undefined for a
-   * whole-Space target or a foreign URL.
+   * The WAS collection id a grant zcap targets, when its `invocationTarget`
+   * addresses a Collection of the given Space, classified by was-client's path
+   * grammar. Returns undefined for anything else -- a whole-Space target, a
+   * resource or reserved sub-endpoint, another Space, or a foreign URL.
    *
    * @param options {object}
    * @param options.invocationTarget {string}
-   * @param options.spaceUrl {string}
+   * @param options.serverUrl {string}   the storage server's base URL
+   * @param options.spaceId {string}
    * @returns {string | undefined}
    */
   static #collectionIdFromTarget({
     invocationTarget,
-    spaceUrl
+    serverUrl,
+    spaceId
   }: {
     invocationTarget: string
-    spaceUrl: string
+    serverUrl: string
+    spaceId: string
   }): string | undefined {
-    if (!invocationTarget.startsWith(`${spaceUrl}/`)) {
+    const parsed = parseSpaceTarget({ serverUrl, target: invocationTarget })
+    if (parsed?.kind !== 'collection' || parsed.spaceId !== spaceId) {
       return undefined
     }
-    const segment = invocationTarget.slice(spaceUrl.length + 1).split('/')[0]
-    return segment || undefined
+    return parsed.collectionId
   }
 
   /**
@@ -3368,7 +3387,6 @@ export class StorageManager {
       return { collections: 0, rotated: 0, failed: 0 }
     }
     const ownerKid = this.#vaultKeys.keyAgreementKey.id
-    const spaceUrl = remote.spaceUrl
     const { zcaps } = this.#recordedGrantZcaps({
       matches: object => object.origin === origin && !!object.appConnect,
       controller: subjectDid,
@@ -3381,7 +3399,8 @@ export class StorageManager {
     for (const zcap of zcaps) {
       const collectionId = StorageManager.#collectionIdFromTarget({
         invocationTarget: zcap.invocationTarget,
-        spaceUrl
+        serverUrl: remote.storageServerUrl,
+        spaceId: remote.spaceId
       })
       if (
         !collectionId ||
@@ -3678,8 +3697,10 @@ export class StorageManager {
     // chained under the generation delegation the session's authority rides,
     // with the expiry clamped to the delegation's own.
     const spaceUrl = remote.spaceUrl
-    const spaceRootCapability = await generateZcapUri({ url: spaceUrl })
-    const collectionUrl = `${spaceUrl}/${collectionId}`
+    const spaceRootCapability = rootCapabilityId(spaceUrl)
+    // The store's own canonical form: the grant's target must match the URL
+    // the grantee's request addresses byte for byte.
+    const collectionUrl = remote.collectionTargetUrl(collectionId)
     const now = Date.now()
     const requestedExpires = expires ?? new Date(now + RP_ZCAP_TTL_MS)
     const expiresAt = profile.invocationCapability

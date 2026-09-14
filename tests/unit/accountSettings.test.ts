@@ -148,13 +148,16 @@ const state = vi.hoisted(() => ({
  * probe: `probeSpace` no longer uses was-client's `describe()` (which
  * collapses a 404 and an unparseable 2xx into the same `null`), so the stub
  * throws a 404-carrying error for an absent Space and resolves for a present
- * one.
+ * one. The URL it reads is the Space Metadata object, `/space/{s}/meta`.
  */
 const zcapStub = vi.hoisted(() => (id: string) => ({
   id,
   read: async ({ url }: { url: string }) => {
+    // `/space/{spaceId}/meta` -- the Space Metadata object the probe reads
+    // under WAS v0.5, so the Space id is the segment after `space`.
+    const segments = new URL(url).pathname.split('/').filter(Boolean)
     const spaceId = decodeURIComponent(
-      new URL(url).pathname.split('/').filter(Boolean).pop() ?? ''
+      segments[segments.indexOf('space') + 1] ?? ''
     )
     state.calls.push(`probe:${spaceId}`)
     if (state.probeThrows.includes(spaceId)) {
@@ -722,6 +725,23 @@ vi.mock('@interop/wallet-core/clientAnnex', async importOriginal => ({
       return { id: `urn:uuid:child-${verb}-${spaceId}`, spaceId }
     }
   ),
+  // The keyring read mint is the GET child by another name; it records as
+  // one so the walk's call order reads the same whichever mint the reader
+  // takes.
+  mintUnlockKeyringReadCapability: vi.fn(
+    async ({
+      parent,
+      controller
+    }: {
+      parent: { spaceId?: string }
+      controller: string
+    }) => {
+      const spaceId = parent.spaceId ?? 'unknown'
+      state.mints.push({ shape: 'child', verb: 'GET', spaceId, controller })
+      state.calls.push(`mintChild:GET:${spaceId}`)
+      return { id: `urn:uuid:child-GET-${spaceId}`, spaceId }
+    }
+  ),
   mintSpaceRootVerbCapability: vi.fn(
     async ({
       spaceId,
@@ -789,8 +809,17 @@ vi.mock('@/session/credentialCoverage', () => ({
         throw new Error('could not read an unlock record')
       }
       // Exercise the reader seam once, so the GET-child mint is observable.
+      // The recorded capability is the shape the real pre-flight admits: the
+      // account DID as controller, the Space container as target, and a GET
+      // among the allowed actions.
       await readerFor({
-        manageCapability: { id: 'urn:zcap:manage', spaceId: 'unlock-space-x' },
+        manageCapability: {
+          id: 'urn:zcap:manage',
+          spaceId: 'unlock-space-x',
+          controller: ACCOUNT_DID,
+          invocationTarget: `${state.wasUrl}/space/unlock-space-x/`,
+          allowedAction: ['GET', 'PUT', 'DELETE']
+        },
         unlockSpaceId: 'unlock-space-x'
       })
       return state.pendingEntries.map(type => ({ type }))

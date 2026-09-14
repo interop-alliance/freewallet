@@ -140,7 +140,7 @@ test('login VPR provisions a collection and returns Space-rooted grants', async 
   expect(payload.data.zcap).toHaveLength(2)
 
   const collectionGrant = payload.data.zcap.find(zcap =>
-    zcap.invocationTarget.endsWith('/example-app-data')
+    zcap.invocationTarget.endsWith('/example-app-data/')
   )!
   expect(collectionGrant.controller).toBe(RP_DID)
   expect(collectionGrant.allowedAction).toContain('PUT')
@@ -150,7 +150,7 @@ test('login VPR provisions a collection and returns Space-rooted grants', async 
 
   // The whole-Space grant is stripped to read-only.
   const spaceGrant = payload.data.zcap.find(
-    zcap => !zcap.invocationTarget.endsWith('/example-app-data')
+    zcap => !zcap.invocationTarget.endsWith('/example-app-data/')
   )!
   expect(spaceGrant.allowedAction).toEqual(['GET', 'HEAD'])
 
@@ -237,7 +237,7 @@ test('public-collection VPR provisions a world-readable collection', async ({
   // `DELETE` survive alongside `POST` and the reads.
   expect(payload.data.zcap).toHaveLength(1)
   const grant = payload.data.zcap[0]
-  expect(grant.invocationTarget.endsWith('/example-app-public')).toBe(true)
+  expect(grant.invocationTarget.endsWith('/example-app-public/')).toBe(true)
   expect(grant.allowedAction).toEqual(['GET', 'HEAD', 'POST', 'PUT', 'DELETE'])
 
   // The collection itself is world-readable: an unauthenticated (no zcap,

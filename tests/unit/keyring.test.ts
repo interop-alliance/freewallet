@@ -2257,7 +2257,9 @@ describe('management zcap delegation', () => {
    * builds it from the mocked WAS url.
    */
   function unlockSpaceUrl(spaceId: string): string {
-    return new URL(`/space/${spaceId}`, wasState.url).toString()
+    // The canonical container form: a trailing slash, which is the target
+    // was-client's `spacePath` builder emits and the server matches.
+    return new URL(`/space/${spaceId}/`, wasState.url).toString()
   }
 
   describe('bindUnlockSecret with delegateManagementTo', () => {
@@ -2301,7 +2303,7 @@ describe('management zcap delegation', () => {
       })
 
       expect((manageCapability as IDelegatedZcap).invocationTarget).toBe(
-        `https://host.example.test/was/space/${unlockSpaceId}`
+        `https://host.example.test/was/space/${unlockSpaceId}/`
       )
     })
 
@@ -2697,7 +2699,7 @@ describe('fetchTransientKeyring (FW-215)', () => {
     const minted = found!.manageCapability as IDelegatedZcap
     expect(minted.allowedAction).toEqual(['GET', 'PUT', 'DELETE'])
     expect(minted.invocationTarget).toBe(
-      `${wasState.url}/space/${found!.unlockSpaceId}`
+      `${wasState.url}/space/${found!.unlockSpaceId}/`
     )
     expect(typeof found!.rebindStandingRecord).toBe('function')
     // And no IndexedDB database was created at any point.

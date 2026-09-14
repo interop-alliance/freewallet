@@ -11,7 +11,7 @@
  */
 import { describe, expect, it, vi } from 'vitest'
 import type { ZcapClient } from '@interop/ezcap'
-import type { SpaceDescription } from '@interop/was-client'
+import type { SpaceMetadata } from '@interop/was-client'
 import {
   inMemorySessionPersistence,
   transientSessionStores
@@ -30,7 +30,7 @@ const ACCOUNT_DID = 'did:webvh:QmScid:was.example:space:s-space'
 function fakeRemote({
   describeResult
 }: {
-  describeResult: SpaceDescription | null | (() => never)
+  describeResult: SpaceMetadata | null | (() => never)
 }) {
   const promoteSpaceController = vi.fn().mockResolvedValue(undefined)
   const rebindController = vi.fn()
@@ -97,7 +97,7 @@ describe('StorageManager.ensurePromotedController', () => {
       describeResult: {
         id: 's-space',
         controller: 'did:key:z6MkTestClient'
-      } as unknown as SpaceDescription
+      } as unknown as SpaceMetadata
     })
     const { manager, profile } = managerFor(remoteStore)
 
@@ -128,7 +128,7 @@ describe('StorageManager.ensurePromotedController', () => {
       describeResult: {
         id: 's-space',
         controller: ACCOUNT_DID
-      } as unknown as SpaceDescription
+      } as unknown as SpaceMetadata
     })
     const { manager, profile } = managerFor(remoteStore)
 

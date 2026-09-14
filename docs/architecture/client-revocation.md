@@ -29,8 +29,8 @@ The four stages, in the enrolled kind's form:
    collection store the fan-out writes through takes that same view.
 3. **The epoch cascade**, over the collections `src/session/userKeyCascade.ts`
    enumerates: every encrypted collection, standard plus any remotely listed
-   one whose Description carries an encryption descriptor, re-epoch'd onto
-   the fresh user key in parallel. Each rotation is a signed append on that
+   one whose Metadata object carries an encryption descriptor, re-epoch'd
+   onto the fresh user key in parallel. Each rotation is a signed append on that
    collection's governing log, so it signs with the key the calling ceremony
    is licensed to append with. Revoked generations retire from the epoch
    rosters and the fresh key escrows into every prior epoch, so other
