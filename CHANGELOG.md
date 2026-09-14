@@ -1,46 +1,9 @@
 # History
 
-## 0.51.0 - TBD
+## 0.43.0 - TBD
 
-### Changed
-
-- BREAKING: Freewallet requires a WAS v0.5 storage server
-  (was-teaching-server 0.33.0 or newer). `@interop/was-client` moves to
-  `^0.62.0` and `@interop/storage-core` to `^0.15.0`.
-- Container URLs are written in their canonical trailing-slash form. The
-  Space URL, the share grant's collection target, the three collection
-  targets `resolveInvocationTarget` builds (private, public, and shared
-  wallet collections), and the Space root capability id are built through
-  was-client's path builders.
-- A Collection's `encryption` descriptor and its stored `custom` come from
-  one Collection Metadata object rather than from two endpoints.
-- The recorded-grant matcher and the grant resolver's plain-URL targets both
-  classify with was-client's `parseSpaceTarget`. For the matcher, only a
-  Collection URL in this Space names a collection to rotate. For the
-  resolver, a string target resolves only to the Space, a Collection, or a
-  Resource, re-emitted in canonical form; a reserved sub-endpoint or a path
-  deeper than a Resource is unsatisfiable.
-- `resolveGrants` and `resolveInvocationTarget` take the Space as
-  `{ serverUrl, spaceId }` (`storage.spaceLocation`) instead of parsing the
-  Space URL back apart.
-- A collection descriptor naming a reserved path segment (`meta`, `query`,
-  `export`, and the rest of the registry) resolves to an unsatisfiable grant
-  instead of throwing out of grant resolution.
-- The account-deletion Space probe reads the Space Metadata object, the
-  target a single-verb GET capability names.
-- The two keyring readers (`unlockEntryReaderFor`, and the account-deletion
-  walk's pending-entry discovery, which now reuses it) mint their GET-only
-  child of a sibling's management zcap through wallet-core's
-  `mintUnlockKeyringReadCapability`, so the child names the keyring record's
-  Resource URL rather than the Space Metadata object. A storage server admits
-  a ladder-signed Resource read only in that shape. The Space existence
-  probes keep the bare `GET`, and read the URL wallet-core's
-  `spaceVerbTarget` names for it.
-- Grant resolution refuses a reserved collection name through was-client's
-  `isReservedCollectionId`, and the account-deletion probe classifies a 404
-  through was-client's `httpStatus`; the app-side copies of both are gone.
-  `@interop/was-client` is consumed from the local checkout until its next
-  publish.
+Every account-management ceremony now runs from a transient session, on a
+standing unlock credential's ladder in place of an enrolled client's key.
 
 ### Added
 
@@ -102,7 +65,291 @@
   server-derived `encryption` member (refused as
   `encryption-history-log-governed`).
 
+- The mender registry's first stage under `src/session/menders/`, over
+  `@interop/wallet-core/menders`: the 34-invariant declaration table, the
+  registration-site index, and the declared gap allowlist. Audit tests pin
+  the transient-reachable set, hold the derived gaps inside the declared
+  allowlist, and hold the allowlist equal to the open-gaps list in
+  ARCHITECTURE.md. Nothing executes through the registry yet, and every
+  existing call site stands.
+
+- `PassphraseUnlockMethod.pendingEstablishment`, the passphrase change's
+  establishment marker: the unlock Space id and key-agreement multibase of
+  the credential being established. The change's enrolled branch stamps it
+  on the old credential's entry before the new credential's establishment
+  starts, restating that entry from the fresh registry read the
+  compare-and-swap wrapper hands over and writing nothing when that fresh
+  entry names another credential. The change's final registry write drops
+  it. `upsertPassphraseUnlockMethod` carries it forward only while a write
+  keeps the entry on the same credential at the same unlock Space; an
+  identity write naming another credential, or a repoint, drops it. The
+  marker write is best-effort, and an absent registry gets none. The ladder
+  branch stamps no marker, a transient session leaving nothing browser-local
+  for a later login to consume one with; its torn establishment is mended by
+  a retry of the same change.
+- A `credential-not-standing` transient-login refusal
+  (`auth.errors.transientCredentialNotStanding`), raised right after the
+  first account-log verification when the document lists none of the
+  credential's `keyAgreement` inventory (a passphrase's commitment, a
+  passkey's verbatim key), before any ladder-signed request is tried.
+- Dependency: `@interop/was-sync` `^0.1.0`.
+
+- One account-ceremony context (`accountCeremonyContext` in
+  `src/session/accountCeremonyContext.ts`), replacing `enrolledContext.ts`. It
+  resolves the enrolled kind from a remembered session (this client's
+  did:webvh update keys sign the account-log entry, its key agent signs the
+  roster append, every request root-invokes) or the ladder kind from a
+  transient session holding a standing unlock credential (a rung of the
+  credential's update-key ladder signs the entry through the record's bridge
+  delegation, the credential's ladder VM signs the licensed roster append, and
+  the per-visit annex VM invokes every request under the generation
+  delegation). A guest, a no-WAS session, and a transient session whose record
+  carries no standing members resolve to neither. The ladder kind carries what
+  only it needs: the ladder VM's own delegation signer (the annex VM stands in
+  no account document), the DELETE-only child mint the account-deletion walk
+  already used, a remote-only unlock-record binder, the credential's
+  `delegatedClients` sibling delegation, the acting credential's management
+  zcap and unlock Space id, the standing key-agreement key every roster and
+  registry unwrap needs, and a `renew()` that replaces the generation
+  delegation in place. Account deletion's ladder-signer construction is now
+  that kind's builder, so the deletion walk and the ceremonies share one
+  source.
+- Every unlock record's bridge and sibling delegation is now signed by its own
+  credential's ladder VM, in place of the acting session's signer, so a strike
+  of one credential's inventory can rot only the record the same ceremony
+  deletes.
+- The passphrase change, passphrase add, passkey add, and passkey remove run
+  from a transient session. `establishStandingUnlock` gained a ladder branch:
+  the new credential's unlock record is written remotely first (inert, its
+  ladder VM standing in no document yet), its annex rung-0 hash is committed
+  under the acting credential's rung as a blocking stage, the bind entry
+  publishes, and only then does the roster escrow append, a ladder-signed
+  append being licensed at the inventory-changing version its own entry mints.
+  `rotateOffUnlockCredential` and the retirement pre-flight run on the ladder
+  kind too: the strike entry is signed by a rung of the surviving credential's
+  ladder, the convergence append by that credential's ladder VM, and the
+  roster unwrap uses its standing key. A credential retirement on the ladder
+  branch strikes the retired credential's annex rung through the SURVIVING
+  credential's sibling delegation, since the annex Space answers to the
+  account did:webvh and a transient session's per-visit key is not it (a
+  passphrase change reaches it through the new credential's sibling, since its
+  own strike entry has already removed the old credential's ladder VM from the
+  document). A passphrase change and a passkey removal also replace the
+  generation delegation before their strike entry lands and adopt the
+  replacement into the live session (profile stamp, persistence strategy,
+  remote store), since the retired credential's ladder VM may be what signed
+  the delegation the visit's requests ride; App Connect grants the visit
+  chained under the old delegation end with it, the same mid-generation death
+  an ordinary disconnect causes.
+- `ActingCredentialRemovalError`, refusing removal of the passkey a transient
+  session entered on, since that credential's ladder VM is what all three
+  stages of the removal act through. A remembered session may still remove its
+  own login passkey.
+- The passphrase change deletes the old unlock Space in the ceremony's own
+  place on the ladder branch: after the annex strike and before the registry
+  write, through a DELETE-only child of the old entry's management zcap signed
+  by the new ladder VM. A tear there leaves an entry still naming the Space
+  rather than a Space nothing names, and each of the mint's five refusals is
+  reported rather than failing a change that has already landed. The tap-free
+  passkey removal deletes the passkey's unlock Space the same way; a delete
+  that does not succeed is reported as a residue rather than as a deletion.
+  The enrolled branch is unchanged: it still re-derives the old unlock
+  identity and clears its browser-local state in the old place.
+- Every ladder-branch strike publishes the post-strike `did:web` projection
+  immediately BEFORE its entry, through the account Space's `id` collection
+  under the visit's generation delegation: the client disconnect, the
+  passphrase change and passkey removal, and the recovery-code revocation. A
+  ladder-signed entry writes `did.jsonl` alone, so `id/did.json` would
+  otherwise keep naming the struck client or credential -- a revocation
+  bypass for a `did:web` verifier, though WAS authorization reads the log and
+  never the projection. The store resolves its capability at each use, so a
+  ceremony that replaced its generation delegation before the strike writes
+  under the replacement. A failed PUT is warned and the entry still
+  publishes, the next visit's projection ensure being the mender.
+- Space export and import from a transient session: one POST and a batch of
+  writes the bound generation delegation already admits.
+- Recovery-code issuance and revocation run from a transient session. A code
+  is now a standing credential with a ladder of its own, derived from the code
+  bytes: its ladder VM publishes under `assertionMethod` and
+  `capabilityDelegation` beside its verbatim `keyAgreement`, and rung 0 of
+  that ladder is the update key whose hash the document commits. The code's
+  unlock record and its bridge are written before any entry on both kinds, and
+  the bridge is signed by the code's OWN ladder VM, so no other credential's
+  strike can rot it. The ladder branch's issuance splits its document entry so
+  the code's decryption material precedes its authority: the code's
+  `keyAgreement` alone (the pivot), the roster escrow anchored at that entry,
+  then the code's ladder VM and rung-0 commitment. The enrolled branch keeps
+  escrow-first and one merged entry, an enrolled client's roster append
+  needing no license. Either way the code can decrypt before it can spend, and
+  a run torn between the stages leaves an inert code a re-run converges.
+- Recovery-code revocation strikes the code's ladder VM beside its
+  `keyAgreement` and its committed rung hash, claiming the VM seedlessly from
+  the rung-0 update-key multibase the registry recorded at issuance. A VM no
+  attribution arm claims refuses the whole revocation before anything is
+  written (`UnclaimedLadderVmRetirementError`): a standing ladder VM whose
+  credential is otherwise retired keeps its delegation authority. The gate
+  also runs read-only up front. On the ladder kind the revocation deletes the
+  code's unlock Space through a DELETE-only child of its management zcap
+  signed by the acting ladder VM. The replacement code issued by a recovery
+  spend gets its bridge delegation signed by that replacement code's OWN
+  ladder VM on both spends (in place of the new client's key, or the new
+  passphrase's ladder VM), published in the same add-and-retire entry, so it
+  keeps verifying past any later strike of another credential's inventory; it
+  is still written in the persist-before-publish seam, before the entry. The
+  re-mint pass no longer walks recovery-code registry entries, since a code's
+  own ladder VM signs its bridge and no ceremony owes it a re-seal.
+- Every recovery code issued before this release must be re-issued. Its
+  committed update key came from a standalone derivation the ladder's rung 0
+  replaces, so such a code no longer spends, and its registry entry still
+  looks healthy. Its bridge also keeps whatever key signed it; the login-time
+  health check's delegation-rot flag is what nudges the re-issue.
+- A login-time registry chain on a transient login, on its own
+  `session.registryReady`: the stale-seal repair, the torn-retirement repair,
+  the bare-passkey rebuild, the registry backfill, and last the acting
+  credential's management-zcap refresh, each riding the visit's generation
+  delegation and unwrapping with the credential's standing key. The refresh
+  runs inside the chain rather than beside it, so one writer at a time
+  compare-and-swaps the credential's registry entry. The CHAPI popup keeps
+  skipping them. The user key sweep and the annex generation GC stay
+  remembered-only.
+- Enrollment approval runs from a transient session. The approving half takes
+  the ceremony context instead of an enrolled client's key material, so a
+  standing credential's ladder signs the commit and add entries through the
+  record's bridge and the escrow append follows them, licensed at the version
+  the add entry mints. The connect-another-wallet card and the QR onboarding
+  invite render and run there. The one-request window between the add entry
+  and the escrow is the branch's stated cost: the new client stands in the
+  document holding no wrap, mended by a re-run with the same connect code, by
+  the escrow-direction convergence of any later ladder-branch ceremony, and by
+  a disconnect from the listing the row now appears in.
+- Client disconnect runs from a transient session, the account's last enrolled
+  client included: the account lands ladder-anchored. Three refusals run
+  before anything is written -- a registry this session cannot read, a
+  pending-shaped passphrase entry, and a standing credential the registry does
+  not name -- and the generation delegation is replaced and adopted before the
+  removal entry when the removed client's own key signed it. The listing drops
+  the self and last-client refusals on that branch, marks no row as this
+  browser, and the last row carries the transition copy. No record re-mint
+  stage follows: every unlock record's bridge and sibling delegation is signed
+  by its own credential's ladder VM, which the removal entry does not strike.
+- `unlockEntryReaderFor` (`src/session/unlockMethods.ts`), the one reader both
+  sibling-record walks take: an enrolled client invokes the stored management
+  zcap, a ladder mints a GET-only child of it and sends it as its own bare
+  did:key.
+
+- A lobby page (`/lobby`) shown while a signup ceremony runs. Clicking
+  "Create Wallet" starts the ceremony in the click handler -- the passkey
+  path spends the WebAuthn user gesture there -- registers the run in a new
+  in-memory setup store, and navigates at once. The page renders a
+  terminal-style feed of the ceremony's stages, fed by the observational
+  `onStage` notifier `signUpWithPassphrase` and `signUpWithPasskey` now
+  accept and thread into the credential-anchored establishment; a mark fires
+  when a stage ends, so the first not-yet-marked line is the running one and
+  a stage a deployment skips (no KMS) is marked done by the next one
+  reported. The notifier is observational: a throwing one is swallowed
+  rather than tearing the run. A settled run navigates as the wizard did --
+  `/dashboard` after `session.storageReady`, `/login` when the credential
+  already had a wallet, and back to the wizard's last step with the same
+  error copy on failure. Mounting with no run in flight routes back to
+  `/signup`. The wizard replaces rather than pushes `/lobby`, the setup
+  store refuses a second run while one is in flight, and a run whose lobby
+  was left before it settled is discarded (its never-entered session's
+  storage handle closed) rather than parked for a later `/lobby` mount to
+  log in. Logout clears the store too. A failed run returns to the step the
+  user must act on (the passphrase step for a passphrase signup), and the
+  submit button is disabled whenever it cannot submit.
+- The lobby's step list derives from wallet-core's exported stage vocabulary
+  (`CREDENTIAL_ANCHORED_ESTABLISHMENT_STAGES` and its aliases) instead of
+  repeating the names, so an upstream rename is a type error rather than a
+  frozen feed; a mark for a name outside the known set logs a warn. A
+  no-WAS signup now emits its own stages (key derivation, the keyring bind,
+  local provisioning, passkey enrollment) and the store picks the list per
+  deployment, so the feed never lists stages that cannot run. A unit test
+  checks every listed stage has `en` and `es` copy.
+- `src/lib/signupSteps.ts` is the one owner of the `/signup` `step` and
+  `method` search params, used by both the wizard and the lobby.
+- `LobbyPage` is imported eagerly rather than as a lazy chunk, since it is
+  on every signup's critical path and a failed chunk fetch would strand a
+  completed ceremony.
+
+- The transient login mints the unlock Space's management zcap and refreshes
+  the acting credential's registry entry with it when the stored copy is
+  absent, expiring, retargeted, or narrower
+  (`refreshTransientManageCapability`). Without
+  it no credential's management zcap is ever refreshed on an account that
+  never remembers a browser, and every one lapses a year after its bind. The
+  pass creates no registry and no entry, touches no other entry, skips a
+  pending-shaped one, rides the visit's generation delegation inside the
+  registry's compare-and-swap, warns and skips on a read that throws, is not
+  awaited (no login blocks on it), and is skipped in the CHAPI popup.
+- An e2e spec for the deletion (`tests/e2e-was/account-deletion.spec.ts`),
+  over a store-side oracle that reads the teaching server's FileSystem
+  backend directly (`tests/e2e-was/storeOracle.ts`). An HTTP probe cannot
+  answer "is this Space gone": once the account Space is deleted, every
+  survivor its did:webvh controlled answers the same masked 404 whether it
+  was deleted or stranded. The spec covers a completed deletion from a
+  transient visit (no account, unlock, or auxiliary annex Space left, and no
+  local residue), a discovery refusal that renders in the dialog with nothing
+  deleted, and a run torn before the acting credential's own unlock Space.
+
 ### Changed
+
+- BREAKING: `VITE_WAS_SERVER_URL` is the server's Spaces Repository URL
+  (`https://host/spaces/`), not the base URL. Service discovery starts from
+  it, since the base URL is often a landing page another process serves with
+  no `service` link and no CORS headers. The base every Space path, the KMS
+  facet, and the CORS proxy facet hang off is derived as its parent.
+- The service description is discovered once per page load
+  (`src/lib/wasService.ts`) and handed to every `WasClient` the app builds,
+  directly or through wallet-core, so no client discovers on its own.
+- Discovery runs once per login, at the login entry point, and the result is
+  threaded down; a login on an unreachable server keeps running off the
+  cached keyring and the local replica, as it did before discovery existed.
+- A server advertising a Spaces Repository URL other than the configured
+  `VITE_WAS_SERVER_URL` is refused at discovery with an
+  `IncompatibleServerError` naming both values.
+- `VITE_WAS_SERVER_URL` may carry any number of trailing slashes, and a
+  value that is not an absolute URL is refused by name at startup instead of
+  white-screening the app.
+- The cached keyring is consulted only when the remote is unreachable; any
+  other read failure now surfaces instead of being masked by the cache.
+- BREAKING: Freewallet requires a WAS v0.5 storage server
+  (was-teaching-server 0.33.0 or newer). `@interop/was-client` moves to
+  `^0.62.0` and `@interop/storage-core` to `^0.15.0`.
+- Container URLs are written in their canonical trailing-slash form. The
+  Space URL, the share grant's collection target, the three collection
+  targets `resolveInvocationTarget` builds (private, public, and shared
+  wallet collections), and the Space root capability id are built through
+  was-client's path builders.
+- A Collection's `encryption` descriptor and its stored `custom` come from
+  one Collection Metadata object rather than from two endpoints.
+- The recorded-grant matcher and the grant resolver's plain-URL targets both
+  classify with was-client's `parseSpaceTarget`. For the matcher, only a
+  Collection URL in this Space names a collection to rotate. For the
+  resolver, a string target resolves only to the Space, a Collection, or a
+  Resource, re-emitted in canonical form; a reserved sub-endpoint or a path
+  deeper than a Resource is unsatisfiable.
+- `resolveGrants` and `resolveInvocationTarget` take the Space as
+  `{ serverUrl, spaceId }` (`storage.spaceLocation`) instead of parsing the
+  Space URL back apart.
+- A collection descriptor naming a reserved path segment (`meta`, `query`,
+  `export`, and the rest of the registry) resolves to an unsatisfiable grant
+  instead of throwing out of grant resolution.
+- The account-deletion Space probe reads the Space Metadata object, the
+  target a single-verb GET capability names.
+- The two keyring readers (`unlockEntryReaderFor`, and the account-deletion
+  walk's pending-entry discovery, which now reuses it) mint their GET-only
+  child of a sibling's management zcap through wallet-core's
+  `mintUnlockKeyringReadCapability`, so the child names the keyring record's
+  Resource URL rather than the Space Metadata object. A storage server admits
+  a ladder-signed Resource read only in that shape. The Space existence
+  probes keep the bare `GET`, and read the URL wallet-core's
+  `spaceVerbTarget` names for it.
+- Grant resolution refuses a reserved collection name through was-client's
+  `isReservedCollectionId`, and the account-deletion probe classifies a 404
+  through was-client's `httpStatus`; the app-side copies of both are gone.
+  `@interop/was-client` is consumed from the local checkout until its next
+  publish.
 
 - The collection app-attribution `generator` is typed `IDID` through the
   provisioning path (`StorageManager` and `WASRemoteStore`), matching
@@ -246,75 +493,6 @@
 - The credential retirement's generation-swap warning names why the old
   delegation needed no POST (expired, signer gone, no delegation, no log)
   instead of reporting every skip as "found no old delegation".
-
-### Fixed
-
-- The account deletion walk's already-gone arm no longer reports a clean
-  wipe. A re-run over an account whose log answers 404 reads no
-  unlock-methods registry and can never read one again, so the local wipe's
-  unlock-method enumeration narrows to the acting credential: the walk now
-  passes `registryUnread`, the executor reports the narrowing as the failed
-  `unlock-methods-registry` stage, and the outcome carries
-  `localWipeNarrowed`. The result is `deleted-unverified` rather than
-  `deleted`, and Settings names the sibling sign-in methods whose local
-  state may still stand, offering the browser-scoped wipe.
-
-- The CHAPI store popup checks a VC API exchange's DID-Auth request before
-  the login form renders (`checkStoreDIDAuthRequest` in
-  `src/lib/walletRequest/storeRequest.ts`, refusing with
-  `StoreRequestRefusedError`). It refuses a request for anything other than
-  DID Authentication alone, one stating no `domain`, one whose `domain` does
-  not match the attested requesting origin, and one whose presentation
-  endpoint sits on an origin other than the exchange's own. The page no
-  longer defaults an absent `domain` to the exchange origin, so a site
-  cannot have the wallet sign a relayed third-party login challenge and
-  deliver the proof elsewhere.
-
-- The store popup's login form names the exchange host and states that
-  logging in proves the wallet identity to it. The passphrase submit stays
-  the one gesture, with no added step.
-
-- The CHAPI get popup refuses a request whose attested origin does not parse,
-  or parses to an opaque origin, before consent renders
-  (`unattributedOrigin`, with its own `chapi.get.unattributedOrigin` copy).
-  The check runs ahead of opening a VC API exchange, and the consent panel's
-  "Requested by" block renders only when there is an origin to name, so an
-  approval no longer records a Login activity attributed to nobody.
-  `requestingOriginOf` returns undefined for an opaque origin.
-
-- The get page's whole pre-consent refusal matrix moves to
-  `src/lib/walletRequest/getRequest.ts` as plain functions
-  (`attestedRequestOrigin`, `precheckGetRequest`, refusing with
-  `GetRequestRefusedError`), the shape the store popup's and the
-  interaction-URL page's checks already have. The page sets its `BlockReason`
-  from the thrown refusal.
-
-- The Storage page reads and decrypts the activity history once per visit,
-  in `useStorageListings`, and hands the scan to both the shares listing and
-  the connected-apps listing. `listSharedCollections` takes an optional
-  pre-fetched `items`, as `listConnectedApps` already did, and so does
-  `useConnectedApps`.
-
-- Grant revocation no longer records a refused POST as revoked. Only the
-  server's `AlreadyRevokedError` counts as skipped; any other failure, a
-  plain `ValidationError` included (a read-replica lag on a live grant
-  answers the same way as a dead chain), is thrown after every POST settles,
-  so the app key stays, no Revoke is recorded, the row stays listed, and a
-  retry re-runs. `revokedIds` lists only the grants whose POST succeeded.
-
-## 0.50.0 - TBD
-
-### Added
-
-- The mender registry's first stage under `src/session/menders/`, over
-  `@interop/wallet-core/menders`: the 34-invariant declaration table, the
-  registration-site index, and the declared gap allowlist. Audit tests pin
-  the transient-reachable set, hold the derived gaps inside the declared
-  allowlist, and hold the allowlist equal to the open-gaps list in
-  ARCHITECTURE.md. Nothing executes through the registry yet, and every
-  existing call site stands.
-
-### Changed
 
 - The remembered login's promoted-account registry stages (the
   standing-delegation refresh, the ladder-rung refresh, and the
@@ -495,174 +673,6 @@
 - The local `formatEtag` copy in `src/lib/sync/pushWrites.ts` is gone.
   was-client exports the same function and it is imported from there.
 
-### Added
-
-- `PassphraseUnlockMethod.pendingEstablishment`, the passphrase change's
-  establishment marker: the unlock Space id and key-agreement multibase of
-  the credential being established. The change's enrolled branch stamps it
-  on the old credential's entry before the new credential's establishment
-  starts, restating that entry from the fresh registry read the
-  compare-and-swap wrapper hands over and writing nothing when that fresh
-  entry names another credential. The change's final registry write drops
-  it. `upsertPassphraseUnlockMethod` carries it forward only while a write
-  keeps the entry on the same credential at the same unlock Space; an
-  identity write naming another credential, or a repoint, drops it. The
-  marker write is best-effort, and an absent registry gets none. The ladder
-  branch stamps no marker, a transient session leaving nothing browser-local
-  for a later login to consume one with; its torn establishment is mended by
-  a retry of the same change.
-- A `credential-not-standing` transient-login refusal
-  (`auth.errors.transientCredentialNotStanding`), raised right after the
-  first account-log verification when the document lists none of the
-  credential's `keyAgreement` inventory (a passphrase's commitment, a
-  passkey's verbatim key), before any ladder-signed request is tried.
-- Dependency: `@interop/was-sync` `^0.1.0`.
-
-### Fixed
-
-- A passphrase change torn between the new credential's standing record and
-  its document entry is finished at the next login with that passphrase.
-  The establish-first arm of `repairTornPassphraseRetirement` is gated on
-  the establishment marker naming the credential logging in at its own
-  unlock Space, replacing the address gate, which could not tell that tear
-  apart from an old passphrase logging in after a change that completed
-  elsewhere. The arm also requires the entry's own credential to still be
-  listed in the account document, so a stale marker over an entry whose
-  credential a later ceremony retired reinstates nothing. It establishes the
-  login credential from its sealed record, swaps the live profile onto the
-  re-bound record, then retires the entry's named credential and rewrites
-  the entry. `rebuildBareEntry` gained the same marker-gated arm for a bare
-  entry on an account whose registry named no passphrase members. The
-  login-time registry backfill (`backfillPassphraseUnlockMethod`) carries
-  the refresh write's identity guard with it: it no longer repoints the
-  passphrase entry to the login credential's unlock Space while that entry
-  names another credential's standing members or carries the marker, so a
-  backfill running after a failed repair in the same login chain cannot drop
-  them. Previously nothing detected the residue, and a fresh browser's login
-  with the new passphrase failed with a raw bridge authorization error.
-- A torn standing-credential establishment (add or change passphrase, add
-  passkey) re-runs with the ladder seed that bound the member. The enrolled
-  branch of `establishStandingUnlock` writes the standing-layout unlock
-  record before the document entry, so the seed is durable before anything
-  names it, and a run given no seed reads one back from a standing record at
-  the credential's unlock Space for the same account before minting a fresh
-  one. Previously a retry after a tear between the entry and the record
-  minted a fresh seed and, against wallet-core's `publishUnlockKey`
-  refusal, could never converge. The failed-passkey cleanup treats a
-  standing record as a lost response only when the document also lists the
-  credential.
-- The Applications page no longer marks an app or agent row "Reconnect
-  needed" when its grants were minted from a transient session. Such a grant
-  is signed by a client-annex per-visit key the account document never
-  lists, so the row derived as orphaned, and its notice and revoke confirm
-  claimed the wallet that connected it had been disconnected. The grant-state
-  check is now wallet-core's `deriveGrantSignerState`, which judges a signer
-  against the document only when the document could have listed it (the
-  account DID or a did:key) and derives an annex signer as unknown. The
-  revocation still POSTs every recorded capability, and a revoke that
-  withdrew nothing from a row whose grants the server refused (a collected
-  generation, an expired grant) now reads "its storage access had already
-  ended" (`applications.revokeSuccessEnded`) instead of promising that the
-  access will expire on its own; the disconnect is named only on an orphaned
-  row. `listApplicationsView` returns `signerCheck` (the account DID plus the
-  signing keys) in place of `signingKeys`, `revokeApplication` returns the
-  toast's i18n key (`outcomeKey`) in place of the state it was derived from,
-  and `deriveAppGrantsState` is gone in favor of `deriveGrantsState`, which
-  the app rows and the agent rows share. `applications.revokeSuccessLegacy`
-  is dropped: a summary-only record already counted as a refused grant.
-
-- The contacts cipher is was-client's self-refreshing one
-  (`createRefreshingEdvDocCipher`), primed with the descriptor the session
-  already acquired so the build reads nothing. A contacts head conflict is
-  settled inside the sync driver's conflict handler, out of reach of the
-  session's read-level refresh guard, so a side sealed under an epoch another
-  client rotated to counted as undecryptable and was adopted unread. The
-  cipher now re-reads the descriptor once and retries before that verdict.
-- An accepted push writes its acked revision back into the local row, so two
-  conditional writes to one row between pulls no longer send a stale
-  `If-Match` and draw a spurious conflict. Inherited from the package's push
-  handler.
-- The replica-less collection listing passes its page size as `limit`, the
-  option `Collection.documents()` reads. It was passing `pageSize`, which the
-  method ignored, so every walk ran at the 1000-document default.
-- The forget ceremony (both the ordinary forget and the last-client
-  transition) stops background replication before its local wipe removes the
-  replica database. The controller's poll timer used to keep calling
-  `reSync()` against the closed handle.
-- The dashboard and the Applications page re-read their lists when a pull
-  of a collection they depend on settles (`usePullSettled`, over the sync
-  status store). On a fresh browser the first pull landed moments after the
-  mount read, so the credential list stayed empty and a grant's orphaned
-  marker stayed off until a manual Sync.
-- `pnpm run typecheck` (and so `pnpm run build`) passes again.
-  `WASRemoteStore.controller` is typed as the DID it always holds
-  (data-integrity-core's `IDID`), narrowed once where the store takes a
-  controller rather than cast where the Space Description is written.
-  `pnpm test` now runs `typecheck` between the formatter and the unit
-  suite, so a type error fails the everyday loop instead of only the
-  build.
-
-- The App Connect grant path's renewal trigger (`delegationStale` in
-  `processZcaps`) tests signer rot beside expiry: a generation delegation
-  whose signing key has left the account document's `capabilityDelegation`
-  (a credential retirement landing elsewhere mid-visit) is renewed before
-  the grant is minted, rather than parenting a grant whose delegation link
-  no longer verifies. The rule is wallet-core's composed `standingZcapStale`
-  against the session's memoized verified account document.
-- `updateContact` refuses a head whose stored body is legacy plaintext
-  instead of falling back to a fresh encrypt, on both the local replica and
-  the remote-direct backend. The fallback minted its own EDV id and bound it
-  as `was.resource` while the write went to the old row id, an envelope a
-  Collection-handle read refuses as swapped.
-
-## 0.49.1 - TBD
-
-### Fixed
-
-- No ceremony re-seals another credential's unlock record any more, so a
-  sibling sign-in method is no longer locked out of its own account. Three
-  stages did: the credential retirement's dependent-record re-mint, the
-  revocation cascade's recovery-delegation re-PUTs, and the last-client
-  transition's pass over the other unlock methods. Each wrote the sibling's
-  record with the ACTING session's key as its frame signer, and a frame
-  proof is checked before decryption, so once a later ceremony struck that
-  key the sibling's next login refused its own record
-  (`KeyringRecordForgedError`). Every record's frame proof, bridge, and
-  `delegatedClients` sibling delegation are signed by its own credential, and
-  that credential's own login refreshes its bridge on the expiry,
-  renewal-window, and signer-gone axes.
-- A recovery spend now drops the registry entry, and deletes the unlock
-  Space, of every credential its add-and-retire entry struck, unspent
-  recovery codes included. The three registry mutations (both continuations'
-  tails and the spend resume) key on the continuation's own
-  `retiredCredentialVmIds` through one shared prologue, in place of a
-  document-membership test that skipped `recovery-code` entries and so left
-  a struck code listed in Settings with its Space standing. A credential on
-  `unclaimedCredentialVmIds` keeps its entry and is warned about by name,
-  since its committed rung hash is still live. The resume reads the same
-  report back off the log through wallet-core's
-  `recoverySpendRetirementFromLog`. `findRetiredCredentialEntries` is
-  replaced by `registryEntriesForCredentialVmIds`, which matches each entry
-  in the form its type publishes under.
-- Both recovery continuations' outcomes are logged: the struck rung hashes
-  and retired credentials at info, and each unclaimed credential at warn.
-- The recovery page's new-passphrase copy says recovery retires the other
-  recovery codes too, in `en` and `es`.
-
-### Removed
-
-- The last-client transition's `RecordRemintFailedError` and
-  `UnrecordedCredentialForgetError` refusals, both of which existed only to
-  protect the removed record re-mint pass, with their settings copy and the
-  ladder-branch disconnect's registry-coverage check. `remintEntriesOf`,
-  `recordRemintedEntry`, and `remintRecoveryDelegations` are gone from
-  `src/session/recovery.ts`, and `RevocationOutcome` no longer carries a
-  `recovery` member. A recovery code issued before the own-signature rule
-  keeps its foreign-signed bridge, and the login-time health check's nudge to
-  re-issue it is that record's whole remedy.
-
-### Changed
-
 - Revoking a connected app rotates each app-provisioned collection once,
   however many non-owner recipients its current epoch carries, through
   was-client's `removeRecipient` taking the whole retiring set. The
@@ -803,210 +813,6 @@
   when an entry was actually dropped, and no longer runs a separate registry
   lookup to decide that.
 
-### Fixed
-
-- The recovery tails delete a retired credential's unlock Space only once
-  the registry write dropping its entry has landed. A failed write (a
-  transport error or a lost compare-and-swap) used to delete the Spaces
-  anyway, leaving the registry naming Spaces that were gone, which the next
-  passphrase change or last-client transition refused on. The spend resume
-  now drops the retired entries and deletes their Spaces on every arm, not
-  only when a successor entry is missing. The residue a tear between the
-  landed drop and the deletes leaves (nameless, inert unlock Spaces) is
-  recorded in ARCHITECTURE.md's Ceremony inventory.
-- A recovery spend now retires every pre-recovery passphrase and passkey
-  in freewallet's own tails, matching the document strike wallet-core 0.65.0
-  made. All three registry mutations (the remembered spend, its resume, and
-  the transient spend) drop the entries whose recorded key-agreement key the
-  post-entry document no longer publishes in either form
-  (`findRetiredCredentialEntries` in `src/session/credentialCoverage.ts`),
-  computed inside the compare-and-swap, and then delete each retired entry's
-  unlock Space best-effort through a DELETE-only child of its management
-  zcap; the remembered tails also clear this browser's unlock-local state for
-  it. `deleteUnlockSpaceForEntry` and `unlockSpaceDeletionRefusal` take an
-  optional session when an explicit signer is passed. The recovery page's
-  new-passphrase copy no longer claims the old passphrase keeps working.
-- Retiring a passphrase or passkey from a remembered session now re-mints the
-  other standing credentials' records and bridge delegations before the strike
-  entry removes the retired credential's ladder VM. The retirement binds
-  `retireUnlockCredential`'s stage-0 closure to `remintRecoveryDelegations`,
-  which takes the doomed VM ids as `retiringKeyMultibases` and leaves the
-  retiring credential's own registry entry out (`excludeUnlockSpaceIds`); the
-  callers pass that entry's unlock Space id on the `method` argument.
-- The rotated user key now reaches a live session's storage ciphers. The
-  in-band adoption fires before the collection fan-out, while every collection
-  still carries the epoch the rotation retires, so rebuilding the ciphers
-  there asked the fresh key to open an epoch it was not yet a recipient of and
-  failed with a `KeyUnwrapError`. It now takes the key material alone
-  (`StorageManager.holdRotatedVaultKeys`), and the post-ceremony
-  `adoptRotatedUserKey` rebuilds the ciphers past the fan-out: its id guard
-  covers the registry re-seal alone rather than skipping the swap. Without
-  this a write made after a recovery-code revocation or a passphrase change,
-  in the same session, could seal under the epoch the rotation had just
-  retired. Recovery-code revocation gained the post-ceremony adoption it never
-  made, and the login-time sweep refreshes its descriptors whenever it adopted
-  a rotated key.
-- Renaming a passkey from a transient session rode the root capability and
-  failed with "no unlock-methods registry"; it now rides the visit's
-  generation delegation like every other registry write. The same default
-  covers `refreshStandingDelegationFields` and `dropBarePasskeyEntry`, which
-  never took one.
-- The remote-direct contacts and contact-revision scans now distinguish a row
-  this wallet holds no epoch key for from an undecryptable one, matching the
-  other encrypted readers.
-
-## 0.49.0 - TBD
-
-Every account-management ceremony now runs from a transient session, on a
-standing unlock credential's ladder in place of an enrolled client's key.
-
-### Added
-
-- One account-ceremony context (`accountCeremonyContext` in
-  `src/session/accountCeremonyContext.ts`), replacing `enrolledContext.ts`. It
-  resolves the enrolled kind from a remembered session (this client's
-  did:webvh update keys sign the account-log entry, its key agent signs the
-  roster append, every request root-invokes) or the ladder kind from a
-  transient session holding a standing unlock credential (a rung of the
-  credential's update-key ladder signs the entry through the record's bridge
-  delegation, the credential's ladder VM signs the licensed roster append, and
-  the per-visit annex VM invokes every request under the generation
-  delegation). A guest, a no-WAS session, and a transient session whose record
-  carries no standing members resolve to neither. The ladder kind carries what
-  only it needs: the ladder VM's own delegation signer (the annex VM stands in
-  no account document), the DELETE-only child mint the account-deletion walk
-  already used, a remote-only unlock-record binder, the credential's
-  `delegatedClients` sibling delegation, the acting credential's management
-  zcap and unlock Space id, the standing key-agreement key every roster and
-  registry unwrap needs, and a `renew()` that replaces the generation
-  delegation in place. Account deletion's ladder-signer construction is now
-  that kind's builder, so the deletion walk and the ceremonies share one
-  source.
-- Every unlock record's bridge and sibling delegation is now signed by its own
-  credential's ladder VM, in place of the acting session's signer, so a strike
-  of one credential's inventory can rot only the record the same ceremony
-  deletes.
-- The passphrase change, passphrase add, passkey add, and passkey remove run
-  from a transient session. `establishStandingUnlock` gained a ladder branch:
-  the new credential's unlock record is written remotely first (inert, its
-  ladder VM standing in no document yet), its annex rung-0 hash is committed
-  under the acting credential's rung as a blocking stage, the bind entry
-  publishes, and only then does the roster escrow append, a ladder-signed
-  append being licensed at the inventory-changing version its own entry mints.
-  `rotateOffUnlockCredential` and the retirement pre-flight run on the ladder
-  kind too: the strike entry is signed by a rung of the surviving credential's
-  ladder, the convergence append by that credential's ladder VM, and the
-  roster unwrap uses its standing key. A credential retirement on the ladder
-  branch strikes the retired credential's annex rung through the SURVIVING
-  credential's sibling delegation, since the annex Space answers to the
-  account did:webvh and a transient session's per-visit key is not it (a
-  passphrase change reaches it through the new credential's sibling, since its
-  own strike entry has already removed the old credential's ladder VM from the
-  document). A passphrase change and a passkey removal also replace the
-  generation delegation before their strike entry lands and adopt the
-  replacement into the live session (profile stamp, persistence strategy,
-  remote store), since the retired credential's ladder VM may be what signed
-  the delegation the visit's requests ride; App Connect grants the visit
-  chained under the old delegation end with it, the same mid-generation death
-  an ordinary disconnect causes.
-- `ActingCredentialRemovalError`, refusing removal of the passkey a transient
-  session entered on, since that credential's ladder VM is what all three
-  stages of the removal act through. A remembered session may still remove its
-  own login passkey.
-- The passphrase change deletes the old unlock Space in the ceremony's own
-  place on the ladder branch: after the annex strike and before the registry
-  write, through a DELETE-only child of the old entry's management zcap signed
-  by the new ladder VM. A tear there leaves an entry still naming the Space
-  rather than a Space nothing names, and each of the mint's five refusals is
-  reported rather than failing a change that has already landed. The tap-free
-  passkey removal deletes the passkey's unlock Space the same way; a delete
-  that does not succeed is reported as a residue rather than as a deletion.
-  The enrolled branch is unchanged: it still re-derives the old unlock
-  identity and clears its browser-local state in the old place.
-- Every ladder-branch strike publishes the post-strike `did:web` projection
-  immediately BEFORE its entry, through the account Space's `id` collection
-  under the visit's generation delegation: the client disconnect, the
-  passphrase change and passkey removal, and the recovery-code revocation. A
-  ladder-signed entry writes `did.jsonl` alone, so `id/did.json` would
-  otherwise keep naming the struck client or credential -- a revocation
-  bypass for a `did:web` verifier, though WAS authorization reads the log and
-  never the projection. The store resolves its capability at each use, so a
-  ceremony that replaced its generation delegation before the strike writes
-  under the replacement. A failed PUT is warned and the entry still
-  publishes, the next visit's projection ensure being the mender.
-- Space export and import from a transient session: one POST and a batch of
-  writes the bound generation delegation already admits.
-- Recovery-code issuance and revocation run from a transient session. A code
-  is now a standing credential with a ladder of its own, derived from the code
-  bytes: its ladder VM publishes under `assertionMethod` and
-  `capabilityDelegation` beside its verbatim `keyAgreement`, and rung 0 of
-  that ladder is the update key whose hash the document commits. The code's
-  unlock record and its bridge are written before any entry on both kinds, and
-  the bridge is signed by the code's OWN ladder VM, so no other credential's
-  strike can rot it. The ladder branch's issuance splits its document entry so
-  the code's decryption material precedes its authority: the code's
-  `keyAgreement` alone (the pivot), the roster escrow anchored at that entry,
-  then the code's ladder VM and rung-0 commitment. The enrolled branch keeps
-  escrow-first and one merged entry, an enrolled client's roster append
-  needing no license. Either way the code can decrypt before it can spend, and
-  a run torn between the stages leaves an inert code a re-run converges.
-- Recovery-code revocation strikes the code's ladder VM beside its
-  `keyAgreement` and its committed rung hash, claiming the VM seedlessly from
-  the rung-0 update-key multibase the registry recorded at issuance. A VM no
-  attribution arm claims refuses the whole revocation before anything is
-  written (`UnclaimedLadderVmRetirementError`): a standing ladder VM whose
-  credential is otherwise retired keeps its delegation authority. The gate
-  also runs read-only up front. On the ladder kind the revocation deletes the
-  code's unlock Space through a DELETE-only child of its management zcap
-  signed by the acting ladder VM. The replacement code issued by a recovery
-  spend gets its bridge delegation signed by that replacement code's OWN
-  ladder VM on both spends (in place of the new client's key, or the new
-  passphrase's ladder VM), published in the same add-and-retire entry, so it
-  keeps verifying past any later strike of another credential's inventory; it
-  is still written in the persist-before-publish seam, before the entry. The
-  re-mint pass no longer walks recovery-code registry entries, since a code's
-  own ladder VM signs its bridge and no ceremony owes it a re-seal.
-- Every recovery code issued before this release must be re-issued. Its
-  committed update key came from a standalone derivation the ladder's rung 0
-  replaces, so such a code no longer spends, and its registry entry still
-  looks healthy. Its bridge also keeps whatever key signed it; the login-time
-  health check's delegation-rot flag is what nudges the re-issue.
-- A login-time registry chain on a transient login, on its own
-  `session.registryReady`: the stale-seal repair, the torn-retirement repair,
-  the bare-passkey rebuild, the registry backfill, and last the acting
-  credential's management-zcap refresh, each riding the visit's generation
-  delegation and unwrapping with the credential's standing key. The refresh
-  runs inside the chain rather than beside it, so one writer at a time
-  compare-and-swaps the credential's registry entry. The CHAPI popup keeps
-  skipping them. The user key sweep and the annex generation GC stay
-  remembered-only.
-- Enrollment approval runs from a transient session. The approving half takes
-  the ceremony context instead of an enrolled client's key material, so a
-  standing credential's ladder signs the commit and add entries through the
-  record's bridge and the escrow append follows them, licensed at the version
-  the add entry mints. The connect-another-wallet card and the QR onboarding
-  invite render and run there. The one-request window between the add entry
-  and the escrow is the branch's stated cost: the new client stands in the
-  document holding no wrap, mended by a re-run with the same connect code, by
-  the escrow-direction convergence of any later ladder-branch ceremony, and by
-  a disconnect from the listing the row now appears in.
-- Client disconnect runs from a transient session, the account's last enrolled
-  client included: the account lands ladder-anchored. Three refusals run
-  before anything is written -- a registry this session cannot read, a
-  pending-shaped passphrase entry, and a standing credential the registry does
-  not name -- and the generation delegation is replaced and adopted before the
-  removal entry when the removed client's own key signed it. The listing drops
-  the self and last-client refusals on that branch, marks no row as this
-  browser, and the last row carries the transition copy. No record re-mint
-  stage follows: every unlock record's bridge and sibling delegation is signed
-  by its own credential's ladder VM, which the removal entry does not strike.
-- `unlockEntryReaderFor` (`src/session/unlockMethods.ts`), the one reader both
-  sibling-record walks take: an enrolled client invokes the stored management
-  zcap, a ladder mints a GET-only child of it and sends it as its own bare
-  did:key.
-
-### Changed
-
 - The registry helpers (`updateUnlockMethods`, `backfillPassphraseUnlockMethod`,
   `revokeUnlockMethod`, `revokeUnlockMethodByCeremony`,
   `resealUnlockRegistryForRotation`, `adoptRotatedUserKeyInBand`,
@@ -1034,130 +840,6 @@ standing unlock credential's ladder in place of an enrolled client's key.
   lands in this machine's authenticator, and the passphrase-change and
   passkey-remove surfaces state that connected apps will need to reconnect
   when the change re-mints the generation delegation.
-
-### Fixed
-
-- The Settings registry refresh after an unlock-method mutation now rides the
-  same authority the mount load does (the visit's generation delegation on a
-  transient session). It root-invoked, the server masks that refusal as a 404,
-  and the absent-looking read emptied the list the mutation had just written
-  to -- a passkey added from a transient session appeared to vanish.
-- The enrollment approval drops this session's verified-log memo BEFORE the
-  ceremony as well as after it. On the ladder branch the escrow append is
-  licensed only at the version the add entry mints, and the roster store
-  resolves its controller view through that memo, so a view primed before the
-  entries (the Connected wallets listing that opens the dialog primes one)
-  anchored the append at the pre-add head and the approval failed with
-  `ResourceLogLicenseError`.
-
-### Removed
-
-- The session-kind gate: `assertAccountCeremonyAllowed` and
-  `StepUpRequiredError`, with every call site (passphrase change, passphrase
-  add, passkey add, passkey remove, recovery-code issuance and revocation,
-  client disconnect, enrollment approval, Space export and import).
-  `BrowserLocalSessionRequiredError` stays for the two ceremonies whose
-  subject is this browser: update-key rotation, and forgetting this browser.
-- The registry write guard that refused every write from a transient session.
-  The write protocol's own guards do not depend on the session tier: the
-  compare-and-swap on a fresh read's ETag, the acting credential's
-  key-agreement multibase on a refresh write, and the direction settled
-  against the account document on an identity write.
-
-## 0.48.0 - TBD
-
-### Fixed
-
-- The Settings unlock-methods list loads on a transient session (the default
-  session type), where it used to render nothing at all. The registry read
-  rides the visit's generation delegation (`profile.invocationCapability`),
-  the authority the transient recovery ceremony already reads it under. The
-  write half is unchanged: minting or rewriting the registry stays gated on
-  the browser-local strategy, so the section lists the account's passkeys
-  read-only while add, rename, and remove keep their existing gate.
-
-## 0.47.0 - TBD
-
-### Removed
-
-- The Settings "Keystore" row under Key management. It reported whether the
-  session had bound a `KeystoreAgent`, which only a remembered login does, so
-  every transient session (the default) read "provisioning failed at login"
-  though nothing was attempted. The Published DID row's "Key server signing
-  key recorded" chip already shows what the account itself records.
-
-### Fixed
-
-- The `did:web` projection (`id/did.json`) no longer keeps publishing keys a
-  ladder-signed account-log entry removed. Such an entry writes `did.jsonl`
-  alone, so after the last-client transition the forgotten client's
-  `authentication` verification method stayed in the projection, and after a
-  transient recovery the retired credential's `keyAgreement` entry did. WAS
-  authorization was never affected: the server resolves a Space's controller
-  from `did.jsonl` and never reads `did.json`.
-- The forget ceremony and the last-client transition PUT the post-removal
-  projection through the forgetting client's own root authority immediately
-  before their removal entry, since that client's authority ends at the entry.
-- Every transient visit runs wallet-core's `ensureDidWebProjection` after its
-  per-visit key is enrolled, invoking under the generation delegation, whose
-  items-subtree target already covers `id/did.json`. It compares before
-  writing, so a healthy account costs one GET and no write. Best-effort, not
-  awaited, and it runs for the CHAPI popup too. No server change and no
-  widened bridge delegation (`decisions/0018`).
-- The visit's ensure is ordered against concurrent writers. Its document was
-  resolved at the start of the composition, so a difference alone does not say
-  which side is stale: the visit supplies a `refresh` that re-runs
-  `verifyAccountLog` under its own chain-head pins, and the write runs only
-  when the refreshed derivation still differs. The PUT is a compare-and-swap on
-  the served read's ETag, so a projection another client wrote in between
-  stands and the visit logs a `conflict` instead. Without this a login could
-  restore a key a disconnect or a retirement had just removed.
-- Six WAS e2e specs (`did-web`, `did-webvh`, `enroll`, `recovery`,
-  `recovery-transient`, `remembered-signup`) assert the account document the
-  ceremonies now publish: the ladder VM survives a self-enrollment, and a
-  recovery retires every pre-recovery standing credential's `keyAgreement`
-  entry. Each count names the entries it counts.
-
-## 0.46.0 - TBD
-
-### Added
-
-- A lobby page (`/lobby`) shown while a signup ceremony runs. Clicking
-  "Create Wallet" starts the ceremony in the click handler -- the passkey
-  path spends the WebAuthn user gesture there -- registers the run in a new
-  in-memory setup store, and navigates at once. The page renders a
-  terminal-style feed of the ceremony's stages, fed by the observational
-  `onStage` notifier `signUpWithPassphrase` and `signUpWithPasskey` now
-  accept and thread into the credential-anchored establishment; a mark fires
-  when a stage ends, so the first not-yet-marked line is the running one and
-  a stage a deployment skips (no KMS) is marked done by the next one
-  reported. The notifier is observational: a throwing one is swallowed
-  rather than tearing the run. A settled run navigates as the wizard did --
-  `/dashboard` after `session.storageReady`, `/login` when the credential
-  already had a wallet, and back to the wizard's last step with the same
-  error copy on failure. Mounting with no run in flight routes back to
-  `/signup`. The wizard replaces rather than pushes `/lobby`, the setup
-  store refuses a second run while one is in flight, and a run whose lobby
-  was left before it settled is discarded (its never-entered session's
-  storage handle closed) rather than parked for a later `/lobby` mount to
-  log in. Logout clears the store too. A failed run returns to the step the
-  user must act on (the passphrase step for a passphrase signup), and the
-  submit button is disabled whenever it cannot submit.
-- The lobby's step list derives from wallet-core's exported stage vocabulary
-  (`CREDENTIAL_ANCHORED_ESTABLISHMENT_STAGES` and its aliases) instead of
-  repeating the names, so an upstream rename is a type error rather than a
-  frozen feed; a mark for a name outside the known set logs a warn. A
-  no-WAS signup now emits its own stages (key derivation, the keyring bind,
-  local provisioning, passkey enrollment) and the store picks the list per
-  deployment, so the feed never lists stages that cannot run. A unit test
-  checks every listed stage has `en` and `es` copy.
-- `src/lib/signupSteps.ts` is the one owner of the `/signup` `step` and
-  `method` search params, used by both the wizard and the lobby.
-- `LobbyPage` is imported eagerly rather than as a lazy chunk, since it is
-  on every signup's critical path and a failed chunk fetch would strand a
-  completed ceremony.
-
-### Changed
 
 - The WebAuthn PRF-retry consent prompt holds its pending question in a
   module-level store (`src/stores/prfRetryStore.ts`) rather than in
@@ -1210,36 +892,6 @@ standing unlock credential's ladder in place of an enrolled client's key.
   explicit start. A stage that overlaps its neighbour cannot be measured as
   a delta between marks, so the concurrent KMS stage reports a span and its
   mark names only the join.
-
-### Fixed
-
-- App Connect's response VP held as the account's did:web DID on a
-  remembered session against a KMS deployment, contradicting both this
-  repo's ARCHITECTURE.md and app-connect-spec `decisions/0004`.
-  `processAppConnect` now passes an explicit holder override, pinning the
-  holder and its DIDAuth proof to the client did:key.
-- A DIDAuth request accepting only `web` or `webvh` was refused, by a wallet
-  that would have presented did:web to a verifier that asked for nothing.
-  `didAuthMethodSupported` now takes the methods the caller can present.
-  Pre-login the CHAPI get page judges deployment capability; after login a
-  session that can present none of the listed methods gets the block screen
-  in place of the consent panel, adding no step to the flow.
-
-### Removed
-
-- The `VITE_ENABLE_DID_WEBVH` opt-out. Every WAS account provisions
-  did:webvh. The reduced provisioning path is now reached only by a session
-  that structurally cannot publish a log (a no-WAS deployment, a guest); it
-  publishes no `did.json` and presents did:key.
-- The KMS X25519 `keyAgreement` key, which is no longer minted anywhere. The
-  did:webvh document always excluded it, since no server-held key may be a
-  wrap target, but the reduced path's hand-assembled document published it.
-  That exposure is closed for accounts created after this change. An
-  existing document keeps what it has, since nothing overwrites it.
-
-## 0.45.0 - TBD
-
-### Changed
 
 - A passphrase signup reads the account `did.jsonl` twice instead of six
   times: the establishment's genesis probe and the transient enrollment's
@@ -1399,32 +1051,6 @@ standing unlock credential's ladder in place of an enrolled client's key.
   the ensure's four no-op requests. A re-bind meeting a Space that is gone
   now fails on the PUT rather than re-creating it under the bootstrap key.
 
-### Added
-
-- The transient login mints the unlock Space's management zcap and refreshes
-  the acting credential's registry entry with it when the stored copy is
-  absent, expiring, retargeted, or narrower
-  (`refreshTransientManageCapability`). Without
-  it no credential's management zcap is ever refreshed on an account that
-  never remembers a browser, and every one lapses a year after its bind. The
-  pass creates no registry and no entry, touches no other entry, skips a
-  pending-shaped one, rides the visit's generation delegation inside the
-  registry's compare-and-swap, warns and skips on a read that throws, is not
-  awaited (no login blocks on it), and is skipped in the CHAPI popup.
-- An e2e spec for the deletion (`tests/e2e-was/account-deletion.spec.ts`),
-  over a store-side oracle that reads the teaching server's FileSystem
-  backend directly (`tests/e2e-was/storeOracle.ts`). An HTTP probe cannot
-  answer "is this Space gone": once the account Space is deleted, every
-  survivor its did:webvh controlled answers the same masked 404 whether it
-  was deleted or stranded. The spec covers a completed deletion from a
-  transient visit (no account, unlock, or auxiliary annex Space left, and no
-  local residue), a discovery refusal that renders in the dialog with nothing
-  deleted, and a run torn before the acting credential's own unlock Space.
-
-## 0.44.0 - TBD
-
-### Changed
-
 - Known-issuer registry requests are routed by what a browser can actually
   reach. The registries list and each `dcc-legacy` registry file are fetched
   directly, since they are served with `Access-Control-Allow-Origin: *`; an
@@ -1440,21 +1066,6 @@ standing unlock credential's ladder in place of an enrolled client's key.
   whole lookup stays bounded at two hops.
 - `@digitalcredentials/issuer-registry-client` to `^4.1.0`, for the `fetch`
   seam the routing above rides.
-
-### Fixed
-
-- The row scans and the push handler classify what an injected seam throws by
-  the error's name rather than by `instanceof`, through the shared predicates
-  `isUnknownEpochError` / `isKeyUnwrapError` / `isSyncConflictError`. In a
-  wallet whose `@interop/was-client` resolved to a second copy, the class a
-  cipher or sync port threw was not the class the store imported: a row this
-  wallet holds no epoch key for fell through to the undecryptable bucket, where
-  the credential purge would delete another reader's real data, and every push
-  `412` became a fatal cycle error instead of a conflict to reconcile.
-
-## 0.43.0 - TBD
-
-### Changed
 
 - `rotateOffUnlockCredential` logs a warning when the retirement reports a
   ladder VM it could not attribute (`ladderVm.unclaimed`), since that VM
@@ -1496,6 +1107,348 @@ standing unlock credential's ladder in place of an enrolled client's key.
   pre-promotion registry write, the keystore promotion -- mark themselves.
   The mend entry point reports per arm the same way. Development-only
   telemetry; nothing about the ceremony changed.
+
+### Fixed
+
+- The account deletion walk's already-gone arm no longer reports a clean
+  wipe. A re-run over an account whose log answers 404 reads no
+  unlock-methods registry and can never read one again, so the local wipe's
+  unlock-method enumeration narrows to the acting credential: the walk now
+  passes `registryUnread`, the executor reports the narrowing as the failed
+  `unlock-methods-registry` stage, and the outcome carries
+  `localWipeNarrowed`. The result is `deleted-unverified` rather than
+  `deleted`, and Settings names the sibling sign-in methods whose local
+  state may still stand, offering the browser-scoped wipe.
+
+- The CHAPI store popup checks a VC API exchange's DID-Auth request before
+  the login form renders (`checkStoreDIDAuthRequest` in
+  `src/lib/walletRequest/storeRequest.ts`, refusing with
+  `StoreRequestRefusedError`). It refuses a request for anything other than
+  DID Authentication alone, one stating no `domain`, one whose `domain` does
+  not match the attested requesting origin, and one whose presentation
+  endpoint sits on an origin other than the exchange's own. The page no
+  longer defaults an absent `domain` to the exchange origin, so a site
+  cannot have the wallet sign a relayed third-party login challenge and
+  deliver the proof elsewhere.
+
+- The store popup's login form names the exchange host and states that
+  logging in proves the wallet identity to it. The passphrase submit stays
+  the one gesture, with no added step.
+
+- The CHAPI get popup refuses a request whose attested origin does not parse,
+  or parses to an opaque origin, before consent renders
+  (`unattributedOrigin`, with its own `chapi.get.unattributedOrigin` copy).
+  The check runs ahead of opening a VC API exchange, and the consent panel's
+  "Requested by" block renders only when there is an origin to name, so an
+  approval no longer records a Login activity attributed to nobody.
+  `requestingOriginOf` returns undefined for an opaque origin.
+
+- The get page's whole pre-consent refusal matrix moves to
+  `src/lib/walletRequest/getRequest.ts` as plain functions
+  (`attestedRequestOrigin`, `precheckGetRequest`, refusing with
+  `GetRequestRefusedError`), the shape the store popup's and the
+  interaction-URL page's checks already have. The page sets its `BlockReason`
+  from the thrown refusal.
+
+- The Storage page reads and decrypts the activity history once per visit,
+  in `useStorageListings`, and hands the scan to both the shares listing and
+  the connected-apps listing. `listSharedCollections` takes an optional
+  pre-fetched `items`, as `listConnectedApps` already did, and so does
+  `useConnectedApps`.
+
+- Grant revocation no longer records a refused POST as revoked. Only the
+  server's `AlreadyRevokedError` counts as skipped; any other failure, a
+  plain `ValidationError` included (a read-replica lag on a live grant
+  answers the same way as a dead chain), is thrown after every POST settles,
+  so the app key stays, no Revoke is recorded, the row stays listed, and a
+  retry re-runs. `revokedIds` lists only the grants whose POST succeeded.
+
+- A passphrase change torn between the new credential's standing record and
+  its document entry is finished at the next login with that passphrase.
+  The establish-first arm of `repairTornPassphraseRetirement` is gated on
+  the establishment marker naming the credential logging in at its own
+  unlock Space, replacing the address gate, which could not tell that tear
+  apart from an old passphrase logging in after a change that completed
+  elsewhere. The arm also requires the entry's own credential to still be
+  listed in the account document, so a stale marker over an entry whose
+  credential a later ceremony retired reinstates nothing. It establishes the
+  login credential from its sealed record, swaps the live profile onto the
+  re-bound record, then retires the entry's named credential and rewrites
+  the entry. `rebuildBareEntry` gained the same marker-gated arm for a bare
+  entry on an account whose registry named no passphrase members. The
+  login-time registry backfill (`backfillPassphraseUnlockMethod`) carries
+  the refresh write's identity guard with it: it no longer repoints the
+  passphrase entry to the login credential's unlock Space while that entry
+  names another credential's standing members or carries the marker, so a
+  backfill running after a failed repair in the same login chain cannot drop
+  them. Previously nothing detected the residue, and a fresh browser's login
+  with the new passphrase failed with a raw bridge authorization error.
+- A torn standing-credential establishment (add or change passphrase, add
+  passkey) re-runs with the ladder seed that bound the member. The enrolled
+  branch of `establishStandingUnlock` writes the standing-layout unlock
+  record before the document entry, so the seed is durable before anything
+  names it, and a run given no seed reads one back from a standing record at
+  the credential's unlock Space for the same account before minting a fresh
+  one. Previously a retry after a tear between the entry and the record
+  minted a fresh seed and, against wallet-core's `publishUnlockKey`
+  refusal, could never converge. The failed-passkey cleanup treats a
+  standing record as a lost response only when the document also lists the
+  credential.
+- The Applications page no longer marks an app or agent row "Reconnect
+  needed" when its grants were minted from a transient session. Such a grant
+  is signed by a client-annex per-visit key the account document never
+  lists, so the row derived as orphaned, and its notice and revoke confirm
+  claimed the wallet that connected it had been disconnected. The grant-state
+  check is now wallet-core's `deriveGrantSignerState`, which judges a signer
+  against the document only when the document could have listed it (the
+  account DID or a did:key) and derives an annex signer as unknown. The
+  revocation still POSTs every recorded capability, and a revoke that
+  withdrew nothing from a row whose grants the server refused (a collected
+  generation, an expired grant) now reads "its storage access had already
+  ended" (`applications.revokeSuccessEnded`) instead of promising that the
+  access will expire on its own; the disconnect is named only on an orphaned
+  row. `listApplicationsView` returns `signerCheck` (the account DID plus the
+  signing keys) in place of `signingKeys`, `revokeApplication` returns the
+  toast's i18n key (`outcomeKey`) in place of the state it was derived from,
+  and `deriveAppGrantsState` is gone in favor of `deriveGrantsState`, which
+  the app rows and the agent rows share. `applications.revokeSuccessLegacy`
+  is dropped: a summary-only record already counted as a refused grant.
+
+- The contacts cipher is was-client's self-refreshing one
+  (`createRefreshingEdvDocCipher`), primed with the descriptor the session
+  already acquired so the build reads nothing. A contacts head conflict is
+  settled inside the sync driver's conflict handler, out of reach of the
+  session's read-level refresh guard, so a side sealed under an epoch another
+  client rotated to counted as undecryptable and was adopted unread. The
+  cipher now re-reads the descriptor once and retries before that verdict.
+- An accepted push writes its acked revision back into the local row, so two
+  conditional writes to one row between pulls no longer send a stale
+  `If-Match` and draw a spurious conflict. Inherited from the package's push
+  handler.
+- The replica-less collection listing passes its page size as `limit`, the
+  option `Collection.documents()` reads. It was passing `pageSize`, which the
+  method ignored, so every walk ran at the 1000-document default.
+- The forget ceremony (both the ordinary forget and the last-client
+  transition) stops background replication before its local wipe removes the
+  replica database. The controller's poll timer used to keep calling
+  `reSync()` against the closed handle.
+- The dashboard and the Applications page re-read their lists when a pull
+  of a collection they depend on settles (`usePullSettled`, over the sync
+  status store). On a fresh browser the first pull landed moments after the
+  mount read, so the credential list stayed empty and a grant's orphaned
+  marker stayed off until a manual Sync.
+- `pnpm run typecheck` (and so `pnpm run build`) passes again.
+  `WASRemoteStore.controller` is typed as the DID it always holds
+  (data-integrity-core's `IDID`), narrowed once where the store takes a
+  controller rather than cast where the Space Description is written.
+  `pnpm test` now runs `typecheck` between the formatter and the unit
+  suite, so a type error fails the everyday loop instead of only the
+  build.
+
+- The App Connect grant path's renewal trigger (`delegationStale` in
+  `processZcaps`) tests signer rot beside expiry: a generation delegation
+  whose signing key has left the account document's `capabilityDelegation`
+  (a credential retirement landing elsewhere mid-visit) is renewed before
+  the grant is minted, rather than parenting a grant whose delegation link
+  no longer verifies. The rule is wallet-core's composed `standingZcapStale`
+  against the session's memoized verified account document.
+- `updateContact` refuses a head whose stored body is legacy plaintext
+  instead of falling back to a fresh encrypt, on both the local replica and
+  the remote-direct backend. The fallback minted its own EDV id and bound it
+  as `was.resource` while the write went to the old row id, an envelope a
+  Collection-handle read refuses as swapped.
+
+- No ceremony re-seals another credential's unlock record any more, so a
+  sibling sign-in method is no longer locked out of its own account. Three
+  stages did: the credential retirement's dependent-record re-mint, the
+  revocation cascade's recovery-delegation re-PUTs, and the last-client
+  transition's pass over the other unlock methods. Each wrote the sibling's
+  record with the ACTING session's key as its frame signer, and a frame
+  proof is checked before decryption, so once a later ceremony struck that
+  key the sibling's next login refused its own record
+  (`KeyringRecordForgedError`). Every record's frame proof, bridge, and
+  `delegatedClients` sibling delegation are signed by its own credential, and
+  that credential's own login refreshes its bridge on the expiry,
+  renewal-window, and signer-gone axes.
+- A recovery spend now drops the registry entry, and deletes the unlock
+  Space, of every credential its add-and-retire entry struck, unspent
+  recovery codes included. The three registry mutations (both continuations'
+  tails and the spend resume) key on the continuation's own
+  `retiredCredentialVmIds` through one shared prologue, in place of a
+  document-membership test that skipped `recovery-code` entries and so left
+  a struck code listed in Settings with its Space standing. A credential on
+  `unclaimedCredentialVmIds` keeps its entry and is warned about by name,
+  since its committed rung hash is still live. The resume reads the same
+  report back off the log through wallet-core's
+  `recoverySpendRetirementFromLog`. `findRetiredCredentialEntries` is
+  replaced by `registryEntriesForCredentialVmIds`, which matches each entry
+  in the form its type publishes under.
+- Both recovery continuations' outcomes are logged: the struck rung hashes
+  and retired credentials at info, and each unclaimed credential at warn.
+- The recovery page's new-passphrase copy says recovery retires the other
+  recovery codes too, in `en` and `es`.
+
+- The recovery tails delete a retired credential's unlock Space only once
+  the registry write dropping its entry has landed. A failed write (a
+  transport error or a lost compare-and-swap) used to delete the Spaces
+  anyway, leaving the registry naming Spaces that were gone, which the next
+  passphrase change or last-client transition refused on. The spend resume
+  now drops the retired entries and deletes their Spaces on every arm, not
+  only when a successor entry is missing. The residue a tear between the
+  landed drop and the deletes leaves (nameless, inert unlock Spaces) is
+  recorded in ARCHITECTURE.md's Ceremony inventory.
+- A recovery spend now retires every pre-recovery passphrase and passkey
+  in freewallet's own tails, matching the document strike wallet-core 0.65.0
+  made. All three registry mutations (the remembered spend, its resume, and
+  the transient spend) drop the entries whose recorded key-agreement key the
+  post-entry document no longer publishes in either form
+  (`findRetiredCredentialEntries` in `src/session/credentialCoverage.ts`),
+  computed inside the compare-and-swap, and then delete each retired entry's
+  unlock Space best-effort through a DELETE-only child of its management
+  zcap; the remembered tails also clear this browser's unlock-local state for
+  it. `deleteUnlockSpaceForEntry` and `unlockSpaceDeletionRefusal` take an
+  optional session when an explicit signer is passed. The recovery page's
+  new-passphrase copy no longer claims the old passphrase keeps working.
+- Retiring a passphrase or passkey from a remembered session now re-mints the
+  other standing credentials' records and bridge delegations before the strike
+  entry removes the retired credential's ladder VM. The retirement binds
+  `retireUnlockCredential`'s stage-0 closure to `remintRecoveryDelegations`,
+  which takes the doomed VM ids as `retiringKeyMultibases` and leaves the
+  retiring credential's own registry entry out (`excludeUnlockSpaceIds`); the
+  callers pass that entry's unlock Space id on the `method` argument.
+- The rotated user key now reaches a live session's storage ciphers. The
+  in-band adoption fires before the collection fan-out, while every collection
+  still carries the epoch the rotation retires, so rebuilding the ciphers
+  there asked the fresh key to open an epoch it was not yet a recipient of and
+  failed with a `KeyUnwrapError`. It now takes the key material alone
+  (`StorageManager.holdRotatedVaultKeys`), and the post-ceremony
+  `adoptRotatedUserKey` rebuilds the ciphers past the fan-out: its id guard
+  covers the registry re-seal alone rather than skipping the swap. Without
+  this a write made after a recovery-code revocation or a passphrase change,
+  in the same session, could seal under the epoch the rotation had just
+  retired. Recovery-code revocation gained the post-ceremony adoption it never
+  made, and the login-time sweep refreshes its descriptors whenever it adopted
+  a rotated key.
+- Renaming a passkey from a transient session rode the root capability and
+  failed with "no unlock-methods registry"; it now rides the visit's
+  generation delegation like every other registry write. The same default
+  covers `refreshStandingDelegationFields` and `dropBarePasskeyEntry`, which
+  never took one.
+- The remote-direct contacts and contact-revision scans now distinguish a row
+  this wallet holds no epoch key for from an undecryptable one, matching the
+  other encrypted readers.
+
+- The Settings registry refresh after an unlock-method mutation now rides the
+  same authority the mount load does (the visit's generation delegation on a
+  transient session). It root-invoked, the server masks that refusal as a 404,
+  and the absent-looking read emptied the list the mutation had just written
+  to -- a passkey added from a transient session appeared to vanish.
+- The enrollment approval drops this session's verified-log memo BEFORE the
+  ceremony as well as after it. On the ladder branch the escrow append is
+  licensed only at the version the add entry mints, and the roster store
+  resolves its controller view through that memo, so a view primed before the
+  entries (the Connected wallets listing that opens the dialog primes one)
+  anchored the append at the pre-add head and the approval failed with
+  `ResourceLogLicenseError`.
+
+- The Settings unlock-methods list loads on a transient session (the default
+  session type), where it used to render nothing at all. The registry read
+  rides the visit's generation delegation (`profile.invocationCapability`),
+  the authority the transient recovery ceremony already reads it under. The
+  write half is unchanged: minting or rewriting the registry stays gated on
+  the browser-local strategy, so the section lists the account's passkeys
+  read-only while add, rename, and remove keep their existing gate.
+
+- The `did:web` projection (`id/did.json`) no longer keeps publishing keys a
+  ladder-signed account-log entry removed. Such an entry writes `did.jsonl`
+  alone, so after the last-client transition the forgotten client's
+  `authentication` verification method stayed in the projection, and after a
+  transient recovery the retired credential's `keyAgreement` entry did. WAS
+  authorization was never affected: the server resolves a Space's controller
+  from `did.jsonl` and never reads `did.json`.
+- The forget ceremony and the last-client transition PUT the post-removal
+  projection through the forgetting client's own root authority immediately
+  before their removal entry, since that client's authority ends at the entry.
+- Every transient visit runs wallet-core's `ensureDidWebProjection` after its
+  per-visit key is enrolled, invoking under the generation delegation, whose
+  items-subtree target already covers `id/did.json`. It compares before
+  writing, so a healthy account costs one GET and no write. Best-effort, not
+  awaited, and it runs for the CHAPI popup too. No server change and no
+  widened bridge delegation (`decisions/0018`).
+- The visit's ensure is ordered against concurrent writers. Its document was
+  resolved at the start of the composition, so a difference alone does not say
+  which side is stale: the visit supplies a `refresh` that re-runs
+  `verifyAccountLog` under its own chain-head pins, and the write runs only
+  when the refreshed derivation still differs. The PUT is a compare-and-swap on
+  the served read's ETag, so a projection another client wrote in between
+  stands and the visit logs a `conflict` instead. Without this a login could
+  restore a key a disconnect or a retirement had just removed.
+- Six WAS e2e specs (`did-web`, `did-webvh`, `enroll`, `recovery`,
+  `recovery-transient`, `remembered-signup`) assert the account document the
+  ceremonies now publish: the ladder VM survives a self-enrollment, and a
+  recovery retires every pre-recovery standing credential's `keyAgreement`
+  entry. Each count names the entries it counts.
+
+- App Connect's response VP held as the account's did:web DID on a
+  remembered session against a KMS deployment, contradicting both this
+  repo's ARCHITECTURE.md and app-connect-spec `decisions/0004`.
+  `processAppConnect` now passes an explicit holder override, pinning the
+  holder and its DIDAuth proof to the client did:key.
+- A DIDAuth request accepting only `web` or `webvh` was refused, by a wallet
+  that would have presented did:web to a verifier that asked for nothing.
+  `didAuthMethodSupported` now takes the methods the caller can present.
+  Pre-login the CHAPI get page judges deployment capability; after login a
+  session that can present none of the listed methods gets the block screen
+  in place of the consent panel, adding no step to the flow.
+
+- The row scans and the push handler classify what an injected seam throws by
+  the error's name rather than by `instanceof`, through the shared predicates
+  `isUnknownEpochError` / `isKeyUnwrapError` / `isSyncConflictError`. In a
+  wallet whose `@interop/was-client` resolved to a second copy, the class a
+  cipher or sync port threw was not the class the store imported: a row this
+  wallet holds no epoch key for fell through to the undecryptable bucket, where
+  the credential purge would delete another reader's real data, and every push
+  `412` became a fatal cycle error instead of a conflict to reconcile.
+
+### Removed
+
+- The last-client transition's `RecordRemintFailedError` and
+  `UnrecordedCredentialForgetError` refusals, both of which existed only to
+  protect the removed record re-mint pass, with their settings copy and the
+  ladder-branch disconnect's registry-coverage check. `remintEntriesOf`,
+  `recordRemintedEntry`, and `remintRecoveryDelegations` are gone from
+  `src/session/recovery.ts`, and `RevocationOutcome` no longer carries a
+  `recovery` member. A recovery code issued before the own-signature rule
+  keeps its foreign-signed bridge, and the login-time health check's nudge to
+  re-issue it is that record's whole remedy.
+
+- The session-kind gate: `assertAccountCeremonyAllowed` and
+  `StepUpRequiredError`, with every call site (passphrase change, passphrase
+  add, passkey add, passkey remove, recovery-code issuance and revocation,
+  client disconnect, enrollment approval, Space export and import).
+  `BrowserLocalSessionRequiredError` stays for the two ceremonies whose
+  subject is this browser: update-key rotation, and forgetting this browser.
+- The registry write guard that refused every write from a transient session.
+  The write protocol's own guards do not depend on the session tier: the
+  compare-and-swap on a fresh read's ETag, the acting credential's
+  key-agreement multibase on a refresh write, and the direction settled
+  against the account document on an identity write.
+
+- The Settings "Keystore" row under Key management. It reported whether the
+  session had bound a `KeystoreAgent`, which only a remembered login does, so
+  every transient session (the default) read "provisioning failed at login"
+  though nothing was attempted. The Published DID row's "Key server signing
+  key recorded" chip already shows what the account itself records.
+
+- The `VITE_ENABLE_DID_WEBVH` opt-out. Every WAS account provisions
+  did:webvh. The reduced provisioning path is now reached only by a session
+  that structurally cannot publish a log (a no-WAS deployment, a guest); it
+  publishes no `did.json` and presents did:key.
+- The KMS X25519 `keyAgreement` key, which is no longer minted anywhere. The
+  did:webvh document always excluded it, since no server-held key may be a
+  wrap target, but the reduced path's hand-assembled document published it.
+  That exposure is closed for accounts created after this change. An
+  existing document keeps what it has, since nothing overwrites it.
 
 ## 0.42.0 - 2026-08-28
 

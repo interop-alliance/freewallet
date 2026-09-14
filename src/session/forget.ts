@@ -66,7 +66,7 @@
  * this browser already fetched stays readable to whoever holds it.
  */
 import { deriveNextKeyHash } from '@interop/did-method-webvh'
-import { WasClient } from '@interop/was-client'
+import { WasClient, type ServiceDescription } from '@interop/was-client'
 import {
   clientAnnexLogStore,
   delegatedClientsDelegationSpaceId,
@@ -123,6 +123,7 @@ import {
 import { adoptRotatedUserKeyInBand } from '@/session/userKeyAdoption'
 import { cascadeCollections } from '@/session/userKeyCascade'
 import { createLogger } from '@/lib/log'
+import { wasServiceDescription } from '@/lib/wasService'
 import { zcapExpires } from '@/lib/zcap'
 
 const log = createLogger('fw:session:forget')
@@ -330,7 +331,7 @@ export async function forgetThisBrowser({
   // entry only a remembered login can finish, and this ceremony ends
   // remembered logins on this account forever.
   if (lastClient) {
-    await assertNoPendingPassphraseEntry({ session, pointer, registry })
+    await assertNoPendingPassphraseEntry({ session, registry })
   }
 
   // Snapshot-first: every wipe target derives from the live session BEFORE
@@ -351,12 +352,15 @@ export async function forgetThisBrowser({
       seed: clientWebvhKeys.updateSeed
     })
   }
+  // Discovered once for every client this ceremony builds.
+  const serviceDescription = await wasServiceDescription()
   const shared = {
     logStore: unlockLogStore({
       pointer,
       delegation: standing.delegation,
       zcapClient: standing.standingClient.agents.zcapClient,
-      pinStore: session.persistence.logPins
+      pinStore: session.persistence.logPins,
+      serviceDescription
     }),
     ladderSeed,
     forgottenClient,
@@ -434,7 +438,7 @@ export async function forgetThisBrowser({
         // client's verification methods until a later writer's
         // `ensureDidWebProjection` caught it.
         clientLogStore: remoteStore.webvhIdStore(),
-        rosterStore: sessionRosterStore({ session })
+        rosterStore: sessionRosterStore({ session, serviceDescription })
       })
       outcome = { lastClient: false, ceremony }
     } else {
@@ -454,9 +458,10 @@ export async function forgetThisBrowser({
         // still-standing client.
         rosterStore: sessionRosterStore({
           session,
-          keyAgent: await ladderVmAgent({ ladderSeed })
+          keyAgent: await ladderVmAgent({ ladderSeed }),
+          serviceDescription
         }),
-        annex: annexCeremonyReach({ session, pointer }),
+        annex: annexCeremonyReach({ session, pointer, serviceDescription }),
         onBeforeRemoval: async ({ did }) =>
           rebindLoginCredentialRecord({
             session,
@@ -503,18 +508,23 @@ export async function forgetThisBrowser({
  * @param options {object}
  * @param options.session {Session}
  * @param options.pointer {{ host: string, spaceId: string }}
+ * @param options.serviceDescription {ServiceDescription}   the server's
+ *   discovered service description, so the client skips discovery
  * @returns {object}   the ceremony's `annex` option
  */
 function annexCeremonyReach({
   session,
-  pointer
+  pointer,
+  serviceDescription
 }: {
   session: Session
   pointer: { host: string; spaceId: string }
+  serviceDescription: ServiceDescription
 }) {
   const was = new WasClient({
     serverUrl: pointer.host,
-    zcapClient: session.profile.zcapClient
+    zcapClient: session.profile.zcapClient,
+    serviceDescription
   })
   return {
     storeFor: ({
@@ -1078,24 +1088,20 @@ function derivableReplicaPrefixes(): Set<string> {
  *
  * @param options {object}
  * @param options.session {Session}
- * @param options.pointer {AccountPointer}
  * @param options.registry {UnlockMethodsRecord | null}
  * @returns {Promise<void>}
  */
 export async function assertNoPendingPassphraseEntry({
   session,
-  pointer,
   registry,
   signer
 }: {
   session: Session
-  pointer: Parameters<typeof delegateLogWrite>[0]['pointer']
   registry: { methods?: unknown[] } | null
   signer?: LadderDeleter
 }): Promise<void> {
   const pending = await findPendingPassphraseEntries({
     registry,
-    host: pointer.host,
     readerFor: unlockEntryReaderFor({
       session,
       ...(signer ? { signer } : {})

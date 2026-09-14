@@ -168,7 +168,7 @@ async function establishPassphraseAnchoredAccount({
   }
 
   const spaceId = mintSpaceId()
-  const pointer: AccountPointer = { spaceId, host: WAS_SERVER_URL }
+  const pointer: AccountPointer = { spaceId, host: WAS_SERVER_URL as string }
   const ladderSeed = generateLadderSeed()
   const establishment = await establishCredentialAnchoredAccount({
     credential,
@@ -544,7 +544,7 @@ async function signUpCredentialAnchoredWithPasskey({
   mark('kdf')
 
   const spaceId = mintSpaceId()
-  const pointer: AccountPointer = { spaceId, host: WAS_SERVER_URL }
+  const pointer: AccountPointer = { spaceId, host: WAS_SERVER_URL as string }
   const ladderSeed = generateLadderSeed()
   // The remembered session's persistence, built here so the establishment's
   // reads and the login's run under one chain-head pin store.

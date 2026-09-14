@@ -295,7 +295,10 @@ function resolveEnrolledContext({
         return (idStore ??= reach.remoteStore.webvhIdStore())
       },
       get rosterStore() {
-        return (rosterStore ??= sessionRosterStore({ session }))
+        return (rosterStore ??= sessionRosterStore({
+          session,
+          serviceDescription: reach.remoteStore.serviceDescription
+        }))
       },
       get collectionStore() {
         return (collectionStore ??= sessionCollectionStores({
@@ -499,7 +502,8 @@ export async function accountCeremonyContext({
         pointer: reach.pointer,
         delegation: standingUnlock.delegation,
         zcapClient: standingAgents.zcapClient,
-        pinStore: session.persistence.logPins
+        pinStore: session.persistence.logPins,
+        serviceDescription: reach.remoteStore.serviceDescription
       }) as WebvhIdStore)
     },
     // Ladder-signed appends, invoked by the annex VM under the generation
@@ -517,6 +521,7 @@ export async function accountCeremonyContext({
         ladderRosterStore = sessionRosterStore({
           session,
           keyAgent: agent,
+          serviceDescription: reach.remoteStore.serviceDescription,
           ...(capability ? { capability } : {})
         })
       }
@@ -542,7 +547,8 @@ export async function accountCeremonyContext({
         host: reach.pointer.host,
         spaceId: reach.pointer.spaceId,
         invoker: invokerNow,
-        pinStore: session.persistence.logPins
+        pinStore: session.persistence.logPins,
+        serviceDescription: reach.remoteStore.serviceDescription
       }))
     },
     ladderDeleter: {

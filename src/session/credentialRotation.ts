@@ -75,6 +75,7 @@ import {
   verifiedAccountLog
 } from '@/session/verifiedLog'
 import { createLogger } from '@/lib/log'
+import { wasServiceDescription } from '@/lib/wasService'
 
 const log = createLogger('fw:session:rotation')
 
@@ -298,6 +299,7 @@ export async function rotateOffUnlockCredential({
       : sessionRosterStore({
           session,
           keyAgent: signingAgent!,
+          serviceDescription: await wasServiceDescription(),
           ...(context.invoker.capability
             ? { capability: context.invoker.capability }
             : {})
@@ -588,15 +590,22 @@ async function retireClientAnnexInventoryStage({
     // session's per-visit annex VM is not, so the ladder branch reaches the
     // generation's log through the surviving credential's sibling delegation
     // rather than by root-invoking as this session's own key.
+    const serviceDescription = await wasServiceDescription()
     const reach =
       context.kind === 'ladder' && standingReach
         ? standingClientAnnexReachFor({
             pointer,
             doc,
             standing: standingReach,
-            pinStore: session.persistence.logPins
+            pinStore: session.persistence.logPins,
+            serviceDescription
           })
-        : clientAnnexReachFor({ session, pointer, doc })
+        : clientAnnexReachFor({
+            session,
+            pointer,
+            doc,
+            serviceDescription
+          })
     if (reach === null) {
       return { action: 'skipped', reason: 'no-pointer' }
     }

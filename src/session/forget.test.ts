@@ -10,6 +10,8 @@
  * ordering both share.
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { TEST_SERVICE_DESCRIPTION } from '../../tests/shared/wasServiceFixture'
+
 import { memoryResourceLogPinStore } from '@interop/vh-resource-log'
 import { agentsFromSeed } from '@interop/was-client/identity'
 import {
@@ -748,7 +750,8 @@ describe('forgetThisBrowser (the ceremony grades)', () => {
     )
     expect(vi.mocked(sessionRosterStore)).toHaveBeenCalledWith({
       session,
-      keyAgent: { id: 'did:key:zLadderVm' }
+      keyAgent: { id: 'did:key:zLadderVm' },
+      serviceDescription: TEST_SERVICE_DESCRIPTION
     })
     expect(options.clientLogStore).toEqual({ webvhIdStore: true })
     expect(typeof options.onBeforeRemoval).toBe('function')

@@ -19,7 +19,7 @@
  * minting closure, differing only in the ladder seed's provenance and whether
  * they hand it a post-edit account document -- both passed in by the caller.
  */
-import { WasClient } from '@interop/was-client'
+import { WasClient, type ServiceDescription } from '@interop/was-client'
 import {
   clientAnnexDidParts,
   clientAnnexLogStore,
@@ -46,6 +46,7 @@ import type {
 } from '@interop/wallet-core/webvh'
 import { ID_COLLECTION } from '@interop/wallet-core/space'
 import { createLogger } from '@/lib/log'
+import { wasServiceDescription } from '@/lib/wasService'
 import { verifiedAccountLog } from '@/session/verifiedLog'
 import { MENDER_WARNINGS } from '@/session/menders/warnings'
 import type { Session } from '@/types/auth'
@@ -86,23 +87,28 @@ export interface ClientAnnexReach {
  * @param options.session {Session}
  * @param options.pointer {ReachPointer}   the account pointer
  * @param options.clientAnnexDid {string}   the generation's did:webvh
+ * @param options.serviceDescription {ServiceDescription}   the server's
+ *   discovered service description, so the client skips discovery
  * @returns {ClientAnnexReach}
  */
 export function clientAnnexReachOf({
   session,
   pointer,
-  clientAnnexDid
+  clientAnnexDid,
+  serviceDescription
 }: {
   session: Session
   pointer: ReachPointer
   clientAnnexDid: string
+  serviceDescription: ServiceDescription
 }): ClientAnnexReach {
   const { spaceId, generationId } = clientAnnexDidParts({
     did: clientAnnexDid
   })
   const was = new WasClient({
     serverUrl: pointer.host,
-    zcapClient: session.profile.zcapClient
+    zcapClient: session.profile.zcapClient,
+    serviceDescription
   })
   let store: ReturnType<typeof clientAnnexLogStore> | undefined
   return {
@@ -133,13 +139,16 @@ export function clientAnnexReachOf({
  *   credential's client identity and its annex-Space sibling delegation
  * @param options.pinStore {ResourceLogPinStore}   the session's chain-head
  *   pins, which the generation log store carries
+ * @param options.serviceDescription {ServiceDescription}   the server's
+ *   discovered service description, so the client skips discovery
  * @returns {ClientAnnexReach}
  */
 export function standingClientAnnexReachOf({
   pointer,
   clientAnnexDid,
   standing,
-  pinStore
+  pinStore,
+  serviceDescription
 }: {
   pointer: ReachPointer
   clientAnnexDid: string
@@ -148,13 +157,15 @@ export function standingClientAnnexReachOf({
     delegatedClients: IZcap
   }
   pinStore: ResourceLogPinStore
+  serviceDescription: ServiceDescription
 }): ClientAnnexReach {
   const { spaceId, generationId } = clientAnnexDidParts({
     did: clientAnnexDid
   })
   const was = new WasClient({
     serverUrl: pointer.host,
-    zcapClient: standing.standingClient.agents.zcapClient
+    zcapClient: standing.standingClient.agents.zcapClient,
+    serviceDescription
   })
   let store: ReturnType<typeof clientAnnexLogStore> | undefined
   return {
@@ -192,13 +203,16 @@ export function standingClientAnnexReachOf({
  *   annex-Space sibling delegation
  * @param options.pinStore {ResourceLogPinStore}   the session's chain-head
  *   pins, which the generation log store carries
+ * @param options.serviceDescription {ServiceDescription}   the server's
+ *   discovered service description, so the client skips discovery
  * @returns {ClientAnnexReach | null}
  */
 export function standingClientAnnexReachFor({
   pointer,
   doc,
   standing,
-  pinStore
+  pinStore,
+  serviceDescription
 }: {
   pointer: ReachPointer
   doc: AccountDoc
@@ -207,6 +221,7 @@ export function standingClientAnnexReachFor({
     delegatedClients: IZcap
   }
   pinStore: ResourceLogPinStore
+  serviceDescription: ServiceDescription
 }): ClientAnnexReach | null {
   const pointedDid = delegatedClientsPointer({ doc })
   if (pointedDid === undefined) {
@@ -216,7 +231,8 @@ export function standingClientAnnexReachFor({
     pointer,
     clientAnnexDid: pointedDid,
     standing,
-    pinStore
+    pinStore,
+    serviceDescription
   })
 }
 
@@ -229,22 +245,31 @@ export function standingClientAnnexReachFor({
  * @param options.pointer {ReachPointer}   the account pointer
  * @param options.doc {object}   the account document to read the pointer out
  *   of (a ceremony's post-edit document, or a verified one)
+ * @param options.serviceDescription {ServiceDescription}   the server's
+ *   discovered service description, so the client skips discovery
  * @returns {ClientAnnexReach | null}
  */
 export function clientAnnexReachFor({
   session,
   pointer,
-  doc
+  doc,
+  serviceDescription
 }: {
   session: Session
   pointer: ReachPointer
   doc: AccountDoc
+  serviceDescription: ServiceDescription
 }): ClientAnnexReach | null {
   const pointedDid = delegatedClientsPointer({ doc })
   if (pointedDid === undefined) {
     return null
   }
-  return clientAnnexReachOf({ session, pointer, clientAnnexDid: pointedDid })
+  return clientAnnexReachOf({
+    session,
+    pointer,
+    clientAnnexDid: pointedDid,
+    serviceDescription
+  })
 }
 
 /**
@@ -273,7 +298,12 @@ export async function pointedClientAnnexReach({
     session,
     pointer
   })
-  const reach = clientAnnexReachFor({ session, pointer, doc })
+  const reach = clientAnnexReachFor({
+    session,
+    pointer,
+    doc,
+    serviceDescription: await wasServiceDescription()
+  })
   return reach === null ? null : { ...reach, doc, log }
 }
 
@@ -495,7 +525,8 @@ export async function renewTransientGenerationDelegation({
         standingClient: standingUnlock.standingClient,
         delegatedClients
       },
-      pinStore: persistence.logPins
+      pinStore: persistence.logPins,
+      serviceDescription: await wasServiceDescription()
     })
     const { delegation } = await ensureLadderSignedGenerationDelegation({
       accountDid,
@@ -540,18 +571,22 @@ export async function renewTransientGenerationDelegation({
  *   read afresh on every call
  * @param options.pinStore {ResourceLogPinStore}   the session's chain-head
  *   pins; the store carries the account log's slot
+ * @param options.serviceDescription {ServiceDescription}   the server's
+ *   discovered service description, so the client skips discovery
  * @returns {DelegatedWebvhLogStore}
  */
 export function didWebProjectionStore({
   host,
   spaceId,
   invoker,
-  pinStore
+  pinStore,
+  serviceDescription
 }: {
   host: string
   spaceId: string
   invoker: () => { zcapClient: ZcapClient; capability?: IZcap }
   pinStore: ResourceLogPinStore
+  serviceDescription: ServiceDescription
 }): DelegatedWebvhLogStore {
   const storeNow = (): DelegatedWebvhLogStore => {
     const { zcapClient, capability } = invoker()
@@ -567,7 +602,8 @@ export function didWebProjectionStore({
       collectionId: ID_COLLECTION.id,
       delegation: capability,
       zcapClient,
-      pinStore
+      pinStore,
+      serviceDescription
     })
   }
   return {
@@ -642,7 +678,8 @@ export async function refreshDidWebProjection({
         host,
         spaceId,
         invoker: () => ({ zcapClient, capability: delegation }),
-        pinStore
+        pinStore,
+        serviceDescription: await wasServiceDescription()
       }),
       did,
       doc,

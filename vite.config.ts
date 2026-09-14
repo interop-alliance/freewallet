@@ -4,12 +4,14 @@ import path from 'node:path'
 import { execSync } from 'node:child_process'
 import { interopLoggerPlugin } from '@interop/logger/vite'
 
-const appVersion = execSync('git describe --tags --always --dirty').toString().trim()
+const appVersion = execSync('git describe --tags --always --dirty')
+  .toString()
+  .trim()
 
 // https://vite.dev/config/
 export default defineConfig({
   define: {
-    __APP_VERSION__: JSON.stringify(appVersion),
+    __APP_VERSION__: JSON.stringify(appVersion)
   },
   build: {
     rollupOptions: {
@@ -74,7 +76,12 @@ export default defineConfig({
   },
   test: {
     environment: 'jsdom',
-    include: ['src/**/*.test.ts', 'src/**/*.test.tsx', 'tests/unit/**/*.test.ts']
+    setupFiles: ['./tests/shared/setup.wasService.ts'],
+    include: [
+      'src/**/*.test.ts',
+      'src/**/*.test.tsx',
+      'tests/unit/**/*.test.ts'
+    ]
   },
   server: {
     allowedHosts: [

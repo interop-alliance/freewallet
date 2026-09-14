@@ -15,6 +15,7 @@
  * remote and browser-local seam is mocked.
  */
 import { beforeEach, describe, expect, it, vi } from 'vitest'
+
 import { CapabilityAgent } from '@interop/capability-agent'
 
 const state = vi.hoisted(() => ({

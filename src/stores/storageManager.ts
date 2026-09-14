@@ -7,10 +7,11 @@
  * (RxDB/IndexedDB), online or offline. A session that has none -- the
  * replica-less transient session, the default -- serves them remote-direct
  * over the remote WAS collections, and so does a CHAPI popup session. When
- * VITE_WAS_SERVER_URL is set (and the session is not a guest), a
- * WASRemoteStore is attached as well: the sync controller replicates a local
- * replica's collections to it in the background, and the storage browser /
- * export / import / quota pages read through it directly.
+ * VITE_WAS_SERVER_URL (the server's Spaces Repository URL) is set (and the
+ * session is not a guest), a WASRemoteStore is attached as well: the sync
+ * controller replicates a local replica's collections to it in the
+ * background, and the storage browser / export / import / quota pages read
+ * through it directly.
  *
  * The remote-direct backend is `src/stores/remoteDirectStore.ts`. A popup
  * runs in a third-party partitioned iframe: its local BrowserStore binds a
@@ -43,6 +44,7 @@ import type { RxCollection, RxStorage } from 'rxdb/plugins/core'
 import type {
   CollectionEncryption,
   IDelegatedZcap,
+  ServiceDescription,
   SpaceMetadata
 } from '@interop/was-client'
 import {
@@ -1260,6 +1262,7 @@ export class StorageManager {
   static async initStorageClients({
     user,
     session,
+    serviceDescription,
     isGuest = false,
     remoteDirect = false,
     storage: rxStorage,
@@ -1271,6 +1274,12 @@ export class StorageManager {
     // strategy: it decides whether a local replica is built, carries the
     // descriptor/meta caches, and pins the chain heads.
     session: SessionCore
+    // The service description this login discovered, threaded in so nothing
+    // below re-probes. Absent when the server could not be reached: the
+    // remote store is still built (its clients discover at their first
+    // request), so a remembered login keeps running off the local replica
+    // offline.
+    serviceDescription?: ServiceDescription
     isGuest?: boolean
     // Route credential + history operations straight to the remote WAS
     // collections (the CHAPI popup path, whose local IndexedDB is partitioned).
@@ -1306,6 +1315,7 @@ export class StorageManager {
     if (storageServerUrl) {
       ;({ remoteStore } = await WASRemoteStore.initClient({
         storageServerUrl,
+        serviceDescription,
         user,
         session
       }))
@@ -2622,7 +2632,8 @@ export class StorageManager {
                   spaceId: remoteStore.spaceId,
                   host: remoteStore.storageServerUrl
                 },
-                pinStore: this.#persistence.logPins
+                pinStore: this.#persistence.logPins,
+                serviceDescription: remoteStore.serviceDescription
               }),
             // Each encrypted collection's log-governed store, the same
             // wiring: epoch[0] lands as the collection's governing-log
@@ -2634,7 +2645,8 @@ export class StorageManager {
                 spaceId: remoteStore.spaceId,
                 did,
                 pinStore: this.#persistence.logPins,
-                signer: userKeyRosterLogSigner({ keyAgent })
+                signer: userKeyRosterLogSigner({ keyAgent }),
+                serviceDescription: remoteStore.serviceDescription
               }),
             promoteController: false,
             // The ceremony's one stage boundary of its own: the
@@ -2748,7 +2760,8 @@ export class StorageManager {
                 spaceId: remoteStore.spaceId,
                 did: pointer.did,
                 pinStore: this.#persistence.logPins,
-                signer: userKeyRosterLogSigner({ keyAgent: profile.keyAgent })
+                signer: userKeyRosterLogSigner({ keyAgent: profile.keyAgent }),
+                serviceDescription: remoteStore.serviceDescription
               })
             })
             await refreshDescriptorsWithoutEpochs()

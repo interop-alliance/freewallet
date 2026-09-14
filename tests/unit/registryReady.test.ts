@@ -18,6 +18,7 @@
  * derivation runs for real.
  */
 import { beforeEach, describe, expect, it, vi } from 'vitest'
+
 import { CapabilityAgent } from '@interop/capability-agent'
 
 const state = vi.hoisted(() => ({

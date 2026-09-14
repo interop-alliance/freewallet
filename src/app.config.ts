@@ -18,10 +18,61 @@ import {
 
 const env = import.meta.env
 
-// Remote WAS server URL. When set, a remote WAS Space is available as a sync
-// target: the sync controller replicates the local RxDB collections to it in
-// the background. (Guest sessions never sync.)
-export const WAS_SERVER_URL = env.VITE_WAS_SERVER_URL
+// The remote WAS server's Spaces Repository URL (`https://host/spaces/`, or
+// `https://host/was/spaces/` on a sub-path mount). When set, a remote WAS
+// Space is available as a sync target: the sync controller replicates the
+// local RxDB collections to it in the background. (Guest sessions never
+// sync.) Service discovery starts from this URL rather than from the base:
+// the server answers every request under its mount, but the base URL itself
+// is often a landing page something else serves, with no `service` link and
+// no CORS headers.
+export const WAS_SPACES_URL: string | undefined = env.VITE_WAS_SERVER_URL
+  ? withOneTrailingSlash(env.VITE_WAS_SERVER_URL)
+  : undefined
+// The WAS server base URL, the parent of the Spaces Repository URL: the base
+// every Space path, the KMS facet, and the CORS proxy facet hang off, and
+// the `host` an account pointer records. Written without a trailing slash.
+// An interior doubled slash is a path segment the resolution keeps, so
+// `https://host//spaces/` derives `https://host` too. A value that does not
+// parse as an absolute URL (a scheme-less `localhost:3002/spaces/`, say) is
+// refused by name here, rather than throwing a bare TypeError at module
+// evaluation that leaves the app a white screen.
+export const WAS_SERVER_URL: string | undefined = WAS_SPACES_URL
+  ? deriveWasServerUrl(WAS_SPACES_URL)
+  : undefined
+
+/**
+ * A container URL in its canonical form: its trailing run of slashes
+ * collapsed to exactly one, so `https://host/spaces`, `https://host/spaces/`
+ * and `https://host/spaces//` all read `https://host/spaces/`.
+ *
+ * @param url {string}
+ * @returns {string}
+ */
+export function withOneTrailingSlash(url: string): string {
+  return `${url.replace(/\/+$/, '')}/`
+}
+
+/**
+ * The WAS server base URL derived from a configured Spaces Repository URL.
+ *
+ * @param spacesUrl {string}   the configured `VITE_WAS_SERVER_URL`, in its
+ *   canonical trailing-slash form
+ * @returns {string}   the parent URL, without a trailing slash
+ * @throws {Error}   when the configured value is not an absolute URL
+ */
+function deriveWasServerUrl(spacesUrl: string): string {
+  try {
+    return new URL('..', spacesUrl).toString().replace(/\/+$/, '')
+  } catch (err) {
+    throw new Error(
+      `VITE_WAS_SERVER_URL is not an absolute URL: "${spacesUrl}". Configure ` +
+        "it as the WAS server's Spaces Repository URL, for example " +
+        '"https://host/spaces/".',
+      { cause: err }
+    )
+  }
+}
 // WebKMS server URL. Defaults to the WAS server's in-process `/kms` facet;
 // set VITE_KMS_SERVER_URL only when the KMS is hosted separately. When
 // neither is set, the session has no KMS: no server-held `authentication`

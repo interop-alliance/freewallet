@@ -77,6 +77,7 @@ import {
   reprimeVerifiedAccountLog
 } from '@/session/verifiedLog'
 import { createLogger } from '@/lib/log'
+import { wasServiceDescription } from '@/lib/wasService'
 
 const log = createLogger('fw:session:revocation')
 
@@ -232,7 +233,6 @@ export async function revokeEnrolledClient({
     // next login rather than by anything here.
     await assertNoPendingPassphraseEntry({
       session,
-      pointer,
       registry: registryRecord,
       signer: context.ladderDeleter
     })
@@ -481,7 +481,8 @@ async function remintGenerationDelegation({
         : clientAnnexReachFor({
             session,
             pointer,
-            doc: document as Parameters<typeof clientAnnexReachFor>[0]['doc']
+            doc: document as Parameters<typeof clientAnnexReachFor>[0]['doc'],
+            serviceDescription: await wasServiceDescription()
           })
     if (!pointer || reach === null) {
       return { renewed: false, skipped: 'no-pointer' }

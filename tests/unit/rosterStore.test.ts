@@ -6,6 +6,7 @@
  * a head the caller's own ceremony already stands on.
  */
 import { afterEach, describe, expect, it, vi } from 'vitest'
+import { TEST_SERVICE_DESCRIPTION } from '../shared/wasServiceFixture'
 
 vi.mock('@interop/wallet-core/keys', async importOriginal => ({
   ...(await importOriginal<typeof import('@interop/wallet-core/keys')>()),
@@ -60,6 +61,7 @@ function resolveControllerOf({
   pinStore: unknown
 }): () => Promise<unknown> {
   accountRosterStore({
+    serviceDescription: TEST_SERVICE_DESCRIPTION,
     ...PARTS,
     pointer: POINTER,
     pinStore: pinStore as never,

@@ -99,6 +99,7 @@ import {
   type PassphraseUnlockMethod
 } from '@/session/unlockMethods'
 import { createLogger, stageMarker, stageSpan, stageTimer } from '@/lib/log'
+import { wasServiceDescription } from '@/lib/wasService'
 import type { StageLabel } from '@/lib/log'
 
 export type { CredentialAnchoredEstablishment, CredentialAnchoredMendReport }
@@ -229,9 +230,13 @@ async function establishmentHooks({
   const { standing } = credential
   const bootstrapAgent = await ladderVmAgent({ ladderSeed })
   const bootstrapZcap = didKeyZcapClient({ keyAgent: bootstrapAgent })
+  // Discovered once for every client this establishment builds, the ones
+  // wallet-core builds from the parts below included.
+  const serviceDescription = await wasServiceDescription()
   const bootstrapWas = new WasClient({
     serverUrl: host,
-    zcapClient: bootstrapZcap
+    zcapClient: bootstrapZcap,
+    serviceDescription
   })
   const idStore = wasWebvhIdStore({
     was: bootstrapWas,
@@ -382,6 +387,7 @@ async function establishmentHooks({
         keyAgent: bootstrapAgent,
         pointer: { did, spaceId, host },
         pinStore: logPins,
+        serviceDescription,
         log
       }),
     // Each encrypted collection's log-governed descriptor store, the same
@@ -395,6 +401,7 @@ async function establishmentHooks({
         did,
         pinStore: logPins,
         signer: userKeyRosterLogSigner({ keyAgent: bootstrapAgent }),
+        serviceDescription,
         log
       }),
     // Built from the agent wallet-core hands over (it owns the bootstrap
@@ -407,7 +414,8 @@ async function establishmentHooks({
     }) =>
       new WasClient({
         serverUrl: host,
-        zcapClient: didKeyZcapClient({ keyAgent })
+        zcapClient: didKeyZcapClient({ keyAgent }),
+        serviceDescription
       }),
     idStore,
     ...(provideKmsAuthentication ? { provideKmsAuthentication } : {}),
@@ -672,9 +680,14 @@ export async function ladderMendAuthority({
   collectionStore: CollectionStoreFor
 }> {
   const keyAgent = await ladderVmAgent({ ladderSeed })
+  const serviceDescription = await wasServiceDescription()
   return {
     invocation: {
-      was: new WasClient({ serverUrl: pointer.host, zcapClient }),
+      was: new WasClient({
+        serverUrl: pointer.host,
+        zcapClient,
+        serviceDescription
+      }),
       zcapClient,
       capability
     },
@@ -686,6 +699,7 @@ export async function ladderMendAuthority({
       pointer,
       pinStore,
       capability,
+      serviceDescription,
       ...(log ? { log } : {})
     }),
     // The controller view is verified fresh here rather than seeded: a mend
@@ -697,7 +711,8 @@ export async function ladderMendAuthority({
       did: pointer.did,
       pinStore,
       signer: userKeyRosterLogSigner({ keyAgent }),
-      capability
+      capability,
+      serviceDescription
     })
   }
 }

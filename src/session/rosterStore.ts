@@ -31,6 +31,7 @@
  * inside the verified-log memo. A bare-parts caller inside a ceremony that
  * already stands on a head hands it over instead, and makes no read at all.
  */
+import type { ServiceDescription } from '@interop/was-client'
 import type { DIDLog } from '@interop/did-method-webvh'
 import type { IZcap } from '@interop/data-integrity-core'
 import type { ZcapClient } from '@interop/ezcap'
@@ -84,6 +85,8 @@ import { verifiedAccountLog } from '@/session/verifiedLog'
  * @param [options.capability] {IZcap}   an invocation capability every
  *   request rides (a transient visit's generation delegation, the only
  *   authority that visit holds); the root capability is invoked otherwise
+ * @param options.serviceDescription {ServiceDescription}   the server's
+ *   discovered service description, so the store's client skips discovery
  * @returns {SealableEncryptionDescriptorStore}
  */
 export function accountRosterStore({
@@ -92,7 +95,8 @@ export function accountRosterStore({
   pointer,
   pinStore,
   log,
-  capability
+  capability,
+  serviceDescription
 }: {
   zcapClient: ZcapClient
   keyAgent: ICapabilityAgent
@@ -100,6 +104,7 @@ export function accountRosterStore({
   pinStore?: ResourceLogPinStore
   log?: DIDLog
   capability?: IZcap
+  serviceDescription: ServiceDescription
 }): SealableEncryptionDescriptorStore {
   const pins = pinStore ?? memoryResourceLogPinStore()
   // A seeded head resolves the controller view once, for the life of this
@@ -133,6 +138,7 @@ export function accountRosterStore({
     },
     pinStore: pins,
     signer: userKeyRosterLogSigner({ keyAgent }),
+    serviceDescription,
     ...(capability ? { capability } : {})
   })
 }
@@ -156,16 +162,20 @@ export function accountRosterStore({
  *   passes the credential's ladder VM agent: that key is what the
  *   post-ceremony document lists, so the roster head stays signed by a key
  *   every later reader resolves
+ * @param options.serviceDescription {ServiceDescription}   the server's
+ *   discovered service description, so the store's client skips discovery
  * @returns {SealableEncryptionDescriptorStore}
  */
 export function sessionRosterStore({
   session,
   capability,
-  keyAgent: signingKeyAgent
+  keyAgent: signingKeyAgent,
+  serviceDescription
 }: {
   session: SessionCore
   capability?: IZcap
   keyAgent?: ICapabilityAgent
+  serviceDescription: ServiceDescription
 }): SealableEncryptionDescriptorStore {
   const { profile, persistence } = session
   const pointer = profile.accountPointer
@@ -187,6 +197,7 @@ export function sessionRosterStore({
     },
     pinStore: persistence.logPins,
     signer: userKeyRosterLogSigner({ keyAgent }),
+    serviceDescription,
     ...(capability ? { capability } : {})
   })
 }

@@ -17,6 +17,8 @@
  * sibling credential's record is read or re-signed at any point.
  */
 import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { TEST_SERVICE_DESCRIPTION } from '../shared/wasServiceFixture'
+
 import { memoryResourceLogPinStore } from '@interop/vh-resource-log'
 
 const state = vi.hoisted(() => ({
@@ -275,6 +277,7 @@ function ladderContext(): object {
     // context builds it.
     get projectionStore() {
       return (projection ??= didWebProjectionStore({
+        serviceDescription: TEST_SERVICE_DESCRIPTION,
         pinStore: memoryResourceLogPinStore(),
         host: POINTER.host,
         spaceId: POINTER.spaceId,
@@ -581,7 +584,6 @@ describe('the three pre-pivot refusals', () => {
     })
     expect(vi.mocked(assertNoPendingPassphraseEntry)).toHaveBeenCalledWith(
       expect.objectContaining({
-        pointer: POINTER,
         registry: state.registry,
         // The detector's own unlock-record reads are single-verb children
         // the ladder VM mints and invokes as its own bare did:key.

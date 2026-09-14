@@ -15,6 +15,7 @@
  * unlock identity, the EDV record cipher) runs for real.
  */
 import { beforeEach, describe, expect, it, vi } from 'vitest'
+
 import type { IKeyAgreementKey, IZcap } from '@interop/data-integrity-core'
 
 const wasState = vi.hoisted(() => ({

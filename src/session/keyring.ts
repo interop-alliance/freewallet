@@ -133,6 +133,7 @@ import {
   saveKeyringCache
 } from '@/lib/sessionKey'
 import { createLogger } from '@/lib/log'
+import { wasServiceDescription } from '@/lib/wasService'
 
 const log = createLogger('fw:session:keyring')
 
@@ -562,6 +563,7 @@ function accountPointerPersister({
     })
     if (WAS_SERVER_URL) {
       await putUnlockKeyring({
+        serviceDescription: await wasServiceDescription(),
         storageServerUrl: WAS_SERVER_URL,
         zcapClient: unlock.zcapClient,
         spaceId: unlock.spaceId,
@@ -1040,11 +1042,18 @@ export async function fetchKeyring({
   let record: unknown
   try {
     record = await getUnlockKeyring({
+      serviceDescription: await wasServiceDescription(),
       storageServerUrl: WAS_SERVER_URL,
       zcapClient: unlock.zcapClient,
       spaceId: unlock.spaceId
     })
   } catch (err) {
+    // Only an unreachable remote falls back to the cache. Anything else --
+    // an incompatible server, a refused invocation, a forged record -- is an
+    // answer about this account, and a stale cache must never mask it.
+    if (!isStorageUnreachable(err)) {
+      throw err
+    }
     // Remote unreachable: fall back to the cache (offline logins), but only
     // within its TTL -- past that (or for an unstamped legacy entry) the
     // error rethrows, so the caller reports "could not check" instead of
@@ -1218,6 +1227,7 @@ export async function fetchTransientKeyring({
   // miss: a transient visit holds no browser-local state to fall back on or
   // clear.
   const record = await getUnlockKeyring({
+    serviceDescription: await wasServiceDescription(),
     storageServerUrl: WAS_SERVER_URL,
     zcapClient: unlock.zcapClient,
     spaceId: unlock.spaceId
@@ -1331,6 +1341,7 @@ function standingRecordRebinder({
     })
     if (WAS_SERVER_URL) {
       await putUnlockKeyring({
+        serviceDescription: await wasServiceDescription(),
         storageServerUrl: WAS_SERVER_URL,
         zcapClient: unlock.zcapClient,
         spaceId: unlock.spaceId,
@@ -1611,6 +1622,7 @@ export async function probeUnlockSpaceCollision({
     return { ...(ownPending ? { ownPending } : {}) }
   }
   const record = await getUnlockKeyring({
+    serviceDescription: await wasServiceDescription(),
     storageServerUrl: WAS_SERVER_URL,
     zcapClient: unlock.zcapClient,
     spaceId: unlock.spaceId
@@ -1845,13 +1857,16 @@ export async function bindUnlockSecret({
 
   let manageCapability: IZcap | undefined
   if (WAS_SERVER_URL) {
+    const serviceDescription = await wasServiceDescription()
     await ensureUnlockSpace({
+      serviceDescription,
       storageServerUrl: WAS_SERVER_URL,
       zcapClient: unlock.zcapClient,
       spaceId: unlock.spaceId,
       controller: unlock.agent.id
     })
     await putUnlockKeyring({
+      serviceDescription,
       storageServerUrl: WAS_SERVER_URL,
       zcapClient: unlock.zcapClient,
       spaceId: unlock.spaceId,
@@ -2121,6 +2136,8 @@ export async function bindCredentialAnchoredUnlockSecret({
     createdAt
   })
 
+  const serviceDescription = await wasServiceDescription()
+
   // A prior stamp is proof the Space and its keyring collection are already
   // there: the record it stamps lives in that collection, and the stamp came
   // from writing or reading it there. So the re-bind skips the ensure's four
@@ -2131,6 +2148,7 @@ export async function bindCredentialAnchoredUnlockSecret({
   // re-created under the bootstrap key.
   if (priorCreatedAt === undefined) {
     await ensureUnlockSpace({
+      serviceDescription,
       storageServerUrl: WAS_SERVER_URL,
       zcapClient: unlock.zcapClient,
       spaceId: unlock.spaceId,
@@ -2138,6 +2156,7 @@ export async function bindCredentialAnchoredUnlockSecret({
     })
   }
   await putUnlockKeyring({
+    serviceDescription,
     storageServerUrl: WAS_SERVER_URL,
     zcapClient: unlock.zcapClient,
     spaceId: unlock.spaceId,
@@ -2213,6 +2232,7 @@ async function verifyUnlockKeyring({
   let record: unknown
   if (WAS_SERVER_URL) {
     record = await getUnlockKeyring({
+      serviceDescription: await wasServiceDescription(),
       storageServerUrl: WAS_SERVER_URL,
       zcapClient: unlock.zcapClient,
       spaceId: unlock.spaceId
@@ -2388,6 +2408,7 @@ async function retireUnlockIdentity({
   if (WAS_SERVER_URL) {
     try {
       await deleteUnlockSpace({
+        serviceDescription: await wasServiceDescription(),
         storageServerUrl: WAS_SERVER_URL,
         zcapClient: unlock.zcapClient,
         spaceId: unlock.spaceId

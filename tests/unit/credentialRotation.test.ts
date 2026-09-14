@@ -11,6 +11,8 @@
  * the verified-log memo invalidation on both sides of the call.
  */
 import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { TEST_SERVICE_DESCRIPTION } from '../shared/wasServiceFixture'
+
 import { memoryResourceLogPinStore } from '@interop/vh-resource-log'
 import { addSink, captureSink } from '@interop/logger'
 
@@ -911,6 +913,7 @@ describe('the annex strike-or-swap stage', () => {
         // exactly as the real context builds it.
         get projectionStore() {
           return (projection ??= didWebProjectionStore({
+            serviceDescription: TEST_SERVICE_DESCRIPTION,
             pinStore: memoryResourceLogPinStore(),
             host: POINTER.host,
             spaceId: POINTER.spaceId,

@@ -13,6 +13,7 @@
  * into the mocked unlock Space exactly as issuance writes it).
  */
 import { beforeEach, describe, expect, it, vi } from 'vitest'
+
 import type { IKeyAgreementKey, IZcap } from '@interop/data-integrity-core'
 
 const state = vi.hoisted(() => ({

@@ -12,6 +12,7 @@
  * sealed into this account's record before minting a fresh one.
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+
 import { memoryResourceLogPinStore } from '@interop/vh-resource-log'
 import type { KeyringFetchResult } from '@/session/keyring'
 import type { AccountCeremonyContext } from '@/session/accountCeremonyContext'

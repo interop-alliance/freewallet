@@ -26,6 +26,8 @@
  * @vitest-environment node
  */
 import { describe, expect, it, vi } from 'vitest'
+import { TEST_SERVICE_DESCRIPTION } from '../../tests/shared/wasServiceFixture'
+
 import { memoryResourceLogPinStore } from '@interop/vh-resource-log'
 import type { IVerifiableCredential } from '@interop/data-integrity-core'
 import type {
@@ -181,6 +183,7 @@ function makeRecordedStore({ capability }: { capability?: IZcap }): {
   requestCalls: Array<{ path?: string; method?: string; capability?: unknown }>
 } {
   const store = new WASRemoteStore({
+    serviceDescription: TEST_SERVICE_DESCRIPTION,
     pinStore: memoryResourceLogPinStore(),
     storageServerUrl: 'https://was.example',
     zcapClient: {

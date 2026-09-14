@@ -18,6 +18,7 @@ import {
   it,
   vi
 } from 'vitest'
+
 import { addSink, captureSink } from '@interop/logger'
 import { CapabilityAgent } from '@interop/capability-agent'
 import type { IDelegatedZcap, IZcap } from '@interop/data-integrity-core'

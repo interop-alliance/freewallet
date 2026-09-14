@@ -13,6 +13,7 @@
  * delegation renewal.
  */
 import { beforeEach, describe, expect, it, vi } from 'vitest'
+
 import { KEYRING_KDF } from '@interop/wallet-core/keyring'
 import { ladderRung } from '@interop/wallet-core/clientAnnex'
 import { transientSessionStores } from '@/session/persistence'

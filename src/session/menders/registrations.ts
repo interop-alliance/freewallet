@@ -58,6 +58,7 @@ import {
 import { sweepStrandedAppKeys } from '@/session/appKeySweep'
 import { sweepClientAnnexGenerations } from '@/session/clientAnnexGc'
 import { refreshTransientManageCapability } from '@/session/unlockMethods'
+import { wasServiceDescription } from '@/lib/wasService'
 
 /**
  * What the remembered login's registrations read. One object per block, its
@@ -550,7 +551,8 @@ const GENERATION_DELEGATION_HEAL: Registration<
     const reach = clientAnnexReachFor({
       session,
       pointer: promoted.pointer,
-      doc: promoted.verified.doc
+      doc: promoted.verified.doc,
+      serviceDescription: await wasServiceDescription()
     })
     if (reach === null) {
       return [

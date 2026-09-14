@@ -44,6 +44,7 @@ import {
 import { accountCeremonyContext } from '@/session/accountCeremonyContext'
 import type { Session } from '@/types/auth'
 import { createLogger } from '@/lib/log'
+import { wasServiceDescription } from '@/lib/wasService'
 
 const log = createLogger('fw:enrollment')
 
@@ -215,7 +216,8 @@ export async function completeEnrollment({
     clientSeed,
     webvhUpdateKeys,
     pointer,
-    accountLogPinStore: persistence.logPins
+    accountLogPinStore: persistence.logPins,
+    serviceDescription: await wasServiceDescription()
   })
 
   // Persist the key set under the unlock layer (this also pins the account

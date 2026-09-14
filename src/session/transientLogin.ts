@@ -66,6 +66,7 @@ import { WAS_SERVER_URL } from '@/app.config'
 import { hasClientKeyRecord } from '@/lib/sessionKey'
 import { isStorageUnreachable } from '@/lib/storageErrors'
 import { createLogger } from '@/lib/log'
+import { wasServiceDescription } from '@/lib/wasService'
 import {
   ladderMendAuthority,
   mendCredentialAnchoredAccount,
@@ -385,6 +386,9 @@ export async function ensureClientAnnexGenerationReady({
   unavailable?: unknown
 }> {
   const zcapClient = found.standingClient.agents.zcapClient
+  // Discovered once for every client this readiness stage builds, the ones
+  // wallet-core builds from the closures below included.
+  const serviceDescription = await wasServiceDescription()
   try {
     const outcome = await ensureCredentialClientAnnexGeneration({
       wasServerUrl: pointer.host,
@@ -392,10 +396,12 @@ export async function ensureClientAnnexGenerationReady({
       account,
       ladderSeed: standing.ladderSeed,
       standingClient: { did: found.standingClient.clientDid, zcapClient },
+      serviceDescription,
       bootstrapWasFor: ({ keyAgent }) =>
         new WasClient({
           serverUrl: pointer.host,
-          zcapClient: didKeyZcapClient({ keyAgent })
+          zcapClient: didKeyZcapClient({ keyAgent }),
+          serviceDescription
         }),
       // The bridge the record carries today. The ensure renews it in place
       // when it has expired, entered its renewal window, or lost its
@@ -409,7 +415,8 @@ export async function ensureClientAnnexGenerationReady({
           pointer,
           delegation,
           zcapClient,
-          pinStore: persistence.logPins
+          pinStore: persistence.logPins,
+          serviceDescription
         }) as WebvhIdStore,
       onRebindRecord: async ({ delegation, delegatedClients }) => {
         const rebind = found.rebindStandingRecord
@@ -797,6 +804,8 @@ export async function transientSessionFromKeyringHit({
   // resolves the pointed generation's log once in all. A lost
   // compare-and-swap re-reads the head fresh under the same pin, exactly as
   // before, and a stage that minted or renewed hands nothing on.
+  // Discovered once for every client this composition builds.
+  const serviceDescription = await wasServiceDescription()
   let firstDoc: typeof verified.doc | undefined = verified.doc
   async function readAccountDocument() {
     if (firstDoc) {
@@ -826,7 +835,8 @@ export async function transientSessionFromKeyringHit({
           collectionId: generationId,
           delegation: siblingDelegation,
           zcapClient: found.standingClient.agents.zcapClient,
-          pinStore: persistence.logPins
+          pinStore: persistence.logPins,
+          serviceDescription
         })
       ),
     ladderSeed,
@@ -876,6 +886,7 @@ export async function transientSessionFromKeyringHit({
       storageServerUrl: pointer.host,
       zcapClient: transientZcapClient,
       spaceId: pointer.spaceId,
+      serviceDescription,
       resolveController: async () =>
         webvhResourceLogController({ did: accountDid, log: verified.log }),
       pinStore: persistence.logPins,

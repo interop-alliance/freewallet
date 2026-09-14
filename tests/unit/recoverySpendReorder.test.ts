@@ -27,6 +27,7 @@
  * identities, and the stored records are real.
  */
 import { beforeEach, describe, expect, it, vi } from 'vitest'
+
 import { memoryResourceLogPinStore } from '@interop/vh-resource-log'
 import { addSink, captureSink } from '@interop/logger'
 import type { IKeyAgreementKey, IZcap } from '@interop/data-integrity-core'

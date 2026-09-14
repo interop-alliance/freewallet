@@ -91,12 +91,14 @@ import {
 import { blockRegistryRead } from '@/session/registryPasses'
 import { primeVerifiedAccountLog } from '@/session/verifiedLog'
 import type { AccountPointer } from '@interop/wallet-core/keyring'
+import type { ServiceDescription } from '@interop/was-client'
 import type {
   KeyringFetchResult,
   PersistableClientKeys,
   UnlockCredential
 } from '@/session/keyring'
 import { createLogger } from '@/lib/log'
+import { wasServiceDescriptionIfReachable } from '@/lib/wasService'
 
 const log = createLogger('fw:session:init')
 
@@ -273,6 +275,19 @@ export async function initSessionFromSeed({
       idb,
       persistCaches: !isGuest && !suppressPopupCaches
     })
+  // The one discovery of this login chain, threaded into everything below
+  // rather than probed per call site. Started here so it overlaps the key
+  // derivation and the KMS round trip, and awaited where the first consumer
+  // needs it. A guest never touches the WAS server, so a guest skips it. An
+  // unreachable server costs the description, not the session: the roster
+  // check is skipped (exactly as an unreachable roster read always was) and
+  // the storage clients are built without it, so a remembered login keeps
+  // running off its local replica offline. A server that answers and refuses
+  // still rejects the login.
+  const discovery =
+    WAS_SERVER_URL && !isGuest
+      ? wasServiceDescriptionIfReachable()
+      : Promise.resolve(undefined)
   const { keyAgent, zcapClient, keyAgreementKey, keyResolver } =
     await agentsFromSeed({ seed })
 
@@ -346,14 +361,17 @@ export async function initSessionFromSeed({
   // through the same one, so its convergence is seeded from that read.
   let loginRosterStore: SealableEncryptionDescriptorStore | undefined
   let userKeyPersistFailed = false
+  const serviceDescription = await discovery
   if (
     userKey &&
     isRememberedSession({ persistence, isGuest }) &&
     WAS_SERVER_URL &&
+    serviceDescription &&
     accountPointer &&
     isWebvhDid(accountPointer.did)
   ) {
     const rosterCheck = await checkUserKeyRosterAtLogin({
+      serviceDescription,
       zcapClient: sessionZcapClient,
       keyAgent,
       pointer: { ...accountPointer, did: accountPointer.did },
@@ -432,6 +450,7 @@ export async function initSessionFromSeed({
     StorageManager.initStorageClients({
       user,
       session: { profile, persistence },
+      serviceDescription,
       isGuest,
       remoteDirect: popup,
       signerCheck: async () =>
@@ -510,6 +529,8 @@ export async function initSessionFromSeed({
  * browser could not be remembered" rather than a login failure.
  *
  * @param options {object}
+ * @param options.serviceDescription {ServiceDescription}   the description
+ *   this login discovered
  * @param options.zcapClient {ZcapClient}   the session's root signing client
  * @param options.keyAgent {ICapabilityAgent}   this client's signing key
  *   agent, for the store's log appends and pin custody
@@ -529,6 +550,7 @@ export async function initSessionFromSeed({
  *   through so its convergence is seeded from that read
  */
 async function checkUserKeyRosterAtLogin({
+  serviceDescription,
   zcapClient,
   keyAgent,
   pointer,
@@ -537,6 +559,7 @@ async function checkUserKeyRosterAtLogin({
   persistence,
   log: accountLog
 }: {
+  serviceDescription: ServiceDescription
   zcapClient: ZcapClient
   keyAgent: ICapabilityAgent
   pointer: AccountPointer & { did: string }
@@ -550,6 +573,7 @@ async function checkUserKeyRosterAtLogin({
 }> {
   const accountDid = pointer.did
   const store = accountRosterStore({
+    serviceDescription,
     zcapClient,
     keyAgent,
     pointer: {

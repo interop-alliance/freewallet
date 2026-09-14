@@ -119,6 +119,7 @@ import {
 import { findLoginCredential, loginHandleOf } from '@/lib/loginCredential'
 import type { Session } from '@/types/auth'
 import { createLogger } from '@/lib/log'
+import { wasServiceDescription } from '@/lib/wasService'
 
 const log = createLogger('fw:session:settings')
 
@@ -2286,7 +2287,7 @@ export async function deleteAccount({
   // read-modify-writes (deletion walks the registry); on a settled session
   // the chain resolved long ago, and a guest session carries no chain.
   await session.registryReady
-  const isGuest = !!session.isGuest
+  const isGuest = session.isGuest
   const { profile, persistence } = session
   const browserLocal = isBrowserLocalSession(persistence)
   // The Storage Access seam: a session begun from the CHAPI popup carries the
@@ -2630,7 +2631,6 @@ export async function deleteAccount({
       try {
         const pending = await findPendingPassphraseEntries({
           registry,
-          host: pointer.host,
           readerFor: unlockEntryReaderFor({
             session,
             ...(deleter ? { signer: deleter } : {})
@@ -2813,6 +2813,7 @@ export async function deleteAccount({
           ttlMs: DELETION_ZCAP_TTL_MS
         })
         ;({ outcome } = await deleteSpaceWithCapability({
+          serviceDescription: await wasServiceDescription(),
           storageServerUrl: WAS_SERVER_URL as string,
           zcapClient: deleter.invoker,
           spaceId,
@@ -2820,6 +2821,7 @@ export async function deleteAccount({
         }))
       } else {
         ;({ outcome } = await new WasClient({
+          serviceDescription: await wasServiceDescription(),
           serverUrl: WAS_SERVER_URL as string,
           zcapClient: profile.zcapClient
         })
@@ -3078,6 +3080,7 @@ export async function deleteAccount({
       for (let attempt = 0; attempt < 2 && outcome === undefined; attempt++) {
         try {
           ;({ outcome } = await new WasClient({
+            serviceDescription: await wasServiceDescription(),
             serverUrl: WAS_SERVER_URL,
             zcapClient
           })
@@ -3201,6 +3204,7 @@ async function repairRegistrySealForDeletion({
   }
   const rosterRead = await readUserKeyRoster({
     store: sessionRosterStore({
+      serviceDescription: await wasServiceDescription(),
       session,
       ...(capability ? { capability } : {})
     }),

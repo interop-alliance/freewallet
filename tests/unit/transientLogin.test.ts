@@ -9,6 +9,8 @@
  * deterministically; the per-visit key mint (`agentsFromSeed`) runs for real.
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { TEST_SERVICE_DESCRIPTION } from '../shared/wasServiceFixture'
+
 import { addSink, captureSink } from '@interop/logger'
 import { WasError } from '@interop/was-client'
 
@@ -705,7 +707,8 @@ describe('transientSessionFromKeyringHit -- the composition wiring', () => {
       collectionId: 'gen-Ux3v0kQf9aPmB2hZ',
       delegation: SIBLING_DELEGATION,
       zcapClient: found.standingClient.agents.zcapClient,
-      pinStore: persistence.logPins
+      pinStore: persistence.logPins,
+      serviceDescription: TEST_SERVICE_DESCRIPTION
     })
 
     // The account log was verified under the same in-memory pins.
@@ -818,7 +821,8 @@ describe('transientSessionFromKeyringHit -- the did:web projection mend', () => 
       collectionId: ID_COLLECTION.id,
       delegation: GENERATION_DELEGATION,
       zcapClient: expect.objectContaining({ isClientAnnexZcapClient: true }),
-      pinStore: persistence.logPins
+      pinStore: persistence.logPins,
+      serviceDescription: TEST_SERVICE_DESCRIPTION
     })
     expect(ensureDidWebProjection).toHaveBeenCalledWith({
       store: expect.anything(),

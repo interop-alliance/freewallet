@@ -38,6 +38,7 @@ import {
   resolvedKeyAgreementMethods
 } from '@interop/wallet-core/webvh'
 import { WAS_SERVER_URL } from '@/app.config'
+import { wasServiceDescription } from '@/lib/wasService'
 import type {
   PassphraseUnlockMethod,
   UnlockMethod
@@ -114,7 +115,6 @@ export function credentialKeyAgreementVmIds({
  *
  * @param options {object}
  * @param options.registry {{ methods?: unknown[] } | null}
- * @param options.host {string}   the storage host to read the records from
  * @param options.readerFor {Function}   the entry's record reader: the signing
  *   client and the capability its record GET rides (the stored management zcap
  *   on a remembered session, a GET-only child of it on a transient one).
@@ -123,11 +123,9 @@ export function credentialKeyAgreementVmIds({
  */
 export async function findPendingPassphraseEntries({
   registry,
-  host,
   readerFor
 }: {
   registry: { methods?: unknown[] } | null
-  host: string
   readerFor: (
     entry: PassphraseUnlockMethod
   ) => Promise<{ zcapClient: ZcapClient; capability: IZcap } | undefined>
@@ -136,6 +134,10 @@ export async function findPendingPassphraseEntries({
     (registry?.methods ?? []) as PassphraseUnlockMethod[]
   ).filter(method => method.type === 'passphrase')
   const pending: PassphraseUnlockMethod[] = []
+  if (entries.length === 0) {
+    return pending
+  }
+  const serviceDescription = await wasServiceDescription()
   for (const entry of entries) {
     if (!entry.manageCapability || !entry.unlockKeyAgreementKeyMultibase) {
       continue
@@ -147,7 +149,8 @@ export async function findPendingPassphraseEntries({
     let sealedToEntry: boolean
     try {
       const record = await getUnlockKeyring({
-        storageServerUrl: WAS_SERVER_URL ?? host,
+        serviceDescription,
+        storageServerUrl: WAS_SERVER_URL as string,
         zcapClient: reader.zcapClient,
         spaceId: entry.unlockSpaceId,
         capability: reader.capability

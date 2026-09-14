@@ -60,7 +60,7 @@
  */
 import type { IZcap } from '@interop/data-integrity-core'
 import { equalBytes } from '@noble/ciphers/utils.js'
-import { WasClient } from '@interop/was-client'
+import { WasClient, type ServiceDescription } from '@interop/was-client'
 import {
   publishUnlockKey,
   type UnlockLogStore
@@ -125,6 +125,7 @@ import {
   type StandingUnlockFields
 } from '@/session/unlockMethods'
 import { createLogger } from '@/lib/log'
+import { wasServiceDescription } from '@/lib/wasService'
 import { zcapExpires } from '@/lib/zcap'
 
 const log = createLogger('fw:session:unlock')
@@ -147,18 +148,22 @@ const log = createLogger('fw:session:unlock')
  * @param options.pinStore {ResourceLogPinStore}   the caller's chain-head
  *   pins; the store carries the account log's slot, so every read and
  *   publish through it is checked against the pin and advances it
+ * @param options.serviceDescription {ServiceDescription}   the server's
+ *   discovered service description, so the store's client skips discovery
  * @returns {UnlockLogStore}
  */
 export function unlockLogStore({
   pointer,
   delegation,
   zcapClient,
-  pinStore
+  pinStore,
+  serviceDescription
 }: {
   pointer: AccountPointer
   delegation: IZcap
   zcapClient: ZcapClient
   pinStore: ResourceLogPinStore
+  serviceDescription: ServiceDescription
 }): UnlockLogStore {
   return delegatedWebvhLogStore({
     host: pointer.host,
@@ -166,7 +171,8 @@ export function unlockLogStore({
     collectionId: ID_COLLECTION.id,
     delegation,
     zcapClient,
-    pinStore
+    pinStore,
+    serviceDescription
   })
 }
 
@@ -344,6 +350,7 @@ export async function establishStandingUnlock({
     if (!actingLadderSeed) {
       throw new ClientAnnexRungCommitSkipped()
     }
+    const serviceDescription = await wasServiceDescription()
     const reach =
       ctx.kind === 'ladder' && ctx.sibling
         ? standingClientAnnexReachOf({
@@ -353,9 +360,15 @@ export async function establishStandingUnlock({
               standingClient: session.profile.standingUnlock!.standingClient,
               delegatedClients: ctx.sibling
             },
-            pinStore: session.persistence.logPins
+            pinStore: session.persistence.logPins,
+            serviceDescription
           })
-        : clientAnnexReachOf({ session, pointer, clientAnnexDid })
+        : clientAnnexReachOf({
+            session,
+            pointer,
+            clientAnnexDid,
+            serviceDescription
+          })
     await commitClientAnnexRung({
       store: reach.logStore(),
       boundLadderSeed: ladderSeed,
@@ -683,13 +696,15 @@ export async function establishClientAnnexGeneration({
     session,
     pointer
   })
+  const serviceDescription = await wasServiceDescription()
   const pointed = await ensurePointedClientAnnexGeneration({
     account: { did: pointer.did, doc: account.doc, log: account.log },
     wasServerUrl: pointer.host,
     ladderSeed,
     was: new WasClient({
       serverUrl: pointer.host,
-      zcapClient: didKeyZcapClient({ keyAgent })
+      zcapClient: didKeyZcapClient({ keyAgent }),
+      serviceDescription
     }),
     mintController: keyAgent.id,
     mintGenerationDelegation: async ({ clientAnnexDid: generationDid }) =>
@@ -711,7 +726,12 @@ export async function establishClientAnnexGeneration({
   // installed when the annex document carries none yet and renewed near
   // expiry otherwise -- signed by this enrolled client's promoted key. A
   // generation the fold just minted carries a fresh delegation already.
-  const clientAnnex = clientAnnexReachOf({ session, pointer, clientAnnexDid })
+  const clientAnnex = clientAnnexReachOf({
+    session,
+    pointer,
+    clientAnnexDid,
+    serviceDescription
+  })
   if (!pointed.generationMinted) {
     await ensureGenerationDelegation({
       session,
@@ -864,15 +884,18 @@ export async function selfEnrollStandingClient({
   let hookFires = 0
   let enrolledPersister:
     ((changes: PersistableClientKeys) => Promise<void>) | undefined
+  const serviceDescription = await wasServiceDescription()
   const result = await selfEnrollClientCore({
     pointer,
     ladderSeed: standing.ladderSeed,
     credentialKeyAgreementKey: standingClient.agents.keyAgreementKey,
+    serviceDescription,
     logStore: unlockLogStore({
       pointer,
       delegation: standing.delegation,
       zcapClient: standingClient.agents.zcapClient,
-      pinStore
+      pinStore,
+      serviceDescription
     }),
     ...(resume ? { resume } : {}),
     // The persist-before-publish seam: the pending-shape record is written

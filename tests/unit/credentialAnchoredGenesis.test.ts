@@ -10,6 +10,8 @@
  * ceremony's collected best-effort failures.
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { TEST_SERVICE_DESCRIPTION } from '../shared/wasServiceFixture'
+
 import { addSink, captureSink } from '@interop/logger'
 
 const state = vi.hoisted(() => ({
@@ -300,6 +302,7 @@ describe('establishCredentialAnchoredAccount -- the orchestrator binding', () =>
         host: POINTER.host
       },
       pinStore: persistence.logPins,
+      serviceDescription: TEST_SERVICE_DESCRIPTION,
       log: accountLog
     })
   })

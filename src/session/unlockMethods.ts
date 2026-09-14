@@ -93,6 +93,7 @@ import {
 import { spacePath, toUrl } from '@interop/was-client/paths'
 import { deleteUnlockLocalState } from '@/lib/sessionKey'
 import { createLogger } from '@/lib/log'
+import { wasServiceDescription } from '@/lib/wasService'
 
 const log = createLogger('fw:session:methods')
 import { deleteUnlockSpace, KEYRING_KDF } from '@interop/wallet-core/keyring'
@@ -1365,6 +1366,7 @@ export async function deleteUnlockSpaceForEntry({
     throw err
   }
   const { outcome } = await deleteUnlockSpace({
+    serviceDescription: await wasServiceDescription(),
     storageServerUrl: WAS_SERVER_URL,
     zcapClient: invoker,
     spaceId: entry.unlockSpaceId,

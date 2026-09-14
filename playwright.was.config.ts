@@ -35,9 +35,9 @@ export default defineConfig({
       cwd: WAS_SERVER_DIR,
       url: WAS_URL,
       reuseExistingServer: !process.env.CI,
-      // SERVER_URL must exactly match the URL the client signs ZCap requests
-      // against (VITE_WAS_SERVER_URL below); the server derives the expected
-      // invocation-target host from it.
+      // SERVER_URL is the server's own base URL; the server derives the
+      // expected invocation-target host from it, and the app's
+      // VITE_WAS_SERVER_URL below is the Spaces Repository URL under it.
       env: { PORT: String(WAS_PORT), SERVER_URL: WAS_URL },
       timeout: 60_000
     },
@@ -49,7 +49,7 @@ export default defineConfig({
       url: APP_URL,
       reuseExistingServer: false,
       env: {
-        VITE_WAS_SERVER_URL: WAS_URL,
+        VITE_WAS_SERVER_URL: `${WAS_URL}/spaces/`,
         // Keep the dev-log endpoint off the live dev session's file.
         INTEROP_LOGGER_FILE: 'test-results/dev-logs/app.ndjson'
       }

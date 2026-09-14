@@ -391,8 +391,9 @@ directly by `cid`. Each encrypted collection's key epochs come from the
 verified head of its own governing log rather than from a metadata member
 the host serves (see "Per-collection descriptor logs" in docs/architecture/keys-and-descriptor-logs.md).
 
-When `VITE_WAS_SERVER_URL` is set and the session is not a guest, a remote
-WAS Space is attached as a **sync target**. `SessionSyncController` in
+When `VITE_WAS_SERVER_URL` (the server's Spaces Repository URL; the base
+URL is its parent) is set and the session is not a guest, a remote WAS
+Space is attached as a **sync target**. `SessionSyncController` in
 `src/stores/syncController.ts` replicates every synced local collection to
 its remote WAS Collection counterpart in the background, over
 `@interop/was-sync`'s collection-agnostic driver, which ships stored bodies

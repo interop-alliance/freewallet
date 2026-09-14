@@ -1,5 +1,7 @@
 // @vitest-environment node
 import { describe, it, expect, vi } from 'vitest'
+import { TEST_SERVICE_DESCRIPTION } from '../shared/wasServiceFixture'
+
 import { memoryResourceLogPinStore } from '@interop/vh-resource-log'
 import type { ZcapClient } from '@interop/ezcap'
 import type { IZcap } from '@interop/data-integrity-core'
@@ -28,6 +30,7 @@ import type { SessionPersistence } from '../../src/session/persistence'
  */
 function storeWithStubbedClient(was: unknown): WASRemoteStore {
   const store = new WASRemoteStore({
+    serviceDescription: TEST_SERVICE_DESCRIPTION,
     pinStore: memoryResourceLogPinStore(),
     storageServerUrl: 'https://example.test',
     zcapClient: { request: vi.fn() } as unknown as ZcapClient,
@@ -799,6 +802,7 @@ describe('WASRemoteStore.ensureGovernedCollection', () => {
       .mockReturnValue({ describeWithEtag, replaceDescription })
     const space = vi.fn().mockReturnValue({ collection, describe })
     const store = new WASRemoteStore({
+      serviceDescription: TEST_SERVICE_DESCRIPTION,
       pinStore: memoryResourceLogPinStore(),
       storageServerUrl: 'https://example.test',
       zcapClient: { request: vi.fn() } as unknown as ZcapClient,
@@ -1011,6 +1015,7 @@ describe('WASRemoteStore.clientLabelsStore', () => {
    */
   function storeWithCapability(capability?: IZcap): WASRemoteStore {
     return new WASRemoteStore({
+      serviceDescription: TEST_SERVICE_DESCRIPTION,
       pinStore: memoryResourceLogPinStore(),
       storageServerUrl: 'https://example.test',
       zcapClient: { request: vi.fn() } as unknown as ZcapClient,

@@ -11,6 +11,7 @@
  * requests it would have made.
  */
 import { beforeEach, describe, expect, it, vi } from 'vitest'
+
 import type { IZcap } from '@interop/data-integrity-core'
 
 const state = vi.hoisted(() => ({

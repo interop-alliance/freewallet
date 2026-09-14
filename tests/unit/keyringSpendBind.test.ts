@@ -9,6 +9,7 @@
  * HTTP seam is mocked.
  */
 import { beforeEach, describe, expect, it, vi } from 'vitest'
+
 import { memoryResourceLogPinStore } from '@interop/vh-resource-log'
 import type { IKeyAgreementKey, IZcap } from '@interop/data-integrity-core'
 

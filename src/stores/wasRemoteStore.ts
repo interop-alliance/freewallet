@@ -1,9 +1,10 @@
 /**
  * WASRemoteStore: the remote WAS (Wallet Attached Storage) backend, attached
- * when VITE_WAS_SERVER_URL is set. Since the local BrowserStore became the
- * always-active replica, this class no longer serves credential / history /
- * public-link reads and writes for the main app -- those replicate in the
- * background through the sync controller. What remains here is the Space
+ * when VITE_WAS_SERVER_URL (the server's Spaces Repository URL) is set.
+ * Since the local BrowserStore became the always-active replica, this class
+ * no longer serves credential / history / public-link reads and writes for
+ * the main app -- those replicate in the background through the sync
+ * controller. What remains here is the Space
  * lifecycle (create / exists / wipe), the storage-browser read-through over
  * arbitrary Collections and Resources, export / import, and quotas.
  *
@@ -31,6 +32,7 @@ import {
   type CollectionEncryption,
   type IZcap,
   type Resource,
+  type ServiceDescription,
   type Space,
   type SpaceMetadata
 } from '@interop/was-client'
@@ -83,6 +85,7 @@ import {
   type UserKey
 } from '@interop/wallet-core/keys'
 import { createLogger } from '@/lib/log'
+import { wasServiceDescription } from '@/lib/wasService'
 
 const log = createLogger('fw:storage:remote')
 
@@ -136,6 +139,14 @@ function controllerDid(controller: string): IDID {
 
 export class WASRemoteStore {
   public storageServerUrl: string
+  // The server's service description, discovered once per page load by
+  // `@/lib/wasService` and handed in: every client this store builds takes
+  // it, so none discovers on its own. Absent only when the server could not
+  // be reached at login -- an offline remembered login still builds the
+  // store, so its local replica keeps serving, and the clients it builds
+  // discover for themselves at their first request (and fail there, exactly
+  // as an unreachable server always did).
+  #discovered?: ServiceDescription
   public was: WasClient
   public spaceId: string
   public controller: IDID
@@ -152,8 +163,27 @@ export class WASRemoteStore {
   // read and publish through it is checked against the pin and advances it.
   #pinStore: ResourceLogPinStore
 
+  /**
+   * The server's discovered service description.
+   *
+   * @returns {ServiceDescription}
+   * @throws {Error}   when discovery never succeeded (the server was
+   *   unreachable when this session started), so a caller that needs it gets
+   *   a named refusal rather than an undefined threaded onward
+   */
+  get serviceDescription(): ServiceDescription {
+    if (!this.#discovered) {
+      throw new Error(
+        'The WAS server was unreachable when this session started, so no ' +
+          'service description was discovered.'
+      )
+    }
+    return this.#discovered
+  }
+
   constructor({
     storageServerUrl,
+    serviceDescription,
     zcapClient,
     spaceId,
     controller,
@@ -161,6 +191,7 @@ export class WASRemoteStore {
     pinStore
   }: {
     storageServerUrl: string
+    serviceDescription?: ServiceDescription
     zcapClient: ZcapClient
     spaceId: string
     controller: string
@@ -168,15 +199,9 @@ export class WASRemoteStore {
     pinStore: ResourceLogPinStore
   }) {
     this.storageServerUrl = storageServerUrl
+    this.#discovered = serviceDescription
     this.#pinStore = pinStore
-    this.was = new WasClient({
-      serverUrl: storageServerUrl,
-      zcapClient,
-      // No decrypt path lives here anymore (replication moves opaque envelopes
-      // verbatim; read-time decrypt is a StorageManager concern), so the
-      // keystore is a no-op.
-      encryption: createEdvEncryption({ resolveKeys: async () => null })
-    })
+    this.was = this.#clientFor({ zcapClient })
     this.spaceId = spaceId
     this.controller = controllerDid(controller)
     this.#capability = capability
@@ -542,13 +567,27 @@ export class WASRemoteStore {
     zcapClient: ZcapClient
     controller: string
   }): void {
-    this.was = new WasClient({
+    this.was = this.#clientFor({ zcapClient })
+    this.controller = controllerDid(controller)
+  }
+
+  /**
+   * A client over this store's server for one signer: the discovered
+   * service description threaded in, and no decrypt path (replication moves
+   * opaque envelopes verbatim; read-time decrypt is a StorageManager
+   * concern), so the keystore is a no-op.
+   *
+   * @param options {object}
+   * @param options.zcapClient {ZcapClient}
+   * @returns {WasClient}
+   */
+  #clientFor({ zcapClient }: { zcapClient: ZcapClient }): WasClient {
+    return new WasClient({
       serverUrl: this.storageServerUrl,
       zcapClient,
-      // Mirrors the constructor: no decrypt path lives here.
+      serviceDescription: this.#discovered,
       encryption: createEdvEncryption({ resolveKeys: async () => null })
     })
-    this.controller = controllerDid(controller)
   }
 
   /**
@@ -830,10 +869,15 @@ export class WASRemoteStore {
 
   static async initClient({
     storageServerUrl,
+    serviceDescription,
     user,
     session: { profile, persistence }
   }: {
     storageServerUrl: string
+    // The description this session discovered, threaded in rather than
+    // re-probed here: `@/lib/wasService` is the app's one discoverer.
+    // Absent when the server was unreachable at login.
+    serviceDescription?: ServiceDescription
     user: User
     // The profile the store signs as, and the session's persistence
     // strategy, for the chain-head pin store every account-log read in this
@@ -852,6 +896,7 @@ export class WASRemoteStore {
     const spaceId = profile.accountPointer?.spaceId ?? deriveSpaceId(clientDid)
     const remoteStore = new WASRemoteStore({
       storageServerUrl,
+      serviceDescription,
       zcapClient: profile.zcapClient,
       spaceId,
       controller,
@@ -1295,9 +1340,7 @@ export class WASRemoteStore {
     zcapClient?: ZcapClient
   } = {}): Promise<{ outcome: 'deleted' | 'not-found' }> {
     try {
-      const was = zcapClient
-        ? new WasClient({ serverUrl: this.storageServerUrl, zcapClient })
-        : this.was
+      const was = zcapClient ? this.#clientFor({ zcapClient }) : this.was
       const space = capability
         ? was.space(this.spaceId, { capability })
         : this.#space()
@@ -1390,18 +1433,19 @@ export class WASRemoteStore {
  * @param options {object}
  * @param options.storageServerUrl {string}
  * @param options.zcapClient {ZcapClient}   built on the unlock agent's signer
- * @returns {WasClient}
+ * @returns {Promise<WasClient>}
  */
-function unlockSpaceClient({
+async function unlockSpaceClient({
   storageServerUrl,
   zcapClient
 }: {
   storageServerUrl: string
   zcapClient: ZcapClient
-}): WasClient {
+}): Promise<WasClient> {
   return new WasClient({
     serverUrl: storageServerUrl,
-    zcapClient
+    zcapClient,
+    serviceDescription: await wasServiceDescription()
   })
 }
 
@@ -1431,7 +1475,7 @@ export async function getUnlockMethodsRecord({
   spaceId: string
   capability?: IZcap
 }): Promise<{ record: unknown; etag?: string } | null> {
-  const was = unlockSpaceClient({ storageServerUrl, zcapClient })
+  const was = await unlockSpaceClient({ storageServerUrl, zcapClient })
   const found = await was
     .space(spaceId, { capability })
     .collection(UNLOCK_METHODS_COLLECTION.id, { encryption: 'plaintext' })
@@ -1477,7 +1521,7 @@ export async function putUnlockMethodsRecord({
   ifMatch?: string
   ifNoneMatch?: boolean
 }): Promise<{ etag?: string }> {
-  const was = unlockSpaceClient({ storageServerUrl, zcapClient })
+  const was = await unlockSpaceClient({ storageServerUrl, zcapClient })
   const body = new TextEncoder().encode(JSON.stringify(record))
   return await was
     .space(spaceId, { capability })
