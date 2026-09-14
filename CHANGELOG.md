@@ -1,6 +1,6 @@
 # History
 
-## 0.43.0 - TBD
+## 0.43.0 - 2026-09-14
 
 Every account-management ceremony now runs from a transient session, on a
 standing unlock credential's ladder in place of an enrolled client's key.
