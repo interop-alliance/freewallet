@@ -1986,6 +1986,68 @@ export class StorageManager {
   }
 
   /**
+   * Reads a Resource's metadata document (the storage browser's metadata
+   * card). Resolves null on a 404, which the server answers both for a
+   * missing target and for one this session may not read, and throws
+   * `NotImplementedError` on a server without metadata support.
+   *
+   * @param options {object}
+   * @param options.url {string}   the Resource URL
+   * @returns {Promise<Record<string, unknown> | null>}
+   */
+  async fetchResourceMeta({
+    url
+  }: {
+    url: string
+  }): Promise<Record<string, unknown> | null> {
+    const read = await this.#requireRemote(
+      'Reading resource metadata'
+    ).fetchResourceMeta({ url })
+    // The metadata card renders members generically, so the typed document is
+    // widened here rather than at every call site.
+    return read as Record<string, unknown> | null
+  }
+
+  /**
+   * Reads a Collection's Metadata object, on the same terms as
+   * {@link fetchResourceMeta}.
+   *
+   * @param options {object}
+   * @param options.url {string}   the Collection URL
+   * @returns {Promise<Record<string, unknown> | null>}
+   */
+  async fetchCollectionMeta({
+    url
+  }: {
+    url: string
+  }): Promise<Record<string, unknown> | null> {
+    const read = await this.#requireRemote(
+      'Reading collection metadata'
+    ).fetchCollectionMeta({ url })
+    return read as Record<string, unknown> | null
+  }
+
+  /**
+   * Whether a collection is encrypted, read from the verified head of its
+   * governing log when this session can verify one, and from the served
+   * Description member otherwise. The storage browser's metadata card asks
+   * this at expand time rather than trusting the listing's host-served
+   * member read at page load.
+   *
+   * @param options {object}
+   * @param options.collectionId {string}
+   * @returns {Promise<boolean>}
+   */
+  async isCollectionEncrypted({
+    collectionId
+  }: {
+    collectionId: string
+  }): Promise<boolean> {
+    const descriptor = await this.#readGovernedDescriptor({ collectionId })
+    return descriptor !== undefined
+  }
+
+  /**
    * Best-effort decryption of a fetched storage-browser resource body: when
    * the body is an EDV envelope from one of the encrypted standard
    * collections and this session holds that collection's cipher (unlocked

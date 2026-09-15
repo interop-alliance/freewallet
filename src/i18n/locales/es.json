@@ -660,6 +660,31 @@
       "type": "Tipo",
       "modified": "Modificado"
     },
+    "meta": {
+      "title": "Metadatos",
+      "loading": "Cargando metadatos...",
+      "empty": "No hay metadatos disponibles.",
+      "error": "No se pudieron cargar los metadatos.",
+      "viewSource": "Ver el origen de los metadatos",
+      "hideSource": "Ocultar el origen de los metadatos",
+      "custom": "Metadatos personalizados",
+      "customEncrypted": "Metadatos personalizados (cifrados, tal como se almacenan)",
+      "fields": {
+        "contentType": "Tipo de contenido",
+        "size": "Tamaño",
+        "createdAt": "Creado",
+        "updatedAt": "Actualizado",
+        "createdBy": "Creado por",
+        "epoch": "Época de clave",
+        "etag": "Versión (ETag)",
+        "id": "Identificador",
+        "name": "Nombre",
+        "type": "Tipo",
+        "generator": "Aplicación",
+        "generatorOrigin": "Origen de la aplicación",
+        "url": "URL"
+      }
+    },
     "quota": {
       "title": "Uso de almacenamiento",
       "stateOk": "Correcto",

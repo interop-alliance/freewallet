@@ -660,6 +660,31 @@
       "type": "Type",
       "modified": "Modified"
     },
+    "meta": {
+      "title": "Metadata",
+      "loading": "Loading metadata...",
+      "empty": "No metadata available.",
+      "error": "Could not load metadata.",
+      "viewSource": "View meta source",
+      "hideSource": "Hide meta source",
+      "custom": "Custom metadata",
+      "customEncrypted": "Custom metadata (encrypted, stored as sent)",
+      "fields": {
+        "contentType": "Content type",
+        "size": "Size",
+        "createdAt": "Created",
+        "updatedAt": "Updated",
+        "createdBy": "Created by",
+        "epoch": "Key epoch",
+        "etag": "Version (ETag)",
+        "id": "Identifier",
+        "name": "Name",
+        "type": "Type",
+        "generator": "Application",
+        "generatorOrigin": "Application origin",
+        "url": "URL"
+      }
+    },
     "quota": {
       "title": "Storage usage",
       "stateOk": "OK",

@@ -30,8 +30,10 @@ import {
   WasClient,
   type Collection,
   type CollectionEncryption,
+  type CollectionMetadata,
   type IZcap,
   type Resource,
+  type ResourceMetadata,
   type ServiceDescription,
   type Space,
   type SpaceMetadata
@@ -943,6 +945,43 @@ export class WASRemoteStore {
     relativeUrl: string
   }): Promise<void> {
     await this.#resourceFromUrl(relativeUrl).delete()
+  }
+
+  /**
+   * Reads a Resource's `/meta` document (the storage browser's metadata
+   * card). Resolves null on a 404, which the server answers both for a
+   * missing target and for one this session may not read, and throws
+   * `NotImplementedError` on a server without metadata support.
+   *
+   * @param options {object}
+   * @param options.url {string}   the Resource URL
+   * @returns {Promise<(ResourceMetadata & { etag?: string }) | null>}
+   */
+  async fetchResourceMeta({
+    url
+  }: {
+    url: string
+  }): Promise<(ResourceMetadata & { etag?: string }) | null> {
+    return await this.#resourceFromUrl(url).meta()
+  }
+
+  /**
+   * Reads a Collection's Metadata object, on the same terms as
+   * {@link fetchResourceMeta}. The read is `describe()`, which never
+   * resolves the codec, so the user-writable `custom` is served as stored
+   * (the opaque envelope on an encrypted collection), which is what the
+   * metadata card renders.
+   *
+   * @param options {object}
+   * @param options.url {string}   the Collection URL
+   * @returns {Promise<(CollectionMetadata & { etag?: string }) | null>}
+   */
+  async fetchCollectionMeta({
+    url
+  }: {
+    url: string
+  }): Promise<(CollectionMetadata & { etag?: string }) | null> {
+    return await this.#collectionFromUrl(url).describe()
   }
 
   async fetchCollectionResource(

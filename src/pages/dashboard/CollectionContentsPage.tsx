@@ -48,6 +48,7 @@ import {
 } from '@/components/storage/AccessIcon'
 import { StorageEmptyState } from '@/components/storage/EmptyState'
 import { SourceViewToggle } from '@/components/storage/SourceViewToggle'
+import { MetadataCard } from '@/components/storage/MetadataCard'
 import {
   decryptResourceBody,
   useResourceSourceCopy
@@ -61,6 +62,22 @@ import { useConnectedApps } from '@/hooks/useConnectedApps'
 import { createLogger } from '@/lib/log'
 
 const log = createLogger('fw:ui:storage')
+
+// The Collection Metadata members this card labels, in display order;
+// anything else the server sends follows them under its own key.
+const COLLECTION_META_FIELDS = [
+  'id',
+  'name',
+  'type',
+  'createdAt',
+  'updatedAt',
+  'createdBy',
+  'generator',
+  'generatorOrigin',
+  'epoch',
+  'etag',
+  'url'
+]
 
 export function CollectionContentsPage() {
   const { t } = useTranslation()
@@ -297,6 +314,20 @@ export function CollectionContentsPage() {
     return getCollectionDisplayName({ collection, t })
   }, [collection, t])
 
+  const collectionUrl = collection?.url ?? null
+  const fetchCollectionMeta = useCallback(async () => {
+    if (!storage || !collectionUrl) {
+      return { meta: null, encrypted: false }
+    }
+    const [meta, governed] = await Promise.all([
+      storage.fetchCollectionMeta({ url: collectionUrl }),
+      storage.isCollectionEncrypted({ collectionId })
+    ])
+    // The document's own member is the fallback, for a session that reads
+    // the served Description rather than the governing log.
+    return { meta, encrypted: governed || Boolean(meta?.encryption) }
+  }, [storage, collectionUrl, collectionId])
+
   const subtitle = useMemo(() => {
     if (!collection) {
       return ''
@@ -375,6 +406,14 @@ export function CollectionContentsPage() {
             </Button>
           )}
         </Stack>
+
+        {collectionUrl && (
+          <MetadataCard
+            key={collectionUrl}
+            fetchMeta={fetchCollectionMeta}
+            fieldOrder={COLLECTION_META_FIELDS}
+          />
+        )}
 
         <Box sx={storageStyles.contentsBody}>
           {deleteCollectionError && (

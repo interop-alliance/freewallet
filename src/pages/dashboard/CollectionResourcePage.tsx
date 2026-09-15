@@ -32,6 +32,7 @@ import {
 import { getResourceDisplayName } from '@/components/storage/displayUtils'
 import { PublicAccessIcon } from '@/components/storage/AccessIcon'
 import { SourceViewToggle } from '@/components/storage/SourceViewToggle'
+import { MetadataCard } from '@/components/storage/MetadataCard'
 import {
   decryptResourceBody,
   useResourceSourceCopy
@@ -43,6 +44,18 @@ import { downloadBlob } from '@/lib/downloadBlob'
 import { createLogger } from '@/lib/log'
 
 const log = createLogger('fw:ui:storage')
+
+// The Resource Metadata members this card labels, in display order; anything
+// else the server sends follows them under its own key.
+const RESOURCE_META_FIELDS = [
+  'contentType',
+  'size',
+  'createdAt',
+  'updatedAt',
+  'createdBy',
+  'epoch',
+  'etag'
+]
 
 /**
  * The resource preview shell shared by this page's two branches (a Verifiable
@@ -57,6 +70,7 @@ const log = createLogger('fw:ui:storage')
  * @param options.isPublic {boolean}   whether to show the public-access marker
  * @param [options.description] {string}
  * @param options.actions {ReactNode}   the card's action buttons
+ * @param options.metadata {ReactNode}   the lazy metadata card
  * @param options.sourceToggle {ReactNode}   the decrypted/envelope switch
  * @param options.sourceText {string}   the code block's contents
  * @returns {JSX.Element}
@@ -67,6 +81,7 @@ function ResourcePreview({
   isPublic,
   description,
   actions,
+  metadata,
   sourceToggle,
   sourceText
 }: {
@@ -75,6 +90,7 @@ function ResourcePreview({
   isPublic: boolean
   description?: string
   actions: ReactNode
+  metadata: ReactNode
   sourceToggle: ReactNode
   sourceText: string
 }) {
@@ -123,6 +139,8 @@ function ResourcePreview({
           </Stack>
         </Stack>
       </Paper>
+
+      {metadata}
 
       {sourceToggle}
       <JsonHighlight code={sourceText} sx={credentialDetailStyles.codeBlock} />
@@ -378,6 +396,26 @@ export function CollectionResourcePage() {
     ? `/credential/${encodeURIComponent(credentialCid)}`
     : null
 
+  const resourceUrl = resource?.url ?? null
+  const fetchResourceMeta = useCallback(async () => {
+    if (!storage || !resourceUrl || !collectionId) {
+      return { meta: null, encrypted: false }
+    }
+    const [meta, encrypted] = await Promise.all([
+      storage.fetchResourceMeta({ url: resourceUrl }),
+      storage.isCollectionEncrypted({ collectionId })
+    ])
+    return { meta, encrypted }
+  }, [storage, resourceUrl, collectionId])
+
+  const metadata = resourceUrl ? (
+    <MetadataCard
+      key={resourceUrl}
+      fetchMeta={fetchResourceMeta}
+      fieldOrder={RESOURCE_META_FIELDS}
+    />
+  ) : null
+
   const sourceToggle = envelopeText !== null && (
     <SourceViewToggle
       value={sourceView}
@@ -418,6 +456,7 @@ export function CollectionResourcePage() {
               title={displayTitle}
               isPublic={!!resource.isPublic}
               description={description}
+              metadata={metadata}
               sourceToggle={sourceToggle}
               sourceText={shownSourceText}
               actions={
@@ -462,6 +501,7 @@ export function CollectionResourcePage() {
             resourceId={resource.id}
             title={displayTitle}
             isPublic={!!resource.isPublic}
+            metadata={metadata}
             sourceToggle={sourceToggle}
             sourceText={shownSourceText}
             actions={

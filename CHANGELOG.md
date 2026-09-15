@@ -2,6 +2,16 @@
 
 ## 0.44.0 - TBD
 
+### Added
+
+- The storage browser's collection and resource pages carry a collapsed
+  Metadata card over the `/meta` document, read on first expand and rendered
+  as labeled rows plus a raw source view. A server without metadata support
+  and a null read (a 404, which also covers a target the session may not
+  read) both show as empty rather than as an error. `StorageManager`'s
+  `fetchResourceMeta` / `fetchCollectionMeta` / `isCollectionEncrypted` are
+  the read path.
+
 ### Changed
 
 - A transient session grants a whole-Space read like every other session

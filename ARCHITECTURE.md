@@ -408,7 +408,9 @@ where status and diagnostics go. Every replication, and every
 Space lifecycle (create/exists/wipe), the storage-browser read-through
 (`/storage/**` pages work directly over remote collections), export/import,
 and quotas. `StorageManager` is the facade; pages and components always talk
-to it rather than to a backend class.
+to it rather than to a backend class. A collection's and a resource's `/meta`
+document is read on demand by the storage-browser pages' Metadata card, which
+fetches only when the user expands it.
 
 Deleting a credential retracts its world-readable public copy before
 removing the private credential (`StorageManager.deleteCredential`), since
