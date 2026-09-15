@@ -193,15 +193,28 @@ export const StoragePage = () => {
 
       const stream = await session.storage.exportSpace()
 
+      const fileName = `space-${spaceId}.tar`
       const windowWithPicker = window as Window & {
         showSaveFilePicker?: SaveFilePicker
       }
       if (typeof windowWithPicker.showSaveFilePicker !== 'function') {
-        throw new Error('Streaming export is not supported in this browser.')
+        // Firefox and Safari have no File System Access API: buffer the
+        // archive into a Blob and hand it to a regular download instead.
+        const bytes = await new Response(stream).blob()
+        const url = URL.createObjectURL(bytes)
+        try {
+          const link = document.createElement('a')
+          link.href = url
+          link.download = fileName
+          link.click()
+        } finally {
+          URL.revokeObjectURL(url)
+        }
+        return
       }
 
       const fileHandle = await windowWithPicker.showSaveFilePicker({
-        suggestedName: `space-${spaceId}.tar`,
+        suggestedName: fileName,
         types: [
           {
             description: 'TAR archive',

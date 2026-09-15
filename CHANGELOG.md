@@ -14,6 +14,10 @@
 
 ### Changed
 
+- The Space export no longer requires the File System Access API. A
+  browser without `showSaveFilePicker` (Firefox, Safari) now receives the
+  archive as a regular download instead of the "could not export" error.
+
 - Disconnecting a connected app rotates it out of its collections' key epochs
   even when every recorded grant has expired. The candidate collections now
   come from the Space's collection listing (the Collection Metadata

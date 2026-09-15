@@ -1416,27 +1416,14 @@ export class WASRemoteStore {
   }
 
   async exportSpace(): Promise<ReadableStream<Uint8Array>> {
-    let response
     try {
-      // Use the raw request escape hatch rather than `space.export()`: the
-      // handle helper buffers the whole tar archive into memory, whereas the
-      // raw `HttpResponse` exposes a `body` stream we can pipe straight to disk.
-      response = await this.was.request({
-        path: `/space/${this.spaceId}/export`,
-        method: 'POST',
-        headers: { accept: 'application/x-tar' },
-        capability: this.#capability
-      })
+      // The streaming variant: the archive is piped to disk as it arrives
+      // rather than buffered whole in memory.
+      return await this.#space().exportStream()
     } catch (err) {
       log.error('Error exporting space', { err })
       throw new Error('Failed to export remote space.', { cause: err })
     }
-
-    if (!response.body) {
-      throw new Error('Unexpected export response: no streamable body.')
-    }
-
-    return response.body
   }
 
   async importSpace({
