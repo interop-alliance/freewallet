@@ -2246,8 +2246,9 @@ describe('deleteAccount (failure policy)', () => {
       session: makeSession({ transient: true }),
       passphrase: PASSPHRASE
     })
-    // The visit's generation delegation is scoped to the items subtree and
-    // can never name the bare Space URL, so the probe mints its own child.
+    // The deletion path mints a single-verb root child for each Space-level
+    // verb it needs rather than riding the visit's generation delegation, so
+    // the probe mints its own GET-only child.
     expect(state.mints).toContainEqual(
       expect.objectContaining({
         shape: 'root',

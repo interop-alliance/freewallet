@@ -68,8 +68,8 @@ projection under-listing a key the log still carries is the safe residue.
 And every transient visit runs wallet-core's `ensureDidWebProjection`, which
 re-derives the projection from the resolved log and republishes only on a
 difference, invoking under the generation delegation. That delegation
-targets the account Space's items subtree, which covers `id/did.json`, so no
-bridge is widened.
+targets the account Space's canonical container URL, which covers
+`id/did.json` by ordinary attenuation, so no bridge is widened.
 
 The ensure's write is ordered twice over, since a difference alone does not
 say which side is stale. It re-resolves the log under the visit's pins and

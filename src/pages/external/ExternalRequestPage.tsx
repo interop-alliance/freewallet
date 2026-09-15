@@ -162,15 +162,6 @@ export function ExternalRequestPage() {
       collections: existingCollectionsFrom(
         await loggedIn.storage.listCollectionPublicStates()
       )
-      // Deliberately NOT `generationDelegationParent`: this page bars the
-      // whole-Space class outright below, for every session, and refuses the
-      // WHOLE request when one is asked for. Resolving it as unsatisfiable
-      // instead would drop that one grant silently and let the rest of the
-      // request through, since `barredGrants` only bars SATISFIABLE targets.
-      // That rests on `ALLOWED_TARGET_CLASSES` never admitting `space`: were
-      // the allowlist widened to it, this page would have to pass the flag
-      // like the popup does, or consent would show a whole-Space row the mint
-      // then drops.
     })
     // The allowlist: the first point a target's class is known is after
     // resolution, so the check runs here, still before consent renders.

@@ -2993,8 +2993,9 @@ export async function deleteAccount({
       // concluding "pre-pivot, data still there" from a transport error would
       // skip (b6) and (w) while the account is gone. Re-probe before
       // surfacing -- under a freshly minted GET-only child on a transient
-      // session, since the visit's generation delegation is scoped to the
-      // items subtree and can never name the bare Space URL.
+      // session, the same shape the deletion's own DELETE capability takes:
+      // this path mints a single-verb root child for each Space-level verb
+      // it needs rather than riding the visit's generation delegation.
       log.error('Error wiping user data', { err })
       let probed: 'present' | 'absent' | 'unknown' = 'unknown'
       try {

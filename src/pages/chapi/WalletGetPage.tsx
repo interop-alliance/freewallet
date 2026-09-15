@@ -69,7 +69,6 @@ import {
   queriesOf,
   requestsCredentialType,
   resolveGrants,
-  sessionGrantsAreGenerationScoped,
   startExchange,
   vcApiExchangeUrl,
   vcMatchesFor,
@@ -471,9 +470,7 @@ export function WalletGetPage() {
               }),
               space,
               collections: existingCollections,
-              allowMissingController: true,
-              generationDelegationParent:
-                sessionGrantsAreGenerationScoped(loggedIn)
+              allowMissingController: true
             })
           )
         }
@@ -504,9 +501,7 @@ export function WalletGetPage() {
           resolveGrants({
             zcapRequests: profile.zcapRequests,
             space,
-            collections: existingCollections,
-            generationDelegationParent:
-              sessionGrantsAreGenerationScoped(loggedIn)
+            collections: existingCollections
           })
         )
       }

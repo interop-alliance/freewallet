@@ -1,5 +1,21 @@
 # History
 
+## 0.44.0 - TBD
+
+### Changed
+
+- A transient session grants a whole-Space read like every other session
+  kind. The refusal `resolveGrant` applied under a generation delegation
+  dated from when that delegation targeted the Space's items subtree, which
+  a whole-Space target sat outside; WAS v0.5 made the trailing-slash
+  container URL canonical, so the two are one string and the pair verifies.
+  The bound is the wallet-side GET/HEAD limitation on the grant. The server
+  adds one thing on top of it: writing the Space Metadata object is
+  controller-only, so no delegated capability reaches it. The
+  `whole-space-transient` refusal
+  reason, its consent copy, and `resolveGrant`'s `generationDelegationParent`
+  option are gone.
+
 ## 0.43.0 - 2026-09-14
 
 Every account-management ceremony now runs from a transient session, on a

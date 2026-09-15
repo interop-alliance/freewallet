@@ -122,10 +122,12 @@ intersected with the limitation for the target's class: read-only for a
 whole Space, a protected collection, and a share, the full vocabulary for
 public collections and app-provisioned private collections. The consent
 screen shows exactly what `resolveGrants` resolved. A grant left with no
-permitted action is unsatisfiable rather than delegated empty. So is a
-whole-Space target asked for by a session whose grants chain under a
-generation delegation, since that delegation is scoped to the Space's items
-subtree; the consent screen words that refusal for itself. Resolution
+permitted action is unsatisfiable rather than delegated empty. A whole-Space
+read resolves the same on every session kind. A transient session's
+generation delegation targets the Space's canonical container URL, the
+string a whole-Space target resolves to. What bounds the grant is the
+wallet-side GET/HEAD limitation. The server adds one thing on top of it,
+that writing the Space Metadata object is controller-only. Resolution
 consults a snapshot of the existing collections' state, kept current as the
 delegation loop provisions, so duplicate names in one request resolve
 against what the request itself created.

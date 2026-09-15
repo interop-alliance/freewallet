@@ -55,6 +55,9 @@ export const EXTERNAL_REQUEST_ORIGIN = 'n/a (API request)'
  * the list is a documented decision, not a code change.
  */
 const ALLOWED_TARGET_CLASSES: readonly string[] = [
+  // `'space'` must stay out. This door attests no requesting origin, and
+  // `barredGrants` bars only satisfiable targets, so leaving the class out
+  // here is what refuses a whole-Space read grant outright.
   'public-collection',
   'collection'
 ]

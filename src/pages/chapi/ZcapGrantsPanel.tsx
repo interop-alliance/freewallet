@@ -280,13 +280,7 @@ export function ZcapGrantsPanel({
               </>
             ) : (
               <Typography variant="body2" color="text.secondary">
-                {/* A refusal that carries its own copy says why; every other
-                    one falls back to the generic note. */}
-                {t(
-                  target.unsatisfiableReason === 'whole-space-transient'
-                    ? 'chapi.get.zcapCannotFulfillWholeSpaceTransient'
-                    : 'chapi.get.zcapCannotFulfill'
-                )}
+                {t('chapi.get.zcapCannotFulfill')}
               </Typography>
             )}
           </Box>

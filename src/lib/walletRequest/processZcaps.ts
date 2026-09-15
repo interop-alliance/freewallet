@@ -157,8 +157,13 @@ type TargetClass =
  * matter what the request asks for.
  */
 const ACTION_CEILINGS: Record<TargetClass, readonly WasAction[]> = {
-  // A Space-wide write would permit rewriting the Space Description, i.e.
-  // controller takeover.
+  /**
+   * A whole-Space grant stays read-only because this row is GET/HEAD, and
+   * that limitation is the bound. The server adds only one thing on top of
+   * it: writing the Space Metadata object (`PUT /space/<S>/meta`) is
+   * controller-only, so no delegated capability reaches it. Its other
+   * Space-level writes do admit delegated capabilities.
+   */
   space: ['GET', 'HEAD'],
   // The user's own credentials, activity log, published DID artifacts, and
   // private key-id map: readable by an RP, never writable by one.
@@ -212,10 +217,13 @@ function isProtectedCollection(collectionId: string | undefined): boolean {
  * The collections no grant may ever name, whatever the descriptor spelling and
  * whatever actions it asks for. `app-connections` holds one app-key credential
  * per connected app, each carrying that app's private seed in
- * `credentialSubject.seed`, so even a read-only grant on it would hand the
- * grantee every other connected app's identity. Read-only-protected (the
- * treatment of the other standard collections) is therefore not enough here:
- * a grant naming it is unsatisfiable.
+ * `credentialSubject.seed`. The rule does two things. It keeps
+ * `app-connections` out of `provisionFor`'s recipient roster, and it refuses
+ * a target that names the collection directly, so such a grant is
+ * unsatisfiable rather than merely read-only. Confidentiality of the seeds
+ * rests elsewhere, on the epoch roster: the rows are EDV envelopes, and a
+ * grantee is not an epoch recipient, so it decrypts nothing. A whole-Space
+ * read grant reaches the ciphertext by attenuation and reads no seed.
  *
  * Deliberately an explicit membership list rather than a roster-derived rule.
  * The roster's `shareable: false` cannot stand in for it -- `public-credentials`
@@ -302,14 +310,6 @@ function collectionClassFor({
 }
 
 /**
- * The refusals that carry their own consent copy, in place of the generic
- * "cannot fulfill" note. Only one today: a whole-Space target asked for by a
- * session whose grants chain under a generation delegation, which is scoped to
- * the Space's items subtree and can never parent a whole-Space grant.
- */
-export type UnsatisfiableReason = 'whole-space-transient'
-
-/**
  * A requested capability's `invocationTarget` resolved against the user's own
  * Space. An absent `targetClass` means the descriptor cannot be fulfilled (a
  * foreign URL, an invalid collection name, or an unknown descriptor type); it
@@ -332,9 +332,6 @@ interface ResolvedTarget {
   collectionId?: string
   // A standard EDV-encrypted collection: the RP will only see ciphertext.
   encrypted: boolean
-  // Why an unsatisfiable target was refused, when the refusal has consent copy
-  // of its own. Absent on every generic refusal.
-  unsatisfiableReason?: UnsatisfiableReason
 }
 
 /**
@@ -408,21 +405,6 @@ export class GenerationDelegationStaleError extends Error {
  */
 export function hasZcapStorage(session: Session): boolean {
   return !!session.storage.hasRemoteStorage && !!session.storage.spaceUrl
-}
-
-/**
- * Whether this session's grants chain under a generation delegation rather
- * than under the Space root capability -- true for a transient session, which
- * holds its Space authority as that delegation. Two consequences ride on it:
- * the whole-Space class is unsatisfiable (see {@link resolveGrant}) and every
- * grant's expiry is clamped to the parent's ({@link grantTtlDays}). Exposed so
- * a consent screen states both without re-deriving the condition.
- *
- * @param session {Session}
- * @returns {boolean}
- */
-export function sessionGrantsAreGenerationScoped(session: Session): boolean {
-  return !!session.profile.invocationCapability
 }
 
 /**
@@ -533,13 +515,6 @@ export function grantTtlDays({
 const UNSATISFIABLE: ResolvedTarget = Object.freeze({
   needsProvisioning: false,
   encrypted: false
-})
-
-// The same refusal, carrying the one reason the consent screen words for
-// itself (see {@link UnsatisfiableReason}).
-const UNSATISFIABLE_WHOLE_SPACE_TRANSIENT: ResolvedTarget = Object.freeze({
-  ...UNSATISFIABLE,
-  unsatisfiableReason: 'whole-space-transient'
 })
 
 // The satisfiable counterpart: the flags every resolved target states, spread
@@ -970,41 +945,24 @@ function capActions({
  * @param [options.allowMissingController] {boolean}   App Connect
  *   consent-preview only: the app-key DID may not exist yet, so an absent
  *   controller is not yet a failure there
- * @param [options.generationDelegationParent] {boolean}   this session's
- *   grants chain under a generation delegation rather than the Space root
- *   (a transient session), which refuses the whole-Space class
  * @returns {ResolvedGrant}
  */
 export function resolveGrant({
   descriptor,
   space,
   collections,
-  allowMissingController = false,
-  generationDelegationParent = false
+  allowMissingController = false
 }: {
   descriptor: ICapabilityQueryDetail
   space: SpaceLocation
   collections: ExistingCollections
   allowMissingController?: boolean
-  generationDelegationParent?: boolean
 }): ResolvedGrant {
   let target = resolveInvocationTarget({
     descriptor: descriptor.invocationTarget,
     space,
     collections
   })
-  // A transient session's grants chain under the generation delegation, whose
-  // `invocationTarget` is the Space's items subtree. That subtree is now
-  // written the same way as the Space itself (WAS v0.5 makes the
-  // trailing-slash container URL canonical), so containment no longer refuses
-  // the pair on its own. The class stays refused here deliberately: a
-  // transient visit's per-generation authority is not the place to hand a
-  // third party the whole Space, and the server's container rule refuses the
-  // Space-level writes such a grant would appear to carry anyway. Recorded
-  // here and applied last, so a generic refusal below cannot overwrite the
-  // reason with the wordless one.
-  const wholeSpaceUnderGeneration =
-    target.targetClass === 'space' && generationDelegationParent
   // A grant with no recipient cannot be delegated: the wire type requires a
   // `controller` but an actual request body can omit it, which would render a
   // consent row with no recipient and delegate to nobody. Refuse it visibly
@@ -1041,9 +999,6 @@ export function resolveGrant({
   if (isSatisfiable(target) && allowedActions.length === 0) {
     target = UNSATISFIABLE
   }
-  if (wholeSpaceUnderGeneration) {
-    target = UNSATISFIABLE_WHOLE_SPACE_TRANSIENT
-  }
   return {
     descriptor,
     target,
@@ -1063,31 +1018,25 @@ export function resolveGrant({
  * @param options.collections {ExistingCollections}
  * @param [options.allowMissingController] {boolean}   App Connect
  *   consent-preview only (see {@link resolveGrant})
- * @param [options.generationDelegationParent] {boolean}   see
- *   {@link resolveGrant}; `sessionGrantsAreGenerationScoped` derives it from a
- *   session
  * @returns {ResolvedGrant[]}
  */
 export function resolveGrants({
   zcapRequests,
   space,
   collections,
-  allowMissingController,
-  generationDelegationParent
+  allowMissingController
 }: {
   zcapRequests: ICapabilityQueryDetail[]
   space: SpaceLocation
   collections: ExistingCollections
   allowMissingController?: boolean
-  generationDelegationParent?: boolean
 }): ResolvedGrant[] {
   return zcapRequests.map(descriptor =>
     resolveGrant({
       descriptor,
       space,
       collections,
-      allowMissingController,
-      generationDelegationParent
+      allowMissingController
     })
   )
 }
@@ -1322,8 +1271,7 @@ export async function processZcaps({
     const { target, allowedActions, write } = resolveGrant({
       descriptor,
       space,
-      collections,
-      generationDelegationParent: !!invocationCapability
+      collections
     })
     if (!isSatisfiable(target) || !target.invocationTarget) {
       continue

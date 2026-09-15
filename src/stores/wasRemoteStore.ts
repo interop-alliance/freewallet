@@ -1315,10 +1315,12 @@ export class WASRemoteStore {
    * Deletes this store's whole remote Space.
    *
    * By default the request root-invokes through this store's bound
-   * capability, which is what an enrolled client holds. A session whose bound
-   * capability cannot name the bare Space URL -- a transient session rides a
-   * generation delegation scoped to the Space's items subtree -- passes its
-   * own single-verb DELETE capability and the signer that capability names as
+   * capability, which is what an enrolled client holds. The server's
+   * exact-delete container rule admits a delegated capability only when the
+   * invoked capability targets exactly the Space's canonical container URL
+   * with `allowedAction` exactly `['DELETE']`. A transient session rides a
+   * generation delegation carrying a wider action set, so it passes its own
+   * single-verb DELETE capability and the signer that capability names as
    * its delegatee, and both travel together on this one request.
    *
    * The 404 is REPORTED rather than decided: the server masks an

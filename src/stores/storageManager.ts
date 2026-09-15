@@ -1862,10 +1862,13 @@ export class StorageManager {
    * account document happens before this call, and the local half is the
    * shared wipe enumeration's.
    *
-   * A session whose bound invocation capability cannot name the bare Space
-   * URL -- a transient session's generation delegation is scoped to the
-   * Space's items subtree -- supplies its own single-verb DELETE capability
-   * and the client that capability names as its delegatee.
+   * A Space DELETE is governed by the server's exact-delete container rule.
+   * A delegated capability passes only when the invoked capability targets
+   * exactly the Space's canonical container URL and its `allowedAction` is
+   * exactly `['DELETE']`. A transient session's generation delegation
+   * targets that URL but carries a wider action set, so it supplies its own
+   * single-verb DELETE capability and the client that capability names as
+   * its delegatee.
    *
    * @param [options] {object}
    * @param [options.capability] {IZcap}   an explicit DELETE capability on

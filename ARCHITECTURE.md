@@ -943,9 +943,9 @@ base64url(SHA-256(unlock did:key))` (a discovery convention).
 - **Generation delegation** -- the one Space-scoped zcap per annex
   generation, delegated to the annex DID by the enrolled client that mints
   the generation, or by the ladder VM on a credential-anchored account. Its
-  `invocationTarget` is the Space's items subtree, so a whole-Space target
-  under it is unsatisfiable and every grant's `expires` is limited to its
-  own.
+  `invocationTarget` is the Space's canonical container URL, so a
+  whole-Space read grant chains under it, and every grant's `expires` is
+  limited to its own.
 - **CapabilityAgent** -- from `@interop/capability-agent`. Wraps the Ed25519
   key pair derived from the passphrase and exposes `getSigner()`.
 - **ZcapClient** -- from `@interop/ezcap`. Wraps the session's root-key
