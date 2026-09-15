@@ -14,6 +14,15 @@
 
 ### Changed
 
+- Every unlock Space (passphrase, passkey, and recovery-code alike) is
+  created with the Space type `['AuxiliarySpace', 'Space', 'UnlockSpace']`,
+  so a reader can recognize one from its Space Metadata object alone. The
+  three creation sites ride wallet-core's `ensureUnlockSpace`, which stamps
+  the type (`@interop/wallet-core` 0.79.0); the annex Space's type is now
+  sorted the same way. Existing unlock Spaces keep no type, since the server
+  treats `type` as immutable after creation; a passphrase change creates a
+  fresh one.
+
 - The Space export no longer requires the File System Access API. A
   browser without `showSaveFilePicker` (Firefox, Safari) now receives the
   archive as a regular download instead of the "could not export" error.
