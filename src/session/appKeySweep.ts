@@ -106,8 +106,9 @@ async function isStrandedAppKey(
  * every later seed until some future login. The sweep is idempotent, so the
  * skipped rows are retried at the next one.
  *
- * The activity history both revocation calls scan is fetched once, and only
- * when at least one row needs revoking.
+ * The activity history both revocation calls scan, and the Space collection
+ * listing the rotation derives its candidates from, are each fetched once
+ * across the whole sweep, and only when at least one row needs revoking.
  *
  * The orphan pass then retracts every app-key public copy that has no private
  * row -- a public copy the user kept through the delete dialog's "keep public
@@ -145,18 +146,22 @@ export async function sweepStrandedAppKeys({
   }
 
   let items: Awaited<ReturnType<StorageManager['listHistoryItems']>> | undefined
+  let collections:
+    Awaited<ReturnType<StorageManager['listCollections']>> | undefined
   let deleted = 0
   for (const { cid, origin, subjectDid } of stranded) {
     try {
       if (origin && subjectDid) {
         items ??= await storage.listHistoryItems()
+        collections ??= await storage.listCollections()
         // Rotate the app out of its app-provisioned collections' key epochs
         // (revoking those collections' pull-axis grants indivisibly) before
         // anything else, then revoke the remaining recorded grants.
         const rotation = await storage.revokeAppCollectionRecipients({
           origin,
           subjectDid,
-          items
+          items,
+          collections
         })
         if (rotation.failed > 0) {
           log.warn(
@@ -182,7 +187,8 @@ export async function sweepStrandedAppKeys({
   const retracted = await retractOrphanPublicAppKeys({
     storage,
     privateCids: new Set(credentials.map(({ cid }) => cid)),
-    items
+    items,
+    collections
   })
   return { deleted, retracted }
 }
@@ -198,16 +204,20 @@ export async function sweepStrandedAppKeys({
  * @param options.storage {StorageManager}
  * @param options.privateCids {Set<string>}   the cids the private pass covered
  * @param [options.items] {Array}   the activity history, if already fetched
+ * @param [options.collections] {Array}   the Space collection listing, if
+ *   already fetched
  * @returns {Promise<number>}   how many public copies were retracted
  */
 async function retractOrphanPublicAppKeys({
   storage,
   privateCids,
-  items
+  items,
+  collections
 }: {
   storage: StorageManager
   privateCids: Set<string>
   items?: Awaited<ReturnType<StorageManager['listHistoryItems']>>
+  collections?: Awaited<ReturnType<StorageManager['listCollections']>>
 }): Promise<number> {
   let publicCopies: Awaited<ReturnType<StorageManager['listCredentials']>>
   try {
@@ -223,6 +233,7 @@ async function retractOrphanPublicAppKeys({
   }
 
   let history = items
+  let listing = collections
   let retracted = 0
   for (const { cid, vc } of publicCopies) {
     if (!(await isStrandedAppKey(vc))) {
@@ -233,10 +244,12 @@ async function retractOrphanPublicAppKeys({
     try {
       if (origin && subjectDid) {
         history ??= await storage.listHistoryItems()
+        listing ??= await storage.listCollections()
         const rotation = await storage.revokeAppCollectionRecipients({
           origin,
           subjectDid,
-          items: history
+          items: history,
+          collections: listing
         })
         if (rotation.failed > 0) {
           log.warn(

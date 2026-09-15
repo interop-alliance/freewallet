@@ -49,6 +49,7 @@ import {
 import { StorageEmptyState } from '@/components/storage/EmptyState'
 import { SourceViewToggle } from '@/components/storage/SourceViewToggle'
 import { MetadataCard } from '@/components/storage/MetadataCard'
+import { fetchMetaWithEncryptionProbe } from '@/components/storage/metadataRows'
 import {
   decryptResourceBody,
   useResourceSourceCopy
@@ -316,16 +317,22 @@ export function CollectionContentsPage() {
 
   const collectionUrl = collection?.url ?? null
   const fetchCollectionMeta = useCallback(async () => {
-    if (!storage || !collectionUrl) {
+    if (!storage || !collectionUrl || !collectionId) {
       return { meta: null, encrypted: false }
     }
-    const [meta, governed] = await Promise.all([
-      storage.fetchCollectionMeta({ url: collectionUrl }),
-      storage.isCollectionEncrypted({ collectionId })
-    ])
-    // The document's own member is the fallback, for a session that reads
-    // the served Description rather than the governing log.
-    return { meta, encrypted: governed || Boolean(meta?.encryption) }
+    // The encryption probe (a governing-log read) is awaited separately from
+    // the meta read, so a continuity refusal or an unreachable host there
+    // does not discard a successful meta read; the document's own member is
+    // the fallback, for a session that reads the served Description rather
+    // than the governing log.
+    return fetchMetaWithEncryptionProbe({
+      fetchMeta: () => storage.fetchCollectionMeta({ url: collectionUrl }),
+      probeEncrypted: () => storage.isCollectionEncrypted({ collectionId }),
+      onProbeError: err =>
+        log.warn('Could not probe the collection encryption descriptor', {
+          err
+        })
+    })
   }, [storage, collectionUrl, collectionId])
 
   const subtitle = useMemo(() => {

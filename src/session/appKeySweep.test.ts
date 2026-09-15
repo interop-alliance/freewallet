@@ -79,6 +79,10 @@ function storageDouble({
       calls.push('listHistoryItems')
       return []
     }),
+    listCollections: vi.fn(async () => {
+      calls.push('listCollections')
+      return []
+    }),
     revokeAppCollectionRecipients: vi.fn(
       async ({ subjectDid }: { subjectDid: string }) => {
         calls.push(`rotate:${subjectDid}`)
@@ -121,6 +125,7 @@ describe('sweepStrandedAppKeys', () => {
     expect(deleted).toBe(1)
     expect(calls).toEqual([
       'listHistoryItems',
+      'listCollections',
       'rotate:did:key:z6MkfakeAppSubject',
       'revoke:did:key:z6MkfakeAppSubject',
       'delete:cid-1'
@@ -128,7 +133,8 @@ describe('sweepStrandedAppKeys', () => {
     expect(storage.revokeAppCollectionRecipients).toHaveBeenCalledWith({
       origin: 'https://app.example',
       subjectDid: 'did:key:z6MkfakeAppSubject',
-      items: []
+      items: [],
+      collections: []
     })
     expect(storage.revokeAppGrants).toHaveBeenCalledWith({
       origin: 'https://app.example',
@@ -137,7 +143,7 @@ describe('sweepStrandedAppKeys', () => {
     })
   })
 
-  it('fetches the activity history once for the whole sweep', async () => {
+  it('fetches the activity history and the collection listing once for the whole sweep', async () => {
     const storage = storageDouble({
       credentials: [
         { cid: 'cid-1', vc: appKeyFixture({ subject: 'did:key:zFirst' }) },
@@ -152,6 +158,8 @@ describe('sweepStrandedAppKeys', () => {
     expect(deleted).toBe(2)
     expect(storage.listHistoryItems).toHaveBeenCalledTimes(1)
     expect(calls.filter(entry => entry === 'listHistoryItems')).toHaveLength(1)
+    expect(storage.listCollections).toHaveBeenCalledTimes(1)
+    expect(calls.filter(entry => entry === 'listCollections')).toHaveLength(1)
   })
 
   it('skips the delete when the grant revocation throws', async () => {
@@ -286,6 +294,7 @@ describe('sweepStrandedAppKeys', () => {
     expect(retracted).toBe(1)
     expect(calls).toEqual([
       'listHistoryItems',
+      'listCollections',
       'rotate:did:key:z6MkfakeAppSubject',
       'revoke:did:key:z6MkfakeAppSubject',
       'retract:pub-1'

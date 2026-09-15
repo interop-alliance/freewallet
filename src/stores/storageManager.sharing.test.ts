@@ -20,7 +20,7 @@
  *
  * @vitest-environment node
  */
-import { afterEach, describe, expect, it } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 import { addSink, captureSink } from '@interop/logger'
 import type { IVerifiableCredential } from '@interop/data-integrity-core'
 import type {
@@ -36,13 +36,16 @@ import {
   type ResourceMetadataCustom,
   type Space
 } from '@interop/was-client'
+import { Ed25519VerificationKey } from '@interop/ed25519-verification-key'
 import {
   addRecipient,
   createEdvEncryption,
   ensureFirstEpoch,
   initRecipients,
   removeRecipient,
-  resolveHmacKey
+  resolveHmacKey,
+  x25519RecipientFromDidKey,
+  type RecipientPublicKey
 } from '@interop/was-client/edv'
 import {
   descriptorLogsFrom,
@@ -77,6 +80,7 @@ import {
 } from '@interop/wallet-core/testing'
 import { EXTERNAL_REQUEST_ORIGIN } from '@/lib/walletRequest/externalRequest'
 import type { WASRemoteStore } from './wasRemoteStore'
+import type { StorageCollection } from '@/lib/storage'
 
 /**
  * A minimal well-formed VC body; the storage layer treats it as opaque JSON.
@@ -110,6 +114,31 @@ async function generateKey(): Promise<{
 }
 
 /**
+ * An App Connect app's identity: a seed-derived Ed25519 `did:key` subject, the
+ * epoch-recipient key App Connect provisioning derives from it, and the
+ * matching private key-agreement key, so a test can both write the roster
+ * entry the way production does and try to read with it afterwards.
+ */
+async function generateAppIdentity(): Promise<{
+  did: string
+  recipient: RecipientPublicKey
+  keyAgreementKey: IKeyAgreementKey
+}> {
+  const key = await Ed25519VerificationKey.generate()
+  const did = `did:key:${key.fingerprint()}`
+  const keyAgreementKey = X25519KeyAgreementKey2020.fromEd25519({
+    controller: did,
+    publicKeyMultibase: key.publicKeyMultibase,
+    privateKeyMultibase: key.privateKeyMultibase
+  })
+  return {
+    did,
+    recipient: x25519RecipientFromDidKey({ did }),
+    keyAgreementKey: keyAgreementKey as IKeyAgreementKey
+  }
+}
+
+/**
  * A structural fake of WASRemoteStore over the in-memory descriptor stores and
  * a revoke-recording Space handle. `collectionEncryption` is served from those
  * same stores -- the server derives a Collection Description's `encryption`
@@ -132,6 +161,11 @@ function makeFakeRemote({ stores }: { stores: MemoryDescriptorStores }): {
     collectionId: string
     meta: { custom?: unknown } | undefined
   }): void
+  /**
+   * The Space's collection listing, as `listCollections` serves it -- the app
+   * attribution (`generator`) the revocation's candidate derivation reads.
+   */
+  setCollections(items: StorageCollection[]): void
 } {
   const spaceId = 's-space'
   const storageServerUrl = 'https://was.example'
@@ -141,6 +175,8 @@ function makeFakeRemote({ stores }: { stores: MemoryDescriptorStores }): {
   const governed: string[] = []
   // The stored `/meta` value per collection, as `collectionMeta` serves it.
   const metas = new Map<string, { custom?: unknown }>()
+  // The Space's collection listing; empty unless a test seeds one.
+  let collections: StorageCollection[] = []
   // The raw synced-resource bodies keyed by logical collection key -- what the
   // remote-direct backend reads/writes over `listSyncedDocuments` etc.
   const logicalToId: Record<string, string> = {
@@ -171,6 +207,9 @@ function makeFakeRemote({ stores }: { stores: MemoryDescriptorStores }): {
       `${spaceUrl}${collectionId}/`,
     async collectionEncryption({ collectionId }: { collectionId: string }) {
       return stores.descriptorOf(collectionId)
+    },
+    async listCollections() {
+      return collections
     },
     async collectionMeta({ collectionId }: { collectionId: string }) {
       // The real store reports "nothing stored" as undefined; a collection a
@@ -247,12 +286,16 @@ function makeFakeRemote({ stores }: { stores: MemoryDescriptorStores }): {
     }
     metas.set(collectionId, meta)
   }
+  const setCollections = (items: StorageCollection[]) => {
+    collections = items
+  }
   return {
     remoteStore,
     revoked,
     governed,
     seedResource,
-    setCollectionMeta
+    setCollectionMeta,
+    setCollections
   }
 }
 
@@ -1617,11 +1660,10 @@ describe('StorageManager.provisionAppCollection', () => {
 
 describe('StorageManager.revokeAppCollectionRecipients', () => {
   const APP_ORIGIN = 'https://app.example'
-  const APP_SUBJECT = 'did:key:z6MkAppSubjectR'
 
   it('rotates the app off each app-provisioned collection and revokes its grant', async () => {
     const owner = await generateKey()
-    const app = await generateKey()
+    const app = await generateAppIdentity()
     const stores = memoryDescriptorStores()
     const { remoteStore, revoked } = makeFakeRemote({ stores })
     const descriptors = await provisionGovernedCollections(owner, stores)
@@ -1639,7 +1681,7 @@ describe('StorageManager.revokeAppCollectionRecipients', () => {
 
     await storage.provisionAppCollection({
       collectionId: 'app-docs',
-      appRecipient: ownerRecipient({ keyAgreementKey: app.keyAgreementKey })
+      appRecipient: app.recipient
     })
 
     const future = new Date(Date.now() + 1_000_000).toISOString()
@@ -1657,7 +1699,7 @@ describe('StorageManager.revokeAppCollectionRecipients', () => {
             id: 'z-app-docs',
             invocationTarget: target,
             expires: future,
-            controller: APP_SUBJECT
+            controller: app.did
           })
         }
       ],
@@ -1666,7 +1708,7 @@ describe('StorageManager.revokeAppCollectionRecipients', () => {
 
     const outcome = await storage.revokeAppCollectionRecipients({
       origin: APP_ORIGIN,
-      subjectDid: APP_SUBJECT
+      subjectDid: app.did
     })
 
     expect(outcome).toEqual({ collections: 1, rotated: 1, failed: 0 })
@@ -1681,10 +1723,163 @@ describe('StorageManager.revokeAppCollectionRecipients', () => {
     )
   })
 
-  it('retires several non-owner recipients in one rotation', async () => {
+  it('rotates an app-provisioned collection whose every grant expired', async () => {
     const owner = await generateKey()
-    const app = await generateKey()
-    const other = await generateKey()
+    const app = await generateAppIdentity()
+    const stores = memoryDescriptorStores()
+    const { remoteStore, revoked, setCollections } = makeFakeRemote({ stores })
+    const descriptors = await provisionGovernedCollections(owner, stores)
+    const ciphers = await buildCiphers(owner, descriptors)
+    const { localStore, user } = await initLocalStore(ciphers)
+    const storage = new StorageManager({
+      persistence: browserLocalSessionPersistence(),
+      localStore,
+      remoteStore,
+      descriptorLogs: descriptorLogsFrom(stores),
+      ciphers,
+      vaultKeys: owner,
+      descriptors
+    })
+
+    await storage.provisionAppCollection({
+      collectionId: 'app-docs',
+      appRecipient: app.recipient
+    })
+    // The collection carries the app's attribution, as provisioning stamps it.
+    setCollections([
+      {
+        id: 'app-docs',
+        url: 'https://was.example/space/s-space/app-docs/',
+        generator: app.did
+      }
+    ])
+
+    // Every recorded grant is long past its own expiry, so the grant scan
+    // yields nothing to revoke.
+    const past = new Date(Date.now() - 1_000_000).toISOString()
+    const target = 'https://was.example/space/s-space/app-docs'
+    await storage.addHistoryLogin({
+      user,
+      origin: APP_ORIGIN,
+      grants: [
+        {
+          id: 'g-app-docs',
+          target,
+          allowedActions: ['GET', 'HEAD'],
+          expires: past,
+          zcap: recordedGrant({
+            id: 'z-app-docs',
+            invocationTarget: target,
+            expires: past,
+            controller: app.did
+          })
+        }
+      ],
+      appConnect: { name: 'Example App', firstRun: true }
+    })
+
+    const outcome = await storage.revokeAppCollectionRecipients({
+      origin: APP_ORIGIN,
+      subjectDid: app.did
+    })
+
+    expect(outcome).toEqual({ collections: 1, rotated: 1, failed: 0 })
+    const descriptor = await remoteStore.collectionEncryption({
+      collectionId: 'app-docs'
+    })
+    expect(currentEpochKids(descriptor!)).toEqual([owner.keyAgreementKey.id])
+    // Nothing to revoke: the grant had already expired.
+    expect(revoked).toEqual([])
+  })
+
+  it('skips a generator-attributed collection the app no longer reads', async () => {
+    const owner = await generateKey()
+    const app = await generateAppIdentity()
+    const other = await generateAppIdentity()
+    const stores = memoryDescriptorStores()
+    const { remoteStore, setCollections } = makeFakeRemote({ stores })
+    const descriptors = await provisionGovernedCollections(owner, stores)
+    const ciphers = await buildCiphers(owner, descriptors)
+    const { localStore } = await initLocalStore(ciphers)
+    const storage = new StorageManager({
+      persistence: browserLocalSessionPersistence(),
+      localStore,
+      remoteStore,
+      descriptorLogs: descriptorLogsFrom(stores),
+      ciphers,
+      vaultKeys: owner,
+      descriptors
+    })
+
+    // The app provisioned the collection and was rotated off it already, so
+    // only the attribution still names it; another app reads it today.
+    await storage.provisionAppCollection({
+      collectionId: 'app-docs',
+      appRecipient: other.recipient
+    })
+    setCollections([
+      {
+        id: 'app-docs',
+        url: 'https://was.example/space/s-space/app-docs/',
+        generator: app.did
+      }
+    ])
+    const before = await remoteStore.collectionEncryption({
+      collectionId: 'app-docs'
+    })
+    const epochsBefore = before!.epochs!.length
+
+    const outcome = await storage.revokeAppCollectionRecipients({
+      origin: APP_ORIGIN,
+      subjectDid: app.did
+    })
+
+    expect(outcome).toEqual({ collections: 1, rotated: 0, failed: 0 })
+    const after = await remoteStore.collectionEncryption({
+      collectionId: 'app-docs'
+    })
+    // Nothing rotated: no epoch was added and the reading app kept its entry.
+    expect(after!.epochs).toHaveLength(epochsBefore)
+    expect(currentEpochKids(after!)).toEqual(
+      expect.arrayContaining([owner.keyAgreementKey.id, other.recipient.id])
+    )
+  })
+
+  it('counts a collection listing it could not read as a failure', async () => {
+    const owner = await generateKey()
+    const app = await generateAppIdentity()
+    const stores = memoryDescriptorStores()
+    const { remoteStore } = makeFakeRemote({ stores })
+    const descriptors = await provisionGovernedCollections(owner, stores)
+    const ciphers = await buildCiphers(owner, descriptors)
+    const { localStore } = await initLocalStore(ciphers)
+    const storage = new StorageManager({
+      persistence: browserLocalSessionPersistence(),
+      localStore,
+      remoteStore,
+      descriptorLogs: descriptorLogsFrom(stores),
+      ciphers,
+      vaultKeys: owner,
+      descriptors
+    })
+    vi.spyOn(remoteStore, 'listCollections').mockRejectedValue(
+      new Error('offline')
+    )
+
+    const outcome = await storage.revokeAppCollectionRecipients({
+      origin: APP_ORIGIN,
+      subjectDid: app.did
+    })
+
+    // The caller cannot tell a rotated app from one still holding a recipient
+    // entry, so the disconnect must not report itself done.
+    expect(outcome).toEqual({ collections: 0, rotated: 0, failed: 1 })
+  })
+
+  it('leaves a co-admitted app its recipient entry', async () => {
+    const owner = await generateKey()
+    const app = await generateAppIdentity()
+    const other = await generateAppIdentity()
     const stores = memoryDescriptorStores()
     const { remoteStore, revoked } = makeFakeRemote({ stores })
     const descriptors = await provisionGovernedCollections(owner, stores)
@@ -1702,11 +1897,11 @@ describe('StorageManager.revokeAppCollectionRecipients', () => {
 
     await storage.provisionAppCollection({
       collectionId: 'app-docs',
-      appRecipient: ownerRecipient({ keyAgreementKey: app.keyAgreementKey })
+      appRecipient: app.recipient
     })
     await storage.provisionAppCollection({
       collectionId: 'app-docs',
-      appRecipient: ownerRecipient({ keyAgreementKey: other.keyAgreementKey })
+      appRecipient: other.recipient
     })
     const before = await remoteStore.collectionEncryption({
       collectionId: 'app-docs'
@@ -1729,7 +1924,7 @@ describe('StorageManager.revokeAppCollectionRecipients', () => {
             id: 'z-app-docs',
             invocationTarget: target,
             expires: future,
-            controller: APP_SUBJECT
+            controller: app.did
           })
         }
       ],
@@ -1738,16 +1933,19 @@ describe('StorageManager.revokeAppCollectionRecipients', () => {
 
     const outcome = await storage.revokeAppCollectionRecipients({
       origin: APP_ORIGIN,
-      subjectDid: APP_SUBJECT
+      subjectDid: app.did
     })
 
     expect(outcome).toEqual({ collections: 1, rotated: 1, failed: 0 })
     const after = await remoteStore.collectionEncryption({
       collectionId: 'app-docs'
     })
-    // One fresh epoch for both retiring readers, and one revocation POST.
+    // One fresh epoch, and the app that was not disconnected reads on.
     expect(after!.epochs).toHaveLength(epochsBefore + 1)
-    expect(currentEpochKids(after!)).toEqual([owner.keyAgreementKey.id])
+    expect(currentEpochKids(after!)).toEqual(
+      expect.arrayContaining([owner.keyAgreementKey.id, other.recipient.id])
+    )
+    expect(currentEpochKids(after!)).not.toContain(app.recipient.id)
     expect((revoked as Array<{ id: string }>).map(zcap => zcap.id)).toEqual([
       'z-app-docs'
     ])
@@ -1755,7 +1953,7 @@ describe('StorageManager.revokeAppCollectionRecipients', () => {
 
   it('drops the app from the blinding-key wrap set without rotating the key', async () => {
     const owner = await generateKey()
-    const app = await generateKey()
+    const app = await generateAppIdentity()
     const stores = memoryDescriptorStores()
     const { remoteStore } = makeFakeRemote({ stores })
     const descriptors = await provisionGovernedCollections(owner, stores)
@@ -1773,7 +1971,7 @@ describe('StorageManager.revokeAppCollectionRecipients', () => {
 
     const provisioned = await storage.provisionAppCollection({
       collectionId: 'app-docs',
-      appRecipient: ownerRecipient({ keyAgreementKey: app.keyAgreementKey })
+      appRecipient: app.recipient
     })
     const hmacId = provisioned.hmac?.id
 
@@ -1792,7 +1990,7 @@ describe('StorageManager.revokeAppCollectionRecipients', () => {
             id: 'z-app-docs',
             invocationTarget: target,
             expires: future,
-            controller: APP_SUBJECT
+            controller: app.did
           })
         }
       ],
@@ -1801,7 +1999,7 @@ describe('StorageManager.revokeAppCollectionRecipients', () => {
 
     await storage.revokeAppCollectionRecipients({
       origin: APP_ORIGIN,
-      subjectDid: APP_SUBJECT
+      subjectDid: app.did
     })
 
     const descriptor = await remoteStore.collectionEncryption({
@@ -1810,7 +2008,7 @@ describe('StorageManager.revokeAppCollectionRecipients', () => {
     // The key never rotates -- blinded tokens must compare across the
     // collection's whole history -- so only the app's wrap entry goes.
     expect(descriptor!.hmac?.id).toBe(hmacId)
-    expect(hmacKids(descriptor!)).not.toContain(app.keyAgreementKey.id)
+    expect(hmacKids(descriptor!)).not.toContain(app.recipient.id)
     expect(
       await resolveHmacOutcome({
         descriptor: descriptor!,
@@ -1849,7 +2047,7 @@ describe('StorageManager.revokeAppCollectionRecipients', () => {
     'recovers the collection id from %s recorded in history',
     async (_label, target, expected, expectedRevoked) => {
       const owner = await generateKey()
-      const app = await generateKey()
+      const app = await generateAppIdentity()
       const stores = memoryDescriptorStores()
       const { remoteStore, revoked } = makeFakeRemote({ stores })
       const descriptors = await provisionGovernedCollections(owner, stores)
@@ -1867,7 +2065,7 @@ describe('StorageManager.revokeAppCollectionRecipients', () => {
 
       await storage.provisionAppCollection({
         collectionId: 'app-docs',
-        appRecipient: ownerRecipient({ keyAgreementKey: app.keyAgreementKey })
+        appRecipient: app.recipient
       })
 
       const future = new Date(Date.now() + 1_000_000).toISOString()
@@ -1884,7 +2082,7 @@ describe('StorageManager.revokeAppCollectionRecipients', () => {
               id: 'z-app-docs',
               invocationTarget: target,
               expires: future,
-              controller: APP_SUBJECT
+              controller: app.did
             })
           }
         ],
@@ -1893,7 +2091,7 @@ describe('StorageManager.revokeAppCollectionRecipients', () => {
 
       const outcome = await storage.revokeAppCollectionRecipients({
         origin: APP_ORIGIN,
-        subjectDid: APP_SUBJECT
+        subjectDid: app.did
       })
 
       // Only an app Collection target names a collection to rotate; a

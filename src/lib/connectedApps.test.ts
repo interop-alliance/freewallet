@@ -12,7 +12,9 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 import {
   isAgentGrantLogin,
   listConnectedAgents,
-  revokeAgentAccess
+  revokeAgentAccess,
+  revokeAppAccess,
+  type ConnectedApp
 } from '@/lib/connectedApps'
 import { EXTERNAL_REQUEST_ORIGIN } from '@/lib/walletRequest/externalRequest'
 import type { StorageManager } from '@/stores/storageManager'
@@ -452,5 +454,66 @@ describe('revokeAgentAccess', () => {
     expect(storage.addHistoryAgentRevoke).toHaveBeenCalledWith(
       expect.objectContaining({ created: '2026-09-01T00:00:00.000Z' })
     )
+  })
+})
+
+describe('revokeAppAccess', () => {
+  const user = { id: 'did:key:zUser', email: 'a@b.c' } as unknown as User
+  const app = {
+    cid: 'cid-app-key',
+    name: 'Example App',
+    origin: 'https://app.example',
+    subjectDid: 'did:key:z6MkAppSubject',
+    grants: []
+  } as unknown as ConnectedApp
+
+  /**
+   * A structural storage fake over the three calls the revocation drives,
+   * with the rotation outcome under the test's control.
+   */
+  function fakeStorage({
+    rotation
+  }: {
+    rotation: { collections: number; rotated: number; failed: number }
+  }) {
+    return {
+      listHistoryItems: vi.fn(async () => []),
+      revokeAppCollectionRecipients: vi.fn(async () => rotation),
+      revokeAppGrants: vi.fn(async () => ({ revoked: 1, skipped: 0 })),
+      deleteAppKey: vi.fn(async () => {}),
+      addHistoryAppRevoke: vi.fn(async () => {})
+    } as unknown as StorageManager
+  }
+
+  it('deletes the app key and records the revoke once every rotation landed', async () => {
+    const storage = fakeStorage({
+      rotation: { collections: 1, rotated: 1, failed: 0 }
+    })
+
+    const outcome = await revokeAppAccess({ storage, user, app })
+
+    expect(outcome).toEqual({ revoked: 1, skipped: 0, rotated: 1 })
+    expect(storage.deleteAppKey).toHaveBeenCalledWith({ cid: 'cid-app-key' })
+    expect(storage.addHistoryAppRevoke).toHaveBeenCalled()
+  })
+
+  it('keeps the app-key row when a collection rotation failed', async () => {
+    const storage = fakeStorage({
+      rotation: { collections: 2, rotated: 1, failed: 1 }
+    })
+
+    await expect(revokeAppAccess({ storage, user, app })).rejects.toThrow(
+      /rotate every collection/
+    )
+    // The app is still a recipient of the collection that did not rotate, so
+    // the row stays listed for a retry and no Revoke is recorded.
+    expect(storage.deleteAppKey).not.toHaveBeenCalled()
+    expect(storage.addHistoryAppRevoke).not.toHaveBeenCalled()
+    // The grant revocation still runs before the refusal, per the JSDoc.
+    expect(storage.revokeAppGrants).toHaveBeenCalledWith({
+      origin: app.origin,
+      subjectDid: app.subjectDid,
+      items: []
+    })
   })
 })

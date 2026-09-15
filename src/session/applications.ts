@@ -121,7 +121,10 @@ export async function revokeApplication({
  * that had already ended. `withdrew` spans both stages, so a single
  * app-provisioned collection -- whose pull grant the rotation revokes, leaving
  * the second stage nothing but an already-revoked POST -- still reads as
- * revoked. When nothing was withdrawn, an orphaned row names the disconnect
+ * revoked. A revoke that left the app a recipient of some collection's current
+ * epoch reaches no wording at all: `revokeAppAccess` throws on a failed
+ * rotation, so the page shows its failure copy and keeps the row.
+ * When nothing was withdrawn, an orphaned row names the disconnect
  * that ended its access; any other row reads as access that had already
  * ended, with no cause claimed, since the account document cannot name one:
  * its recorded grants were all skipped (a transient session's grant after

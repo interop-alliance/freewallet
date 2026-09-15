@@ -14,6 +14,22 @@
 
 ### Changed
 
+- Disconnecting a connected app rotates it out of its collections' key epochs
+  even when every recorded grant has expired. The candidate collections now
+  come from the Space's collection listing (the Collection Metadata
+  `generator` attribution) as well as from the recorded grants, expired ones
+  included; the unexpired grants still supply the capabilities the rotation
+  revokes. The rotation retires the app's own recipient entry, derived from
+  its subject DID as provisioning derived it, so an app co-admitted to the
+  same collection keeps its access. A rotation that could not land, or a
+  collection listing that could not be read, keeps the app-key row and
+  records no Revoke, so the user can retry rather than being told the app's
+  access had already ended.
+
+- The login-time app-key sweep fetches the Space collection listing once for
+  the whole sweep and hands it to each rotation, rather than re-listing per
+  stranded key.
+
 - A transient session grants a whole-Space read like every other session
   kind. The refusal `resolveGrant` applied under a generation delegation
   dated from when that delegation targeted the Space's items subtree, which

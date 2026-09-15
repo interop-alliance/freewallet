@@ -426,12 +426,21 @@ export async function listConnectedApps({
  * deleted key whose grants are still live.
  *
  * The key rotation runs first (`revokeAppCollectionRecipients`): for each
- * app-provisioned encrypted collection it appends a fresh epoch without the
- * app's key and revokes those collections' pull-axis grants indivisibly, so the
- * app cannot decrypt anything written afterward. That rotation is best-effort
- * per collection (a stuck collection is logged, not fatal). Then the remaining
- * grants are revoked (`revokeAppGrants`, which tolerates the double-revocation
- * of the already-rotated collections' grants).
+ * collection the app provisioned or was granted -- found through the
+ * Collection Metadata `generator` attribution as well as the recorded grants,
+ * so an app whose grants have all expired is still rotated out -- it appends a
+ * fresh epoch without the app's key and revokes those collections' pull-axis
+ * grants indivisibly, so the app cannot decrypt anything written afterward.
+ * That rotation is best-effort per collection (a stuck collection is logged
+ * and counted). Then the remaining grants are revoked (`revokeAppGrants`,
+ * which tolerates the double-revocation of the already-rotated collections'
+ * grants).
+ *
+ * A collection the rotation could not re-key keeps the app as a recipient of
+ * the current epoch, so the app-key row is kept and no Revoke is recorded: the
+ * call throws once the grant revocation has run, and the row stays listed for
+ * the user to retry. This is the sweep's rule too (`sweepStrandedAppKeys`
+ * leaves a stranded key in place on `rotation.failed > 0`).
  *
  * Which grants are POSTed is settled by wallet-core's `grantRevocationSkip`
  * against the same verified document the listing marked the row with: an expired
@@ -452,7 +461,7 @@ export async function listConnectedApps({
  * only the expiry skip applies and everything else is POSTed.
  *
  * What a failure leaves behind: the rotation stage has already run, so the
- * app-provisioned collections are rotated off the app's recipient key, while
+ * collections it could re-key are rotated off the app's recipient key, while
  * the credential is kept and no Revoke is recorded. That state is safe to
  * retry from. The rotation is idempotent (a collection whose current epoch
  * carries no non-owner recipient is skipped), the grants that did land are
@@ -499,6 +508,13 @@ export async function revokeAppAccess({
     subjectDid: app.subjectDid,
     items
   })
+  if (rotation.failed > 0) {
+    // The app is still a recipient of some collection's current epoch. Keep
+    // the row (and record no Revoke), so the disconnect can be retried.
+    throw new Error(
+      'Could not rotate every collection off the app being disconnected.'
+    )
+  }
   await storage.deleteAppKey({ cid: app.cid })
   await storage.addHistoryAppRevoke({
     user,

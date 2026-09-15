@@ -53,6 +53,7 @@ import {
   addRecipient,
   DescriptorRefreshPolicy,
   removeRecipient,
+  x25519RecipientFromDidKey,
   type EncryptionDescriptorCache,
   type EncryptionDescriptorSource,
   type EncryptionDescriptorStore,
@@ -3424,57 +3425,79 @@ export class StorageManager {
 
   /**
    * The key-rotation half of revoking a connected app's access: for each
-   * app-provisioned encrypted collection the app was granted, removes every
-   * non-owner recipient entry from the current epoch in ONE was-client
+   * app-provisioned encrypted collection the app was granted, removes the
+   * app's own recipient entry from the current epoch in ONE was-client
    * `removeRecipient` call (which rotates the epoch FIRST, then runs the pull
-   * axis -- indivisible), so a revoked app cannot decrypt future writes.
-   * However many non-owner entries retire, the collection gains one epoch and
-   * its pull-axis zcaps are revoked once. The owner (the vault KAK) stays
-   * recipient zero; for
-   * these collections every non-owner entry is the app's, and removal needs no
-   * seed (the roster kid is in the descriptor), so it works even for an
-   * orphaned state.
+   * axis -- indivisible), so a revoked app cannot decrypt future writes. The
+   * collection gains one epoch and its pull-axis zcaps are revoked once. The
+   * owner (the vault KAK) stays recipient zero, and so does any other app
+   * co-admitted to the same collection: the retiring kid is derived from this
+   * app's subject DID (`x25519RecipientFromDidKey`), the same derivation App
+   * Connect provisioning writes the roster entry with. Removal needs no seed
+   * (the roster kid is in the descriptor), so it works even for an orphaned
+   * state.
    *
-   * The candidate collections come from the recorded grant zcaps'
-   * `invocationTarget`s (standard / protected collections and whole-Space grants
-   * excluded); only those whose current-epoch roster still carries a non-owner
+   * The candidate collections are the union of two sources, because a grant
+   * expires on its own while a recipient entry does not. The first is the
+   * Space's collection listing: every collection whose Collection Metadata
+   * names this app's subject DID as its `generator`, the attribution stamped
+   * at App Connect provisioning. The second is the recorded grant zcaps'
+   * `invocationTarget`s, expired grants included, which reaches a collection
+   * the app was admitted to but did not provision. Standard / protected
+   * collections and whole-Space grants are excluded from both. The unexpired
+   * grants still supply the zcaps the rotation revokes on its pull axis; a
+   * candidate reached only through the listing or through an expired grant
+   * rotates with nothing to revoke.
+   *
+   * Only candidates whose current-epoch roster still carries the app's own
    * entry are rotated, and the collections rotate in parallel. Best-effort per
-   * collection: a failure is logged and the rest proceed, so one stuck
-   * collection does not strand the whole revocation. A no-op (zero counts)
-   * without a remote store or vault keys. The honest limitation stands:
-   * ciphertext the app already fetched stays readable to it.
+   * collection: a failure is logged, counted in `failed`, and the rest
+   * proceed, so one stuck collection does not strand the whole revocation. A
+   * collection listing that cannot be read counts as one failure too, since
+   * the caller cannot then tell a rotated app from one still holding a
+   * recipient entry; a caller that supplies its own listing cannot hit that
+   * failure. A no-op (zero counts) without a remote store or vault
+   * keys. The honest limitation stands: ciphertext the app already fetched
+   * stays readable to it.
    *
    * @param options {object}
    * @param options.origin {string}   the connected app's origin
    * @param options.subjectDid {string}   the app-key credential's subject DID
    * @param [options.items] {Array<{ id: string; doc: WalletActivity }>}   a
    *   pre-fetched history scan, when the caller already holds one
+   * @param [options.collections] {Array<StorageCollection>}   a pre-fetched
+   *   Space collection listing, when the caller already holds one
    * @returns {Promise<{ collections: number; rotated: number; failed: number }>}
    */
   async revokeAppCollectionRecipients({
     origin,
     subjectDid,
-    items
+    items,
+    collections
   }: {
     origin: string
     subjectDid: string
     items?: Array<{ id: string; doc: WalletActivity }>
+    collections?: Array<StorageCollection>
   }): Promise<{ collections: number; rotated: number; failed: number }> {
     const remote = this.#remoteStore
     if (!remote || !this.#vaultKeys) {
       return { collections: 0, rotated: 0, failed: 0 }
     }
     const ownerKid = this.#vaultKeys.keyAgreementKey.id
-    const { zcaps } = this.#recordedGrantZcaps({
+    // The app's own roster kid, derived the way App Connect provisioning
+    // derives it. An app-key subject is always a seed-derived did:key, so a
+    // throw here is a malformed caller rather than a revocation outcome.
+    const appKid = x25519RecipientFromDidKey({ did: subjectDid }).id
+    const { zcaps, expired } = this.#recordedGrantZcaps({
       matches: object => object.origin === origin && !!object.appConnect,
       controller: subjectDid,
       items: items ?? (await this.listHistoryItems())
     })
 
-    // Group the pull-axis zcaps by the app-provisioned collection they target,
-    // dropping whole-Space and protected-collection grants.
-    const byCollection = new Map<string, IDelegatedZcap[]>()
-    for (const zcap of zcaps) {
+    // The app-provisioned collection a grant zcap targets, or undefined for a
+    // whole-Space grant, a protected collection, or a foreign target.
+    const appCollectionOf = (zcap: IDelegatedZcap): string | undefined => {
       const collectionId = StorageManager.#collectionIdFromTarget({
         invocationTarget: zcap.invocationTarget,
         serverUrl: remote.storageServerUrl,
@@ -3484,8 +3507,21 @@ export class StorageManager {
         !collectionId ||
         StorageManager.#isProtectedCollection(collectionId)
       ) {
+        return undefined
+      }
+      return collectionId
+    }
+
+    // Group the pull-axis zcaps by the collection they target. Only the
+    // unexpired ones are worth a revocation POST, so they alone land here.
+    const byCollection = new Map<string, IDelegatedZcap[]>()
+    const candidates = new Set<string>()
+    for (const zcap of zcaps) {
+      const collectionId = appCollectionOf(zcap)
+      if (!collectionId) {
         continue
       }
+      candidates.add(collectionId)
       const existing = byCollection.get(collectionId)
       if (existing) {
         existing.push(zcap)
@@ -3493,12 +3529,42 @@ export class StorageManager {
         byCollection.set(collectionId, [zcap])
       }
     }
+    // An expired grant names a collection the app may still be a recipient of;
+    // it is a candidate to rotate, with no capability left to revoke.
+    for (const zcap of expired) {
+      const collectionId = appCollectionOf(zcap)
+      if (collectionId) {
+        candidates.add(collectionId)
+      }
+    }
+
+    // The collections this app provisioned, whatever its grants now say. This
+    // is the source that survives every grant expiring.
+    let listingFailed = false
+    try {
+      for (const collection of collections ??
+        (await remote.listCollections())) {
+        if (
+          collection.generator === subjectDid &&
+          !StorageManager.#isProtectedCollection(collection.id)
+        ) {
+          candidates.add(collection.id)
+        }
+      }
+    } catch (err) {
+      listingFailed = true
+      log.warn(
+        'Could not list the collections attributed to the app being revoked',
+        { origin, subjectDid, err }
+      )
+    }
 
     // Each collection's rotation is independent of the others, so they run
     // together; the outcomes are folded below into the same counts a
     // sequential pass produced.
     const outcomes = await Promise.all(
-      [...byCollection].map(async ([collectionId, revoke]) => {
+      [...candidates].map(async collectionId => {
+        const revoke = byCollection.get(collectionId) ?? []
         try {
           const descriptor = await this.#readGovernedDescriptor({
             collectionId
@@ -3507,7 +3573,7 @@ export class StorageManager {
             return 'skipped' as const
           }
           const nonOwner = currentEpochRecipientKids({ descriptor, ownerKid })
-          if (nonOwner.length === 0) {
+          if (!nonOwner.includes(appKid)) {
             return 'skipped' as const
           }
           const newDescriptor = await removeRecipient({
@@ -3517,7 +3583,7 @@ export class StorageManager {
             }),
             space: remote.spaceHandle(),
             revoke,
-            recipientId: nonOwner
+            recipientId: appKid
           })
           await this.#descriptorCache?.writeDescriptor({
             collectionId,
@@ -3540,8 +3606,10 @@ export class StorageManager {
       })
     )
     const rotated = outcomes.filter(outcome => outcome === 'rotated').length
-    const failed = outcomes.filter(outcome => outcome === 'failed').length
-    return { collections: byCollection.size, rotated, failed }
+    const failed =
+      outcomes.filter(outcome => outcome === 'failed').length +
+      (listingFailed ? 1 : 0)
+    return { collections: candidates.size, rotated, failed }
   }
 
   /**
@@ -3552,7 +3620,10 @@ export class StorageManager {
    * clock-skew margin; an absent or unparseable
    * value is not expired). Deduplicated by capability id. `skipped` counts
    * the entries that carry no revocable capability (legacy summary-only
-   * records, a different controller, or an already-expired grant). The predicate is what tells the two grantee kinds
+   * records, a different controller, or an already-expired grant), and
+   * `expired` carries the grants dropped for expiry alone: nothing to revoke,
+   * but they still name the collections the grantee may remain a key-epoch
+   * recipient of. The predicate is what tells the two grantee kinds
    * apart: an App Connect app (an origin plus an `appConnect` member) and an
    * agent (the interaction-URL origin marker and no `appConnect`).
    *
@@ -3562,7 +3633,8 @@ export class StorageManager {
    *   delegated to
    * @param options.items {Array<{ id: string; doc: WalletActivity }>}   the
    *   pre-fetched history, so this need not re-scan it
-   * @returns {{ zcaps: IDelegatedZcap[]; skipped: number }}
+   * @returns {{ zcaps: IDelegatedZcap[]; skipped: number;
+   *   expired: IDelegatedZcap[] }}
    */
   #recordedGrantZcaps({
     matches,
@@ -3576,8 +3648,9 @@ export class StorageManager {
     }) => boolean
     controller: string
     items: Array<{ id: string; doc: WalletActivity }>
-  }): { zcaps: IDelegatedZcap[]; skipped: number } {
+  }): { zcaps: IDelegatedZcap[]; skipped: number; expired: IDelegatedZcap[] } {
     const zcaps: IDelegatedZcap[] = []
+    const expired: IDelegatedZcap[] = []
     const seen = new Set<string>()
     const now = Date.now()
     let skipped = 0
@@ -3617,12 +3690,13 @@ export class StorageManager {
         // own `expires`, and an absent or unparseable one is NOT expired.
         if (delegationExpired({ zcap, now })) {
           skipped += 1
+          expired.push(zcap)
           continue
         }
         zcaps.push(zcap)
       }
     }
-    return { zcaps, skipped }
+    return { zcaps, skipped, expired }
   }
 
   /**

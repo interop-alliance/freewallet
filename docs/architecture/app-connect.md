@@ -191,8 +191,26 @@ the storage browser as an ordinary recipient with its vault KAK,
 descriptor-driven from the collection's governing log. Revoking a connected
 app rotates the epoch off the app's key for each such collection
 (`removeRecipient`, which rotates then revokes the pull-axis grants
-indivisibly), so a revoked app cannot decrypt future writes. Ciphertext it
-already fetched stays readable to it. The blinded-index key is not rotated
+indivisibly), so a revoked app cannot decrypt future writes. The retiring
+entry is the app's own, derived from its subject DID the way provisioning
+wrote it, so another app admitted to the same collection keeps its access.
+Ciphertext it already fetched stays readable to it.
+
+Which collections that rotation covers is the union of two sources. The
+first is the Space's collection listing: every collection whose Collection
+Metadata names the app's subject DID as its `generator`, the attribution
+stamped at provisioning. The second is the collections the app's recorded
+grants target, expired grants included, which reaches a collection the app
+was admitted to but did not create. A grant expires on its own; a recipient
+entry does not, so the listing is what keeps the rotation working for an app
+whose grants all lapsed before the user disconnected it. The unexpired
+grants still supply the capabilities the rotation revokes on its pull axis.
+
+A collection the rotation could not re-key, or a collection listing that
+could not be read, keeps the disconnect incomplete: the app-key row stays
+listed, no Revoke activity is recorded, and the page reports the failure so
+the user can retry. The retry converges, since each stage detects its own
+completion. The blinded-index key is not rotated
 on revoke (see "Client revocation and the epoch cascade" in client-revocation.md), so the revoked
 app keeps the ability to compute blinded terms while the query endpoint
 stays behind the revoked pull grant.

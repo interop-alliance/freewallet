@@ -33,6 +33,7 @@ import { getResourceDisplayName } from '@/components/storage/displayUtils'
 import { PublicAccessIcon } from '@/components/storage/AccessIcon'
 import { SourceViewToggle } from '@/components/storage/SourceViewToggle'
 import { MetadataCard } from '@/components/storage/MetadataCard'
+import { fetchMetaWithEncryptionProbe } from '@/components/storage/metadataRows'
 import {
   decryptResourceBody,
   useResourceSourceCopy
@@ -401,11 +402,19 @@ export function CollectionResourcePage() {
     if (!storage || !resourceUrl || !collectionId) {
       return { meta: null, encrypted: false }
     }
-    const [meta, encrypted] = await Promise.all([
-      storage.fetchResourceMeta({ url: resourceUrl }),
-      storage.isCollectionEncrypted({ collectionId })
-    ])
-    return { meta, encrypted }
+    // The encryption probe (a governing-log read) is awaited separately from
+    // the meta read, so a continuity refusal or an unreachable host there
+    // does not discard a successful meta read. The Resource Metadata object
+    // carries no `encryption` member of its own, so the fallback reads as
+    // `false` on a probe failure.
+    return fetchMetaWithEncryptionProbe({
+      fetchMeta: () => storage.fetchResourceMeta({ url: resourceUrl }),
+      probeEncrypted: () => storage.isCollectionEncrypted({ collectionId }),
+      onProbeError: err =>
+        log.warn('Could not probe the collection encryption descriptor', {
+          err
+        })
+    })
   }, [storage, resourceUrl, collectionId])
 
   const metadata = resourceUrl ? (

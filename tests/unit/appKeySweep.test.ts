@@ -101,6 +101,7 @@ function fakeStorage(stored: StoredCredential[]) {
     // row; the revoke-before-delete ordering has its own suite
     // (`src/session/appKeySweep.test.ts`), so here they just succeed.
     listHistoryItems: vi.fn(async () => []),
+    listCollections: vi.fn(async () => []),
     revokeAppCollectionRecipients: vi.fn(async () => ({
       collections: 0,
       rotated: 0,
