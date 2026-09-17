@@ -30,8 +30,11 @@
   `RemoteDirectStore`, the fetched id in the storage browser's
   `decryptCollectionResource`, and the sealed envelope's own stamped id for a
   self-contained record (wallet-core's `recordEnvelopeId`). The contacts
-  conflict rule is addressed too, so a side sealed for another resource is
-  refused rather than compared, and the remote master wins.
+  conflict rule is addressed too: the binding passes the contested row's id
+  beside the two bodies, so each side is opened under the id it was read from.
+  A side sealed for another resource raises `IntegrityError`, which leaves the
+  conflict handler and fails the replication cycle rather than being settled
+  on the fail-safe remote master.
 - A contacts row written by the pre-fix path -- an app-minted uuidv7 resource
   id carrying a content-mode envelope -- no longer decrypts, the binding check
   refusing a body served under an id it was not sealed for. The cross-replica

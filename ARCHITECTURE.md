@@ -725,7 +725,11 @@ cascades, and the permanent wire-level constants.
   unknown-epoch refresh of its own, so the closure reads was-client's
   self-refreshing cipher (`stores/refreshingCollectionCipher.ts`). A conflict
   side sealed under an epoch another client rotated to is re-read once before
-  it counts as undecryptable.
+  it counts as undecryptable. The closure hands the resolver the contested
+  row's own id beside the two bodies, so each side's envelope is opened under
+  the id it was read from. A body sealed for some other resource is refused
+  there, and that refusal leaves the resolver and fails the replication cycle
+  rather than counting as one more unreadable side.
 - **`@interop/vh-resource-log`** -- the Resource Log Profile's generic
   client side: chain verification, the chain-head pin port
   (`ResourceLogPinStore`, `ResourceLogHeadPin`, `memoryResourceLogPinStore`)

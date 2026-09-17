@@ -9,6 +9,8 @@
  */
 import { describe, expect, it } from 'vitest'
 import { addSink, captureSink } from '@interop/logger'
+import { errorNameOf } from '@interop/wallet-core/menders'
+import { IntegrityError } from '@interop/was-client/sync'
 // The driver logs through was-sync's own seam, which the app's logging module
 // wires to the `sync` namespace on import.
 import '@/lib/log'
@@ -17,6 +19,8 @@ import type { SyncedDoc, WithDeleted } from '@interop/was-sync'
 import { createContactsConflictHandler } from './contactsConflictHandler'
 
 const CONTACT_ID = 'urn:uuid:c0ffee'
+const ROW_ID = 'row-1'
+const DECOY_ID = 'urn:uuid:decoy'
 
 /**
  * A stored contact head row, carrying an envelope the fake ciphers below key
@@ -35,7 +39,7 @@ function row({
   version: number
 }): WithDeleted<SyncedDoc> {
   return {
-    id: 'row-1',
+    id: ROW_ID,
     updatedAt: '000000000001',
     version,
     _deleted: false,
@@ -72,6 +76,56 @@ function fakeCipher({
         writerId: ciphertext,
         contact: { displayName: 'Ada Lovelace' }
       }
+    }
+  } as unknown as DocCipher
+}
+
+/**
+ * A cipher that records the id each decrypt was addressed with, and answers
+ * with a head payload carrying a decoy `id` member.
+ *
+ * @param options {object}
+ * @param options.addressedWith {string[]}   collects each decrypt's id
+ * @param options.stamps {Record<string, string>}   envelope id to `updatedAt`
+ * @returns {DocCipher}
+ */
+function recordingCipher({
+  addressedWith,
+  stamps
+}: {
+  addressedWith: string[]
+  stamps: Record<string, string>
+}): DocCipher {
+  return {
+    async decrypt({ id, envelope }: { id: string; envelope: unknown }) {
+      addressedWith.push(id)
+      const ciphertext = (envelope as { jwe: { ciphertext: string } }).jwe
+        .ciphertext
+      return {
+        id: DECOY_ID,
+        contactId: CONTACT_ID,
+        updatedAt: stamps[ciphertext],
+        writerId: ciphertext,
+        contact: { displayName: 'Ada Lovelace' }
+      }
+    }
+  } as unknown as DocCipher
+}
+
+/**
+ * A cipher whose every decrypt raises the envelope-to-resource binding
+ * refusal.
+ *
+ * @returns {DocCipher}
+ */
+function misboundCipher(): DocCipher {
+  return {
+    async decrypt({ id }: { id: string }) {
+      throw new IntegrityError(
+        'Cannot decrypt this resource: the stored envelope is bound to a ' +
+          `different resource id ("${DECOY_ID}") than the one requested ` +
+          `("${id}").`
+      )
     }
   } as unknown as DocCipher
 }
@@ -135,6 +189,54 @@ describe('the contacts conflict binding', () => {
     expect(
       handler.isEqual(local, row({ envelopeId: 'local-env', version: 4 }))
     ).toBe(false)
+  })
+
+  it('addresses each side with the contested row id, not the payload id', async () => {
+    // The envelope-to-resource binding check is only worth anything if the id
+    // the cipher is handed comes from the row. A payload member named `id` is
+    // a decoy: it rides inside the body the host served, so a decrypt
+    // addressed with it would verify the body against itself.
+    const addressedWith: string[] = []
+    const handler = createContactsConflictHandler({
+      getCipher: () =>
+        recordingCipher({
+          addressedWith,
+          stamps: {
+            'remote-env': '2026-01-01T00:00:00.000Z',
+            'local-env': '2026-02-01T00:00:00.000Z'
+          }
+        })
+    })
+    const input = {
+      realMasterState: row({ envelopeId: 'remote-env', version: 4 }),
+      newDocumentState: row({ envelopeId: 'local-env', version: 3 })
+    }
+
+    expect(await handler.resolve(input)).toBe(input.newDocumentState)
+    expect(addressedWith).toEqual([ROW_ID, ROW_ID])
+    expect(addressedWith).not.toContain(DECOY_ID)
+  })
+
+  it('lets an integrity refusal propagate out of the handler', async () => {
+    // A body sealed for another resource is the host tampering or misfiling,
+    // not one more side this replica holds no key for. Settling the conflict
+    // on the fail-safe default would discard the refusal, so the resolver
+    // rethrows it and the replication cycle fails.
+    const handler = createContactsConflictHandler({
+      getCipher: () => misboundCipher()
+    })
+    const input = {
+      realMasterState: row({ envelopeId: 'remote-env', version: 4 }),
+      newDocumentState: row({ envelopeId: 'local-env', version: 3 })
+    }
+
+    let raised: unknown
+    try {
+      await handler.resolve(input)
+    } catch (err) {
+      raised = err
+    }
+    expect(errorNameOf(raised)).toBe('IntegrityError')
   })
 
   it("reports a resolver failure on the driver's sync namespace", async () => {
