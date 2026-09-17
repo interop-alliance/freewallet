@@ -729,7 +729,8 @@ cascades, and the permanent wire-level constants.
   row's own id beside the two bodies, so each side's envelope is opened under
   the id it was read from. A body sealed for some other resource is refused
   there, and that refusal leaves the resolver and fails the replication cycle
-  rather than counting as one more unreadable side.
+  rather than counting as one more unreadable side. The closure logs it on the
+  `sync` namespace first, naming the row and which side was misbound.
 - **`@interop/vh-resource-log`** -- the Resource Log Profile's generic
   client side: chain verification, the chain-head pin port
   (`ResourceLogPinStore`, `ResourceLogHeadPin`, `memoryResourceLogPinStore`)

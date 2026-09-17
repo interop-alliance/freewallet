@@ -34,7 +34,10 @@
   beside the two bodies, so each side is opened under the id it was read from.
   A side sealed for another resource raises `IntegrityError`, which leaves the
   conflict handler and fails the replication cycle rather than being settled
-  on the fail-safe remote master.
+  on the fail-safe remote master. Both directions fail the cycle alike, and the
+  binding now logs the refusal on the `sync` namespace at error level, naming
+  the row and which side was misbound (wallet-core's new `onIntegrityRefusal`
+  seam).
 - A contacts row written by the pre-fix path -- an app-minted uuidv7 resource
   id carrying a content-mode envelope -- no longer decrypts, the binding check
   refusing a body served under an id it was not sealed for. The cross-replica

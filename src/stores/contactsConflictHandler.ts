@@ -12,13 +12,17 @@
  * `@interop/was-sync`, so everything here is the decision closure. The
  * collection's document cipher is read at resolve time through `getCipher`,
  * never captured, so a later `setCiphers` swap (the epoch cascade's) is
- * honored. A resolver throw (an undecryptable side, say) is reported by
- * `makeConflictHandler` itself, through was-sync's logging seam (the `sync`
- * namespace), before it propagates.
+ * honored. A resolver throw (an integrity refusal, or a `getCipher` that itself
+ * fails) is reported by `makeConflictHandler` too, through was-sync's logging
+ * seam (the same `sync` namespace), before it propagates.
  *
  * Each side's envelope is addressed with the contested row's own id, so a body
- * sealed for another resource is refused rather than compared: the rule's
- * fail-safe then hands the conflict to the remote master.
+ * sealed for another resource is refused rather than compared. Both directions
+ * fail the replication cycle: a misbound remote side and a misbound local side
+ * are refused alike, no winner is returned, and the queued local edit stays
+ * queued rather than being dropped. The refusal is logged here first, on the
+ * `sync` namespace, naming the row and the side the binding check refused, and
+ * is then rethrown unchanged.
  *
  * Equality is the whole-row `deepEqual`, not the package's `statesEqual`
  * (which compares the revision and body members alone): the feed echo of a
@@ -30,6 +34,11 @@ import { makeConflictHandler, type ConflictHandler } from '@interop/was-sync'
 import { resolveContactHeadConflict } from '@interop/wallet-core/sync'
 import type { DocCipher } from '@interop/was-client/edv'
 import { deepEqual } from 'rxdb/plugins/utils'
+import { createLogger } from '@/lib/log'
+
+// The driver's own namespace: the refusal reads beside was-sync's report of
+// the failed cycle rather than under an app-side name of its own.
+const log = createLogger('sync')
 
 /**
  * @param options {object}
@@ -52,7 +61,14 @@ export function createContactsConflictHandler({
         local: newDocumentState.data,
         ...(cipher ? { cipher } : {}),
         remoteDeleted: Boolean(realMasterState._deleted),
-        localDeleted: Boolean(newDocumentState._deleted)
+        localDeleted: Boolean(newDocumentState._deleted),
+        onIntegrityRefusal({ side, err }) {
+          log.error('Contacts conflict side sealed for another resource', {
+            id: realMasterState.id,
+            side,
+            err
+          })
+        }
       })
     }
   })

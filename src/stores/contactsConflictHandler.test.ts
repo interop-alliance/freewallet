@@ -54,19 +54,30 @@ function row({
  * @param options {object}
  * @param options.stamps {Record<string, string>}   envelope id to `updatedAt`
  * @param [options.unreadable] {string[]}
+ * @param [options.misbound] {string[]}   envelopes refused by the
+ *   envelope-to-resource binding check
  * @returns {DocCipher}
  */
 function fakeCipher({
   stamps,
-  unreadable = []
+  unreadable = [],
+  misbound = []
 }: {
   stamps: Record<string, string>
   unreadable?: string[]
+  misbound?: string[]
 }): DocCipher {
   return {
-    async decrypt({ envelope }: { envelope: unknown }) {
+    async decrypt({ id, envelope }: { id: string; envelope: unknown }) {
       const ciphertext = (envelope as { jwe: { ciphertext: string } }).jwe
         .ciphertext
+      if (misbound.includes(ciphertext)) {
+        throw new IntegrityError(
+          'Cannot decrypt this resource: the stored envelope is bound to a ' +
+            `different resource id ("${DECOY_ID}") than the one requested ` +
+            `("${id}").`
+        )
+      }
       if (unreadable.includes(ciphertext)) {
         throw new Error(`no key epoch for ${ciphertext}`)
       }
@@ -239,12 +250,53 @@ describe('the contacts conflict binding', () => {
     expect(errorNameOf(raised)).toBe('IntegrityError')
   })
 
+  it('logs the row and the side the binding check refused', async () => {
+    // Both directions fail the replication cycle, so what the log has to carry
+    // is which body was misbound: a misfiled remote body and a queued local
+    // edit sealed for another resource are the same refusal otherwise.
+    for (const misbound of ['remote-env', 'local-env']) {
+      const handler = createContactsConflictHandler({
+        getCipher: () =>
+          fakeCipher({
+            stamps: {
+              'remote-env': '2026-01-01T00:00:00.000Z',
+              'local-env': '2026-02-01T00:00:00.000Z'
+            },
+            misbound: [misbound]
+          })
+      })
+      const input = {
+        realMasterState: row({ envelopeId: 'remote-env', version: 4 }),
+        newDocumentState: row({ envelopeId: 'local-env', version: 3 })
+      }
+
+      const capture = captureSink()
+      const removeSink = addSink(capture.sink)
+      try {
+        await expect(handler.resolve(input)).rejects.toThrow()
+      } finally {
+        removeSink()
+      }
+
+      const refusal = capture.events.find(
+        event =>
+          event.msg === 'Contacts conflict side sealed for another resource'
+      )
+      expect(refusal?.ns).toBe('sync')
+      expect(refusal?.level).toBe('error')
+      expect(refusal?.data).toMatchObject({
+        id: ROW_ID,
+        side: misbound === 'remote-env' ? 'remote' : 'local'
+      })
+    }
+  })
+
   it("reports a resolver failure on the driver's sync namespace", async () => {
     // Both sides' own unreachability is fail-safe inside
-    // resolveContactHeadConflict; what can still throw out of this binding's
-    // resolve closure is `getCipher` itself, and `makeConflictHandler` is the
-    // one that reports it before the failure propagates and fails the
-    // replication cycle.
+    // resolveContactHeadConflict; what throws out of this binding's resolve
+    // closure is an integrity refusal or `getCipher` itself, and
+    // `makeConflictHandler` is the one that reports it before the failure
+    // propagates and fails the replication cycle.
     const handler = createContactsConflictHandler({
       getCipher: () => {
         throw new Error('cipher unavailable')
