@@ -247,6 +247,7 @@ export function CollectionResourcePage() {
       const decrypted = await decryptResourceBody({
         storage,
         collectionId,
+        resourceId: matchResource.id,
         body
       })
       if (isCancelled()) {

@@ -40,16 +40,20 @@ export function useResourceSourceCopy() {
  * @param options {object}
  * @param options.storage {StorageManager}
  * @param [options.collectionId] {string}   the WAS collection id
+ * @param options.resourceId {string}   the id the resource was fetched under,
+ *   which the decrypt verifies the stored envelope against
  * @param options.body {FetchedCollectionResource}   the fetched resource body
  * @returns {Promise<Json | undefined>}
  */
 export async function decryptResourceBody({
   storage,
   collectionId,
+  resourceId,
   body
 }: {
   storage: StorageManager
   collectionId?: string
+  resourceId: string
   body: FetchedCollectionResource
 }): Promise<Json | undefined> {
   if (body.kind !== 'json' || !collectionId) {
@@ -57,6 +61,7 @@ export async function decryptResourceBody({
   }
   return await storage.decryptCollectionResource({
     collectionId,
+    resourceId,
     data: body.data as Json
   })
 }

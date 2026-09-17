@@ -28,7 +28,10 @@ function promotedRemoteStore(): WASRemoteStore {
   return {
     controller: ACCOUNT_DID,
     spaceHandle: () => ({
-      describe: async () => ({ controller: ACCOUNT_DID })
+      describeWithEtag: async () => ({
+        description: { controller: ACCOUNT_DID },
+        etag: '"1"'
+      })
     })
   } as unknown as WASRemoteStore
 }

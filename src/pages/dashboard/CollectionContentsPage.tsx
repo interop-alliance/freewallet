@@ -206,6 +206,7 @@ export function CollectionContentsPage() {
         const decrypted = await decryptResourceBody({
           storage,
           collectionId,
+          resourceId: resource.id,
           body
         })
         if (

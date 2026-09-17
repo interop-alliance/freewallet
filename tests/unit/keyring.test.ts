@@ -357,7 +357,7 @@ async function decryptRecord({
   const { keyAgreementKey, keyResolver } = await unlockFor(passphrase)
   const { encryption, wrapped } = record as {
     encryption: CollectionEncryption
-    wrapped: unknown
+    wrapped: { id: string }
   }
   const cipher = await createEdvDocCipher({
     keyAgreementKey: keyAgreementKey as unknown as IKeyAgreementKey,
@@ -366,6 +366,7 @@ async function decryptRecord({
     encryption
   })
   return (await cipher.decrypt({
+    id: wrapped.id,
     envelope: wrapped as never
   })) as Record<string, unknown>
 }

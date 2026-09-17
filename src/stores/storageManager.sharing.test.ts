@@ -2138,12 +2138,13 @@ describe('StorageManager.decryptCollectionResource (app collection)', () => {
       encryption: descriptor
     })
     const doc = { title: 'App note', body: 'hello' }
-    const { envelope } = await ownerCipher.encrypt({
+    const { id, envelope } = await ownerCipher.encrypt({
       data: doc as unknown as Json
     })
 
     const decrypted = await storage.decryptCollectionResource({
       collectionId: 'app-docs',
+      resourceId: id,
       data: envelope
     })
     expect(decrypted).toEqual(doc)
@@ -2176,6 +2177,7 @@ describe('StorageManager.decryptCollectionResource (app collection)', () => {
 
     const decrypted = await storage.decryptCollectionResource({
       collectionId: 'never-provisioned',
+      resourceId: 'z-fake',
       data: envelope
     })
     expect(decrypted).toBeUndefined()

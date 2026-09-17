@@ -211,6 +211,8 @@ function currentEpochRecipientKids({
  *
  * @param options {object}
  * @param options.cipher {DocCipher}
+ * @param options.id {string}   the resource id the envelope was read under,
+ *   which the decrypt verifies the stored body against
  * @param options.envelope {Json}
  * @param options.source {string}   how the failure names the collection, e.g.
  *   `collection "private-credentials"`
@@ -218,15 +220,22 @@ function currentEpochRecipientKids({
  */
 async function decryptEnvelope({
   cipher,
+  id,
   envelope,
   source
 }: {
   cipher: DocCipher
+  id: string
   envelope: Json
   source: string
 }): Promise<{ value: Json | undefined; unknownEpoch: boolean }> {
   try {
-    return { value: await cipher.decrypt({ envelope }), unknownEpoch: false }
+    return {
+      // A synced document is JSON: only a chunked document decrypts to a
+      // `Blob`, and no wallet collection stores one.
+      value: (await cipher.decrypt({ id, envelope })) as Json,
+      unknownEpoch: false
+    }
   } catch (err) {
     const failure = classifyDecryptFailure(err)
     if (failure === 'unknown-epoch') {
@@ -240,6 +249,16 @@ async function decryptEnvelope({
           err
         }
       )
+      return { value: undefined, unknownEpoch: false }
+    }
+    if (failure === 'integrity') {
+      // The host served a body that does not verify against the id it was read
+      // under. No refresh can help, and the read yields nothing rather than
+      // another resource's content.
+      log.warn('Refusing a resource whose body failed its integrity check', {
+        source,
+        err
+      })
       return { value: undefined, unknownEpoch: false }
     }
     log.warn('Could not decrypt resource envelope', { source, err })
@@ -1541,7 +1560,8 @@ export class StorageManager {
    * refresh below, which is why it is reported rather than assumed resolved.
    *
    * @returns {Promise<{ appKeys: StoredCredential[]; skipped: {
-   *   unknownEpoch: number; noEpochKey: number; undecryptable: number } }>}
+   *   unknownEpoch: number; noEpochKey: number; undecryptable: number;
+   *   integrity: number } }>}
    */
   async listAppKeys(): Promise<{
     appKeys: StoredCredential[]
@@ -1549,6 +1569,7 @@ export class StorageManager {
       unknownEpoch: number
       noEpochKey: number
       undecryptable: number
+      integrity: number
     }
   }> {
     // Unknown-epoch rows mean the cipher may be built from a stale descriptor
@@ -1563,7 +1584,8 @@ export class StorageManager {
         const skipped = {
           unknownEpoch: this.#store.unknownEpochAppKeys,
           noEpochKey: this.#store.noEpochKeyAppKeys,
-          undecryptable: this.#store.undecryptableAppKeys
+          undecryptable: this.#store.undecryptableAppKeys,
+          integrity: this.#store.integrityAppKeys
         }
         return {
           value: { appKeys, skipped },
@@ -1814,6 +1836,21 @@ export class StorageManager {
   }
 
   /**
+   * The count of `private-credentials` rows the most recent
+   * {@link listCredentials} read had to skip because their body failed its
+   * integrity check: the envelope did not authenticate, or the host served it
+   * under an id it was not sealed for. Surfaced on the dashboard separately
+   * from {@link undecryptableCredentials}, and never purgeable -- producing
+   * such a row takes no keys, so removing it would let a host present
+   * recoverable data as garbage and have the wallet destroy it.
+   *
+   * @returns {number}
+   */
+  get integrityCredentials(): number {
+    return this.#store.integrityCredentials
+  }
+
+  /**
    * Removes the local `private-credentials` rows that could not be decrypted,
    * so the user can clear rows that can never be shown. Returns the number of
    * rows removed.
@@ -1833,6 +1870,18 @@ export class StorageManager {
    */
   get undecryptableAppKeys(): number {
     return this.#store.undecryptableAppKeys
+  }
+
+  /**
+   * The count of `app-connections` rows the most recent {@link listAppKeys}
+   * read had to skip because their body failed its integrity check. Never
+   * purged, and load-bearing on the match path: a skipped app key read as
+   * absent would mint a second identity for the app.
+   *
+   * @returns {number}
+   */
+  get integrityAppKeys(): number {
+    return this.#store.integrityAppKeys
   }
 
   /**
@@ -2063,14 +2112,18 @@ export class StorageManager {
    * @param options {object}
    * @param options.collectionId {string}   the WAS collection id (e.g.
    *   `private-credentials`)
+   * @param options.resourceId {string}   the id the resource was fetched
+   *   under, which the decrypt verifies the stored envelope against
    * @param options.data {Json}   the fetched JSON resource body
    * @returns {Promise<Json | undefined>}
    */
   async decryptCollectionResource({
     collectionId,
+    resourceId,
     data
   }: {
     collectionId: string
+    resourceId: string
     data: Json
   }): Promise<Json | undefined> {
     if (!isEncryptedEnvelope(data)) {
@@ -2083,7 +2136,11 @@ export class StorageManager {
       // A non-standard collection: an App Connect app-provisioned collection the
       // wallet decrypts as an ordinary recipient (vault KAK = recipient zero),
       // descriptor-driven from the fetched Collection Description.
-      return this.#decryptAppCollectionResource({ collectionId, data })
+      return this.#decryptAppCollectionResource({
+        collectionId,
+        resourceId,
+        data
+      })
     }
     return this.#readWithEpochRefresh({
       collectionId,
@@ -2095,6 +2152,7 @@ export class StorageManager {
         }
         return await decryptEnvelope({
           cipher,
+          id: resourceId,
           envelope: data,
           source: `collection "${collectionId}"`
         })
@@ -2117,14 +2175,17 @@ export class StorageManager {
    *
    * @param options {object}
    * @param options.collectionId {string}   the WAS collection id
+   * @param options.resourceId {string}   the id the resource was fetched under
    * @param options.data {Json}   the fetched EDV envelope
    * @returns {Promise<Json | undefined>}
    */
   async #decryptAppCollectionResource({
     collectionId,
+    resourceId,
     data
   }: {
     collectionId: string
+    resourceId: string
     data: Json
   }): Promise<Json | undefined> {
     const remote = this.#remoteStore
@@ -2195,6 +2256,7 @@ export class StorageManager {
         }
         return await decryptEnvelope({
           cipher,
+          id: resourceId,
           envelope: data,
           source: `app collection "${collectionId}"`
         })
@@ -2475,14 +2537,14 @@ export class StorageManager {
       // on a hiccup would be wrong, and this is the one provisioning step
       // awaited un-guarded -- so a transport failure warns and skips like
       // the neighbouring steps, and the next login re-checks.
-      let description: SpaceMetadata | null
+      let read: { description: SpaceMetadata; etag?: string } | null
       try {
-        description = await remote.spaceHandle().describe()
+        read = await remote.spaceHandle().describeWithEtag()
       } catch (err) {
         log.warn('Could not confirm the promoted Space controller', { err })
         return { promoted: false }
       }
-      if (description?.controller === did) {
+      if (read?.description.controller === did) {
         // The server already agrees, so nothing was promoted here.
         this.#fireKeystorePromotion({ profile, did })
         return { promoted: false }
@@ -2492,15 +2554,23 @@ export class StorageManager {
         controller: keyAgent.id
       })
       try {
-        // A non-null read is the description this method just made through
-        // the same Space handle, so it rides along and `configure` skips its
-        // own pre-merge describe. A null one does not: it came from a read
-        // under the promoted signer, where an unauthorized answer is masked
-        // as the same 404 an absent description returns, so the truthful
-        // read is the one `configure` makes under the did:key client.
+        // A read with its validator is the description this method just made
+        // through the same Space handle, so it rides along and `configure`
+        // skips its own pre-merge describe. Two answers do not ride along. A
+        // null one came from a read under the promoted signer, where an
+        // unauthorized answer is masked as the same 404 an absent
+        // description returns, so the truthful read is the one `configure`
+        // makes under the did:key client. And a read carrying no `ETag` is
+        // no compare-and-swap baseline at all -- was-client refuses such a
+        // write rather than sending it unconditionally -- so it is dropped
+        // for the same reason, leaving `configure` its own read.
+        const current =
+          read !== null && read.etag !== undefined
+            ? { ...read.description, etag: read.etag }
+            : undefined
         await remote.promoteSpaceController({
           controller: did,
-          ...(description !== null ? { current: description } : {})
+          ...(current !== undefined ? { current } : {})
         })
       } finally {
         remote.rebindController({

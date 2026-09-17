@@ -16,6 +16,10 @@
  * `makeConflictHandler` itself, through was-sync's logging seam (the `sync`
  * namespace), before it propagates.
  *
+ * Each side's envelope is addressed with the contested row's own id, so a body
+ * sealed for another resource is refused rather than compared: the rule's
+ * fail-safe then hands the conflict to the remote master.
+ *
  * Equality is the whole-row `deepEqual`, not the package's `statesEqual`
  * (which compares the revision and body members alone): the feed echo of a
  * row this replica just pushed carries the server-managed `createdBy` and
@@ -43,6 +47,7 @@ export function createContactsConflictHandler({
     async resolve({ realMasterState, newDocumentState }) {
       const cipher = getCipher()
       return await resolveContactHeadConflict({
+        id: realMasterState.id,
         remote: realMasterState.data,
         local: newDocumentState.data,
         ...(cipher ? { cipher } : {}),

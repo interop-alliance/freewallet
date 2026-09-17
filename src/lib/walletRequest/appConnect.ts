@@ -30,33 +30,38 @@ import type {
  * The match scan skipped rows this session cannot read, and no stored app key
  * matched. Carries the skipped counts so the popup can say which way the read
  * failed: rows whose key epoch is still unknown after the one descriptor
- * refresh, rows in a known epoch this session holds no wrap for, and
- * envelopes that will not decrypt at all.
+ * refresh, rows in a known epoch this session holds no wrap for, rows whose
+ * body failed its integrity check, and envelopes that will not decrypt at all.
  */
 export class AppKeysUnreadableError extends Error {
   unknownEpoch: number
   noEpochKey: number
   undecryptable: number
+  integrity: number
 
   constructor({
     unknownEpoch,
     noEpochKey,
-    undecryptable
+    undecryptable,
+    integrity
   }: {
     unknownEpoch: number
     noEpochKey: number
     undecryptable: number
+    integrity: number
   }) {
     super(
       'Could not read the stored app keys: ' +
         `${unknownEpoch} row(s) in a still-unknown key epoch, ` +
         `${noEpochKey} row(s) in a key epoch this session holds no key for, ` +
+        `${integrity} row(s) whose body failed its integrity check, ` +
         `${undecryptable} undecryptable row(s).`
     )
     this.name = 'AppKeysUnreadableError'
     this.unknownEpoch = unknownEpoch
     this.noEpochKey = noEpochKey
     this.undecryptable = undecryptable
+    this.integrity = integrity
   }
 }
 
@@ -67,12 +72,17 @@ export class AppKeysUnreadableError extends Error {
  * seed and DID. The consent preview and the approved path share this
  * predicate so the popup blocks on exactly what approval would refuse.
  *
+ * A row whose body failed its integrity check counts here too: it is the one
+ * skip a host can produce with no keys at all, so treating it as "absent"
+ * would let the host force a second identity for the app.
+ *
  * @param options {object}
  * @param options.matched {boolean}   whether a stored app key matched
  * @param options.skipped {object}   the scan's skipped counts
  * @param options.skipped.unknownEpoch {number}
  * @param options.skipped.noEpochKey {number}
  * @param options.skipped.undecryptable {number}
+ * @param options.skipped.integrity {number}
  * @returns {boolean}
  */
 export function appKeyMintRefused({
@@ -80,13 +90,19 @@ export function appKeyMintRefused({
   skipped
 }: {
   matched: boolean
-  skipped: { unknownEpoch: number; noEpochKey: number; undecryptable: number }
+  skipped: {
+    unknownEpoch: number
+    noEpochKey: number
+    undecryptable: number
+    integrity: number
+  }
 }): boolean {
   return (
     !matched &&
     (skipped.unknownEpoch > 0 ||
       skipped.noEpochKey > 0 ||
-      skipped.undecryptable > 0)
+      skipped.undecryptable > 0 ||
+      skipped.integrity > 0)
   )
 }
 

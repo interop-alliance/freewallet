@@ -32,6 +32,7 @@ import {
   mintRecordEncryption,
   parseRecordFrame,
   recordCipher,
+  recordEnvelopeId,
   recordProofKeyMultibase,
   RecordProofError,
   signRecordFrame,
@@ -205,6 +206,12 @@ export async function unwrapRecordEnvelope({
       label
     })
   }
+  // The stored envelope's own id, which the decrypt verifies the body against:
+  // a self-contained record carries its envelope verbatim, so the id it was
+  // sealed under is the one member here that can name it. Read before the try
+  // below, since an envelope carrying none is a malformed frame rather than a
+  // record sealed to another key.
+  const envelopeId = recordEnvelopeId({ wrapped, label })
   // The frame is this record kind's, at this version; everything from here on
   // is key work, and every way it can fail means the same thing to a caller:
   // the envelope does not open under the key it was handed. That includes the
@@ -217,7 +224,12 @@ export async function unwrapRecordEnvelope({
       collectionId,
       encryption
     })
-    return await cipher.decrypt({ envelope: wrapped as never })
+    // A record body is JSON: only a chunked document decrypts to a `Blob`,
+    // and a self-contained record is never one.
+    return (await cipher.decrypt({
+      id: envelopeId,
+      envelope: wrapped as never
+    })) as Json
   } catch (err) {
     throw new RecordEnvelopeDecryptError({ cause: err })
   }

@@ -97,8 +97,10 @@ export interface SyncedCollectionStore {
   readonly unknownEpochAppKeys: number
   readonly noEpochKeyAppKeys: number
   readonly undecryptableAppKeys: number
+  readonly integrityAppKeys: number
   purgeUndecryptableAppKeys(): Promise<number>
   readonly undecryptableCredentials: number
+  readonly integrityCredentials: number
   purgeUndecryptableCredentials(): Promise<number>
   readonly unknownEpochCredentials: number
   readonly unknownEpochHistory: number
@@ -163,6 +165,13 @@ export class RemoteDirectStore implements SyncedCollectionStore {
   // Never purged -- they are another reader's data, not garbage -- and they
   // drive no descriptor refresh, which could not help.
   #noEpochKeyCredentials = 0
+  // Counts of resources the last read skipped because their body failed its
+  // integrity check (it did not authenticate, or the host served it under an
+  // id it was not sealed for). Never purged: the failure is the host's, the
+  // data behind it may be intact, and a delete here would remove it from the
+  // server outright.
+  #integrityCredentials = 0
+  #integrityAppKeys = 0
   // Session cache of the remote `private-credentials` contents, so a batch of
   // adds does not re-list-and-decrypt the whole collection per item (it is
   // rebuilt by every list read and maintained incrementally on add/delete).
@@ -243,9 +252,11 @@ export class RemoteDirectStore implements SyncedCollectionStore {
    * plaintext rows through keyed by their resource id) and its tolerant
    * bucketing: a row whose envelope will not decrypt under the current KAK is
    * collected as undecryptable (purgeable), a row naming an unknown key epoch
-   * is counted separately so a descriptor refresh can pick it up, and a row
-   * this wallet holds no key for is counted apart from both (no refresh can
-   * help, and it is another reader's data). The per-resource GETs and the
+   * is counted separately so a descriptor refresh can pick it up, a row this
+   * wallet holds no key for is counted apart from both (no refresh can help,
+   * and it is another reader's data), and a row whose body failed its
+   * integrity check is counted apart from all three (never collected, since a
+   * purge here deletes from the server). The per-resource GETs and the
    * decrypts run in parallel; the fold walks them in list order, so the entry
    * ordering and the failure buckets match what a sequential pass produced.
    *
@@ -257,7 +268,7 @@ export class RemoteDirectStore implements SyncedCollectionStore {
    * @param options.logicalKey {string}   'privateCredentials' | 'appConnections'
    * @returns {Promise<{ entries: Array<{ resourceId: string; cid: string;
    *   vc: IVerifiableCredential }>; undecryptableRowIds: string[];
-   *   unknownEpoch: number; noEpochKey: number }>}
+   *   unknownEpoch: number; noEpochKey: number; integrity: number }>}
    */
   async #scanContentCollection({
     logicalKey
@@ -272,6 +283,7 @@ export class RemoteDirectStore implements SyncedCollectionStore {
     undecryptableRowIds: string[]
     unknownEpoch: number
     noEpochKey: number
+    integrity: number
   }> {
     const cipher = this.#cipherFor(logicalKey)
     const resources = await this.#remote.listSyncedDocuments({ logicalKey })
@@ -283,14 +295,16 @@ export class RemoteDirectStore implements SyncedCollectionStore {
     const undecryptableRowIds: string[] = []
     let unknownEpoch = 0
     let noEpochKey = 0
+    let integrity = 0
     const decrypted = await Promise.all(
-      resources.map(async ({ data }) => {
+      resources.map(async ({ id, data }) => {
         if (!isEncryptedEnvelope(data)) {
           return { vc: data as unknown as IVerifiableCredential | undefined }
         }
         try {
           return {
             vc: (await cipher.decrypt({
+              id,
               envelope: data
             })) as unknown as IVerifiableCredential,
             fromEnvelope: true
@@ -323,6 +337,16 @@ export class RemoteDirectStore implements SyncedCollectionStore {
             { logicalKey, resourceId, err }
           )
           noEpochKey += 1
+        } else if (failure === 'integrity') {
+          // The host served a body that does not verify against the id it was
+          // read under. Skipped, counted, and never collected for the purge:
+          // authentic data may sit behind it, and a delete here would destroy
+          // the only evidence of the misbehavior.
+          log.warn(
+            'Refusing a remote resource whose body failed its integrity check',
+            { logicalKey, readUnderResourceId: resourceId, err }
+          )
+          integrity += 1
         } else {
           // One undecryptable remote row must not brick the whole popup list.
           log.warn('Skipping undecryptable remote resource', {
@@ -340,7 +364,7 @@ export class RemoteDirectStore implements SyncedCollectionStore {
       const cid = fromEnvelope ? await cidFrom({ doc: vc }) : resourceId
       entries.push({ resourceId, cid, vc })
     }
-    return { entries, undecryptableRowIds, unknownEpoch, noEpochKey }
+    return { entries, undecryptableRowIds, unknownEpoch, noEpochKey, integrity }
   }
 
   /**
@@ -351,8 +375,13 @@ export class RemoteDirectStore implements SyncedCollectionStore {
    * @returns {Promise<void>}
    */
   async #loadCredentialEntries(): Promise<void> {
-    const { entries, undecryptableRowIds, unknownEpoch, noEpochKey } =
-      await this.#scanContentCollection({ logicalKey: 'privateCredentials' })
+    const {
+      entries,
+      undecryptableRowIds,
+      unknownEpoch,
+      noEpochKey,
+      integrity
+    } = await this.#scanContentCollection({ logicalKey: 'privateCredentials' })
     const index = new Map<string, Set<string>>()
     for (const { resourceId, cid } of entries) {
       this.#indexCredential({ index, cid, resourceId })
@@ -363,6 +392,7 @@ export class RemoteDirectStore implements SyncedCollectionStore {
     this.#undecryptableCredentials = undecryptableRowIds.length
     this.#unknownEpochCredentials = unknownEpoch
     this.#noEpochKeyCredentials = noEpochKey
+    this.#integrityCredentials = integrity
     this.#credentialsLoaded = true
   }
 
@@ -499,12 +529,18 @@ export class RemoteDirectStore implements SyncedCollectionStore {
   }
 
   async listAppKeys(): Promise<Array<StoredCredential>> {
-    const { entries, undecryptableRowIds, unknownEpoch, noEpochKey } =
-      await this.#scanContentCollection({
-        logicalKey: 'appConnections'
-      })
+    const {
+      entries,
+      undecryptableRowIds,
+      unknownEpoch,
+      noEpochKey,
+      integrity
+    } = await this.#scanContentCollection({
+      logicalKey: 'appConnections'
+    })
     this.#unknownEpochAppKeys = unknownEpoch
     this.#noEpochKeyAppKeys = noEpochKey
+    this.#integrityAppKeys = integrity
     this.#undecryptableAppKeyRowIds = undecryptableRowIds
     this.#undecryptableAppKeys = undecryptableRowIds.length
     const seen = new Set<string>()
@@ -546,11 +582,15 @@ export class RemoteDirectStore implements SyncedCollectionStore {
     return this.#undecryptableAppKeys
   }
 
+  get integrityAppKeys(): number {
+    return this.#integrityAppKeys
+  }
+
   /**
    * Removes the remote `app-connections` resources whose envelopes will not
    * decrypt at all, from the most recent scan. Only that bucket is deleted:
-   * unknown-epoch resources and resources this wallet holds no key for are an
-   * app's real identity and stay on the server.
+   * unknown-epoch resources, resources this wallet holds no key for, and
+   * resources whose body failed its integrity check stay on the server.
    *
    * @returns {Promise<number>}
    */
@@ -585,10 +625,15 @@ export class RemoteDirectStore implements SyncedCollectionStore {
     return this.#noEpochKeyCredentials
   }
 
+  get integrityCredentials(): number {
+    return this.#integrityCredentials
+  }
+
   async purgeUndecryptableCredentials(): Promise<number> {
     // A fresh scan collects the current undecryptable resource ids. Only that
-    // bucket is deleted: unknown-epoch resources and resources this wallet
-    // holds no key for stay on the server.
+    // bucket is deleted: unknown-epoch resources, resources this wallet holds
+    // no key for, and resources whose body failed its integrity check stay on
+    // the server.
     await this.#loadCredentialEntries()
     for (const resourceId of this.#undecryptableCredentialRowIds) {
       await this.#remote.deleteSyncedResource({
@@ -635,13 +680,14 @@ export class RemoteDirectStore implements SyncedCollectionStore {
     let unknownEpoch = 0
     // Same shape as the credential scan: decrypt in parallel, fold in order.
     const decrypted = await Promise.all(
-      resources.map(async ({ data }) => {
+      resources.map(async ({ id, data }) => {
         if (!isEncryptedEnvelope(data)) {
           return { activity: data as unknown as WalletActivity | undefined }
         }
         try {
           return {
             activity: (await cipher.decrypt({
+              id,
               envelope: data
             })) as unknown as WalletActivity
           }
@@ -666,6 +712,14 @@ export class RemoteDirectStore implements SyncedCollectionStore {
             'Skipping remote wallet-activity resource: this wallet is not a ' +
               'recipient of its key epoch',
             { resourceId, err }
+          )
+          continue
+        }
+        if (failure === 'integrity') {
+          log.warn(
+            'Refusing a remote wallet-activity resource whose body failed ' +
+              'its integrity check',
+            { readUnderResourceId: resourceId, err }
           )
           continue
         }
@@ -750,11 +804,19 @@ export class RemoteDirectStore implements SyncedCollectionStore {
    * `upgradeContactHeadPayload` read-side upgrade.
    *
    * @param options {object}
+   * @param options.id {string}   the resource id the row was read under, which
+   *   the decrypt verifies the stored envelope against
    * @param options.data {Json | undefined}   the raw stored body
    * @returns {Promise<{ head?: ContactHeadPayload; failure?: DecryptFailure;
    *   err?: unknown }>}
    */
-  async #decryptContactHead({ data }: { data: Json | undefined }): Promise<{
+  async #decryptContactHead({
+    id,
+    data
+  }: {
+    id: string
+    data: Json | undefined
+  }): Promise<{
     head?: ContactHeadPayload
     failure?: DecryptFailure
     err?: unknown
@@ -769,7 +831,7 @@ export class RemoteDirectStore implements SyncedCollectionStore {
     }
     const cipher = this.#cipherFor('contacts')
     try {
-      const raw = await cipher.decrypt({ envelope: data })
+      const raw = await cipher.decrypt({ id, envelope: data })
       return {
         head: upgradeContactHeadPayload(raw as unknown as ContactHeadPayload)
       }
@@ -792,7 +854,7 @@ export class RemoteDirectStore implements SyncedCollectionStore {
       logicalKey: 'contacts'
     })
     const decrypted = await Promise.all(
-      resources.map(({ data }) => this.#decryptContactHead({ data }))
+      resources.map(({ id, data }) => this.#decryptContactHead({ id, data }))
     )
     const contacts: StoredContact[] = []
     let unknownEpoch = 0
@@ -812,6 +874,12 @@ export class RemoteDirectStore implements SyncedCollectionStore {
             'Skipping remote contacts row: this wallet is not a recipient ' +
               'of its key epoch',
             { rowId, err }
+          )
+        } else if (failure === 'integrity') {
+          log.warn(
+            'Refusing a remote contacts row whose body failed its integrity ' +
+              'check',
+            { readUnderRowId: rowId, err }
           )
         } else {
           log.warn('Skipping unreadable remote contacts row', { rowId, err })
@@ -853,7 +921,7 @@ export class RemoteDirectStore implements SyncedCollectionStore {
       logicalKey: 'contacts',
       resourceId: id
     })
-    const { head, err } = await this.#decryptContactHead({ data })
+    const { head, err } = await this.#decryptContactHead({ id, data })
     if (err) {
       log.warn('Skipping unreadable remote contacts row', { id, err })
       return undefined
@@ -919,7 +987,7 @@ export class RemoteDirectStore implements SyncedCollectionStore {
         resourceId: id
       })
       const { head: storedHead } = found
-        ? await this.#decryptContactHead({ data: found.data })
+        ? await this.#decryptContactHead({ id, data: found.data })
         : { head: undefined }
       if (storedHead?.contactId !== contactId) {
         throw new Error(`Remote "contacts" row "${id}" already exists.`)
@@ -978,6 +1046,7 @@ export class RemoteDirectStore implements SyncedCollectionStore {
         )
       }
       const { head: existingHead, err } = await this.#decryptContactHead({
+        id,
         data
       })
       if (err || !existingHead) {
@@ -1136,12 +1205,12 @@ export class RemoteDirectStore implements SyncedCollectionStore {
       logicalKey: 'contactsHistory'
     })
     const decrypted = await Promise.all(
-      resources.map(async ({ data }) => {
+      resources.map(async ({ id, data }) => {
         if (!isEncryptedEnvelope(data)) {
           return { raw: data }
         }
         try {
-          return { raw: await cipher.decrypt({ envelope: data }) }
+          return { raw: await cipher.decrypt({ id, envelope: data }) }
         } catch (err) {
           return { err }
         }
@@ -1167,6 +1236,12 @@ export class RemoteDirectStore implements SyncedCollectionStore {
             'Skipping remote contacts-history row: this wallet is not a ' +
               'recipient of its key epoch',
             { resourceId, err }
+          )
+        } else if (failure === 'integrity') {
+          log.warn(
+            'Refusing a remote contacts-history row whose body failed its ' +
+              'integrity check',
+            { readUnderResourceId: resourceId, err }
           )
         } else {
           log.warn('Skipping unreadable remote contacts-history row', {

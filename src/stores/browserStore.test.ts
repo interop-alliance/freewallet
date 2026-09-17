@@ -13,7 +13,7 @@ import { cidFrom } from '@interop/was-client/sync'
 import type { Json } from '@interop/was-sync'
 import { BrowserStore } from './browserStore'
 import { UnknownEpochError, type DocCipher } from '@interop/was-client/edv'
-import { KeyUnwrapError } from '@interop/was-client'
+import { IntegrityError, KeyUnwrapError } from '@interop/was-client'
 import type { ContactRevisionPayload } from '@interop/social-core'
 import { browserLocalSessionPersistence } from '@/session/persistence'
 import { PublicCopyRetractionError, StorageManager } from './storageManager'
@@ -822,6 +822,141 @@ function makeNoEpochKeyCipher({ foreignRealm = false } = {}): DocCipher {
     }
   }
 }
+
+/**
+ * A fake cipher whose `decrypt` always throws `IntegrityError` -- standing in
+ * for the host serving one resource's body under another resource's id (or a
+ * body that will not authenticate). `encrypt` still produces a normal fake
+ * envelope, so a caller can seed rows with it.
+ *
+ * @param [options.foreignRealm] {boolean}   raise the refusal from a second
+ *   copy of the package instead of this one
+ */
+function makeMisboundCipher({ foreignRealm = false } = {}): DocCipher {
+  return {
+    async encrypt({ data }: { data: Json }) {
+      fakeCipherCounter += 1
+      const id = `z6MisboundEnvelope${fakeCipherCounter}`
+      return {
+        id,
+        envelope: {
+          id,
+          sequence: 0,
+          jwe: { ciphertext: JSON.stringify(data) }
+        } as Json
+      }
+    },
+    async decrypt({ id }: { id?: string }) {
+      if (foreignRealm) {
+        throw foreignRealmError('IntegrityError')
+      }
+      throw new IntegrityError(
+        'Cannot decrypt this resource: the stored envelope is bound to a ' +
+          `different resource id ("z6SealedFor") than the one requested ` +
+          `("${id}"). The server swapped two resources' envelopes.`
+      )
+    }
+  }
+}
+
+describe('BrowserStore (misbound envelopes)', () => {
+  it('counts a misbound credential row apart from undecryptable and never purges it', async () => {
+    // A misbound envelope takes no keys to produce: the host served one
+    // resource's body under another's id. Bucketing it as purgeable garbage
+    // would let that host have the wallet destroy authentic data.
+    const { localStore } = await initLocalStore({
+      ciphers: {
+        privateCredentials: makeMisboundCipher(),
+        walletActivity: makeMisboundCipher()
+      }
+    })
+    await localStore.rxCollection('privateCredentials').insert({
+      id: 'z6ReadUnder',
+      updatedAt: new Date().toISOString(),
+      version: 0,
+      data: {
+        id: 'z6ReadUnder',
+        sequence: 0,
+        jwe: { ciphertext: JSON.stringify(makeCredential('Alice')) }
+      } as Json
+    })
+
+    expect(await localStore.listCredentials()).toHaveLength(0)
+    expect(localStore.integrityCredentials).toBe(1)
+    expect(localStore.undecryptableCredentials).toBe(0)
+    // It drives no descriptor refresh either: no refresh can change the answer.
+    expect(localStore.unknownEpochCredentials).toBe(0)
+    expect(localStore.noEpochKeyCredentials).toBe(0)
+
+    expect(await localStore.purgeUndecryptableCredentials()).toBe(0)
+    expect(
+      await localStore.rxCollection('privateCredentials').find().exec()
+    ).toHaveLength(1)
+  })
+
+  it('counts a misbound app-key row apart from undecryptable and never purges it', async () => {
+    // The app-key half: a misbound row read as absent would mint a second
+    // identity for the app, so it is counted rather than silently skipped.
+    const { localStore } = await initLocalStore({
+      ciphers: {
+        privateCredentials: makeFakeCipher(),
+        appConnections: makeMisboundCipher(),
+        walletActivity: makeFakeCipher()
+      }
+    })
+    await localStore.rxCollection('appConnections').insert({
+      id: 'z6AppReadUnder',
+      updatedAt: new Date().toISOString(),
+      version: 0,
+      data: {
+        id: 'z6AppReadUnder',
+        sequence: 0,
+        jwe: {
+          ciphertext: JSON.stringify(makeAppKey('https://app.example/editor'))
+        }
+      } as Json
+    })
+
+    expect(await localStore.listAppKeys()).toEqual([])
+    expect(localStore.integrityAppKeys).toBe(1)
+    expect(localStore.undecryptableAppKeys).toBe(0)
+    expect(localStore.unknownEpochAppKeys).toBe(0)
+    expect(localStore.noEpochKeyAppKeys).toBe(0)
+
+    expect(await localStore.purgeUndecryptableAppKeys()).toBe(0)
+    expect(
+      await localStore.rxCollection('appConnections').find().exec()
+    ).toHaveLength(1)
+  })
+
+  it('classifies the refusal raised from a second copy of the package', async () => {
+    // Matched by `err.name`, for the same reason the epoch refusals are: a
+    // wallet whose `@interop/was-client` resolves twice throws a class this
+    // file never imported, and a miss here drops the row into the purgeable
+    // bucket.
+    const { localStore } = await initLocalStore({
+      ciphers: {
+        privateCredentials: makeMisboundCipher({ foreignRealm: true }),
+        walletActivity: makeMisboundCipher({ foreignRealm: true })
+      }
+    })
+    await localStore.rxCollection('privateCredentials').insert({
+      id: 'z6ForeignMisbound',
+      updatedAt: new Date().toISOString(),
+      version: 0,
+      data: {
+        id: 'z6ForeignMisbound',
+        sequence: 0,
+        jwe: { ciphertext: JSON.stringify(makeCredential('Alice')) }
+      } as Json
+    })
+
+    expect(await localStore.listCredentials()).toHaveLength(0)
+    expect(localStore.integrityCredentials).toBe(1)
+    expect(localStore.undecryptableCredentials).toBe(0)
+    expect(await localStore.purgeUndecryptableCredentials()).toBe(0)
+  })
+})
 
 describe('BrowserStore (key epochs)', () => {
   it('stores the epoch the cipher stamped on the row', async () => {

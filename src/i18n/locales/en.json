@@ -479,6 +479,8 @@
     "removeUndecryptable": "Remove",
     "undecryptableRemoved_one": "{{count}} undecryptable credential removed.",
     "undecryptableRemoved_other": "{{count}} undecryptable credentials removed.",
+    "integrity_one": "{{count}} credential failed its integrity check and is not shown. The storage server returned data that does not match the credential it was stored as. The credential has been left untouched.",
+    "integrity_other": "{{count}} credentials failed their integrity check and are not shown. The storage server returned data that does not match the credentials they were stored as. They have been left untouched.",
     "passkeySafety": {
       "notSynced": "This wallet's only login is a passkey stored on this device. If you lose the device, you lose the wallet. Add a second login method in Settings.",
       "synced": "This wallet has a single passkey login. Add a second login method in case you lose access to it.",

@@ -14,6 +14,34 @@
 
 ### Changed
 
+- A row whose body fails its integrity check is bucketed apart from the
+  purgeable `undecryptable` one: `classifyDecryptFailure` returns `integrity`
+  for an `IntegrityError`, the credential and app-key counters carry it
+  separately in both backends, and neither purge can reach it. Producing such
+  a row takes no keys, so the old bucketing let a host present recoverable
+  data as garbage and have the wallet destroy it -- on the replica-less
+  backend, off the server. The dashboard reports the count in its own alert
+  with no removal action, the App Connect match path refuses to mint on it
+  (an app key read as absent would mint a second identity), and every read
+  path logs it distinctly, naming the id the body was read under.
+- Every EDV decrypt names the resource id the body was read under, per
+  `@interop/was-client` 0.66.0's now-required `DocCipher.decrypt` `id`
+  argument: the replica row id in `BrowserStore`, the feed row id in
+  `RemoteDirectStore`, the fetched id in the storage browser's
+  `decryptCollectionResource`, and the sealed envelope's own stamped id for a
+  self-contained record (wallet-core's `recordEnvelopeId`). The contacts
+  conflict rule is addressed too, so a side sealed for another resource is
+  refused rather than compared, and the remote master wins.
+- A contacts row written by the pre-fix path -- an app-minted uuidv7 resource
+  id carrying a content-mode envelope -- no longer decrypts, the binding check
+  refusing a body served under an id it was not sealed for. The cross-replica
+  conformance exercise drops the scenario that pinned its editability. There
+  is no migration.
+- The minimum dependency versions move to `@interop/was-client` `^0.67.0`,
+  `@interop/was-sync` `^0.4.0`, and `@interop/storage-core` `^0.18.0`. The
+  driver now treats was-client's `NotSupportedError` as a permanent refusal
+  and stops that one collection's replication rather than re-sending the
+  batch forever.
 - Every unlock Space (passphrase, passkey, and recovery-code alike) is
   created with the Space type `['AuxiliarySpace', 'Space', 'UnlockSpace']`,
   so a reader can recognize one from its Space Metadata object alone. The
@@ -54,6 +82,27 @@
   `whole-space-transient` refusal
   reason, its consent copy, and `resolveGrant`'s `generationDelegationParent`
   option are gone.
+- The WAS e2e run stores under its own `.was-e2e-data/` directory, emptied
+  before the teaching server starts, rather than under the server checkout's
+  `data/` directory where every earlier run's Spaces accumulated. The suite
+  runs serially against one long-lived server, so that accumulation was a
+  variable in every timing-sensitive assertion. It needs was-teaching-server's
+  `WAS_DATA_DIR`, and applies only to a server Playwright starts --
+  `reuseExistingServer` still hands an already-running dev server, and its own
+  store, to the run.
+
+### Fixed
+
+- The login-time Space-controller promotion is pinned to a validator, so it
+  writes instead of being refused. It read the Space Description with
+  `describe()` and handed that etag-less answer to `Space.configure` as its
+  compare-and-swap baseline, which `@interop/was-client` 0.67.0 refuses with
+  `NotSupportedError` rather than sending the write unconditionally. The
+  refusal was silent -- both callers warn and continue -- so on the
+  pointer-promotion path the Space controller was never promoted and the next
+  login re-failed the same way instead of healing. The read now goes through
+  `describeWithEtag()`, and a read carrying no `ETag` drops the baseline so
+  `configure` reads for itself.
 
 ## 0.43.0 - 2026-09-14
 

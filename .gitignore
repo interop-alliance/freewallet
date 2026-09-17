@@ -32,6 +32,9 @@ dist-ssr
 /test-results/
 /playwright-report/
 
+# WAS e2e teaching-server store (emptied at the start of each run)
+/.was-e2e-data/
+
 # Generated CHAPI polyfill bundles (copied from node_modules by `prepare`)
 public/js/
 

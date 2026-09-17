@@ -860,11 +860,15 @@ describe('WASRemoteStore.ensureGovernedCollection', () => {
 })
 
 describe('WASRemoteStore.promoteSpaceController', () => {
-  it('forwards a supplied `current` to the Space configure', async () => {
-    const current: SpaceMetadata = {
+  it('forwards a supplied `current` to the Space configure, validator included', async () => {
+    // The caller's baseline carries the `ETag` of the read it came from:
+    // was-client pins the promotion write to it, and refuses a baseline
+    // without one rather than writing unconditionally.
+    const current: SpaceMetadata & { etag?: string } = {
       id: 'space-id',
       type: ['Space'],
-      controller: 'did:key:test'
+      controller: 'did:key:test',
+      etag: '"1"'
     }
     const configure = vi.fn().mockResolvedValue(undefined)
     const store = storeWithStubbedClient({

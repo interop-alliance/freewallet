@@ -66,6 +66,12 @@ export function DashboardPage() {
   // so the user can see and clear them rather than one poisoned row hanging the
   // page.
   const [undecryptableCount, setUndecryptableCount] = useState(0)
+  // Rows whose body failed its integrity check: the storage server returned
+  // data that does not verify against the id it was read under. Surfaced on
+  // its own, with no remove affordance -- producing such a row takes no keys,
+  // so offering to delete it would let a host present recoverable data as
+  // garbage and have the wallet destroy the evidence.
+  const [integrityCount, setIntegrityCount] = useState(0)
   // Dismissing the passkey-safety notice hides it for this visit only.
   const [noticeDismissed, setNoticeDismissed] = useState(false)
   const seedReady = session?.welcomeSeedReady
@@ -103,6 +109,7 @@ export function DashboardPage() {
       }
       setCredentials(vcs)
       setUndecryptableCount(session.storage.undecryptableCredentials)
+      setIntegrityCount(session.storage.integrityCredentials)
       setLoadError(false)
     },
     [session]
@@ -270,6 +277,12 @@ export function DashboardPage() {
           }
         >
           {t('dashboard.undecryptable', { count: undecryptableCount })}
+        </Alert>
+      )}
+
+      {integrityCount > 0 && (
+        <Alert severity="error" sx={{ mb: 2 }}>
+          {t('dashboard.integrity', { count: integrityCount })}
         </Alert>
       )}
 

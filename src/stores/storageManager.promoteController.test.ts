@@ -2,10 +2,12 @@
  * Unit tests for the login-time controller promotion
  * (`StorageManager.ensurePromotedController`), specifically what it hands
  * was-client's `Space.configure()` as `current`. The promoted-signer read it
- * makes is a description in hand, so it rides along and the pre-merge
- * re-describe is skipped; a `null` from that read is not, since an
- * unauthorized answer under the promoted signer is masked as the same 404 an
- * absent description returns.
+ * makes is a description in hand, so it rides along with that read's `ETag`
+ * and the pre-merge re-describe is skipped. Two answers do not ride along: a
+ * `null`, since an unauthorized answer under the promoted signer is masked as
+ * the same 404 an absent description returns, and a read carrying no `ETag`,
+ * which is no compare-and-swap baseline -- was-client refuses such a write
+ * rather than sending it unconditionally.
  *
  * @vitest-environment node
  */
@@ -25,12 +27,15 @@ const ACCOUNT_DID = 'did:webvh:QmScid:was.example:space:s-space'
 
 /**
  * A recording stand-in for the remote store's promotion surface: the Space
- * handle's `describe`, the controller rebinds, and the promotion PUT.
+ * handle's `describeWithEtag`, the controller rebinds, and the promotion PUT.
+ * The read answers as a real WAS server does, with the Description and its
+ * validator, since the validator is what the promotion write is pinned to.
  */
 function fakeRemote({
   describeResult
 }: {
-  describeResult: SpaceMetadata | null | (() => never)
+  describeResult:
+    { description: SpaceMetadata; etag?: string } | null | (() => never)
 }) {
   const promoteSpaceController = vi.fn().mockResolvedValue(undefined)
   const rebindController = vi.fn()
@@ -43,7 +48,7 @@ function fakeRemote({
   const remoteStore = {
     spaceId: 's-space',
     controller: ACCOUNT_DID,
-    spaceHandle: () => ({ describe: describeSpace }),
+    spaceHandle: () => ({ describeWithEtag: describeSpace }),
     rebindController,
     promoteSpaceController
   } as unknown as WASRemoteStore
@@ -90,14 +95,17 @@ function managerFor(remoteStore: WASRemoteStore): {
 }
 
 describe('StorageManager.ensurePromotedController', () => {
-  it('passes the non-null read through as `current`', async () => {
+  it('passes the non-null read through as `current`, validator included', async () => {
     const { remoteStore, promoteSpaceController, describeSpace } = fakeRemote({
       // The Space is there, but still controlled by the did:key: the
       // promotion PUT never landed.
       describeResult: {
-        id: 's-space',
-        controller: 'did:key:z6MkTestClient'
-      } as unknown as SpaceMetadata
+        description: {
+          id: 's-space',
+          controller: 'did:key:z6MkTestClient'
+        } as unknown as SpaceMetadata,
+        etag: '"1"'
+      }
     })
     const { manager, profile } = managerFor(remoteStore)
 
@@ -106,7 +114,33 @@ describe('StorageManager.ensurePromotedController', () => {
     expect(describeSpace).toHaveBeenCalledOnce()
     expect(promoteSpaceController).toHaveBeenCalledWith({
       controller: ACCOUNT_DID,
-      current: { id: 's-space', controller: 'did:key:z6MkTestClient' }
+      current: {
+        id: 's-space',
+        controller: 'did:key:z6MkTestClient',
+        etag: '"1"'
+      }
+    })
+  })
+
+  it('drops `current` when the read carried no validator', async () => {
+    const { remoteStore, promoteSpaceController } = fakeRemote({
+      // No `ETag` reached the client (a proxy stripping the header, a
+      // browser without it exposed): the read is no baseline, so the write
+      // goes out without one and `configure` reads for itself instead of
+      // being refused for a baseline it cannot pin to.
+      describeResult: {
+        description: {
+          id: 's-space',
+          controller: 'did:key:z6MkTestClient'
+        } as unknown as SpaceMetadata
+      }
+    })
+    const { manager, profile } = managerFor(remoteStore)
+
+    await manager.ensurePromotedController({ profile })
+
+    expect(promoteSpaceController).toHaveBeenCalledWith({
+      controller: ACCOUNT_DID
     })
   })
 
@@ -126,9 +160,12 @@ describe('StorageManager.ensurePromotedController', () => {
   it('skips the promotion entirely when the server already agrees', async () => {
     const { remoteStore, promoteSpaceController } = fakeRemote({
       describeResult: {
-        id: 's-space',
-        controller: ACCOUNT_DID
-      } as unknown as SpaceMetadata
+        description: {
+          id: 's-space',
+          controller: ACCOUNT_DID
+        } as unknown as SpaceMetadata,
+        etag: '"1"'
+      }
     })
     const { manager, profile } = managerFor(remoteStore)
 

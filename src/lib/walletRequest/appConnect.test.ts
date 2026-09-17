@@ -41,7 +41,7 @@ const CAPABILITY_QUERY = {
 async function fakeSession({
   appKeys = [],
   credentials = [],
-  skipped = { unknownEpoch: 0, noEpochKey: 0, undecryptable: 0 }
+  skipped = { unknownEpoch: 0, noEpochKey: 0, undecryptable: 0, integrity: 0 }
 }: {
   appKeys?: StoredCredential[]
   credentials?: StoredCredential[]
@@ -49,6 +49,7 @@ async function fakeSession({
     unknownEpoch: number
     noEpochKey: number
     undecryptable: number
+    integrity: number
   }
 } = {}): Promise<{ session: Session; added: unknown[]; deleted: string[] }> {
   const keyAgent = await CapabilityAgent.fromSecret({
@@ -132,7 +133,12 @@ describe('processAppConnect', () => {
     // session holds no wrap for, so "no match" does not mean "never
     // connected" and a mint would orphan the app's prior identity.
     const { session, added } = await fakeSession({
-      skipped: { unknownEpoch: 0, noEpochKey: 1, undecryptable: 0 }
+      skipped: {
+        unknownEpoch: 0,
+        noEpochKey: 1,
+        undecryptable: 0,
+        integrity: 0
+      }
     })
 
     await expect(
@@ -154,7 +160,12 @@ describe('processAppConnect', () => {
     // reach the match path unresolved (the consent preview already spent the
     // refresh before this scan ran).
     const { session, added } = await fakeSession({
-      skipped: { unknownEpoch: 1, noEpochKey: 0, undecryptable: 0 }
+      skipped: {
+        unknownEpoch: 1,
+        noEpochKey: 0,
+        undecryptable: 0,
+        integrity: 0
+      }
     })
 
     await expect(
@@ -172,7 +183,12 @@ describe('processAppConnect', () => {
 
   it('refuses to mint when the scan skipped undecryptable rows', async () => {
     const { session, added } = await fakeSession({
-      skipped: { unknownEpoch: 0, noEpochKey: 0, undecryptable: 2 }
+      skipped: {
+        unknownEpoch: 0,
+        noEpochKey: 0,
+        undecryptable: 2,
+        integrity: 0
+      }
     })
 
     await expect(
@@ -188,6 +204,32 @@ describe('processAppConnect', () => {
     expect(added).toHaveLength(0)
   })
 
+  it('refuses to mint when the scan skipped a misbound row', async () => {
+    // The one skip a host can produce with no keys at all: it served a body
+    // that does not verify against the id it was read under. Treating it as
+    // "absent" would let the host force a second identity for the app.
+    const { session, added } = await fakeSession({
+      skipped: {
+        unknownEpoch: 0,
+        noEpochKey: 0,
+        undecryptable: 0,
+        integrity: 1
+      }
+    })
+
+    await expect(
+      processAppConnect({
+        appConnect: { app: APP, capabilityQueries: [CAPABILITY_QUERY] },
+        session,
+        origin: ORIGIN,
+        challenge: 'challenge-skip-3',
+        domain: ORIGIN,
+        didAuthRequested: true
+      })
+    ).rejects.toThrow(AppKeysUnreadableError)
+    expect(added).toHaveLength(0)
+  })
+
   it('serves a match found despite skipped rows', async () => {
     const { credential, subjectDid } = await mintAppKeyCredential({
       app: APP,
@@ -196,7 +238,12 @@ describe('processAppConnect', () => {
     const stored = [{ cid: 'cid-1', vc: credential }] as StoredCredential[]
     const { session, added } = await fakeSession({
       appKeys: stored,
-      skipped: { unknownEpoch: 1, noEpochKey: 1, undecryptable: 1 }
+      skipped: {
+        unknownEpoch: 1,
+        noEpochKey: 1,
+        undecryptable: 1,
+        integrity: 1
+      }
     })
 
     const response = await processAppConnect({

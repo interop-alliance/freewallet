@@ -25,7 +25,7 @@ const COLLECTION_ID = 'contacts'
 /**
  * A vault key pair, two one-epoch descriptors wrapped to it (the one the
  * session holds, and the one another client rotated to), and an envelope
- * sealed under the rotated epoch.
+ * sealed under the rotated epoch, with the resource id it was minted under.
  *
  * @returns {Promise<object>}
  */
@@ -48,15 +48,15 @@ async function fixture() {
     idDerivation: 'random',
     encryption: rotated
   })
-  const { envelope } = await rotatedCipher.encrypt({
+  const { id, envelope } = await rotatedCipher.encrypt({
     data: { displayName: 'Ada' }
   })
-  return { keyAgreementKey, keyResolver, held, rotated, envelope }
+  return { keyAgreementKey, keyResolver, held, rotated, id, envelope }
 }
 
 describe('refreshingCollectionCipher', () => {
   it('builds from the descriptor in hand and re-reads the source once on an unknown epoch', async () => {
-    const { keyAgreementKey, keyResolver, held, rotated, envelope } =
+    const { keyAgreementKey, keyResolver, held, rotated, id, envelope } =
       await fixture()
     const source: EncryptionDescriptorSource = {
       collectionEncryption: vi.fn(async () => rotated)
@@ -79,7 +79,7 @@ describe('refreshingCollectionCipher', () => {
     // The build was served by the primed descriptor, not the source.
     expect(source.collectionEncryption).not.toHaveBeenCalled()
 
-    await expect(cipher.decrypt({ envelope })).resolves.toEqual({
+    await expect(cipher.decrypt({ id, envelope })).resolves.toEqual({
       displayName: 'Ada'
     })
     expect(source.collectionEncryption).toHaveBeenCalledTimes(1)
@@ -88,7 +88,7 @@ describe('refreshingCollectionCipher', () => {
   })
 
   it('propagates the unknown epoch when there is no source to refresh from', async () => {
-    const { keyAgreementKey, keyResolver, held, envelope } = await fixture()
+    const { keyAgreementKey, keyResolver, held, id, envelope } = await fixture()
     const cipher = await refreshingCollectionCipher({
       collectionId: COLLECTION_ID,
       idDerivation: 'random',
@@ -96,7 +96,7 @@ describe('refreshingCollectionCipher', () => {
       keyAgreementKey,
       keyResolver
     })
-    await expect(cipher.decrypt({ envelope })).rejects.toSatisfy(
+    await expect(cipher.decrypt({ id, envelope })).rejects.toSatisfy(
       isUnknownEpochError
     )
   })

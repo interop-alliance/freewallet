@@ -1,4 +1,5 @@
 import { defineConfig, devices } from '@playwright/test'
+import { WAS_E2E_DATA_DIR } from './tests/e2e-was/wasDataDir'
 
 const APP_PORT = 5274
 const WAS_PORT = 3002
@@ -9,6 +10,9 @@ const WAS_SERVER_DIR = process.env.WAS_SERVER_DIR ?? '../was-teaching-server'
 
 export default defineConfig({
   testDir: './tests/e2e-was',
+  // Empties WAS_E2E_DATA_DIR before the teaching server starts, so the run
+  // begins against an empty store.
+  globalSetup: './tests/e2e-was/wasDataDir.ts',
   fullyParallel: false,
   // One shared teaching server (dev mode, single process) serves every test,
   // and it fully re-verifies the did:webvh log per zcap request -- parallel
@@ -38,7 +42,16 @@ export default defineConfig({
       // SERVER_URL is the server's own base URL; the server derives the
       // expected invocation-target host from it, and the app's
       // VITE_WAS_SERVER_URL below is the Spaces Repository URL under it.
-      env: { PORT: String(WAS_PORT), SERVER_URL: WAS_URL },
+      // WAS_DATA_DIR keeps the run's Spaces out of the server checkout's own
+      // data/ directory, which would otherwise accumulate every past run's.
+      // It only applies to a server this config starts: `reuseExistingServer`
+      // hands an already-running dev server (and its own store) to the run
+      // instead.
+      env: {
+        PORT: String(WAS_PORT),
+        SERVER_URL: WAS_URL,
+        WAS_DATA_DIR: WAS_E2E_DATA_DIR
+      },
       timeout: 60_000
     },
     {

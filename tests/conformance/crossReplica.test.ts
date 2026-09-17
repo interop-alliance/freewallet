@@ -22,24 +22,19 @@
  * store with the same reconciliation (mirroring `dcw/app/model/syncedDoc.ts`,
  * kept in step with `dcw/test-node/contactsSyncEngine.test.ts`), and this
  * wallet's `BrowserStore` write paths are reproduced verbatim over a memory
- * RxDB. Both replicas now build the contacts cipher per the spec
+ * RxDB. Both replicas build the contacts cipher per the spec
  * (`idDerivation: 'random'`), key the row with the cipher-minted EDV id, and
- * update in place via `encryptUpdate` -- and both must keep tolerating what
- * the LEGACY freewallet paths left on servers: uuidv7 resource ids and
- * `sequence: 0` at any revision (fresh `cipher.encrypt` on every save). A
- * dedicated legacy-row test covers that tail.
+ * update in place via `encryptUpdate`.
  *
  * Divergences this exercise pins down (see
  * `wallet-core/docs/cross-replica-sync-compatibility.md` for the written
  * contract):
- * - EDV `sequence` stays advisory on the wire: legacy freewallet envelopes are
- *   `sequence: 0` whatever the revision count, and an updater must advance
- *   from whatever it finds. The server ETag `version` is the enforced
- *   concurrency control.
- * - Legacy uuid resource ids stay first-class on the update path: was-client
- *   accepts a pre-existing id verbatim when a `current` envelope is supplied
- *   (the id is already on the server, so the URL-leak guard only covers
- *   creates).
+ * - EDV `sequence` stays advisory on the wire: an updater advances from
+ *   whatever it finds rather than trusting a count. The server ETag `version`
+ *   is the enforced concurrency control.
+ * - A resource id is first-class on the update path: was-client accepts a
+ *   pre-existing id verbatim when a `current` envelope is supplied (the id is
+ *   already on the server, so the URL-leak guard only covers creates).
  *
  * Needs the sibling `../was-teaching-server` checkout built (override with
  * `WAS_SERVER_DIR`). Run: `pnpm run test:conformance`.
@@ -390,10 +385,10 @@ function makeDcwContactResolve({
       })
       return
     }
-    const remoteBody = await cipher.decrypt({ envelope: master.data })
+    const remoteBody = await cipher.decrypt({ id, envelope: master.data })
     const remote = isContactHeadPayload(remoteBody) ? remoteBody : null
     const localBody =
-      data != null ? await cipher.decrypt({ envelope: data }) : null
+      data != null ? await cipher.decrypt({ id, envelope: data }) : null
     const local =
       localBody != null && isContactHeadPayload(localBody) ? localBody : null
 
@@ -404,7 +399,7 @@ function makeDcwContactResolve({
       await store.adoptLatest({
         id,
         latest: master,
-        projection: { kind: 'upsert', payload: remoteBody }
+        projection: { kind: 'upsert', payload: remoteBody as Json }
       })
       return
     }
@@ -466,11 +461,6 @@ describeConformance('cross-replica round-trip conformance', () => {
 
   // Freewallet replica parts.
   const fwCiphers = {} as Record<CollectionId, DocCipher>
-  // The PRE-FIX freewallet contacts cipher construction (no `idDerivation`, so
-  // 'content' mode): used only to author LEGACY rows -- app-minted uuidv7
-  // resource id, fresh encrypt each save -- whose tolerance both replicas must
-  // keep.
-  let fwLegacyContactsCipher: DocCipher
   const fwPorts = {} as Record<CollectionId, WasSyncPort>
   let fwCollections: Record<CollectionId, RxCollection<SyncedDoc>>
   let fwDb: Awaited<ReturnType<typeof createRxDatabase>>
@@ -534,34 +524,6 @@ describeConformance('cross-replica round-trip conformance', () => {
   }
 
   /**
-   * The LEGACY `browserStore.addContact` (pre-fix): app-minted uuidv7 row id,
-   * content-mode cipher whose minted id is discarded, fresh encrypt
-   * (`sequence: 0`). Authors the rows the legacy-tolerance test edits.
-   */
-  async function fwAddLegacyContact(
-    contact: ContactHeadPayload['contact'],
-    writerId: string
-  ): Promise<{ id: string; head: ContactHeadPayload }> {
-    const id = uuidv7()
-    const head: ContactHeadPayload = {
-      contactId: uuidv7(),
-      updatedAt: new Date().toISOString(),
-      writerId,
-      contact
-    }
-    const { envelope } = await fwLegacyContactsCipher.encrypt({
-      data: head as unknown as Json
-    })
-    await fwCollections[CONTACTS_COLLECTION].insert({
-      id,
-      updatedAt: head.updatedAt,
-      version: 0,
-      data: envelope
-    } as SyncedDoc)
-    return { id, head }
-  }
-
-  /**
    * `browserStore.updateContact`: decrypt the existing head, preserve its
    * `contactId`, re-encrypt in place through `encryptUpdate` (the envelope
    * stays bound to the row id and its `sequence` advances from the prior
@@ -579,6 +541,7 @@ describeConformance('cross-replica round-trip conformance', () => {
     }
     const current = doc.toMutableJSON().data as Json
     const existing = (await fwCiphers[CONTACTS_COLLECTION].decrypt({
+      id,
       envelope: current
     })) as unknown as ContactHeadPayload
     const head: ContactHeadPayload = {
@@ -635,9 +598,12 @@ describeConformance('cross-replica round-trip conformance', () => {
     if (!doc || doc.deleted) {
       return undefined
     }
-    return fwCiphers[collectionId].decrypt({
+    // Every collection here is JSON; `decrypt` widened to `Json | Blob` for
+    // the chunked-document case, which none of these exercise.
+    return (await fwCiphers[collectionId].decrypt({
+      id,
       envelope: doc.toMutableJSON().data as Json
-    })
+    })) as Json
   }
 
   // ---- dcw write paths (syncManager's encrypt* helpers over the store) ---
@@ -678,6 +644,7 @@ describeConformance('cross-replica round-trip conformance', () => {
     }
     const cipher = dcwCiphers[CONTACTS_COLLECTION]
     const existing = (await cipher.decrypt({
+      id,
       envelope: row.data
     })) as unknown as ContactHeadPayload
     const head: ContactHeadPayload = {
@@ -808,13 +775,6 @@ describeConformance('cross-replica round-trip conformance', () => {
         collectionId
       })
     }
-    fwLegacyContactsCipher = await createEdvDocCipher({
-      keyAgreementKey: fwAgents.keyAgreementKey,
-      keyResolver: fwAgents.keyResolver,
-      collectionId: CONTACTS_COLLECTION,
-      encryption: descriptors[CONTACTS_COLLECTION]
-    })
-
     // Freewallet replica: memory RxDB with the real schema + conflict handler.
     fwDb = await createRxDatabase({
       name: 'conformance-wallet-db',
@@ -852,7 +812,8 @@ describeConformance('cross-replica round-trip conformance', () => {
       dcwEngines[collectionId] = new SyncEngine({
         port,
         store,
-        decryptDoc: envelope => cipher.decrypt({ envelope }),
+        decryptDoc: async ({ id, envelope }) =>
+          (await cipher.decrypt({ id, envelope })) as Json,
         validatePayload:
           collectionId === CONTACTS_COLLECTION
             ? isContactHeadPayload
@@ -940,10 +901,9 @@ describeConformance('cross-replica round-trip conformance', () => {
     ].filter(r => !r.deleted)
     expect(contactRows).toHaveLength(2) // dcw-authored + fw-authored, no dupes
 
-    // Both replicas now update through `encryptUpdate`: freewallet advanced
-    // the DCW-authored envelope's EDV sequence from 0 to 1. (The server ETag
-    // `version`, not the sequence, remains the enforced concurrency control;
-    // legacy fresh-encrypt envelopes are pinned separately below.)
+    // Both replicas update through `encryptUpdate`: freewallet advanced the
+    // DCW-authored envelope's EDV sequence from 0 to 1. (The server ETag
+    // `version`, not the sequence, remains the enforced concurrency control.)
     const envelope = await serverEnvelope(CONTACTS_COLLECTION, dcwAuthoredId)
     expect(envelope?.sequence).toBe(1)
   })
@@ -1062,7 +1022,7 @@ describeConformance('cross-replica round-trip conformance', () => {
     // ends -- freewallet's contacts rows are now keyed by the cipher-minted
     // EDV id (spec `idDerivation: 'random'`), and was-client's update path
     // accepts a pre-existing resource id verbatim. This exercises the edit
-    // round trip; the legacy uuid-id tail is pinned in the next test.
+    // round trip.
     const head = await dcwUpdateContact(
       fwAuthoredId,
       {
@@ -1085,50 +1045,6 @@ describeConformance('cross-replica round-trip conformance', () => {
     expect(await fwCollections[CONTACTS_COLLECTION].find().exec()).toHaveLength(
       2
     )
-  })
-
-  it('DCW in-place edits a LEGACY freewallet contact (uuid row id, sequence-0 envelope)', async () => {
-    // Rows authored by the pre-fix freewallet write path live on real servers:
-    // an app-minted uuidv7 resource id and a content-mode fresh-encrypt
-    // envelope (`sequence: 0` whatever the revision). Both tolerances must
-    // hold together on the update path -- was-client takes the pre-existing
-    // uuid id verbatim (`current` supplied) and advances the sequence from
-    // the legacy envelope's 0.
-    const { id: legacyId, head } = await fwAddLegacyContact(
-      { displayName: 'Legacy Row' } as ContactHeadPayload['contact'],
-      'fw-writer'
-    )
-    await fwSync(CONTACTS_COLLECTION)
-    await dcwSync(CONTACTS_COLLECTION)
-    expect(dcwStores[CONTACTS_COLLECTION].projection.get(legacyId)).toEqual(
-      head
-    )
-
-    const edited = await dcwUpdateContact(
-      legacyId,
-      {
-        displayName: 'Legacy Row (edited on mobile)'
-      } as ContactHeadPayload['contact'],
-      'dcw-writer'
-    )
-    await dcwSync(CONTACTS_COLLECTION)
-    await fwSync(CONTACTS_COLLECTION)
-
-    const seen = (await fwRead(
-      CONTACTS_COLLECTION,
-      legacyId
-    )) as unknown as ContactHeadPayload
-    expect(seen).toEqual(edited)
-    // The uuid row was edited in place under its own id, sequence advanced
-    // from the legacy envelope's 0.
-    const envelope = await serverEnvelope(CONTACTS_COLLECTION, legacyId)
-    expect(envelope?.sequence).toBe(1)
-
-    // Leave the board as the delete tests expect: exactly the two standard
-    // contact rows.
-    await fwDeleteContact(legacyId)
-    await fwSync(CONTACTS_COLLECTION)
-    await dcwSync(CONTACTS_COLLECTION)
   })
 
   it('propagates a freewallet delete to DCW', async () => {

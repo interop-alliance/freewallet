@@ -132,6 +132,13 @@ export class BrowserStore {
   // rows they are skipped, NOT cached, and never purged; unlike them a
   // descriptor refresh cannot help, so they drive no refresh.
   #noEpochKeyCredentials = 0
+  // Count of `private-credentials` rows the most recent list read had to skip
+  // because their body failed its integrity check -- IntegrityError: the
+  // envelope did not authenticate, or it was served under an id it was not
+  // sealed for. It takes no keys to produce, so it is the host-misbehavior
+  // signal the binding check exists to catch: the rows are counted, never
+  // cached, never purged, and drive no descriptor refresh.
+  #integrityCredentials = 0
   // Session-lifetime decrypt cache, keyed first by logical collection key and
   // then by RxDB row id, holding each envelope row's decrypted plaintext so a
   // row is decrypted at most once per session. Every read (list, load-one,
@@ -180,6 +187,12 @@ export class BrowserStore {
   // written under a mismatched KAK). Purgeable garbage, exactly like the
   // credential collection's undecryptable rows.
   #undecryptableAppKeys = 0
+  // Count of `app-connections` rows the most recent {@link listAppKeys} call
+  // had to skip because their body failed its integrity check -- the app-key
+  // sibling of `#integrityCredentials`, and load-bearing for the same reason
+  // as the epoch counters: an app key read as absent would mint a second
+  // identity for the app.
+  #integrityAppKeys = 0
   // The content cid of each decrypted `app-connections` envelope row, keyed by
   // row id (the app-key sibling of `#credentialCidByRow`). The collection
   // holds one row per connected app, so it is scanned per call rather than
@@ -448,7 +461,7 @@ export class BrowserStore {
    * The single decrypt-read skeleton shared by every collection: reads the live
    * rows in the requested order, decrypting envelope rows (through the
    * per-collection cache) and passing legacy plaintext rows through, and sorts
-   * each decrypt failure into one of three buckets so a caller stays tolerant of
+   * each decrypt failure into one of four buckets so a caller stays tolerant of
    * a single bad row rather than failing the whole read.
    *
    * A row whose envelope will not decrypt under the current KAK (corrupted,
@@ -462,7 +475,12 @@ export class BrowserStore {
    * (`KeyUnwrapError` -- never a recipient, or removed and the epoch
    * rotated) is collected in `noEpochKeyRowIds` and likewise NOT cached: it is
    * real data belonging to someone else's read set, so it is never purged, and
-   * a descriptor refresh cannot help it (only a later key grant can).
+   * a descriptor refresh cannot help it (only a later key grant can). A row
+   * whose body failed its integrity check (`IntegrityError` -- the envelope did
+   * not authenticate, or the host served it under an id it was not sealed for)
+   * is collected in `integrityRowIds` and NOT cached: it is the host's
+   * misbehavior rather than the row's, so it is never purged and drives no
+   * refresh.
    *
    * `fromEnvelope` distinguishes a decrypted envelope row from a plaintext
    * passthrough, which the credential caller needs (a plaintext row is keyed by
@@ -482,7 +500,8 @@ export class BrowserStore {
    *   pass false for a mutable, rewritten-in-place collection
    * @returns {Promise<{ entries: Array<{ rowId: string; data: Json;
    *   fromEnvelope: boolean }>; undecryptableRowIds: string[];
-   *   unknownEpochRowIds: string[]; noEpochKeyRowIds: string[] }>}
+   *   unknownEpochRowIds: string[]; noEpochKeyRowIds: string[];
+   *   integrityRowIds: string[] }>}
    */
   async #decryptedRows({
     logicalKey,
@@ -497,6 +516,7 @@ export class BrowserStore {
     undecryptableRowIds: string[]
     unknownEpochRowIds: string[]
     noEpochKeyRowIds: string[]
+    integrityRowIds: string[]
   }> {
     const docs = await this.rxCollection(logicalKey)
       .find({ sort: [{ updatedAt: sort }] })
@@ -508,6 +528,7 @@ export class BrowserStore {
     const undecryptableRowIds: string[] = []
     const unknownEpochRowIds: string[] = []
     const noEpochKeyRowIds: string[] = []
+    const integrityRowIds: string[] = []
     // Every row's decrypt is independent, so they run together; the fold below
     // then walks them in list order, keeping the entry ordering and the
     // per-row failure buckets exactly as a sequential pass produced them.
@@ -522,7 +543,10 @@ export class BrowserStore {
           return { id, plaintext: cached, fromEnvelope: true }
         }
         try {
-          const plaintext = await cipher.decrypt({ envelope: data! })
+          const plaintext = (await cipher.decrypt({
+            id,
+            envelope: data!
+          })) as Json
           decryptCache?.set(id, plaintext)
           return { id, plaintext, fromEnvelope: true }
         } catch (err) {
@@ -548,6 +572,17 @@ export class BrowserStore {
             { logicalKey, id, err }
           )
           noEpochKeyRowIds.push(id)
+        } else if (failure === 'integrity') {
+          // The host served a body that does not verify against the id it was
+          // read under. Authentic data may sit behind it, so it is skipped
+          // (uncached) and never purged; the error names the id the envelope
+          // was sealed for beside the id read here.
+          log.warn('Refusing a row whose body failed its integrity check', {
+            logicalKey,
+            readUnderId: id,
+            err
+          })
+          integrityRowIds.push(id)
         } else {
           log.warn('Skipping undecryptable row', { logicalKey, id, err })
           undecryptableRowIds.push(id)
@@ -560,7 +595,8 @@ export class BrowserStore {
       entries,
       undecryptableRowIds,
       unknownEpochRowIds,
-      noEpochKeyRowIds
+      noEpochKeyRowIds,
+      integrityRowIds
     }
   }
 
@@ -661,6 +697,21 @@ export class BrowserStore {
   }
 
   /**
+   * The count of `private-credentials` rows the most recent
+   * {@link listCredentials} call had to skip because their body failed its
+   * integrity check: the envelope did not authenticate, or the host served it
+   * under an id it was not sealed for. Unlike
+   * {@link undecryptableCredentials} these rows are never purged -- the
+   * failure is the host's and the underlying data may be intact, so removing
+   * them would consume the only evidence of the misbehavior.
+   *
+   * @returns {number}
+   */
+  get integrityCredentials(): number {
+    return this.#integrityCredentials
+  }
+
+  /**
    * The count of `wallet-activity` rows the most recent
    * {@link listHistoryItems} call had to skip for the same reason.
    *
@@ -728,19 +779,22 @@ export class BrowserStore {
    *
    * @returns {Promise<{ entries: Array<{ rowId: string; cid: string;
    *   vc: IVerifiableCredential }>; undecryptableRowIds: string[];
-   *   unknownEpochRowIds: string[]; noEpochKeyRowIds: string[] }>}
+   *   unknownEpochRowIds: string[]; noEpochKeyRowIds: string[];
+   *   integrityRowIds: string[] }>}
    */
   async #credentialEntries(): Promise<{
     entries: Array<{ rowId: string; cid: string; vc: IVerifiableCredential }>
     undecryptableRowIds: string[]
     unknownEpochRowIds: string[]
     noEpochKeyRowIds: string[]
+    integrityRowIds: string[]
   }> {
     const {
       entries: rows,
       undecryptableRowIds,
       unknownEpochRowIds,
-      noEpochKeyRowIds
+      noEpochKeyRowIds,
+      integrityRowIds
     } = await this.#decryptedRows({
       logicalKey: 'privateCredentials',
       sort: 'asc'
@@ -781,7 +835,8 @@ export class BrowserStore {
       entries,
       undecryptableRowIds,
       unknownEpochRowIds,
-      noEpochKeyRowIds
+      noEpochKeyRowIds,
+      integrityRowIds
     }
   }
 
@@ -939,8 +994,10 @@ export class BrowserStore {
    * shown (corrupted, or written under a mismatched KAK). Returns the number
    * of rows removed.
    *
-   * Only the `undecryptableRowIds` bucket is purged. Unknown-epoch rows and rows
-   * this wallet holds no epoch key for are real data and are left in place.
+   * Only the `undecryptableRowIds` bucket is purged. Unknown-epoch rows, rows
+   * this wallet holds no epoch key for, and rows that failed their integrity
+   * check are real data (or a host's misbehavior over real data) and are left
+   * in place.
    *
    * @returns {Promise<number>}
    */
@@ -964,11 +1021,13 @@ export class BrowserStore {
       entries,
       undecryptableRowIds,
       unknownEpochRowIds,
-      noEpochKeyRowIds
+      noEpochKeyRowIds,
+      integrityRowIds
     } = await this.#credentialEntries()
     this.#undecryptableCredentials = undecryptableRowIds.length
     this.#unknownEpochCredentials = unknownEpochRowIds.length
     this.#noEpochKeyCredentials = noEpochKeyRowIds.length
+    this.#integrityCredentials = integrityRowIds.length
     const seen = new Set<string>()
     const credentials: StoredCredential[] = []
     for (const { cid, vc } of entries) {
@@ -992,19 +1051,22 @@ export class BrowserStore {
    *
    * @returns {Promise<{ entries: Array<{ rowId: string; cid: string;
    *   vc: IVerifiableCredential }>; undecryptableRowIds: string[];
-   *   unknownEpochRowIds: string[]; noEpochKeyRowIds: string[] }>}
+   *   unknownEpochRowIds: string[]; noEpochKeyRowIds: string[];
+   *   integrityRowIds: string[] }>}
    */
   async #appKeyEntries(): Promise<{
     entries: Array<{ rowId: string; cid: string; vc: IVerifiableCredential }>
     undecryptableRowIds: string[]
     unknownEpochRowIds: string[]
     noEpochKeyRowIds: string[]
+    integrityRowIds: string[]
   }> {
     const {
       entries: rows,
       undecryptableRowIds,
       unknownEpochRowIds,
-      noEpochKeyRowIds
+      noEpochKeyRowIds,
+      integrityRowIds
     } = await this.#decryptedRows({
       logicalKey: 'appConnections',
       sort: 'asc'
@@ -1030,7 +1092,8 @@ export class BrowserStore {
       entries,
       undecryptableRowIds,
       unknownEpochRowIds,
-      noEpochKeyRowIds
+      noEpochKeyRowIds,
+      integrityRowIds
     }
   }
 
@@ -1079,11 +1142,13 @@ export class BrowserStore {
       entries,
       undecryptableRowIds,
       unknownEpochRowIds,
-      noEpochKeyRowIds
+      noEpochKeyRowIds,
+      integrityRowIds
     } = await this.#appKeyEntries()
     this.#unknownEpochAppKeys = unknownEpochRowIds.length
     this.#noEpochKeyAppKeys = noEpochKeyRowIds.length
     this.#undecryptableAppKeys = undecryptableRowIds.length
+    this.#integrityAppKeys = integrityRowIds.length
     const seen = new Set<string>()
     const appKeys: StoredCredential[] = []
     for (const { cid, vc } of entries) {
@@ -1144,6 +1209,19 @@ export class BrowserStore {
    */
   get noEpochKeyAppKeys(): number {
     return this.#noEpochKeyAppKeys
+  }
+
+  /**
+   * The count of `app-connections` rows the most recent {@link listAppKeys}
+   * call had to skip because their body failed its integrity check. Never
+   * purged, and load-bearing on the match path for the same reason as
+   * {@link noEpochKeyAppKeys}: a skipped app key read as absent would mint a
+   * second identity for the app.
+   *
+   * @returns {number}
+   */
+  get integrityAppKeys(): number {
+    return this.#integrityAppKeys
   }
 
   /**
@@ -1398,7 +1476,7 @@ export class BrowserStore {
     let raw: Json
     if (cipher && isEncryptedEnvelope(data)) {
       try {
-        raw = await cipher.decrypt({ envelope: data! })
+        raw = (await cipher.decrypt({ id, envelope: data! })) as Json
       } catch (err) {
         log.warn('Skipping undecryptable contacts row', { id, err })
         return undefined
@@ -1499,6 +1577,7 @@ export class BrowserStore {
         )
       }
       existingHead = (await cipherForRead.decrypt({
+        id,
         envelope: data!
       })) as unknown as ContactHeadPayload
     } else {
@@ -1687,7 +1766,10 @@ export class BrowserStore {
           return { id, plaintext: cached, indexed }
         }
         try {
-          const plaintext = await cipher.decrypt({ envelope: data! })
+          const plaintext = (await cipher.decrypt({
+            id,
+            envelope: data!
+          })) as Json
           decryptCache.set(id, plaintext)
           return { id, plaintext, indexed }
         } catch (err) {

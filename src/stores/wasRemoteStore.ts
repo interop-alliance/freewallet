@@ -529,11 +529,14 @@ export class WASRemoteStore {
    *
    * @param options {object}
    * @param options.controller {string}   the account's did:webvh DID
-   * @param [options.current] {SpaceMetadata | null}   the caller's own
-   *   just-made read of this same Space, with no Space Metadata object write
-   *   in between; supplying it skips `configure`'s pre-merge re-describe.
-   *   Omit it (rather than passing `null`) when no such read is in hand, so
-   *   `configure` makes the read itself under this store's signing client.
+   * @param [options.current] {SpaceMetadata & { etag?: string } | null}   the
+   *   caller's own just-made read of this same Space, with no Space Metadata
+   *   object write in between; supplying it skips `configure`'s pre-merge
+   *   re-describe. It must carry that read's `ETag`, the validator the write
+   *   is pinned to: a baseline without one is refused rather than written
+   *   unconditionally. Omit it (rather than passing `null`) when no such read
+   *   is in hand, so `configure` makes the read itself under this store's
+   *   signing client.
    * @returns {Promise<void>}
    */
   async promoteSpaceController({
@@ -541,7 +544,7 @@ export class WASRemoteStore {
     current
   }: {
     controller: string
-    current?: SpaceMetadata | null
+    current?: (SpaceMetadata & { etag?: string }) | null
   }): Promise<void> {
     await this.#space().configure({
       name: 'Wallet Space',

@@ -479,6 +479,8 @@
     "removeUndecryptable": "Eliminar",
     "undecryptableRemoved_one": "Se eliminó {{count}} credencial no descifrable.",
     "undecryptableRemoved_other": "Se eliminaron {{count}} credenciales no descifrables.",
+    "integrity_one": "{{count}} credencial no superó su comprobación de integridad y no se muestra. El servidor de almacenamiento devolvió datos que no coinciden con la credencial guardada. La credencial no se ha modificado.",
+    "integrity_other": "{{count}} credenciales no superaron su comprobación de integridad y no se muestran. El servidor de almacenamiento devolvió datos que no coinciden con las credenciales guardadas. No se han modificado.",
     "passkeySafety": {
       "notSynced": "El único acceso de esta billetera es una llave de acceso guardada en este dispositivo. Si pierde el dispositivo, pierde la billetera. Agregue un segundo método de acceso en Ajustes.",
       "synced": "Esta billetera tiene un único acceso con llave de acceso. Agregue un segundo método de acceso por si pierde el acceso a ella.",

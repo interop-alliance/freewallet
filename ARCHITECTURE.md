@@ -383,8 +383,14 @@ store **EDV envelopes**: encrypted at rest locally and opaque to the server.
 A per-collection document cipher (`createEdvDocCipher` from
 `@interop/was-client/edv`, built from the session's vault KAK) encrypts at
 write time and decrypts at read time. The row id is a hash of the JWE
-ciphertext, so it is identical on every replica. Page-facing identity stays
-the credential `cid` or activity `id`, recovered by decrypting at read time.
+ciphertext, so it is identical on every replica. Every decrypt names the id
+the body was read under, and a body sealed for some other resource is refused
+rather than opened, so a host cannot answer one resource with another's
+envelope. Such a row is counted in its own bucket, apart from the purgeable
+one: producing it takes no keys, so a host that could have it collected as
+garbage could have the wallet destroy recoverable data. The dashboard reports
+it and offers no removal. Page-facing identity stays the credential `cid` or activity `id`,
+recovered by decrypting at read time.
 JWE encryption is nondeterministic, so dedupe keys on that content identity
 rather than on the row id. `public-credentials` is plaintext and keyed
 directly by `cid`. Each encrypted collection's key epochs come from the
