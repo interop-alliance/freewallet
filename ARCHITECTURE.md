@@ -14,7 +14,7 @@ src/pages/          Route-level React components (one file per page)
   auth/             Login, Signup, Lobby, Recover, GuestLogin, Logout
   chapi/            CHAPI popup pages (WalletGetPage, WalletStorePage)
   external/         Requests arriving without CHAPI (ExternalRequestPage,
-                    the interaction-URL door)
+                    the interaction-URL entry point)
   dashboard/        Authenticated dashboard pages
 src/components/     Shared React components
   credentialDetails/, storage/, resume/   Feature sub-components
@@ -27,8 +27,8 @@ src/lib/            Pure business logic (no React)
                     one KMS-held key the account document publishes
                     (ensureKmsAuthentication)
   didWeb.ts         The did:web projection id of a promoted account
-  resolveWalletInput.ts  The one door for free-form text (paste box, QR),
-                    over the shared wallet-input classifier
+  resolveWalletInput.ts  The one entry point for free-form text (paste box,
+                    QR), over the shared wallet-input classifier
   sessionKey.ts     freewallet-session IndexedDB state (keyring cache,
                     client-key records, unlock methods, passkey-safety
                     notices)
@@ -446,6 +446,16 @@ rename the creator. The storage browser reads them through
 names a collection's app by matching `generator` against the connected apps'
 subject DIDs.
 
+Content migration brings another account's backup bundle into this one. The
+Storage page's "Import from another wallet" action
+(`src/components/storage/ContentMigrationDialog.tsx`) takes the bundle file
+and the old secret, and `src/session/contentMigration.ts` runs the walk.
+`@interop/wallet-backup` reads the bundle and pushes one plaintext row at a
+time at a sink built over `StorageManager`'s import methods, so every row
+lands on the session's own backend and every session kind may run it. The
+walk contacts no server of the old account: everything it reads comes out of
+the file. The run's counts become one Import activity.
+
 A user's remote Space is identified by an independent random `spaceId`
 minted at signup and carried in the account pointer; unlock Spaces keep
 `spaceId = base64url(SHA-256(unlock did:key))` as a discovery convention.
@@ -506,22 +516,23 @@ The declarations are data and the registrations are code
 list in order and reports each entry into `session.mends`, and a routing or
 ceremony-tail entry reports from its own call site instead.
 
-| Ceremony                                  | Entry point                                                     | Module                                                                      | Shared half                 | Mender                                                                                                                                                          | Topic doc               |
-| ----------------------------------------- | --------------------------------------------------------------- | --------------------------------------------------------------------------- | --------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------- |
-| Credential-anchored genesis               | every WAS signup, remembered or not (the default)               | `src/session/credentialAnchoredGenesis.ts`                                  | `/clientAnnex`              | re-run; the transient login's heal branch                                                                                                                       | `account-genesis.md`    |
-| Recovery spend (remembered and transient) | `/recover`                                                      | `src/session/recovery.ts`                                                   | `/recovery`, `/clientAnnex` | remembered: pending record pre-pivot + spend resume; transient: re-run, open gaps (below)                                                                       | `recovery-codes.md`     |
-| Self-enrollment at login                  | remembered login on a fresh browser                             | `src/session/initSession.ts` + `src/session/pendingEnrollment.ts`           | `/clientAnnex`              | pending record pre-pivot; the next remembered login's resume                                                                                                    | `session-and-auth.md`   |
-| Client enrollment (two-party)             | Settings > Connected wallets, any session type                  | `src/lib/enrollment.ts` (UI in `src/components/EnrolledClientsSection.tsx`) | `/enrollment`               | re-run with the same connect code; the escrow-direction convergence of any later ladder-branch ceremony                                                         | `client-enrollment.md`  |
-| Client revocation + epoch cascade         | Settings > Connected wallets, any session type                  | `src/session/revocation.ts`                                                 | `/clients`                  | re-run; the cascade-completion sweep; on the ladder branch, the retire-direction convergence of any later ladder-branch ceremony (open gap below)               | `client-revocation.md`  |
-| Recovery-code issuance                    | Settings > Recovery codes, any session type                     | `src/session/recovery.ts`                                                   | `/recovery`                 | re-run with the same code (every stage detects its own completion); a tear after the document entry has no mender                                               | `recovery-codes.md`     |
-| Recovery-code revocation                  | Settings > Recovery codes, any session type                     | `src/session/recovery.ts`                                                   | `/recovery`                 | re-run; the cascade-completion sweep                                                                                                                            | `recovery-codes.md`     |
-| Unlock-credential rotation                | Settings (passphrase change, passkey removal), any session type | `src/session/credentialRotation.ts`                                         | `/unlock`                   | torn-retirement repair at the next passphrase login, transient or remembered, with its marker-gated establish-first arm; remembered-login sweep; re-seal repair | `session-and-auth.md`   |
-| Forget ceremony                           | Settings > Connected wallets, own row, browser-local only       | `src/session/forget.ts`                                                     | `/clientAnnex`              | re-run (wipe last); forgotten-browser detector at the next remembered login                                                                                     | `did-webvh-identity.md` |
-| Last-client transition                    | same row, `lastClient` confirm, browser-local only              | `src/session/forget.ts`                                                     | `/clientAnnex`              | re-run                                                                                                                                                          | `did-webvh-identity.md` |
-| Update-key rotation                       | Settings, browser-local only                                    | `src/session/accountSettings.ts`                                            | `/webvh`                    | re-run (persist-before-publish)                                                                                                                                 | `did-webvh-identity.md` |
-| Account genesis (plain)                   | a no-WAS deployment's signup only; healed at every login        | `src/session/signup.ts`                                                     | `/genesis`                  | re-run (every stage an ensure)                                                                                                                                  | `account-genesis.md`    |
-| Account deletion                          | Settings, any session type                                      | `src/session/accountSettings.ts` + `wipe.ts`                                | app-side phase order        | re-run; an in-run retry for the acting credential's own unlock Space; otherwise the next login with that credential offering to remove it (not yet built)       | `did-webvh-identity.md` |
-| Shared wipe (executor, not user-facing)   | consumed by the deletion-shaped ceremonies                      | `src/session/wipe.ts`                                                       | app-side                    | re-probe verification; the `unverified` report                                                                                                                  | `did-webvh-identity.md` |
+| Ceremony                                  | Entry point                                                           | Module                                                                      | Shared half                 | Mender                                                                                                                                                          | Topic doc                |
+| ----------------------------------------- | --------------------------------------------------------------------- | --------------------------------------------------------------------------- | --------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------ |
+| Credential-anchored genesis               | every WAS signup, remembered or not (the default)                     | `src/session/credentialAnchoredGenesis.ts`                                  | `/clientAnnex`              | re-run; the transient login's heal branch                                                                                                                       | `account-genesis.md`     |
+| Recovery spend (remembered and transient) | `/recover`                                                            | `src/session/recovery.ts`                                                   | `/recovery`, `/clientAnnex` | remembered: pending record pre-pivot + spend resume; transient: re-run, open gaps (below)                                                                       | `recovery-codes.md`      |
+| Self-enrollment at login                  | remembered login on a fresh browser                                   | `src/session/initSession.ts` + `src/session/pendingEnrollment.ts`           | `/clientAnnex`              | pending record pre-pivot; the next remembered login's resume                                                                                                    | `session-and-auth.md`    |
+| Client enrollment (two-party)             | Settings > Connected wallets, any session type                        | `src/lib/enrollment.ts` (UI in `src/components/EnrolledClientsSection.tsx`) | `/enrollment`               | re-run with the same connect code; the escrow-direction convergence of any later ladder-branch ceremony                                                         | `client-enrollment.md`   |
+| Client revocation + epoch cascade         | Settings > Connected wallets, any session type                        | `src/session/revocation.ts`                                                 | `/clients`                  | re-run; the cascade-completion sweep; on the ladder branch, the retire-direction convergence of any later ladder-branch ceremony (open gap below)               | `client-revocation.md`   |
+| Recovery-code issuance                    | Settings > Recovery codes, any session type                           | `src/session/recovery.ts`                                                   | `/recovery`                 | re-run with the same code (every stage detects its own completion); a tear after the document entry has no mender                                               | `recovery-codes.md`      |
+| Recovery-code revocation                  | Settings > Recovery codes, any session type                           | `src/session/recovery.ts`                                                   | `/recovery`                 | re-run; the cascade-completion sweep                                                                                                                            | `recovery-codes.md`      |
+| Unlock-credential rotation                | Settings (passphrase change, passkey removal), any session type       | `src/session/credentialRotation.ts`                                         | `/unlock`                   | torn-retirement repair at the next passphrase login, transient or remembered, with its marker-gated establish-first arm; remembered-login sweep; re-seal repair | `session-and-auth.md`    |
+| Forget ceremony                           | Settings > Connected wallets, own row, browser-local only             | `src/session/forget.ts`                                                     | `/clientAnnex`              | re-run (wipe last); forgotten-browser detector at the next remembered login                                                                                     | `did-webvh-identity.md`  |
+| Last-client transition                    | same row, `lastClient` confirm, browser-local only                    | `src/session/forget.ts`                                                     | `/clientAnnex`              | re-run                                                                                                                                                          | `did-webvh-identity.md`  |
+| Update-key rotation                       | Settings, browser-local only                                          | `src/session/accountSettings.ts`                                            | `/webvh`                    | re-run (persist-before-publish)                                                                                                                                 | `did-webvh-identity.md`  |
+| Account genesis (plain)                   | a no-WAS deployment's signup only; healed at every login              | `src/session/signup.ts`                                                     | `/genesis`                  | re-run (every stage an ensure)                                                                                                                                  | `account-genesis.md`     |
+| Account deletion                          | Settings, any session type                                            | `src/session/accountSettings.ts` + `wipe.ts`                                | app-side phase order        | re-run; an in-run retry for the acting credential's own unlock Space; otherwise the next login with that credential offering to remove it (not yet built)       | `did-webvh-identity.md`  |
+| Shared wipe (executor, not user-facing)   | consumed by the deletion-shaped ceremonies                            | `src/session/wipe.ts`                                                       | app-side                    | re-probe verification; the `unverified` report                                                                                                                  | `did-webvh-identity.md`  |
+| Content migration                         | Storage page, beside Export Space, every session kind including guest | `src/session/contentMigration.ts`                                           | `@interop/wallet-backup`    | re-run (skip existing by content identity; the import activity replaced put-then-delete-others)                                                                 | `session-persistence.md` |
 
 A WAS signup's remembered and passkey flavors continue into the
 self-enrollment row, and the credential-anchored genesis heal branch also
@@ -903,6 +914,12 @@ base64url(SHA-256(unlock did:key))` (a discovery convention).
   verifies, and every pin store is in-memory
   (`decisions/0012-no-durable-continuity-pins.md`). See "Log continuity
   within a session". Avoid: continuity prior.
+- **Content migration** -- bringing a backup bundle's content into a
+  DIFFERENT account, through `StorageManager`'s import methods, which skip
+  a row the account already holds by its content identity. Contrast the
+  restore, which puts a bundle back into the account it came from, and the
+  move, which carries an account's identity across. Only content travels: no
+  DID, no grant, no share, no public link.
 - **Ceremony** -- an ordered sequence of writes across the account's systems
   and this browser's local state, ordered by persist-before-publish,
   document-edit-first, and decryption-material-before-authorization. Each

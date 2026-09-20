@@ -16,7 +16,11 @@
  * 'did:web:interopalliance.org'. A drift of one character duplicates both
  * seeds on every install, forever.
  */
-import { normalizeContact, type ContactData } from '@interop/social-core'
+import {
+  SELF_CONTACT_NAME,
+  normalizeContact,
+  type ContactData
+} from '@interop/social-core'
 
 const INTEROP_ALLIANCE_TEAM_NAME = 'Interop Alliance Team'
 
@@ -50,3 +54,15 @@ export const interopAllianceTeamContact: ContactData = normalizedSeed({
   displayName: INTEROP_ALLIANCE_TEAM_NAME,
   urlAddresses: [{ label: 'did', url: 'did:web:interopalliance.org' }]
 })
+
+/**
+ * The display names of the contacts this wallet seeds itself with -- the
+ * `seedNames` argument social-core's `isUnlinkedSeedTwin` matches on. A
+ * migrated contact carrying one of these names is the bundle's copy of a seed
+ * the new account already planted, so it is skipped rather than landing beside
+ * it (unless the local row has been customized, which disqualifies the match).
+ */
+export const SEED_CONTACT_NAMES: string[] = [
+  INTEROP_ALLIANCE_TEAM_NAME,
+  SELF_CONTACT_NAME
+]

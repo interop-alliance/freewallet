@@ -99,15 +99,15 @@ The marker type `AppKeyCredential`
 makes "presents as an app key" a term check rather than a shape heuristic.
 It is a self-declaration a plant can copy, and a plant binds just as well,
 so binding cannot license storage. `StorageManager.addCredential` is the one
-door for externally supplied credentials (the CHAPI store popup, the URL /
-QR / manual-paste import, the credentials half of a space import). It
+entry point for externally supplied credentials (the CHAPI store popup, the
+URL / QR / manual-paste import, the credentials half of a space import). It
 refuses every marked credential, binding or not (`assertStorableAppKey`,
-`AppKeyRefusedError`). The mint path has its own door,
+`AppKeyRefusedError`). The mint path has its own store method,
 `StorageManager.addMintedAppKey` (called only by `processAppConnect`,
 writing into `app-connections`), which asserts the mint invariants.
 
-Two ingest paths sit outside that door: the background sync pull, and the
-space half of an import. The pull replicates the account's own remote
+Two ingest paths sit outside that entry point: the background sync pull, and
+the space half of an import. The pull replicates the account's own remote
 collections, writable only by the account's enrolled wallet clients
 (`app-connections` is never grantable, and `private-credentials` is
 protected, so RP and share grants on it are read-only). The import writes

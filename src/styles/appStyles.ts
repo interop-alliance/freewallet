@@ -591,6 +591,22 @@ export const historyStyles = {
   }
 } as const
 
+/**
+ * Visually-hidden style for a file input wrapped by a "choose file" Button,
+ * kept in the accessibility tree so the button still opens the picker.
+ */
+export const visuallyHiddenInput: React.CSSProperties = {
+  clip: 'rect(0 0 0 0)',
+  clipPath: 'inset(50%)',
+  height: 1,
+  overflow: 'hidden',
+  position: 'absolute',
+  bottom: 0,
+  left: 0,
+  whiteSpace: 'nowrap',
+  width: 1
+}
+
 export const storageStyles = {
   /**
    * Top toolbar showing the connected remote space and export action.

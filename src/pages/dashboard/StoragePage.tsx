@@ -10,14 +10,16 @@ import { useTranslation } from 'react-i18next'
 import { useNavigate } from 'react-router'
 import { DashboardLayout } from '@/components/DashboardLayout'
 import { CollectionSharesDialog } from '@/components/storage/CollectionSharesDialog'
+import { ContentMigrationDialog } from '@/components/storage/ContentMigrationDialog'
 import { CollectionsOverview } from '@/components/storage/StorageBrowser'
 import { StorageQuotaCard } from '@/components/storage/StorageQuotaCard'
 import { getCollectionDisplayName } from '@/components/storage/displayUtils'
 import { useAsyncLoad } from '@/hooks/useAsyncLoad'
 import { useAuthStore } from '@/stores/authStore'
+import { syncController } from '@/stores/syncController'
 import { useSyncStatusStore } from '@/stores/syncStatusStore'
 import { showToast } from '@/stores/toastStore'
-import { storageStyles } from '@/styles/appStyles'
+import { storageStyles, visuallyHiddenInput } from '@/styles/appStyles'
 import type { StorageCollection } from '@/lib/storage'
 import { quotaViewFromReport, writesRestricted } from '@/lib/storageQuota'
 import type { StorageQuotaStatus } from '@/types/storageQuota'
@@ -29,23 +31,6 @@ import { SYNCED_COLLECTIONS } from '@/app.config'
 import { createLogger } from '@/lib/log'
 
 const log = createLogger('fw:ui:storage')
-
-/**
- * Visually-hidden style for the file input wrapped by the import Button
- * (`component="label"`); keeps the native input accessible while the Button
- * provides the visible affordance.
- */
-const visuallyHiddenInput: React.CSSProperties = {
-  clip: 'rect(0 0 0 0)',
-  clipPath: 'inset(50%)',
-  height: 1,
-  overflow: 'hidden',
-  position: 'absolute',
-  bottom: 0,
-  left: 0,
-  whiteSpace: 'nowrap',
-  width: 1
-}
 
 type SaveFilePicker = (options?: {
   suggestedName?: string
@@ -69,6 +54,7 @@ export const StoragePage = () => {
   const [sharesDialogCollectionId, setSharesDialogCollectionId] = useState<
     string | null
   >(null)
+  const [migrationOpen, setMigrationOpen] = useState(false)
   const [quotaStatus, setQuotaStatus] = useState<StorageQuotaStatus>({
     kind: 'loading'
   })
@@ -358,6 +344,17 @@ export const StoragePage = () => {
                 onChange={handleImportFile}
               />
             </Button>
+            <Button
+              variant="outlined"
+              onClick={() => setMigrationOpen(true)}
+              disabled={!session}
+              sx={[
+                storageStyles.buttonTextLeft,
+                storageStyles.buttonSize.topAction
+              ]}
+            >
+              {t('storage.migration.action')}
+            </Button>
           </Stack>
         </Stack>
       </Paper>
@@ -397,6 +394,21 @@ export const StoragePage = () => {
           />
         )}
       </Box>
+
+      {session && migrationOpen && (
+        <ContentMigrationDialog
+          session={session}
+          onClose={() => setMigrationOpen(false)}
+          onImported={() => {
+            // The rows land through the session's own import methods, so a
+            // remembered session's replica already carries them; this re-lists
+            // what the page itself shows and nudges replication to push them
+            // out.
+            syncController.reSync()
+            void reloadCollections()
+          }}
+        />
+      )}
 
       {session && sharesDialogCollectionId && (
         <CollectionSharesDialog

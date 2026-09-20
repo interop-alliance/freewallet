@@ -4,6 +4,26 @@
 
 ### Added
 
+- Importing another wallet's content from a backup bundle. The Storage page
+  offers "Import from another wallet" to every session kind, a guest and a
+  no-WAS deployment included: it takes the bundle file and one old secret --
+  the old passphrase, a recovery code, or the code the bundle carries -- and
+  `src/session/contentMigration.ts` runs `@interop/wallet-backup`'s walk over
+  a sink built on `StorageManager`'s new import methods
+  (`importCredential`, `importContactHead`, `importContactRevision`,
+  `importActivity`), which skip a row the account already holds by its
+  content identity. The "already held" checks decide against one
+  held-content snapshot per run (`snapshotHeldContent`), read through the
+  stale-descriptor refresh seam and kept current by each accepted write, so
+  a run reads each collection once rather than once per archived row. An
+  archived head carrying no `contactId` is refused as `conflicting`, and the
+  revisions of a head whose write failed are reported `skipped` so one such
+  head cannot end the `contacts-history` walk. The walk reads the file alone
+  and contacts no server of the old account. Its counts become one `Import` activity, and the dialog
+  renders the per-collection report. Only content travels: the old account's
+  DID, every grant and app key, every share, and the public links stay
+  behind, which the dialog states before the run.
+
 - The storage browser's collection and resource pages carry a collapsed
   Metadata card over the `/meta` document, read on first expand and rendered
   as labeled rows plus a raw source view. A server without metadata support

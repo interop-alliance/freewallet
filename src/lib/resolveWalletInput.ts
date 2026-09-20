@@ -1,6 +1,6 @@
 /**
- * The one door every piece of free-form text enters the wallet through: the
- * Add Credential paste box and the QR scanner. The ordered discrimination
+ * The one entry point every piece of free-form text enters the wallet
+ * through: the Add Credential paste box and the QR scanner. The ordered discrimination
  * itself is shared (`classifyWalletInput` / `handleWalletInput` in
  * `@interop/wallet-request`), so a grammar one wallet routes is not a
  * grammar the other silently mis-handles -- a connect code read as a

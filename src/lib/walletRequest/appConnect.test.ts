@@ -67,7 +67,7 @@ async function fakeSession({
       deleteCredential: async ({ cid }: { cid: string }) => {
         deleted.push(cid)
       },
-      // The mint path stores through its own door, never `addCredential`
+      // The mint path stores through its own method, never `addCredential`
       // (which refuses every marker credential).
       addMintedAppKey: async (entry: unknown) => {
         added.push(entry)
@@ -109,7 +109,7 @@ describe('processAppConnect', () => {
     })
 
     expect(response.appConnect?.firstRun).toBe(true)
-    // The mint door takes the credential alone: the row lands in
+    // The mint store method takes the credential alone: the row lands in
     // `app-connections` and no credential-created activity is attributed.
     expect(added).toEqual([{ credential: expect.anything() }])
     const subjectDid = response.appConnect?.subjectDid
@@ -401,7 +401,7 @@ describe('processAppConnect', () => {
 
     expect(response.appConnect?.firstRun).toBe(true)
     expect(response.appConnect?.subjectDid).not.toBe(subjectDid)
-    // Minted through the mint door, and nothing was deleted from the
+    // Minted through the mint store method, and nothing was deleted from the
     // credential store on this path.
     expect(added).toHaveLength(1)
     expect(deleted).toEqual([])

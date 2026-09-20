@@ -37,7 +37,11 @@ import type {
 import type { ZcapClient } from '@interop/ezcap'
 import {
   CONTACTS_COLLECTION,
+  isUnlinkedSeedTwin,
+  upgradeContactHeadPayload,
+  upgradeContactRevisionPayload,
   type ContactData,
+  type ContactHeadPayload,
   type ContactRevisionPayload
 } from '@interop/social-core'
 import type { RxCollection, RxStorage } from 'rxdb/plugins/core'
@@ -72,7 +76,7 @@ import {
   sessionCollectionStores
 } from '@/session/collectionLogStore'
 import type { ControllerProfile, SessionCore, User } from '@/types/auth'
-import { cidFrom } from '@interop/was-client/sync'
+import { cidFrom, contentCid } from '@interop/was-client/sync'
 import { classifyDecryptFailure } from '@/lib/decryptFailure'
 import { refreshingCollectionCipher } from '@/stores/refreshingCollectionCipher'
 import {
@@ -84,9 +88,13 @@ import {
 } from '@/app.config'
 import {
   assertMintedAppKey,
-  assertStorableAppKey
+  assertStorableAppKey,
+  presentsAsAppKey
 } from '@interop/wallet-request'
 import { credentialTitle } from '@/lib/viewMappers/credentialTitle'
+import { SEED_CONTACT_NAMES } from '@/fixtures/defaultContacts'
+import { WALK_STOPPING_ERROR_NAME } from '@interop/wallet-backup'
+import type { HeldContent, ImportOutcome } from '@/types/migration'
 import { didWebFromSpace } from '@/lib/didWeb'
 import { ensureKmsAuthentication } from '@/lib/kms'
 import {
@@ -1486,19 +1494,20 @@ export class StorageManager {
    * the active backend (the local active replica, or the remote-direct popup
    * backend).
    *
-   * This is the single door every credential coming from outside the wallet
-   * goes through (the CHAPI store popup, the URL / QR / manual-paste import,
-   * and the credentials half of a space import), so it is where a credential
-   * presenting as an app key is refused outright, whether or not it binds to
-   * its own seed: app keys are wallet-minted, never imported, and the mint
-   * path has its own door ({@link addMintedAppKey}). The background sync pull
+   * This is the single entry point every credential coming from outside the
+   * wallet goes through (the CHAPI store popup, the URL / QR / manual-paste
+   * import, and the credentials half of a space import), so it is where a
+   * credential presenting as an app key is refused outright, whether or not
+   * it binds to its own seed: app keys are wallet-minted, never imported, and
+   * the mint path has its own store method ({@link addMintedAppKey}). The
+   * background sync pull
    * (the driver in `@interop/was-sync`) writes pulled rows into the local
    * replica without
    * passing through here, deliberately: it replicates the account's own
    * remote collections, which only the account's enrolled wallet clients can
    * write (`private-credentials` is a protected collection -- RP and share
    * grants on it are read-only), and each of those clients enforces this same
-   * refusal at its own door; the pulled bodies are also EDV envelopes the
+   * refusal at its own entry point; the pulled bodies are also EDV envelopes the
    * sync layer could not inspect. The match-time seed binding in
    * `@interop/wallet-request` remains the backstop for anything that
    * slips past.
@@ -1520,13 +1529,13 @@ export class StorageManager {
   }
 
   /**
-   * The mint path's own store door: saves an app-key credential the wallet
+   * The mint path's own store method: saves an app-key credential the wallet
    * itself just minted (`processAppConnect`), which {@link addCredential}
    * would refuse -- external ingest never stores a marker credential, so the
    * one legitimate producer gets its own entry point instead of a bypass flag
    * on the shared one. Still asserts the mint invariants (`assertMintedAppKey`
    * in `@interop/wallet-request`: marker present, subject DID derived
-   * from the carried seed) so this door cannot be misused to store a foreign
+   * from the carried seed) so this method cannot be misused to store a foreign
    * app key either.
    *
    * The row lands in the dedicated `app-connections` collection, never in
@@ -1608,9 +1617,32 @@ export class StorageManager {
   }
 
   /**
-   * The store step behind {@link addCredential}: content-cid derivation, the
-   * idempotent insert into `private-credentials`, and the best-effort Create
-   * history entry.
+   * The write half both credential store methods share: the content-cid
+   * derivation and the idempotent insert into `private-credentials`. Each
+   * caller screens app keys its own way before reaching here:
+   * {@link addCredential} refuses, {@link importCredential} skips.
+   *
+   * @param options {object}
+   * @param options.credential {IVerifiableCredential}
+   * @returns {Promise<{ cid: string; inserted: boolean }>}   `inserted` is
+   *   false when the cid was already held
+   */
+  async #storeCredential({
+    credential
+  }: {
+    credential: IVerifiableCredential
+  }): Promise<{ cid: string; inserted: boolean }> {
+    // The credential's content cid is its page-facing identity (idempotence,
+    // routes, history); the backend encrypts the VC into an EDV envelope keyed
+    // by a content-derived envelope-hash id.
+    const cid = await cidFrom({ doc: credential })
+    const inserted = await this.#store.addCredential({ cid, credential })
+    return { cid, inserted }
+  }
+
+  /**
+   * The store step behind {@link addCredential}: the shared write half, plus
+   * the best-effort Create history entry an interactive add always records.
    *
    * @param options {object}
    * @param options.credential {IVerifiableCredential}
@@ -1624,11 +1656,7 @@ export class StorageManager {
     credential: IVerifiableCredential
     user: User
   }) {
-    // The credential's content cid is its page-facing identity (idempotence,
-    // routes, history); the backend encrypts the VC into an EDV envelope keyed
-    // by a content-derived envelope-hash id.
-    const cid = await cidFrom({ doc: credential })
-    const inserted = await this.#store.addCredential({ cid, credential })
+    const { cid, inserted } = await this.#storeCredential({ credential })
     if (inserted) {
       // Best-effort: the credential is already stored, and losing a log
       // line beats reporting the whole store as failed (in remote-direct
@@ -4377,6 +4405,355 @@ export class StorageManager {
     contactId: string
   }): Promise<Array<ContactRevisionPayload>> {
     return await this.#store.listContactRevisions({ contactId })
+  }
+
+  /**
+   * The content-migration import methods: one per migrated collection, each
+   * taking an ARCHIVED row out of a backup bundle and writing it with no side
+   * effects of its own -- no `created` activity, no `create` revision, and no
+   * re-minted id, timestamp, or `writerId`. The interactive write methods
+   * above keep their side effects unconditionally; nothing here is a flag on
+   * them.
+   *
+   * Every one reports an {@link ImportOutcome} rather than throwing, so the
+   * walk carries on past a row it could not write. The one exception is the
+   * walk-stopping error (`WALK_STOPPING_ERROR_NAME`, was-client's 507), which
+   * is a wall rather than a per-row failure and is rethrown so the walk stops.
+   *
+   * The merge rule is "skip existing, by content identity", so a re-run of the
+   * same bundle converges and a populated account keeps what it has. The
+   * "already held" checks read the {@link HeldContent} snapshot the caller
+   * took with {@link snapshotHeldContent}, and each accepted write adds its row
+   * to that snapshot, so one run reads each collection once and a row it
+   * wrote counts as held for the rows behind it.
+   *
+   * @param options {object}
+   * @param options.what {string}   what the failed write was, for the log line
+   * @param options.write {function}   the write, reporting its own outcome
+   * @returns {Promise<Outcome | 'failed'>}
+   */
+  async #importRow<Outcome extends string>({
+    what,
+    write
+  }: {
+    what: string
+    write: () => Promise<Outcome>
+  }): Promise<Outcome | 'failed'> {
+    try {
+      return await write()
+    } catch (err) {
+      if (errorNameOf(err) === WALK_STOPPING_ERROR_NAME) {
+        // The Space is full: every row behind this one would fail the same
+        // way, so the walk stops rather than wasting the rest of the bundle.
+        throw err
+      }
+      log.warn(`Could not import an archived ${what}`, { err })
+      return 'failed'
+    }
+  }
+
+  /**
+   * Reads what the account holds in the collections the import methods
+   * write, once, as the snapshot they decide against. The three listings are
+   * independent and run together. Each rides the same stale-descriptor
+   * refresh the page reads do, so a row another client re-sealed under a
+   * rotated key epoch is still seen as held rather than imported a second
+   * time.
+   *
+   * Credentials need no entry: their dedupe is the shared write half's own
+   * cid check.
+   *
+   * @returns {Promise<HeldContent>}
+   */
+  async snapshotHeldContent(): Promise<HeldContent> {
+    const [heads, revisions, items] = await Promise.all([
+      this.#readWithEpochRefresh({
+        collectionId: 'contacts',
+        read: async () => ({
+          value: await this.#store.listContactHeads(),
+          unknownEpoch: this.#store.unknownEpochContacts > 0
+        })
+      }),
+      this.#readWithEpochRefresh({
+        collectionId: 'contacts-history',
+        read: async () => ({
+          value: await this.#store.listAllContactRevisions(),
+          unknownEpoch: this.#store.unknownEpochContactsHistory > 0
+        })
+      }),
+      this.listHistoryItems()
+    ])
+    const contactHeads = new Map<string, ContactHeadPayload>()
+    for (const { rowId, head } of heads) {
+      // Legacy heads written before the row-id / contact-id split carry no
+      // usable distinction; fall back to the row id for those.
+      contactHeads.set(head.contactId ?? rowId, head)
+    }
+
+    const contactRevisions = new Map<string, Set<string>>()
+    for (const revision of revisions) {
+      let identities = contactRevisions.get(revision.contactId)
+      if (!identities) {
+        identities = new Set<string>()
+        contactRevisions.set(revision.contactId, identities)
+      }
+      identities.add(contentCid(revision as unknown as Json))
+    }
+
+    const activities = new Map<string, WalletActivity>()
+    for (const { id, doc } of items) {
+      activities.set(id, doc)
+    }
+
+    return { contactHeads, contactRevisions, activities }
+  }
+
+  /**
+   * Imports one archived credential, deduped by its content cid. Records no
+   * Create activity: the bundle's own `wallet-activity` rows carry the old
+   * wallet's history, and a burst of creations dated today would bury it.
+   *
+   * A row presenting as an app key (the marker type) is reported `skipped`
+   * without a write: app keys are wallet-minted and do not migrate in this
+   * build, so the row is screened and counted as not migrated rather than
+   * counted as a write that failed.
+   *
+   * @param options {object}
+   * @param options.credential {IVerifiableCredential}
+   * @returns {Promise<ImportOutcome>}
+   */
+  async importCredential({
+    credential
+  }: {
+    credential: IVerifiableCredential
+  }): Promise<ImportOutcome> {
+    return await this.#importRow({
+      what: 'credential',
+      write: async () => {
+        if (presentsAsAppKey(credential)) {
+          log.warn('Skipping an archived credential presenting as an app key')
+          return 'skipped'
+        }
+        const { inserted } = await this.#storeCredential({ credential })
+        return inserted ? 'accepted' : 'skipped'
+      }
+    })
+  }
+
+  /**
+   * Imports one archived contact head verbatim, under the `contactId` the old
+   * wallet minted -- the identity every migrated revision refers to -- with
+   * its archived `updatedAt` and `writerId`. Records no `create` revision.
+   *
+   * A head carrying no `contactId` is `conflicting`: it could be deduped
+   * against nothing, so every re-run would land another copy under a fresh
+   * row id, and reporting it as failed would invite a retry that can never
+   * converge.
+   *
+   * Two checks run before the write. A held contact that is the un-customized
+   * seed twin of the archived one (social-core's `isUnlinkedSeedTwin` over
+   * this wallet's seed names) already stands for it, so the archived copy is
+   * reported `seed-twin` and lands nowhere; a customized local seed row is
+   * not matched and the archived copy lands beside it. Then the id check: a
+   * held row under the same `contactId` is `skipped` when its payload's
+   * content identity matches, and `conflicting` when it differs -- the held
+   * row is left untouched and nothing is written, so a doctored bundle
+   * cannot overwrite a genuine row by reusing its id.
+   *
+   * `seed-twin` is reported apart from `skipped` because the contact's
+   * revisions ride on the difference: an already-held head stands for them,
+   * while a seed twin's revisions carry the old account's identity in every
+   * snapshot and must not land. The walk maps it down to the sink vocabulary
+   * and owns the orphan rule for the revisions.
+   *
+   * @param options {object}
+   * @param options.head {ContactHeadPayload}
+   * @param options.held {HeldContent}   the run's snapshot, updated on accept
+   * @returns {Promise<ImportOutcome | 'seed-twin'>}
+   */
+  async importContactHead({
+    head,
+    held
+  }: {
+    head: ContactHeadPayload
+    held: HeldContent
+  }): Promise<ImportOutcome | 'seed-twin'> {
+    return await this.#importRow({
+      what: 'contact',
+      write: async (): Promise<ImportOutcome | 'seed-twin'> => {
+        if (!head.contactId) {
+          log.warn(
+            'Refusing an archived contact head that carries no contactId'
+          )
+          return 'conflicting'
+        }
+        const heads = held.contactHeads
+        // Only an archived head carrying a seed name can have a twin, so the
+        // scan over the held heads runs for those alone.
+        if (SEED_CONTACT_NAMES.includes(head.contact.displayName)) {
+          for (const local of heads.values()) {
+            if (
+              isUnlinkedSeedTwin(
+                local.contact,
+                head.contact,
+                SEED_CONTACT_NAMES
+              )
+            ) {
+              return 'seed-twin'
+            }
+          }
+        }
+        // Compared through the read-side upgrade every listing passes a head
+        // through, so a row this import itself wrote reads back as the same
+        // identity and a re-run converges rather than reporting a conflict.
+        const upgraded = upgradeContactHeadPayload(head)
+        const stored = heads.get(head.contactId)
+        if (stored) {
+          const archived = contentCid(upgraded as unknown as Json)
+          return archived === contentCid(stored as unknown as Json)
+            ? 'skipped'
+            : 'conflicting'
+        }
+        await this.#store.putContactHead({ head })
+        heads.set(head.contactId, upgraded)
+        return 'accepted'
+      }
+    })
+  }
+
+  /**
+   * Imports one archived contact revision verbatim, keeping its archived
+   * `timestamp` and `writerId`, appended to `contacts-history` under the
+   * `contactId` it carries.
+   *
+   * A revision payload carries no id of its own, so its identity is the
+   * content id of the payload, compared against the snapshot's identities for
+   * that contact; a match is `skipped`. The snapshot's one decrypt pass is
+   * what a stored, blinded index would replace (FW-545).
+   *
+   * Whether the revision's contact exists is deliberately not checked here.
+   * The orphan rule belongs to the walk, which knows what the bundle carried
+   * and what this run wrote; this method only refuses to crash without a
+   * head.
+   *
+   * @param options {object}
+   * @param options.revision {ContactRevisionPayload}
+   * @param options.held {HeldContent}   the run's snapshot, updated on accept
+   * @returns {Promise<ImportOutcome>}
+   */
+  async importContactRevision({
+    revision,
+    held
+  }: {
+    revision: ContactRevisionPayload
+    held: HeldContent
+  }): Promise<ImportOutcome> {
+    return await this.#importRow({
+      what: 'contact revision',
+      write: async () => {
+        let identities = held.contactRevisions.get(revision.contactId)
+        if (!identities) {
+          identities = new Set<string>()
+          held.contactRevisions.set(revision.contactId, identities)
+        }
+        // Upgraded for the comparison, stored verbatim: the listings upgrade
+        // every row they read, so an identity built from the raw archived
+        // payload would miss this import's own earlier write.
+        const identity = contentCid(
+          upgradeContactRevisionPayload(revision) as unknown as Json
+        )
+        if (identities.has(identity)) {
+          return 'skipped'
+        }
+        await this.#store.addContactRevision({ revision })
+        identities.add(identity)
+        return 'accepted'
+      }
+    })
+  }
+
+  /**
+   * Imports one archived activity verbatim, its own `id` included, deduped by
+   * that id. A held row under the same id whose body's content identity
+   * differs is `conflicting`: the archived row lands nowhere and the held row
+   * is untouched.
+   *
+   * An archived row carrying no id of its own is `conflicting` too. It cannot
+   * be deduped, so every re-run would add another copy; reporting it as failed
+   * would invite a retry that can never converge.
+   *
+   * Which activities are worth migrating (only a credential's own, and the
+   * drop rule for an archived `created` row) is the walk's filter, not this
+   * method's.
+   *
+   * @param options {object}
+   * @param options.activity {WalletActivity}
+   * @param options.held {HeldContent}   the run's snapshot, updated on accept
+   * @returns {Promise<ImportOutcome>}
+   */
+  async importActivity({
+    activity,
+    held
+  }: {
+    activity: WalletActivity
+    held: HeldContent
+  }): Promise<ImportOutcome> {
+    return await this.#importRow({
+      what: 'activity',
+      write: async () => {
+        const id = activity.id
+        if (!id) {
+          log.warn('Refusing an archived activity that carries no id')
+          return 'conflicting'
+        }
+        const stored = held.activities.get(id)
+        if (!stored) {
+          await this.#store.addHistoryItem({ resourceId: id, activity })
+          held.activities.set(id, activity)
+          return 'accepted'
+        }
+        return contentCid(stored as Json) === contentCid(activity as Json)
+          ? 'skipped'
+          : 'conflicting'
+      }
+    })
+  }
+
+  /**
+   * Writes one activity and then removes every OTHER row carrying the same
+   * activity id -- the migration's import activity, the one activity written
+   * this way.
+   *
+   * The order is load-bearing. `listHistoryItems` keeps the first row it meets
+   * per activity id, and an envelope is nondeterministic, so a re-run's fresh
+   * row would otherwise hide behind the first run's stale one forever. Writing
+   * first leaves no window with no row at all, and a kill between the two
+   * writes leaves two rows that the next run's delete step clears, so it
+   * converges either way.
+   *
+   * @param options {object}
+   * @param options.activity {WalletActivity}   carries its own deterministic
+   *   id, the one the replaced rows share
+   * @returns {Promise<void>}
+   */
+  async putHistoryItemReplacingOthers({
+    activity
+  }: {
+    activity: WalletActivity
+  }): Promise<void> {
+    const id = activity.id
+    if (!id) {
+      throw new Error(
+        'Cannot replace history rows for an activity that carries no id.'
+      )
+    }
+    const rowId = await this.#store.addHistoryItem({ resourceId: id, activity })
+    const rows = await this.#store.findHistoryItemsByInnerId({ id })
+    for (const row of rows) {
+      if (row.rowId !== rowId) {
+        await this.#store.deleteHistoryItemByRowId({ rowId: row.rowId })
+      }
+    }
   }
 }
 

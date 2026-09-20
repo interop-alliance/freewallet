@@ -4,7 +4,7 @@
  * their own `app-connections` collection.
  *
  * They are deleted, never moved. An app key's value is the seed it carries, and
- * leaving one among the ordinary credentials keeps two doors open onto that
+ * leaving one among the ordinary credentials keeps two paths open onto that
  * seed -- a world-readable public link, and a share of the credentials
  * collection. Copying the rows across would preserve each app's identity but
  * also preserve whatever a stale copy of the old row exposes, so the accepted

@@ -108,7 +108,7 @@ export interface SyncedCollectionStore {
   addHistoryItem(options: {
     resourceId: string
     activity: WalletActivity
-  }): Promise<void>
+  }): Promise<string>
   listHistoryItems(): Promise<Array<{ id: string; doc: WalletActivity }>>
   addPublicCredential(options: {
     cid: string
@@ -118,6 +118,7 @@ export interface SyncedCollectionStore {
   hasPublicCredential(options: { cid: string }): Promise<boolean>
   listPublicCredentials(): Promise<Array<StoredCredential>>
   readonly unknownEpochContacts: number
+  readonly unknownEpochContactsHistory: number
   listContacts(): Promise<Array<StoredContact>>
   loadContact(options: { id: string }): Promise<StoredContact | undefined>
   addContact(options: {
@@ -136,6 +137,15 @@ export interface SyncedCollectionStore {
   listContactRevisions(options: {
     contactId: string
   }): Promise<Array<ContactRevisionPayload>>
+  listAllContactRevisions(): Promise<Array<ContactRevisionPayload>>
+  listContactHeads(): Promise<
+    Array<{ rowId: string; head: ContactHeadPayload }>
+  >
+  putContactHead(options: { head: ContactHeadPayload }): Promise<void>
+  findHistoryItemsByInnerId(options: {
+    id: string
+  }): Promise<Array<{ rowId: string; doc: WalletActivity }>>
+  deleteHistoryItemByRowId(options: { rowId: string }): Promise<void>
   setCiphers(ciphers: Record<string, DocCipher>): void
 }
 
@@ -156,8 +166,10 @@ export class RemoteDirectStore implements SyncedCollectionStore {
   // client cannot make a stored app key read as absent (which would mint a
   // second identity for the app).
   #unknownEpochAppKeys = 0
-  // The contacts scan's counterpart of the credential counter above.
+  // The contacts and contacts-history scans' counterparts of the credential
+  // counter above.
   #unknownEpochContacts = 0
+  #unknownEpochContactsHistory = 0
   #noEpochKeyAppKeys = 0
   #undecryptableAppKeys = 0
   // Count of resources the last read skipped because this wallet holds no key
@@ -647,12 +659,23 @@ export class RemoteDirectStore implements SyncedCollectionStore {
     return removed
   }
 
+  /**
+   * Appends one entry to the remote `wallet-activity` collection, and returns
+   * the row id it landed under -- which the put-then-delete-others write of
+   * the migration's import activity needs, to tell the row it just wrote from
+   * the ones it is replacing.
+   *
+   * @param options {object}
+   * @param options.resourceId {string}
+   * @param options.activity {WalletActivity}
+   * @returns {Promise<string>}
+   */
   async addHistoryItem({
     activity
   }: {
     resourceId: string
     activity: WalletActivity
-  }): Promise<void> {
+  }): Promise<string> {
     // The caller's `resourceId` lives on only as the activity's own `id` inside
     // the encrypted document (mirroring the local store); the row is keyed by
     // the cipher's content-derived envelope-hash id.
@@ -666,17 +689,30 @@ export class RemoteDirectStore implements SyncedCollectionStore {
       body: envelope,
       epoch
     })
+    return id
   }
 
-  async listHistoryItems(): Promise<
-    Array<{ id: string; doc: WalletActivity }>
+  /**
+   * Reads every remote `wallet-activity` resource, decrypting each with the
+   * per-row tolerance the other scans apply (an unknown-epoch row is counted
+   * for the facade's descriptor refresh; a no-epoch-key, integrity-failing, or
+   * otherwise unreadable row is warned and skipped), and pairs each readable
+   * activity with the row id it was read under.
+   *
+   * The shared half of {@link listHistoryItems} (which collapses duplicates by
+   * the activity's own id) and {@link findHistoryItemsByInnerId} (which keeps
+   * every row, since the import path deletes the extras).
+   *
+   * @returns {Promise<Array<{ rowId: string; activity: WalletActivity }>>}
+   */
+  async #historyEntries(): Promise<
+    Array<{ rowId: string; activity: WalletActivity }>
   > {
     const cipher = this.#cipherFor('walletActivity')
     const resources = await this.#remote.listSyncedDocuments({
       logicalKey: 'walletActivity'
     })
-    const seen = new Set<string>()
-    const items: Array<{ id: string; doc: WalletActivity }> = []
+    const entries: Array<{ rowId: string; activity: WalletActivity }> = []
     let unknownEpoch = 0
     // Same shape as the credential scan: decrypt in parallel, fold in order.
     const decrypted = await Promise.all(
@@ -732,15 +768,65 @@ export class RemoteDirectStore implements SyncedCollectionStore {
       if (activity === undefined) {
         continue
       }
-      const id = activity.id ?? resourceId
+      entries.push({ rowId: resourceId, activity })
+    }
+    this.#unknownEpochHistory = unknownEpoch
+    return entries
+  }
+
+  async listHistoryItems(): Promise<
+    Array<{ id: string; doc: WalletActivity }>
+  > {
+    const entries = await this.#historyEntries()
+    const seen = new Set<string>()
+    const items: Array<{ id: string; doc: WalletActivity }> = []
+    for (const { rowId, activity } of entries) {
+      const id = activity.id ?? rowId
       if (seen.has(id)) {
         continue
       }
       seen.add(id)
       items.push({ id, doc: activity })
     }
-    this.#unknownEpochHistory = unknownEpoch
     return items
+  }
+
+  /**
+   * Every `wallet-activity` row carrying one activity id, row ids included --
+   * the write-side lookup the migration import needs, where
+   * {@link listHistoryItems} collapses duplicates and hides them. The activity
+   * id lives inside the encrypted body, so this is a decrypt scan (FW-545
+   * tracks a stored index that would replace it).
+   *
+   * @param options {object}
+   * @param options.id {string}   the activity's own id, not a row id
+   * @returns {Promise<Array<{ rowId: string; doc: WalletActivity }>>}
+   */
+  async findHistoryItemsByInnerId({
+    id
+  }: {
+    id: string
+  }): Promise<Array<{ rowId: string; doc: WalletActivity }>> {
+    const entries = await this.#historyEntries()
+    return entries
+      .filter(({ rowId, activity }) => (activity.id ?? rowId) === id)
+      .map(({ rowId, activity }) => ({ rowId, doc: activity }))
+  }
+
+  /**
+   * Removes one `wallet-activity` resource by its row id -- the remote twin of
+   * the local store's row-id delete, and the second half of the import
+   * activity's put-then-delete-others write.
+   *
+   * @param options {object}
+   * @param options.rowId {string}
+   * @returns {Promise<void>}
+   */
+  async deleteHistoryItemByRowId({ rowId }: { rowId: string }): Promise<void> {
+    await this.#remote.deleteSyncedResource({
+      logicalKey: 'walletActivity',
+      resourceId: rowId
+    })
   }
 
   async addPublicCredential({
@@ -794,6 +880,10 @@ export class RemoteDirectStore implements SyncedCollectionStore {
     return this.#unknownEpochContacts
   }
 
+  get unknownEpochContactsHistory(): number {
+    return this.#unknownEpochContactsHistory
+  }
+
   /**
    * Decrypts one remote `contacts` row body to its head payload, mirroring
    * the local store's per-row tolerance: a plaintext (legacy) body passes
@@ -841,22 +931,28 @@ export class RemoteDirectStore implements SyncedCollectionStore {
   }
 
   /**
-   * Lists the remote `contacts` collection, decrypting each head row with the
-   * local store's tolerance (an unknown-epoch row is skipped and counted for
-   * the facade's descriptor refresh; an unreadable row is warned and skipped),
-   * and mapping each readable head to a {@link StoredContact} with the same
-   * legacy `contactId ?? rowId` fallback the local reads apply.
+   * Reads the remote `contacts` collection as head payloads, decrypting each
+   * row with the local store's tolerance (an unknown-epoch row is skipped and
+   * counted for the facade's descriptor refresh; an unreadable row is warned
+   * and skipped), paired with the row id it was read under.
    *
-   * @returns {Promise<Array<StoredContact>>}
+   * The shared half of {@link listContacts} and the existence lookup the
+   * migration import needs: a head's `writerId` and its exact payload, which
+   * the {@link StoredContact} projection drops, are what the import's content
+   * check compares.
+   *
+   * @returns {Promise<Array<{ rowId: string; head: ContactHeadPayload }>>}
    */
-  async listContacts(): Promise<Array<StoredContact>> {
+  async listContactHeads(): Promise<
+    Array<{ rowId: string; head: ContactHeadPayload }>
+  > {
     const resources = await this.#remote.listSyncedDocuments({
       logicalKey: 'contacts'
     })
     const decrypted = await Promise.all(
       resources.map(({ id, data }) => this.#decryptContactHead({ id, data }))
     )
-    const contacts: StoredContact[] = []
+    const heads: Array<{ rowId: string; head: ContactHeadPayload }> = []
     let unknownEpoch = 0
     for (let position = 0; position < resources.length; position++) {
       const { id: rowId } = resources[position]
@@ -889,17 +985,29 @@ export class RemoteDirectStore implements SyncedCollectionStore {
       if (!head) {
         continue
       }
-      contacts.push({
-        id: rowId,
-        // Legacy heads written before the row-id / contact-id split carry no
-        // usable distinction; fall back to the row id for those.
-        contactId: head.contactId ?? rowId,
-        contact: head.contact,
-        updatedAt: head.updatedAt
-      })
+      heads.push({ rowId, head })
     }
     this.#unknownEpochContacts = unknownEpoch
-    return contacts
+    return heads
+  }
+
+  /**
+   * Lists the remote `contacts` collection, mapping each readable head to a
+   * {@link StoredContact} with the same legacy `contactId ?? rowId` fallback
+   * the local reads apply.
+   *
+   * @returns {Promise<Array<StoredContact>>}
+   */
+  async listContacts(): Promise<Array<StoredContact>> {
+    const heads = await this.listContactHeads()
+    return heads.map(({ rowId, head }) => ({
+      id: rowId,
+      // Legacy heads written before the row-id / contact-id split carry no
+      // usable distinction; fall back to the row id for those.
+      contactId: head.contactId ?? rowId,
+      contact: head.contact,
+      updatedAt: head.updatedAt
+    }))
   }
 
   /**
@@ -996,6 +1104,37 @@ export class RemoteDirectStore implements SyncedCollectionStore {
       // write, so the add succeeded.
     }
     return { id, contactId, contact, updatedAt }
+  }
+
+  /**
+   * Writes an archived contact head verbatim -- the migration import's write
+   * method. Unlike {@link addContact} it mints nothing: the `contactId`,
+   * `updatedAt`, and `writerId` the bundle carried are the ones stored, so the
+   * imported contact keeps the identity its revisions refer to and the history
+   * reads as the old wallet's.
+   *
+   * One PUT, no compare-and-swap: {@link updateContact}'s three-attempt CAS
+   * loop and prior-head refusal are the interactive edit path, and the caller
+   * ({@link StorageManager.importContactHead}) has already decided this
+   * `contactId` is not held. The row id is fresh cipher randomness, so a
+   * not-created outcome is the transport's retry of a PUT whose success
+   * response was lost, and the write stands.
+   *
+   * @param options {object}
+   * @param options.head {ContactHeadPayload}
+   * @returns {Promise<void>}
+   */
+  async putContactHead({ head }: { head: ContactHeadPayload }): Promise<void> {
+    const cipher = this.#cipherFor('contacts')
+    const { id, envelope, epoch } = await cipher.encrypt({
+      data: head as unknown as Json
+    })
+    await this.#remote.putSyncedResource({
+      logicalKey: 'contacts',
+      resourceId: id,
+      body: envelope,
+      epoch
+    })
   }
 
   /**
@@ -1182,24 +1321,18 @@ export class RemoteDirectStore implements SyncedCollectionStore {
   }
 
   /**
-   * Lists a single contact's revision history, most recent first, ordered by
-   * the logical `timestamp` each payload carries (`writerId` descending
-   * breaks a tie) -- the shared {@link compareContactRevisionsNewestFirst}.
-   * The remote-direct backend has no plaintext row-to-contact index (that is
-   * a local-replica read accelerator), so every history row is fetched and
-   * decrypted, filtered by its TRUE `contactId`, with the usual per-row
-   * tolerance: an unknown-epoch, no-epoch-key, or otherwise unreadable row is
-   * warned and skipped.
+   * Reads every remote `contacts-history` row as a revision payload. The
+   * remote-direct backend has no plaintext row-to-contact index (that is a
+   * local-replica read accelerator), so every history row is fetched and
+   * decrypted, with the usual per-row tolerance: an unknown-epoch,
+   * no-epoch-key, or otherwise unreadable row is warned and skipped.
    *
-   * @param options {object}
-   * @param options.contactId {string}
+   * The shared half of {@link listContactRevisions} and
+   * {@link listAllContactRevisions}.
+   *
    * @returns {Promise<Array<ContactRevisionPayload>>}
    */
-  async listContactRevisions({
-    contactId
-  }: {
-    contactId: string
-  }): Promise<Array<ContactRevisionPayload>> {
+  async #revisionEntries(): Promise<Array<ContactRevisionPayload>> {
     const cipher = this.#cipherFor('contactsHistory')
     const resources = await this.#remote.listSyncedDocuments({
       logicalKey: 'contactsHistory'
@@ -1217,14 +1350,17 @@ export class RemoteDirectStore implements SyncedCollectionStore {
       })
     )
     const revisions: ContactRevisionPayload[] = []
+    let unknownEpoch = 0
     for (let position = 0; position < resources.length; position++) {
       const { id: resourceId } = resources[position]
       const { raw, err } = decrypted[position]
       if (err) {
         const failure = classifyDecryptFailure(err)
         if (failure === 'unknown-epoch') {
-          // Possibly-fresh data behind a stale descriptor: skip it so a later
-          // read, past a descriptor refresh, can pick it up.
+          // Possibly-fresh data behind a stale descriptor: skip it, counted
+          // for the facade's descriptor refresh, so a later read past that
+          // refresh can pick it up.
+          unknownEpoch += 1
           log.warn('Skipping unknown-epoch remote contacts-history row', {
             resourceId,
             err
@@ -1254,15 +1390,45 @@ export class RemoteDirectStore implements SyncedCollectionStore {
       if (raw === undefined) {
         continue
       }
-      const revision = upgradeContactRevisionPayload(
-        raw as unknown as ContactRevisionPayload
+      revisions.push(
+        upgradeContactRevisionPayload(raw as unknown as ContactRevisionPayload)
       )
-      if (revision.contactId === contactId) {
-        revisions.push(revision)
-      }
     }
+    this.#unknownEpochContactsHistory = unknownEpoch
+    return revisions
+  }
+
+  /**
+   * Lists a single contact's revision history, most recent first, ordered by
+   * the logical `timestamp` each payload carries (`writerId` descending
+   * breaks a tie) -- the shared {@link compareContactRevisionsNewestFirst}.
+   * Every history row is decrypted and filtered by its TRUE `contactId`.
+   *
+   * @param options {object}
+   * @param options.contactId {string}
+   * @returns {Promise<Array<ContactRevisionPayload>>}
+   */
+  async listContactRevisions({
+    contactId
+  }: {
+    contactId: string
+  }): Promise<Array<ContactRevisionPayload>> {
+    const revisions = (await this.#revisionEntries()).filter(
+      revision => revision.contactId === contactId
+    )
     revisions.sort(compareContactRevisionsNewestFirst)
     return revisions
+  }
+
+  /**
+   * Lists every contact's revisions in one pass, in no particular order --
+   * the whole-collection read the migration import's held-content snapshot
+   * takes once, in place of one full listing per archived revision.
+   *
+   * @returns {Promise<Array<ContactRevisionPayload>>}
+   */
+  async listAllContactRevisions(): Promise<Array<ContactRevisionPayload>> {
+    return await this.#revisionEntries()
   }
 
   setCiphers(ciphers: Record<string, DocCipher>): void {

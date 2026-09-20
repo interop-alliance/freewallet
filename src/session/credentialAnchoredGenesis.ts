@@ -32,8 +32,8 @@
  * running the whole thing again. The sibling binding
  * (`mendCredentialAnchoredAccount` below) wraps wallet-core's mend entry
  * point -- the converging ensure over the tear states the establishment can
- * leave -- with the same hook set, so any door into a torn account runs the
- * shared arms instead of hand-rolling its own heal.
+ * leave -- with the same hook set, so any entry point into a torn account
+ * runs the shared arms instead of hand-rolling its own heal.
  */
 import { WasClient } from '@interop/was-client'
 import type { EncryptionDescriptorStore } from '@interop/was-client/edv'

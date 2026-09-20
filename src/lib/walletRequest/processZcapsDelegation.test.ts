@@ -374,7 +374,7 @@ describe('processZcaps collection attribution', () => {
     })
   })
 
-  it('stamps the intake origin verbatim, trailing slash canonicalized at the door', async () => {
+  it('stamps the intake origin verbatim, trailing slash canonicalized at intake', async () => {
     const { session } = fakeSession()
     await processZcaps({
       zcapRequests: [APP_PUBLIC_DESCRIPTOR],

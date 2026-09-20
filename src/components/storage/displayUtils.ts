@@ -95,7 +95,8 @@ export function groupCollections({
  * translated name for a wallet collection over its stored one.
  *
  * @param options {object}
- * @param options.collection {StorageCollection}
+ * @param options.collection {Pick<StorageCollection, 'id' | 'name'>}   a
+ *   listed collection, or a bare `{ id }` for one named by id alone
  * @param options.t {TFunction}
  * @returns {string}
  */
@@ -103,7 +104,7 @@ export function getCollectionDisplayName({
   collection,
   t
 }: {
-  collection: StorageCollection
+  collection: Pick<StorageCollection, 'id' | 'name'>
   t: TFunction
 }): string {
   const canonical = CANONICAL_COLLECTION_NAMES.get(collection.id)

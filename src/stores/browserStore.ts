@@ -126,6 +126,9 @@ export class BrowserStore {
   #unknownEpochCredentials = 0
   #unknownEpochHistory = 0
   #unknownEpochContacts = 0
+  // The whole-collection contacts-history scan's counterpart of the contacts
+  // counter above.
+  #unknownEpochContactsHistory = 0
   // Count of rows the most recent list read had to skip because this wallet
   // holds no key for their (known) key epoch -- KeyUnwrapError: it was never a
   // recipient, or was removed and the epoch rotated. Like the unknown-epoch
@@ -730,6 +733,10 @@ export class BrowserStore {
    */
   get unknownEpochContacts(): number {
     return this.#unknownEpochContacts
+  }
+
+  get unknownEpochContactsHistory(): number {
+    return this.#unknownEpochContactsHistory
   }
 
   /**
@@ -1342,10 +1349,15 @@ export class BrowserStore {
    * envelope-hash id; the caller's `resourceId` then lives on only as the
    * activity's own `id` inside the encrypted document.
    *
+   * Returns the row id the entry landed under -- the cipher's envelope-hash id
+   * on an encrypted store, the passed `resourceId` on a plaintext one -- which
+   * the put-then-delete-others write of the migration's import activity needs,
+   * to tell the row it just wrote from the ones it is replacing.
+   *
    * @param options {object}
    * @param options.resourceId {string}
    * @param options.activity {WalletActivity}
-   * @returns {Promise<void>}
+   * @returns {Promise<string>}
    */
   async addHistoryItem({
     resourceId,
@@ -1353,12 +1365,13 @@ export class BrowserStore {
   }: {
     resourceId: string
     activity: WalletActivity
-  }) {
-    await this.#insertEncrypted({
+  }): Promise<string> {
+    const { rowId } = await this.#insertEncrypted({
       logicalKey: 'walletActivity',
       id: resourceId,
       data: activity as Json
     })
+    return rowId
   }
 
   /**
@@ -1392,6 +1405,54 @@ export class BrowserStore {
       items.push({ id, doc: activity })
     }
     return items
+  }
+
+  /**
+   * Every `wallet-activity` row carrying one activity id, row ids included --
+   * the write-side lookup the migration import needs, where
+   * {@link listHistoryItems} collapses duplicates to their oldest copy and
+   * hides the rest. The activity id lives inside the encrypted body, so this
+   * is a decrypt scan (FW-545 tracks a stored index that would replace it).
+   *
+   * @param options {object}
+   * @param options.id {string}   the activity's own id, not a row id
+   * @returns {Promise<Array<{ rowId: string; doc: WalletActivity }>>}
+   */
+  async findHistoryItemsByInnerId({
+    id
+  }: {
+    id: string
+  }): Promise<Array<{ rowId: string; doc: WalletActivity }>> {
+    const { entries } = await this.#decryptedRows({
+      logicalKey: 'walletActivity',
+      sort: 'asc'
+    })
+    const found: Array<{ rowId: string; doc: WalletActivity }> = []
+    for (const { rowId, data } of entries) {
+      const activity = data as WalletActivity
+      if ((activity.id ?? rowId) === id) {
+        found.push({ rowId, doc: activity })
+      }
+    }
+    return found
+  }
+
+  /**
+   * Removes a single `wallet-activity` row by its RxDB row id (a soft delete
+   * replication pushes as a tombstone) -- the `wallet-activity` twin of
+   * {@link deleteCredentialByRowId}, and the second half of the import
+   * activity's put-then-delete-others write.
+   *
+   * @param options {object}
+   * @param options.rowId {string}
+   * @returns {Promise<void>}
+   */
+  async deleteHistoryItemByRowId({ rowId }: { rowId: string }): Promise<void> {
+    const doc = await this.rxCollection('walletActivity').findOne(rowId).exec()
+    if (doc) {
+      await doc.remove()
+    }
+    this.#cacheFor('walletActivity').delete(rowId)
   }
 
   /**
@@ -1430,6 +1491,20 @@ export class BrowserStore {
       rowId,
       head: upgradeContactHeadPayload(data as unknown as ContactHeadPayload)
     }))
+  }
+
+  /**
+   * Reads the stored `contacts` rows as head payloads, oldest first -- the
+   * existence lookup the migration import needs. A head's `writerId` and its
+   * exact payload, which the {@link StoredContact} projection drops, are what
+   * the import's content check compares.
+   *
+   * @returns {Promise<Array<{ rowId: string; head: ContactHeadPayload }>>}
+   */
+  async listContactHeads(): Promise<
+    Array<{ rowId: string; head: ContactHeadPayload }>
+  > {
+    return await this.#contactEntries()
   }
 
   /**
@@ -1536,6 +1611,26 @@ export class BrowserStore {
       data: head as unknown as Json
     })
     return { id: rowId, contactId, contact, updatedAt }
+  }
+
+  /**
+   * Writes an archived contact head verbatim -- the migration import's write
+   * method. Unlike {@link addContact} it mints nothing: the `contactId`,
+   * `updatedAt`, and `writerId` the bundle carried are the ones stored, so the
+   * imported contact keeps the identity its revisions refer to and the history
+   * reads as the old wallet's. The row id is minted here as always, since it
+   * is transport-level addressing and never travels in a bundle.
+   *
+   * @param options {object}
+   * @param options.head {ContactHeadPayload}
+   * @returns {Promise<void>}
+   */
+  async putContactHead({ head }: { head: ContactHeadPayload }): Promise<void> {
+    await this.#insertEncrypted({
+      logicalKey: 'contacts',
+      id: uuidv7(),
+      data: head as unknown as Json
+    })
   }
 
   /**
@@ -1820,6 +1915,28 @@ export class BrowserStore {
     await Promise.all(backfill.map(entry => this.#indexContactRevision(entry)))
     revisions.sort(compareContactRevisionsNewestFirst)
     return revisions
+  }
+
+  /**
+   * Lists every contact's revisions in one pass, in no particular order --
+   * the whole-collection read the migration import's held-content snapshot
+   * takes once, in place of one read per archived revision. Every row is
+   * decrypted (through the session decrypt cache), with
+   * {@link #decryptedRows}'s per-row tolerance; the plaintext row-to-contact
+   * index is neither consulted nor backfilled here, since the caller wants
+   * every contact's rows.
+   *
+   * @returns {Promise<Array<ContactRevisionPayload>>}
+   */
+  async listAllContactRevisions(): Promise<Array<ContactRevisionPayload>> {
+    const { entries, unknownEpochRowIds } = await this.#decryptedRows({
+      logicalKey: 'contactsHistory',
+      sort: 'desc'
+    })
+    this.#unknownEpochContactsHistory = unknownEpochRowIds.length
+    return entries.map(({ data }) =>
+      upgradeContactRevisionPayload(data as unknown as ContactRevisionPayload)
+    )
   }
 
   /**

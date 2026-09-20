@@ -704,6 +704,70 @@
       "maxUploadSize": "Max upload size: {{size}} per file",
       "loadError": "Could not load storage usage.",
       "retry": "Retry"
+    },
+    "migration": {
+      "action": "Import from Another Wallet",
+      "title": "Import from another wallet",
+      "intro": "Brings the content of a backup file from another wallet into this account. Credentials, contacts, and their history are added here. Nothing in this account is removed.",
+      "chooseFile": "Choose backup file",
+      "changeFile": "Choose a different file",
+      "selectedFile": "{{name}} ({{size}})",
+      "secretLegend": "How the backup is opened",
+      "secretKinds": {
+        "passphrase": "The old wallet's passphrase",
+        "recoveryCode": "A recovery code for the old wallet",
+        "packedCode": "The recovery code inside the backup"
+      },
+      "passphraseLabel": "Old wallet passphrase",
+      "recoveryCodeLabel": "Recovery code",
+      "exportPassphraseLabel": "Export passphrase",
+      "exportPassphraseHelp": "Leave this empty if the backup was written without a password.",
+      "recoveryCodeHint": "A recovery code resists guessing better than a passphrase does.",
+      "notMigratedTitle": "What this does not bring across",
+      "notMigratedDid": "The old account's identifier, and the identity your contacts know you as.",
+      "notMigratedGrants": "Every authorization, grant, and app key. Each connected app and agent has to be added again from scratch; reconnecting is not enough.",
+      "notMigratedShares": "Every share of a collection.",
+      "notMigratedPublicLinks": "The public links. A credential that was public comes back private, and you can share it again by hand.",
+      "notMigratedLocalOnly": "This wallet keeps no remote storage, so the imported content is readable only as long as this browser keeps its site data.",
+      "run": "Import content",
+      "cancel": "Cancel",
+      "close": "Close",
+      "running": "Reading the backup. This can take a while.",
+      "progressTitle": "Progress",
+      "progressRow": "{{collection}}: {{count}}",
+      "reportTitle": "Import report",
+      "buckets": {
+        "accepted": "Added: {{count}}",
+        "skipped": "Already here: {{count}}",
+        "conflicting": "Held under other content: {{count}}",
+        "failed": "Not written: {{count}}",
+        "unopenable": "Could not be opened: {{count}}"
+      },
+      "collectionStoppedBy": "Stopped early: {{cause}}",
+      "stoppedAt": "The import stopped in {{collection}}: {{cause}}",
+      "notMigratedCollectionsTitle": "Left in the backup",
+      "notMigratedCollectionRow": "{{collection}}: {{count}} items",
+      "quotaWarning": "The backup is {{bundleSize}} and this space has {{freeSize}} free, so some rows may be refused.",
+      "replicaOutOfSync": "Replication had not caught up when the import began, so a row already on the server may have been added a second time.",
+      "success": "Import complete.",
+      "causes": {
+        "keyUnwrap": "No key from this backup opened the row.",
+        "unknownEpoch": "The row names a key the backup does not carry.",
+        "chunked": "The item was stored in parts, which the import does not reassemble.",
+        "logUnreadable": "The collection's key history could not be read.",
+        "quotaExceeded": "This account's storage is full.",
+        "payloadTooLarge": "The item is larger than this server accepts.",
+        "failed": "The write did not land.",
+        "unknown": "Unexpected: {{name}}."
+      },
+      "errors": {
+        "bundleInvalid": "This file is not a wallet backup, or it is damaged.",
+        "accountArchiveMissing": "This backup carries no account data, so nothing in it can be opened.",
+        "secretNotRecipient": "That passphrase or code does not open this backup. A secret created after the backup was written cannot open it.",
+        "cancelled": "Import cancelled. What was already added stays.",
+        "quotaExceeded": "This account's storage is full, so the import stopped.",
+        "failed": "The import failed. Please try again."
+      }
     }
   },
   "credential": {

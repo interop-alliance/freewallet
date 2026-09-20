@@ -1,11 +1,11 @@
 /**
  * Unit tests for the store-time app-key refusal: `StorageManager.addCredential`
- * is the single door every credential coming from outside the wallet goes
- * through (the CHAPI store popup, the URL / QR / manual-paste import, the
+ * is the single entry point every credential coming from outside the wallet
+ * goes through (the CHAPI store popup, the URL / QR / manual-paste import, the
  * credentials half of a space import), and it refuses every credential
  * presenting as an app key -- whether or not it binds to its own seed, since a
  * fully attacker-generated credential binds perfectly. Only the wallet's own
- * mint path stores one, through its own door (`addMintedAppKey`), which in
+ * mint path stores one, through its own store method (`addMintedAppKey`), which in
  * turn refuses anything that does not carry the mint invariants and writes to
  * the dedicated `app-connections` collection.
  *
@@ -22,25 +22,19 @@
  * @vitest-environment node
  */
 import { afterEach, describe, expect, it } from 'vitest'
-import type {
-  IKeyAgreementKey,
-  IKeyResolver,
-  IVerifiableCredential
-} from '@interop/data-integrity-core'
-import { X25519KeyAgreementKey2020 } from '@interop/x25519-key-agreement-key'
+import type { IVerifiableCredential } from '@interop/data-integrity-core'
 import { CapabilityAgent } from '@interop/capability-agent'
-import { createEdvDocCipher, type DocCipher } from '@interop/was-client/edv'
-import { mintRecordEncryption } from '@/session/recordEnvelope'
-import { getRxStorageMemory } from 'rxdb/plugins/storage-memory'
-import type { User } from '@/types/auth'
 import {
   AppKeyMintInvariantError,
   AppKeyRefusedError,
   mintAppKeyCredential
 } from '@interop/wallet-request'
-import { browserLocalSessionPersistence } from '@/session/persistence'
-import { BrowserStore } from './browserStore'
-import { StorageManager } from './storageManager'
+import {
+  closeMemoryStores,
+  memoryStorageManager,
+  type CollectionPair,
+  type MemoryStorageHarness
+} from '@/stores/testing/memoryStorageManager'
 
 const app = {
   name: 'Text Editor',
@@ -48,64 +42,29 @@ const app = {
 }
 const origin = 'https://app.example'
 
-const openStores: BrowserStore[] = []
-let userCounter = 0
+/**
+ * The collections an app key's store path touches.
+ */
+const APP_KEY_COLLECTIONS: CollectionPair[] = [
+  ['privateCredentials', 'private-credentials'],
+  ['appConnections', 'app-connections'],
+  ['walletActivity', 'wallet-activity']
+]
 
-afterEach(async () => {
-  while (openStores.length > 0) {
-    await openStores.pop()?.close()
-  }
-})
+afterEach(closeMemoryStores)
 
 /**
  * A StorageManager over a fresh memory-RxDB BrowserStore with real ciphers and
  * no remote store, plus the user its history entries are attributed to.
+ *
+ * @returns {Promise<MemoryStorageHarness>}
  */
-async function makeStorage(): Promise<{ storage: StorageManager; user: User }> {
-  const generated = await X25519KeyAgreementKey2020.generate({
-    controller: 'did:key:z6MkTestController'
+async function makeStorage(): Promise<MemoryStorageHarness> {
+  return await memoryStorageManager({
+    collections: APP_KEY_COLLECTIONS,
+    controller: 'did:key:z6MkTestController',
+    userIdPrefix: 'did:key:z6MkAppKeyUser'
   })
-  const key = generated as IKeyAgreementKey
-  const keyResolver: IKeyResolver = async () => ({
-    id: generated.id!,
-    type: generated.type,
-    publicKeyMultibase: generated.publicKeyMultibase
-  })
-  const ciphers: Record<string, DocCipher> = {}
-  for (const [logicalKey, collectionId] of [
-    ['privateCredentials', 'private-credentials'],
-    ['appConnections', 'app-connections'],
-    ['walletActivity', 'wallet-activity']
-  ]) {
-    // Every encrypted collection carries a key-epoch roster from birth, so
-    // each cipher gets a local one-epoch descriptor wrapped to the test KAK.
-    ciphers[logicalKey] = await createEdvDocCipher({
-      keyAgreementKey: key,
-      keyResolver,
-      collectionId,
-      encryption: await mintRecordEncryption({ keyAgreementKey: key })
-    })
-  }
-  userCounter += 1
-  const user: User = {
-    id: `did:key:z6MkAppKeyUser${userCounter}`,
-    email: 'test@example.com'
-  }
-  const { localStore } = await BrowserStore.initClient({
-    user,
-    storage: getRxStorageMemory(),
-    ciphers
-  })
-  await localStore.ensureUserCollections({ user })
-  openStores.push(localStore)
-  const storage = new StorageManager({
-    localStore,
-    ciphers,
-    vaultKeys: { keyAgreementKey: key, keyResolver },
-    descriptors: {},
-    persistence: browserLocalSessionPersistence()
-  })
-  return { storage, user }
 }
 
 /**
@@ -136,7 +95,7 @@ describe('StorageManager.addCredential app-key screening', () => {
   it('refuses an externally arriving app key even when it binds', async () => {
     // The core attack shape: an attacker-generated credential with its OWN
     // fresh seed binds perfectly, so binding cannot admit it -- the marker
-    // alone refuses, and only the mint path's door stores one.
+    // alone refuses, and only the mint path's store method stores one.
     const { storage, user } = await makeStorage()
     const { credential } = await mintAppKeyCredential({ app, origin })
     await expect(storage.addCredential({ credential, user })).rejects.toThrow(
