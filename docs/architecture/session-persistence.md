@@ -263,6 +263,77 @@ replacement is minted by the new credential's ladder VM and installed
 through that credential's sibling delegation. Every App Connect grant the
 visit chained under the old delegation ends with it.
 
+**The backup export's stage order** (`src/session/backupExport.ts`). The
+ceremony waits out `session.registryReady` and `session.mends`, resolves the
+account-ceremony context once, and then pre-flights the account Space's, the
+client-annex Space's, and every registry entry's capability for `POST`,
+before anything is minted. The client-annex Space is resolved from the
+account document's `#DelegatedClients` pointer on both session kinds, and a
+named annex Space this session cannot reach refuses the run there, before
+the code is minted. Four stages follow in order. First the recovery code: a
+fresh code is minted through the ordinary issuance ceremony, labeled with
+the date, so everything after it already names the code's own unlock Space.
+Then the Space listing, read after that issuance: the account Space, the
+client-annex Space, and one unlock Space per unlock-methods registry entry.
+A registry read back from the server that carries no entry for the Space
+the issuance just reported refuses the run there, since a bundle missing
+the Space its own packed code opens does not restore the account. Then one
+export per Space, in listing order; the account Space's archive is checked
+against this visit's pinned chain head for the account log before the
+bundle is written, and a mismatch refuses the run. A visit holding no pin
+for that log skips the check. Then the packing.
+
+Which capability each export rides depends on the kind. An enrolled session
+root-invokes the account and annex Spaces and invokes each entry's stored
+management zcap directly. A ladder-anchored session rides the generation
+delegation on the account Space, the record's `delegatedClients` delegation
+on the annex (sent by the credential's standing client, since the annex
+Space answers to the account did:webvh), and a freshly minted POST-only
+child of each management zcap on the siblings, signed by the ladder VM and
+sent by its bare did:key. Both kinds run the same pre-flight over the stored
+zcap: an entry whose zcap allows no `POST`, has expired, or names a
+delegatee this session cannot act through is refused before the request, so
+the report names the entry rather than a server refusal. What refreshes such
+a zcap differs by entry. A passphrase's and a passkey's are re-minted by a
+login with that credential. A recovery code's has no refresh path at all --
+only the code's own unlock identity can re-delegate it -- so the remedy
+there is to remove the code under Settings > Recovery codes and issue a new
+one, which is what the refusal says.
+
+The export is a walk rather than a snapshot. Each Space is read at its own
+moment and nothing on the server holds the set still, so the bundle is only
+as consistent as the run was quiet. The one bound the ceremony can state it
+does: the registry is re-read once every archive is in hand, and a set of
+unlock Spaces that differs from the listed one fails the run, since a
+credential added mid-run would be missing from the bundle and one removed
+would be in it after its Space was gone. Because the bundle is buffered
+whole before it is handed back (wallet-backup's writer finalizes the pack
+with no consumer attached), that check still runs before the caller sees a
+single byte.
+
+The rule is fail-whole: one Space that cannot be exported fails the run, so
+no bundle is written that reads as complete and is not. The pivot is the
+code issuance, and it is the only durable write the ceremony makes. A run
+torn past a COMPLETED issuance leaves an ordinary labeled recovery code,
+listed and removable in Settings like any other, so the mender is a re-run.
+A tear inside the issuance is not that: the issuance is itself staged
+(`src/session/recovery.ts`, the registry entry last), and a tear after its
+document entry is the open gap
+`every-document-key-agreement-entry-has-a-locatable-credential`, where a
+document `keyAgreement` entry and a roster wrap stand for a code nothing can
+locate. The code string reaches only the packing; nothing stores it, returns
+it, or logs it. The export passphrase seals the packed code and nothing
+else: the bundle carries every unlock Space archive and the account Space's
+user key roster, so a holder can guess the wallet passphrase offline and the
+file's bound is the weaker of the two secrets.
+
+The save is asked first. The dialog opens the browser's save picker before
+the ceremony starts where the browser has one, so a dismissed picker mints
+no code, and pipes the bundle into the chosen file afterwards; a browser
+without the File System Access API buffers the finished bundle into a Blob
+instead. A cancelled run renders the cancelled message, which says the code
+it may already have issued is listed in Settings.
+
 Contacts are reachable in a transient session. The remote-direct backend
 serves all seven contact operations against the remote `contacts` and
 `contacts-history` collections. Head rows are read and written in place

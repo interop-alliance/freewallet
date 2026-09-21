@@ -31,6 +31,7 @@ import {
 } from '@playwright/test'
 import {
   awaitLoginChain,
+  coldTerminal,
   fillSettled,
   forceRememberBrowser,
   signupViaWizard,
@@ -70,23 +71,6 @@ interface DeletableAccount {
 }
 
 /**
- * Opens a fresh, cold browser context (empty IndexedDB and localStorage) to
- * stand in for another terminal. Callers must close the returned context.
- *
- * @param browser {Browser}
- * @returns {Promise<{ context: Awaited<ReturnType<Browser['newContext']>>,
- *   page: Page }>}
- */
-async function coldTerminal(browser: Browser): Promise<{
-  context: Awaited<ReturnType<Browser['newContext']>>
-  page: Page
-}> {
-  const context = await browser.newContext({ baseURL: APP_URL })
-  const page = await context.newPage()
-  return { context, page }
-}
-
-/**
  * The world-readable `id/did.jsonl` URL the Settings page links, once
  * did:webvh provisioning has landed.
  *
@@ -119,7 +103,7 @@ async function buildLadderAnchoredAccount(
   const baseline = await listStoredSpaceIds()
 
   // --- Terminal A: the credential-anchored signup (no enrolled client). ---
-  const first = await coldTerminal(browser)
+  const first = await coldTerminal(browser, APP_URL)
   let passphrase: string
   let accountSpaceId: string
   try {
@@ -136,7 +120,7 @@ async function buildLadderAnchoredAccount(
 
   // --- Terminal B: the remembered self-enrollment and the second unlock
   // method, the one step the tier refusals keep off a transient session. ---
-  const second = await coldTerminal(browser)
+  const second = await coldTerminal(browser, APP_URL)
   let annexSpaceIds: string[]
   let logUrl: string
   try {
@@ -299,7 +283,7 @@ test.describe.serial('Account deletion from a transient session', () => {
     test.slow()
     test.setTimeout(300_000)
 
-    const { context, page } = await coldTerminal(browser)
+    const { context, page } = await coldTerminal(browser, APP_URL)
     try {
       await transientLoginToDeleteDialog(page, account.passphrase)
       const dialog = openDeleteDialog(page)
@@ -345,7 +329,7 @@ test.describe.serial('Account deletion from a transient session', () => {
     test.slow()
     test.setTimeout(600_000)
 
-    const { context, page } = await coldTerminal(browser)
+    const { context, page } = await coldTerminal(browser, APP_URL)
     try {
       const baseline = await transientLoginToDeleteDialog(
         page,
@@ -405,7 +389,7 @@ test.describe.serial('Account deletion torn after the pivot', () => {
     test.slow()
     test.setTimeout(600_000)
 
-    const { context, page } = await coldTerminal(browser)
+    const { context, page } = await coldTerminal(browser, APP_URL)
     try {
       const baseline = await transientLoginToDeleteDialog(
         page,

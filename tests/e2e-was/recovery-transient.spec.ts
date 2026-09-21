@@ -18,7 +18,7 @@
  *
  * The REMEMBERED recovery cell is pinned in `recovery.spec.ts`.
  */
-import { test, expect, type Browser, type Page } from '@playwright/test'
+import { test, expect, type Page } from '@playwright/test'
 import {
   defaultWebvhLogVerifier,
   readLogFromString,
@@ -26,6 +26,7 @@ import {
 } from '@interop/did-method-webvh'
 import { delegatedClientsPointer } from '@interop/wallet-core/clientAnnex'
 import {
+  coldTerminal,
   expectDidWebProjectionMatches,
   fillSettled,
   signupViaWizard
@@ -59,18 +60,6 @@ function delegatedClientsPointerOf(doc: object | null | undefined) {
   return delegatedClientsPointer({
     doc: doc as Parameters<typeof delegatedClientsPointer>[0]['doc']
   })
-}
-
-/**
- * The public-terminal browser: a fresh context holding nothing.
- */
-async function coldTerminal(browser: Browser): Promise<{
-  context: Awaited<ReturnType<Browser['newContext']>>
-  page: Page
-}> {
-  const context = await browser.newContext({ baseURL: APP_URL })
-  const page = await context.newPage()
-  return { context, page }
 }
 
 /**
@@ -150,7 +139,7 @@ test.describe.serial('transient recovery (the login-axis cell)', () => {
     browser
   }) => {
     test.setTimeout(360_000)
-    const { context, page } = await coldTerminal(browser)
+    const { context, page } = await coldTerminal(browser, APP_URL)
     try {
       // Deliberately no remember seam: the default is the transient
       // variant. The localStorage baseline is captured before any input.
@@ -292,7 +281,7 @@ test.describe.serial('transient recovery (the login-axis cell)', () => {
     browser
   }) => {
     test.setTimeout(240_000)
-    const { context, page } = await coldTerminal(browser)
+    const { context, page } = await coldTerminal(browser, APP_URL)
     try {
       await page.goto('/#/login')
       const baseline = await captureLocalStorageKeys({ page })
@@ -322,7 +311,7 @@ test.describe.serial('transient recovery (the login-axis cell)', () => {
     // a fixed string would leave a record a later run's collision probe
     // rightly refuses.
     const tornPassphrase = `Torn-transient-43!-${Date.now()}`
-    const { context, page } = await coldTerminal(browser)
+    const { context, page } = await coldTerminal(browser, APP_URL)
     try {
       // Every mutating request the ceremony makes, in order (preflights and
       // reads excluded); aborted requests are recorded too.

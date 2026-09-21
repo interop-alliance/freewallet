@@ -19,11 +19,12 @@
  * transient client visible nowhere on the account -- the connected-wallets
  * list on the enrolled client never grows a row for it.
  */
-import { test, expect, type Browser, type Page } from '@playwright/test'
+import { test, expect, type Page } from '@playwright/test'
 import type { IDelegatedZcap } from '@interop/data-integrity-core'
 import {
   appZcapClient,
   awaitLoginChain,
+  coldTerminal,
   fillSettled,
   signupViaWizard
 } from './helpers'
@@ -137,18 +138,6 @@ function appConnectQuery({
 }
 
 /**
- * A browser holding nothing: the public terminal an app sends its user to.
- */
-async function coldTerminal(browser: Browser): Promise<{
-  context: Awaited<ReturnType<Browser['newContext']>>
-  page: Page
-}> {
-  const context = await browser.newContext({ baseURL: WALLET_ORIGIN })
-  const page = await context.newPage()
-  return { context, page }
-}
-
-/**
  * Drives one cross-site App Connect popup visit to the consent panel, and
  * returns the popup frame, the localStorage baseline captured in its
  * partition before anything happened, and the login latency.
@@ -207,7 +196,7 @@ test.describe.serial('the CHAPI popup on a transient session', () => {
   test('a cold terminal connects an app and answers as the visit key', async ({
     browser
   }) => {
-    const { context, page } = await coldTerminal(browser)
+    const { context, page } = await coldTerminal(browser, WALLET_ORIGIN)
     try {
       const challenge = `chal-popup-transient-${Date.now()}`
       const { frame, latencyMs } = await popupToConsent(page, {
@@ -313,7 +302,7 @@ test.describe.serial('the CHAPI popup on a transient session', () => {
   test('grants a whole-Space read the app can invoke, and nothing past it', async ({
     browser
   }) => {
-    const { context, page } = await coldTerminal(browser)
+    const { context, page } = await coldTerminal(browser, WALLET_ORIGIN)
     try {
       const { frame } = await popupToConsent(page, {
         passphrase,
@@ -422,7 +411,7 @@ test.describe.serial('the CHAPI popup on a transient session', () => {
   test('the popup partition holds nothing after the visit, crash included', async ({
     browser
   }) => {
-    const { context, page } = await coldTerminal(browser)
+    const { context, page } = await coldTerminal(browser, WALLET_ORIGIN)
     try {
       const { frame, baseline } = await popupToConsent(page, {
         passphrase,

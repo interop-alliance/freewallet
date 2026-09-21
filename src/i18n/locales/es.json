@@ -768,6 +768,53 @@
         "quotaExceeded": "El almacenamiento de esta cuenta está lleno, así que la importación se detuvo.",
         "failed": "La importación falló. Inténtalo de nuevo."
       }
+    },
+    "backup": {
+      "title": "Respaldar esta cartera",
+      "intro": "Escribe un archivo de respaldo con todo lo que esta cuenta guarda en el servidor de almacenamiento. El respaldo incluye un codigo de recuperacion nuevo, asi que el archivo mas ese codigo restaura la cuenta por si solo.",
+      "modeLegend": "Como viaja el codigo de recuperacion en el archivo",
+      "modes": {
+        "protected": "Protegido con contrasena (recomendado)",
+        "unprotected": "Sin proteger"
+      },
+      "passphraseLabel": "Contrasena de exportacion",
+      "confirmLabel": "Confirmar la contrasena de exportacion",
+      "passphraseHelp": "Sella el codigo de recuperacion dentro de este archivo. No tiene que coincidir con la frase de acceso de la cartera y puede reutilizarla en respaldos posteriores. Quien tenga el archivo igual puede probar su frase de acceso sin conexion, asi que el archivo solo es tan fuerte como la mas debil de las dos.",
+      "passphraseMismatch": "Las dos entradas no coinciden.",
+      "unprotectedWarning": "Sin contrasena el archivo es una credencial al portador: quien lo tenga controla esta cuenta, sin adivinar nada. Su codigo de recuperacion aparece en Configuracion > Codigos de recuperacion, donde puede eliminarlo.",
+      "codeNote": "Cada respaldo agrega un codigo de recuperacion, etiquetado con la fecha de hoy, en Configuracion > Codigos de recuperacion.",
+      "removalNote": "Eliminar ese codigo mas adelante impide que abra la cuenta activa. No vuelve seguro un archivo ya exportado.",
+      "codeLabel": "Respaldo {{date}}",
+      "progress": {
+        "issuingCode": "Emitiendo el codigo de recuperacion del respaldo...",
+        "exportingSpace": "Exportando el espacio {{index}} de {{total}}...",
+        "packing": "Empaquetando el archivo de respaldo..."
+      },
+      "run": "Crear respaldo",
+      "cancel": "Cancelar",
+      "close": "Cerrar",
+      "success": "Respaldo escrito.",
+      "errors": {
+        "cancelled": "Se cancelo el respaldo. Cualquier codigo de recuperacion ya emitido aparece en Configuracion > Codigos de recuperacion.",
+        "missingCapability": {
+          "recoveryCode": "El codigo de recuperacion \"{{label}}\" no registra una capacidad de gestion, asi que esa parte del respaldo no se puede exportar. La capacidad de un codigo de recuperacion no se renueva al iniciar sesion: elimine ese codigo en Configuracion > Codigos de recuperacion, emita uno nuevo y vuelva a intentarlo.",
+          "passkey": "La clave de acceso \"{{label}}\" no registra una capacidad de gestion, asi que esa parte del respaldo no se puede exportar. Inicie sesion una vez con esa clave de acceso y vuelva a intentarlo.",
+          "passphrase": "La frase de acceso de esta cuenta no registra una capacidad de gestion, asi que esa parte del respaldo no se puede exportar. Inicie sesion una vez con la frase de acceso y vuelva a intentarlo.",
+          "generic": "Una parte de esta cuenta no registra una capacidad de gestion, asi que no se puede exportar y no se escribio ningun respaldo."
+        },
+        "unsupportedCapability": {
+          "recoveryCode": "La capacidad de gestion del codigo de recuperacion \"{{label}}\" no sirve para este respaldo: esta vencida o se registro antes de que existieran los respaldos. La capacidad de un codigo de recuperacion no se renueva al iniciar sesion: elimine ese codigo en Configuracion > Codigos de recuperacion, emita uno nuevo y vuelva a intentarlo.",
+          "passkey": "La capacidad de gestion de la clave de acceso \"{{label}}\" no sirve para este respaldo: esta vencida o se registro antes de que existieran los respaldos. Inicie sesion una vez con esa clave de acceso para renovarla y vuelva a intentarlo.",
+          "passphrase": "La capacidad de gestion de la frase de acceso de esta cuenta no sirve para este respaldo: esta vencida o se registro antes de que existieran los respaldos. Inicie sesion una vez con la frase de acceso para renovarla y vuelva a intentarlo.",
+          "generic": "Una parte de esta cuenta registra una capacidad de gestion que no sirve para este respaldo, asi que no se escribio ningun respaldo."
+        },
+        "spaceExportFailed": "El servidor de almacenamiento no pudo exportar una parte de esta cuenta, asi que no se escribio ningun respaldo.",
+        "accountSpaceMissing": "Esta cuenta no nombra ningun espacio de almacenamiento para exportar.",
+        "failed": "No se pudo escribir el respaldo.",
+        "codeNotListed": "No se escribio ningun respaldo: el codigo de recuperacion que emitio esta ejecucion no figura entre los metodos de desbloqueo de la cuenta. El registro de la cuenta todavia puede tener una entrada para el. Vuelva a intentarlo, y si aparece una fila \"Respaldo <fecha>\" en Configuracion > Codigos de recuperacion, puede eliminarla ahi.",
+        "registryChanged": "Los metodos de desbloqueo de esta cuenta cambiaron mientras se escribia el respaldo, asi que no se escribio ningun respaldo. Vuelva a intentarlo.",
+        "continuity": "El archivo exportado de la cuenta no contiene el historial que esta sesion verifico, asi que no se escribio ningun respaldo. Inicie sesion de nuevo y vuelva a intentarlo. Si se repite, el servidor de almacenamiento puede estar sirviendo un registro de cuenta distinto."
+      }
     }
   },
   "credential": {

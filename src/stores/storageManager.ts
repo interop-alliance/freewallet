@@ -2007,7 +2007,9 @@ export class StorageManager {
   }
 
   async exportSpace(): Promise<ReadableStream<Uint8Array>> {
-    // Export needs no authority a transient session lacks; the gate is
+    // Export needs no authority a transient session lacks; the gate is the
+    // remote store alone, so a session with one exports whatever its
+    // capability reaches.
     return await this.#requireRemote('Exporting a Space').exportSpace()
   }
 

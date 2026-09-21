@@ -605,6 +605,22 @@ test('a Space exports and imports from a transient session', async ({
     })
     expect(exported.length).toBeGreaterThan(0)
 
+    // The backup export rides the same visit's capabilities over the same
+    // Space, plus the annex and sibling archives; the bundle's own
+    // assertions are `backup-export.spec.ts`. All this cell owes that suite
+    // is that a transient session is offered the run at all, so the dialog
+    // is opened and closed again without minting a code.
+    await exportButton.click()
+    const backupDialog = page.getByRole('dialog')
+    await expect(backupDialog.getByText('Back up this wallet')).toBeVisible()
+    // The run button waits on an export password in the default mode, so
+    // what is asserted here is that the action is offered, not that it runs.
+    await expect(
+      backupDialog.getByRole('button', { name: 'Create backup' })
+    ).toBeVisible()
+    await backupDialog.getByRole('button', { name: 'Close' }).click()
+    await expect(backupDialog).toBeHidden()
+
     // The import goes through the page's own button (a hidden file input
     // inside it), which is the surface the refusal used to reach.
     await page.locator('input[type="file"]').setInputFiles({

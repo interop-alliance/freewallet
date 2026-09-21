@@ -28,16 +28,9 @@ import { errorNameOf } from '@interop/wallet-core/menders'
  * @returns {boolean}
  */
 export function isStorageUnreachable(err: unknown): boolean {
-  const seen = new Set<unknown>()
-  let current: unknown = err
   // Walk the `cause` chain so a WasError wrapped in a plain Error is still
-  // classified. The depth cap and `seen` set guard against runaway or cyclic
-  // chains.
-  for (let depth = 0; depth < 16 && current != null; depth++) {
-    if (seen.has(current)) {
-      break
-    }
-    seen.add(current)
+  // classified.
+  for (const current of causeChain(err)) {
     const name = errorNameOf(current)
     if (name === 'WasServerError') {
       return true
@@ -52,9 +45,29 @@ export function isStorageUnreachable(err: unknown): boolean {
     ) {
       return true
     }
-    current = current instanceof Error ? current.cause : undefined
   }
   return false
+}
+
+/**
+ * An error and every `cause` beneath it, outermost first. The depth cap and
+ * the `seen` set guard against runaway or cyclic chains, so a classifier can
+ * read a wrapped error's whole chain with one loop.
+ *
+ * @param err {unknown}   the caught error
+ * @returns {Generator<unknown>}
+ */
+export function* causeChain(err: unknown): Generator<unknown> {
+  const seen = new Set<unknown>()
+  let current: unknown = err
+  for (let depth = 0; depth < 16 && current != null; depth++) {
+    if (seen.has(current)) {
+      return
+    }
+    seen.add(current)
+    yield current
+    current = current instanceof Error ? current.cause : undefined
+  }
 }
 
 /**

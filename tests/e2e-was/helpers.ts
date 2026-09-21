@@ -1,6 +1,8 @@
 import { Buffer } from 'node:buffer'
 import {
   expect,
+  type Browser,
+  type BrowserContext,
   type Locator,
   type Page,
   type TestInfo
@@ -249,6 +251,22 @@ export async function forceRememberBrowser(page: Page): Promise<void> {
 }
 
 /**
+ * A public-terminal browser: a fresh context holding nothing.
+ *
+ * @param browser {Browser}
+ * @param baseURL {string}   the origin the context opens against
+ * @returns {Promise<{ context: BrowserContext, page: Page }>}
+ */
+export async function coldTerminal(
+  browser: Browser,
+  baseURL: string
+): Promise<{ context: BrowserContext; page: Page }> {
+  const context = await browser.newContext({ baseURL })
+  const page = await context.newPage()
+  return { context, page }
+}
+
+/**
  * Submits the login form on an already-loaded login page WITHOUT the
  * remember-this-browser seam, so a non-remembered browser takes its default
  * login route -- the transient (public-terminal) login -- and waits for the
@@ -336,4 +354,87 @@ export async function expectDidWebProjectionMatches({
     expect(response.status()).toBe(200)
     expect((await response.json()) as unknown).toEqual(expected)
   }).toPass({ timeout })
+}
+
+/**
+ * What the stubbed save picker collected: the suggested file name and the
+ * bytes the app piped into the "file".
+ */
+type SavedFile = { name: string; chunks: Uint8Array[]; done: boolean }
+
+/**
+ * Stubs the File System Access API's save picker on the page, from its next
+ * navigation on, so a save the app pipes to a picked file lands in page
+ * memory instead, where `savedFileBytes` reads it back. Headless Chromium
+ * has no picker of its own, and the app takes the Blob download without one.
+ *
+ * @param page {Page}
+ * @returns {Promise<void>}
+ */
+export async function stubSaveFilePicker(page: Page): Promise<void> {
+  await page.addInitScript(() => {
+    const win = window as unknown as {
+      __E2E_SAVED_FILE__?: SavedFile
+      showSaveFilePicker?: (options?: { suggestedName?: string }) => unknown
+    }
+    win.showSaveFilePicker = async (options?: { suggestedName?: string }) => {
+      const saved: SavedFile = {
+        name: options?.suggestedName ?? '',
+        chunks: [],
+        done: false
+      }
+      win.__E2E_SAVED_FILE__ = saved
+      return {
+        createWritable: async () =>
+          new WritableStream<Uint8Array>({
+            write(chunk) {
+              saved.chunks.push(chunk)
+            },
+            close() {
+              saved.done = true
+            }
+          })
+      }
+    }
+  })
+}
+
+/**
+ * The file the stubbed picker's last save wrote, once the app has closed it.
+ * The bytes cross to node as base64, since a `Uint8Array` does not survive
+ * `page.evaluate`.
+ *
+ * @param page {Page}
+ * @returns {Promise<{ name: string, bytes: Uint8Array }>}
+ */
+export async function savedFileBytes(
+  page: Page
+): Promise<{ name: string; bytes: Uint8Array }> {
+  await page.waitForFunction(
+    () =>
+      (window as unknown as { __E2E_SAVED_FILE__?: SavedFile })
+        .__E2E_SAVED_FILE__?.done === true,
+    undefined,
+    { timeout: 60_000 }
+  )
+  const { name, base64 } = await page.evaluate(() => {
+    const saved = (window as unknown as { __E2E_SAVED_FILE__: SavedFile })
+      .__E2E_SAVED_FILE__
+    const total = saved.chunks.reduce((sum, chunk) => sum + chunk.length, 0)
+    const all = new Uint8Array(total)
+    let at = 0
+    for (const chunk of saved.chunks) {
+      all.set(chunk, at)
+      at += chunk.length
+    }
+    // `String.fromCharCode` is spread over the bytes, so it is fed in slices
+    // small enough not to blow the argument limit.
+    let binary = ''
+    const step = 0x8000
+    for (let index = 0; index < all.length; index += step) {
+      binary += String.fromCharCode(...all.subarray(index, index + step))
+    }
+    return { name: saved.name, base64: btoa(binary) }
+  })
+  return { name, bytes: new Uint8Array(Buffer.from(base64, 'base64')) }
 }

@@ -23,20 +23,18 @@
 import fs from 'node:fs/promises'
 import path from 'node:path'
 import { expect, type APIRequestContext, type Page } from '@playwright/test'
-
-// Matches `playwright.was.config.ts`: the sibling checkout the harness starts
-// the teaching server from, overridable for non-standard layouts.
-const WAS_SERVER_DIR = process.env.WAS_SERVER_DIR ?? '../was-teaching-server'
+import { WAS_E2E_DATA_DIR } from './wasDataDir'
 
 /**
- * The FileSystem backend's Spaces directory. `dataDir` is fixed relative to
- * the server module (`<server repo>/data`) with no env override, so the path
- * follows from the checkout alone.
+ * The FileSystem backend's Spaces directory. The harness starts the teaching
+ * server with `WAS_DATA_DIR` set to the run's own data root
+ * (`playwright.was.config.ts`, `wasDataDir.ts`), so the store lives there and
+ * not under the server checkout's `data/`.
  *
  * @returns {string}
  */
 export function storedSpacesDir(): string {
-  return path.resolve(process.cwd(), WAS_SERVER_DIR, 'data', 'spaces')
+  return path.join(WAS_E2E_DATA_DIR, 'spaces')
 }
 
 /**

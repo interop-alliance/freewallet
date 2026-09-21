@@ -1418,15 +1418,63 @@ export class WASRemoteStore {
     }
   }
 
-  async exportSpace(): Promise<ReadableStream<Uint8Array>> {
+  /**
+   * Exports a Space as a streamed tar archive: this store's own Space under
+   * its own binding by default, or ANOTHER Space of this account over a
+   * signer and a capability the caller supplies (the backup export's sibling
+   * reach, where neither the Space nor the authority is this store's own).
+   * The handle is built the same way every request in this store is, so the
+   * archive streams rather than buffering.
+   *
+   * was-client's `exportStream` takes no `AbortSignal`, so the request itself
+   * is not cancelled; an abort cancels the stream's source and errors the
+   * stream with the signal's reason. A cancel is the caller's own AbortError,
+   * which travels un-wrapped and unlogged rather than as an export failure.
+   *
+   * @param [options] {object}
+   * @param [options.spaceId] {string}   the Space to export; defaults to
+   *   this store's own
+   * @param [options.zcapClient] {ZcapClient}   the client that sends the
+   *   POST, when it is not this store's own
+   * @param [options.capability] {IZcap}   the capability it invokes; absent,
+   *   the request invokes that Space's root capability
+   * @param [options.signal] {AbortSignal}   cancels the read
+   * @returns {Promise<ReadableStream<Uint8Array>>}
+   */
+  async exportSpace({
+    spaceId = this.spaceId,
+    zcapClient,
+    capability,
+    signal
+  }: {
+    spaceId?: string
+    zcapClient?: ZcapClient
+    capability?: IZcap
+    signal?: AbortSignal
+  } = {}): Promise<ReadableStream<Uint8Array>> {
+    signal?.throwIfAborted()
+    let stream: ReadableStream<Uint8Array>
     try {
-      // The streaming variant: the archive is piped to disk as it arrives
-      // rather than buffered whole in memory.
-      return await this.#space().exportStream()
+      let space: Space
+      if (zcapClient) {
+        space = this.#clientFor({ zcapClient }).space(spaceId, {
+          ...(capability ? { capability } : {})
+        })
+      } else if (capability) {
+        space = this.was.space(spaceId, { capability })
+      } else {
+        space = this.#space(spaceId)
+      }
+      stream = await space.exportStream()
     } catch (err) {
-      log.error('Error exporting space', { err })
+      log.error('Error exporting space', { err, spaceId })
       throw new Error('Failed to export remote space.', { cause: err })
     }
+    return signal
+      ? stream.pipeThrough(new TransformStream<Uint8Array, Uint8Array>(), {
+          signal
+        })
+      : stream
   }
 
   async importSpace({

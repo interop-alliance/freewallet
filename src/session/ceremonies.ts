@@ -1,8 +1,8 @@
 /**
  * The typed ceremony vocabulary: wallet-core's shared `CEREMONY_IDS`
  * extended with the app-only ceremonies -- account deletion, the shared wipe
- * executor, and the content migration -- that have no wallet-core
- * counterpart. The ids are
+ * executor, the content migration, and the backup export -- that have no
+ * wallet-core counterpart. The ids are
  * code-only: nothing persists them anywhere (not in the account log, not in
  * local storage); they exist so a ceremony can be named consistently in
  * code, tests, and error reporting. The doc counterpart test
@@ -17,7 +17,8 @@ import { CEREMONY_IDS } from '@interop/wallet-core'
 export const APP_CEREMONY_IDS = [
   'account-deletion',
   'wallet-wipe',
-  'content-migration'
+  'content-migration',
+  'backup-export'
 ] as const
 
 /**

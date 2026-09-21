@@ -109,6 +109,7 @@ import {
 } from '@interop/wallet-core/keyring'
 import {
   standingClientFromUnlockSeed,
+  UNLOCK_MANAGEMENT_ACTIONS,
   unlockKeyVmId,
   unwrapUnlockRecord,
   wrapUnlockRecord,
@@ -322,12 +323,13 @@ export function unlockManagementGrantee({
  * called when a WAS server is configured -- the unlock Space, and thus the
  * capability, exist only then.
  *
- * A standing record's management zcap widens the actions to include PUT --
- * a recovery code's, and a standing passphrase's or passkey's alike. That is
- * what lets the revocation cascade re-PUT the record with a freshly minted
- * bridge delegation when the original's signing client is revoked. A plain
- * keyring record (a pointer with no standing members) keeps the narrow
- * GET/DELETE set. The rule holds at every mint site -- the bind, the
+ * A standing record's management zcap widens the actions to
+ * `UNLOCK_MANAGEMENT_ACTIONS` (GET, PUT, DELETE, POST) -- a recovery code's,
+ * and a standing passphrase's or passkey's alike. The PUT is what lets the
+ * revocation cascade re-PUT the record with a freshly minted bridge
+ * delegation when the original's signing client is revoked; the POST is what
+ * the backup export invokes on the Space. A plain keyring record (a pointer
+ * with no standing members) keeps the narrow GET/DELETE set. The rule holds at every mint site -- the bind, the
  * per-login mint in `buildFetchResult`, and the rebind -- because the
  * registry stores whichever capability was minted last.
  *
@@ -1249,8 +1251,9 @@ export async function fetchTransientKeyring({
     accountLogPinStore
   })
   // The management zcap this visit may refresh the registry entry with: the
-  // same mint the remembered login makes (`buildFetchResult`), with PUT for a
-  // standing record so a refresh never narrows what the bind delegated.
+  // same mint the remembered login makes (`buildFetchResult`), with the full
+  // `UNLOCK_MANAGEMENT_ACTIONS` set for a standing record so a refresh never
+  // narrows what the bind delegated.
   const manageCapability = await delegateUnlockManagement({
     zcapClient: unlock.zcapClient,
     spaceId: unlock.spaceId,
@@ -1258,7 +1261,9 @@ export async function fetchTransientKeyring({
       pointer: unwrapped.found.pointer,
       controller: unwrapped.found.controller
     }),
-    ...(unwrapped.standing ? { allowedActions: ['GET', 'PUT', 'DELETE'] } : {})
+    ...(unwrapped.standing
+      ? { allowedActions: [...UNLOCK_MANAGEMENT_ACTIONS] }
+      : {})
   })
   return {
     ...unwrapped.found,
@@ -1427,7 +1432,7 @@ async function buildFetchResult({
         pointer: found.pointer,
         controller: found.controller
       }),
-      ...(standing ? { allowedActions: ['GET', 'PUT', 'DELETE'] } : {})
+      ...(standing ? { allowedActions: [...UNLOCK_MANAGEMENT_ACTIONS] } : {})
     })
   }
   return result
@@ -1876,15 +1881,18 @@ export async function bindUnlockSecret({
       // The unlock agent delegates GET/DELETE on its own Space to the account
       // identity, so a lost method stays revocable without re-deriving this
       // unlock identity from the (possibly lost) secret. Pure signing. A
-      // standing bind widens the actions to include PUT, exactly as a
-      // recovery code's does: that is what lets the revocation cascade
-      // re-PUT this record with a freshly minted bridge delegation when the
-      // original's signing client is revoked.
+      // standing bind widens the actions to `UNLOCK_MANAGEMENT_ACTIONS`,
+      // exactly as a recovery code's does: that is what lets the revocation
+      // cascade re-PUT this record with a freshly minted bridge delegation
+      // when the original's signing client is revoked, and the backup export
+      // POST the Space.
       manageCapability = await delegateUnlockManagement({
         zcapClient: unlock.zcapClient,
         spaceId: unlock.spaceId,
         controller: delegateManagementTo,
-        ...(delegation ? { allowedActions: ['GET', 'PUT', 'DELETE'] } : {})
+        ...(delegation
+          ? { allowedActions: [...UNLOCK_MANAGEMENT_ACTIONS] }
+          : {})
       })
     }
   }
@@ -2164,14 +2172,14 @@ export async function bindCredentialAnchoredUnlockSecret({
   })
   let manageCapability: IZcap | undefined
   if (delegateManagementTo) {
-    // The standing widening (PUT beside GET/DELETE), exactly as the
+    // The standing widening (`UNLOCK_MANAGEMENT_ACTIONS`), exactly as the
     // remembered path's standing bind delegates it: the revocation cascade
     // must be able to re-PUT this record with a re-minted bridge.
     manageCapability = await delegateUnlockManagement({
       zcapClient: unlock.zcapClient,
       spaceId: unlock.spaceId,
       controller: delegateManagementTo,
-      allowedActions: ['GET', 'PUT', 'DELETE']
+      allowedActions: [...UNLOCK_MANAGEMENT_ACTIONS]
     })
   }
 

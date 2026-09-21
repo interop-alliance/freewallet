@@ -1099,9 +1099,15 @@ export function managementZcapClient({
  * state around a Space that in fact still stands.
  */
 export type UnlockSpaceDeletionOutcome =
-  | 'deleted'
-  | 'not-found'
-  | 'no-server'
+  'deleted' | 'not-found' | 'no-server' | UnlockSpaceCapabilityRefusal
+
+/**
+ * The refusals `unlockSpaceCapabilityRefusal` reports: the last five deletion
+ * outcomes, which are the ways an entry's stored management zcap can fail to
+ * carry a verb (any verb, not the DELETE alone), decided locally before
+ * anything is minted or sent.
+ */
+export type UnlockSpaceCapabilityRefusal =
   | 'no-capability'
   | 'expired-capability'
   | 'foreign-controller'
@@ -1136,11 +1142,11 @@ function sessionDelegatorIdentities({
 }
 
 /**
- * The read-only pre-flight of an unlock Space deletion: the caller-side
- * preconditions `mintSpaceVerbCapability` leaves to its caller, checked
- * before anything is minted or any credential is retired. Returns the residue
- * outcome that refuses the delete, or `undefined` when the recorded
- * capability is usable.
+ * The read-only pre-flight of a request on an unlock Space through its
+ * entry's stored management zcap: the caller-side preconditions
+ * `mintSpaceVerbCapability` leaves to its caller, checked before anything is
+ * minted, sent, or retired. Returns the refusal, or `undefined` when the
+ * recorded capability can carry the verb.
  *
  * The delegator check is skipped when the caller supplies its own signer: it
  * states the identity it acts as, which this module cannot second-guess. A
@@ -1156,13 +1162,13 @@ function sessionDelegatorIdentities({
  * @param options.signer.zcapClient {ZcapClient}
  * @param [options.signer.invoker] {ZcapClient}
  * @param options.signer.controller {string}
- * @param [options.verb] {string}   the verb the child would carry; defaults
- *   to `DELETE`, the deletion walk's own. A discovery probe asks for `GET`,
- *   and a parent that does not allow it is unprobeable rather than
- *   undeletable
- * @returns {UnlockSpaceDeletionOutcome | undefined}
+ * @param [options.verb] {string}   the verb the child would carry, one of
+ *   `GET`, `POST`, `PUT` or `DELETE`; defaults to `DELETE`, the deletion
+ *   walk's own. The discovery probe and the sibling record reader ask for
+ *   `GET`, the backup export for `POST`
+ * @returns {UnlockSpaceCapabilityRefusal | undefined}
  */
-export function unlockSpaceDeletionRefusal({
+export function unlockSpaceCapabilityRefusal({
   session,
   entry,
   signer,
@@ -1171,8 +1177,8 @@ export function unlockSpaceDeletionRefusal({
   session?: Session
   entry: UnlockMethod
   signer?: { zcapClient: ZcapClient; invoker?: ZcapClient; controller: string }
-  verb?: 'GET' | 'PUT' | 'DELETE'
-}): UnlockSpaceDeletionOutcome | undefined {
+  verb?: 'GET' | 'POST' | 'PUT' | 'DELETE'
+}): UnlockSpaceCapabilityRefusal | undefined {
   const parent = entry.manageCapability as
     | {
         controller?: string
@@ -1261,7 +1267,7 @@ export function unlockEntryReaderFor({
         capability: parent
       }
     }
-    if (unlockSpaceDeletionRefusal({ session, entry, signer, verb: 'GET' })) {
+    if (unlockSpaceCapabilityRefusal({ session, entry, signer, verb: 'GET' })) {
       return undefined
     }
     return {
@@ -1277,11 +1283,12 @@ export function unlockEntryReaderFor({
 }
 
 /**
- * Deletes one unlock Space through a freshly minted DELETE-only child of the
- * entry's management zcap, rather than by invoking that three-verb capability
- * directly. The storage server admits a delegated Space DELETE only when the
- * capability's `invocationTarget` is exactly the Space URL and its
- * `allowedAction` is exactly `['DELETE']`, so the stored GET/PUT/DELETE
+ * Mints a one-verb child of an entry's management zcap and names the client
+ * that sends it: the one mint every request on a SIBLING unlock Space rides,
+ * whether the deletion walk's DELETE, its discovery probe's GET, or the
+ * backup export's POST. The storage server admits a delegated Space request
+ * only when the capability's `invocationTarget` is exactly the Space URL and
+ * its `allowedAction` is exactly the one verb, so the stored multi-verb
  * capability is a parent to delegate from, never a capability to invoke. The
  * child's target is the parent's own bytes, its lifetime the deletion TTL
  * clamped to the parent's `expires`, and nothing stores it: it is minted
@@ -1290,16 +1297,98 @@ export function unlockEntryReaderFor({
  *
  * The delegatee is the delegator itself -- the account DID the parent already
  * names -- unless the caller supplies its own signer, which is how a session
- * with no enrolled-client key (the ladder VM's bare did:key) deletes.
+ * with no enrolled-client key (the ladder VM's bare did:key) acts.
  *
  * Delegating and invoking are two different keys there, and mixing them is a
  * masked 404: the child's parent must be signed by the parent's own
  * controller (the ladder VM under `<accountDid>#<multibase>`), while the
- * child's own DELETE must be sent by the child's controller -- the ladder
+ * child's own request must be sent by the child's controller -- the ladder
  * VM's bare did:key, which carries no `capabilityInvocation` relation in the
  * account document and so can delegate but never invoke under its account
  * form. The caller's `invoker` is that sender; absent, the delegator sends
  * its own child, which is the remembered session's management-zcap path.
+ *
+ * The read-only pre-flight (`unlockSpaceCapabilityRefusal`) runs first, so a
+ * parent that cannot carry the verb is reported as a refusal rather than
+ * thrown by the mint.
+ *
+ * @param options {object}
+ * @param [options.session] {Session}   the acting session, which signs the
+ *   child itself; absent, the caller must supply its own `signer`
+ * @param options.entry {UnlockMethod}   the method whose Space the request
+ *   is on
+ * @param [options.signer] {object}   an explicit delegator, invoker and
+ *   delegatee, for a caller not signing as an enrolled client
+ * @param options.signer.zcapClient {ZcapClient}   the delegating signer
+ * @param [options.signer.invoker] {ZcapClient}   the client that sends the
+ *   request; defaults to the delegating signer
+ * @param options.signer.controller {string}
+ * @param options.verb {string}   the one verb the child carries
+ * @returns {Promise<UnlockSpaceCapabilityRefusal | object>}   the refusal, or
+ *   `{ zcapClient, capability }`: the sender and the child it invokes
+ */
+export async function unlockSpaceVerbInvocation({
+  session,
+  entry,
+  signer,
+  verb
+}: {
+  session?: Session
+  entry: UnlockMethod
+  signer?: { zcapClient: ZcapClient; invoker?: ZcapClient; controller: string }
+  verb: 'GET' | 'POST' | 'PUT' | 'DELETE'
+}): Promise<
+  UnlockSpaceCapabilityRefusal | { zcapClient: ZcapClient; capability: IZcap }
+> {
+  const refusal = unlockSpaceCapabilityRefusal({
+    ...(session ? { session } : {}),
+    entry,
+    ...(signer ? { signer } : {}),
+    verb
+  })
+  if (refusal) {
+    return refusal
+  }
+  const parent = entry.manageCapability as IZcap
+  const controller =
+    signer?.controller ?? (parent as { controller?: string }).controller
+  let delegator: ZcapClient
+  if (signer) {
+    delegator = signer.zcapClient
+  } else if (session) {
+    delegator = managementZcapClient({ session, capability: parent })
+  } else {
+    // Unreachable: the refusal above already refuses a caller holding
+    // neither a session nor a signer.
+    return 'foreign-controller'
+  }
+  // The child's own controller sends it; the delegator only signs it.
+  const invoker = signer?.invoker ?? delegator
+  try {
+    return {
+      zcapClient: invoker,
+      capability: await mintSpaceVerbCapability({
+        zcapClient: delegator,
+        parent,
+        verb,
+        controller: controller as string,
+        ttlMs: DELETION_ZCAP_TTL_MS
+      })
+    }
+  } catch (err) {
+    // Matched by name: the refusal is raised in wallet-core, whose class this
+    // module's copy need not be identical to.
+    if (errorNameOf(err) === 'ExpiredParentCapabilityError') {
+      return 'expired-capability'
+    }
+    throw err
+  }
+}
+
+/**
+ * Deletes one unlock Space through a freshly minted DELETE-only child of the
+ * entry's management zcap (`unlockSpaceVerbInvocation`), tolerating a Space
+ * already gone.
  *
  * @param options {object}
  * @param [options.session] {Session}   the acting session, which signs the
@@ -1325,52 +1414,20 @@ export async function deleteUnlockSpaceForEntry({
   if (!WAS_SERVER_URL) {
     return 'no-server'
   }
-  const refusal = unlockSpaceDeletionRefusal({
+  const invocation = await unlockSpaceVerbInvocation({
     ...(session ? { session } : {}),
     entry,
-    ...(signer ? { signer } : {})
+    ...(signer ? { signer } : {}),
+    verb: 'DELETE'
   })
-  if (refusal) {
-    return refusal
-  }
-  const parent = entry.manageCapability as IZcap
-  const controller =
-    signer?.controller ?? (parent as { controller?: string }).controller
-  let delegator: ZcapClient
-  if (signer) {
-    delegator = signer.zcapClient
-  } else if (session) {
-    delegator = managementZcapClient({ session, capability: parent })
-  } else {
-    // Unreachable: the refusal above already refuses a caller holding
-    // neither a session nor a signer.
-    return 'foreign-controller'
-  }
-  // The child's own controller sends it; the delegator only signs it.
-  const invoker = signer?.invoker ?? delegator
-  let capability
-  try {
-    capability = await mintSpaceVerbCapability({
-      zcapClient: delegator,
-      parent,
-      verb: 'DELETE',
-      controller: controller as string,
-      ttlMs: DELETION_ZCAP_TTL_MS
-    })
-  } catch (err) {
-    // Matched by name: the refusal is raised in wallet-core, whose class this
-    // module's copy need not be identical to.
-    if ((err as Error).name === 'ExpiredParentCapabilityError') {
-      return 'expired-capability'
-    }
-    throw err
+  if (typeof invocation === 'string') {
+    return invocation
   }
   const { outcome } = await deleteUnlockSpace({
     serviceDescription: await wasServiceDescription(),
     storageServerUrl: WAS_SERVER_URL,
-    zcapClient: invoker,
     spaceId: entry.unlockSpaceId,
-    capability
+    ...invocation
   })
   return outcome
 }
@@ -1436,7 +1493,7 @@ export async function revokeUnlockMethod({
   // finds a removable entry. Refusing after the retirement would leave an
   // entry nothing can remove.
   if (WAS_SERVER_URL) {
-    const refusal = unlockSpaceDeletionRefusal({ session, entry, ...deleter })
+    const refusal = unlockSpaceCapabilityRefusal({ session, entry, ...deleter })
     if (refusal) {
       throw new Error(
         `This unlock method's management capability is unusable from this ` +

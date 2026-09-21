@@ -36,7 +36,8 @@ const TITLE_TO_ID: Record<string, string> = {
   'Update-key rotation': 'update-key-rotation',
   'Account deletion': 'account-deletion',
   'Shared wipe (executor, not user-facing)': 'wallet-wipe',
-  'Content migration': 'content-migration'
+  'Content migration': 'content-migration',
+  'Backup export': 'backup-export'
 }
 
 interface CeremonyRow {

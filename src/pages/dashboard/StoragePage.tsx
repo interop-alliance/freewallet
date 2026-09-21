@@ -9,6 +9,7 @@ import Typography from '@mui/material/Typography'
 import { useTranslation } from 'react-i18next'
 import { useNavigate } from 'react-router'
 import { DashboardLayout } from '@/components/DashboardLayout'
+import { BackupExportDialog } from '@/components/storage/BackupExportDialog'
 import { CollectionSharesDialog } from '@/components/storage/CollectionSharesDialog'
 import { ContentMigrationDialog } from '@/components/storage/ContentMigrationDialog'
 import { CollectionsOverview } from '@/components/storage/StorageBrowser'
@@ -29,18 +30,9 @@ import { useStorageListings } from '@/hooks/useStorageListings'
 import { attributeCollectionsToApps } from '@/lib/collectionAttribution'
 import { SYNCED_COLLECTIONS } from '@/app.config'
 import { createLogger } from '@/lib/log'
+import { canExportBackup } from '@/session/backupExport'
 
 const log = createLogger('fw:ui:storage')
-
-type SaveFilePicker = (options?: {
-  suggestedName?: string
-  types?: Array<{
-    description?: string
-    accept?: Record<string, string[]>
-  }>
-}) => Promise<{
-  createWritable: () => Promise<WritableStream>
-}>
 
 export const StoragePage = () => {
   const { t } = useTranslation()
@@ -49,7 +41,7 @@ export const StoragePage = () => {
   const [loadedCollections, setLoadedCollections] = useState<
     Array<StorageCollection>
   >([])
-  const [isExporting, setIsExporting] = useState(false)
+  const [backupOpen, setBackupOpen] = useState(false)
   const [isImporting, setIsImporting] = useState(false)
   const [sharesDialogCollectionId, setSharesDialogCollectionId] = useState<
     string | null
@@ -59,6 +51,7 @@ export const StoragePage = () => {
     kind: 'loading'
   })
   const hasRemoteStorage = Boolean(session?.storage?.hasRemoteStorage)
+  const backupOffered = Boolean(session && canExportBackup({ session }))
   const syncStatuses = useSyncStatusStore(state => state.statuses)
 
   const loadQuota = useCallback(async () => {
@@ -166,62 +159,6 @@ export const StoragePage = () => {
     [apps, collections]
   )
 
-  const handleExportSpace = async () => {
-    if (!session?.storage) {
-      return
-    }
-    setIsExporting(true)
-    try {
-      const spaceId = session.storage.spaceId
-      if (!spaceId) {
-        throw new Error('Remote space ID is unavailable.')
-      }
-
-      const stream = await session.storage.exportSpace()
-
-      const fileName = `space-${spaceId}.tar`
-      const windowWithPicker = window as Window & {
-        showSaveFilePicker?: SaveFilePicker
-      }
-      if (typeof windowWithPicker.showSaveFilePicker !== 'function') {
-        // Firefox and Safari have no File System Access API: buffer the
-        // archive into a Blob and hand it to a regular download instead.
-        const bytes = await new Response(stream).blob()
-        const url = URL.createObjectURL(bytes)
-        try {
-          const link = document.createElement('a')
-          link.href = url
-          link.download = fileName
-          link.click()
-        } finally {
-          URL.revokeObjectURL(url)
-        }
-        return
-      }
-
-      const fileHandle = await windowWithPicker.showSaveFilePicker({
-        suggestedName: fileName,
-        types: [
-          {
-            description: 'TAR archive',
-            accept: { 'application/x-tar': ['.tar'] }
-          }
-        ]
-      })
-
-      const writable = await fileHandle.createWritable()
-      await stream.pipeTo(writable)
-    } catch (error) {
-      if ((error as DOMException).name === 'AbortError') {
-        return
-      }
-      log.error('Failed to export space', { err: error })
-      showToast({ message: t('storage.exportError'), severity: 'error' })
-    } finally {
-      setIsExporting(false)
-    }
-  }
-
   const handleImportFile = async (
     event: React.ChangeEvent<HTMLInputElement>
   ) => {
@@ -316,9 +253,8 @@ export const StoragePage = () => {
           <Stack direction="row" spacing={1.5}>
             <Button
               variant="contained"
-              onClick={handleExportSpace}
-              loading={isExporting}
-              disabled={!hasRemoteStorage}
+              onClick={() => setBackupOpen(true)}
+              disabled={!backupOffered}
               sx={[
                 storageStyles.buttonTextLeft,
                 storageStyles.buttonSize.topAction
@@ -394,6 +330,13 @@ export const StoragePage = () => {
           />
         )}
       </Box>
+
+      {session && backupOpen && (
+        <BackupExportDialog
+          session={session}
+          onClose={() => setBackupOpen(false)}
+        />
+      )}
 
       {session && migrationOpen && (
         <ContentMigrationDialog

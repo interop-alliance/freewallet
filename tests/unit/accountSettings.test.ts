@@ -94,7 +94,7 @@ const state = vi.hoisted(() => ({
   spaceDeleteThrows: [] as string[],
   // What `deleteUnlockMethodSpace` reports per entry type.
   artifactOutcome: {} as Record<string, string>,
-  // Per unlock Space id, the read-only refusal `unlockSpaceDeletionRefusal`
+  // Per unlock Space id, the read-only refusal `unlockSpaceCapabilityRefusal`
   // reports (a lapsed or unusable management zcap).
   entryRefusal: {} as Record<string, string>,
   // The same read-only refusal for a GET child: a management zcap allowing
@@ -540,13 +540,50 @@ vi.mock('@/session/unlockMethods', async importOriginal => {
         return state.unlockSpaceDeleteOutcome
       }
     ),
-    unlockSpaceDeletionRefusal: vi.fn(
+    unlockSpaceCapabilityRefusal: vi.fn(
       ({ entry, verb }: { entry: { unlockSpaceId: string }; verb?: string }) =>
         verb === 'GET'
           ? state.entryGetRefusal[entry.unlockSpaceId]
           : state.entryRefusal[entry.unlockSpaceId]
     ),
     managementZcapClient: vi.fn(() => zcapStub('management-client')),
+    // The one-verb child mint over an entry's management zcap, refused by
+    // the same per-Space state the read-only refusal reads, and recorded as
+    // the child mint it makes.
+    unlockSpaceVerbInvocation: vi.fn(
+      async ({
+        entry,
+        signer,
+        verb
+      }: {
+        entry: { unlockSpaceId: string }
+        signer?: { invoker?: unknown; zcapClient: unknown; controller: string }
+        verb: string
+      }) => {
+        const refusal =
+          verb === 'GET'
+            ? state.entryGetRefusal[entry.unlockSpaceId]
+            : state.entryRefusal[entry.unlockSpaceId]
+        if (refusal) {
+          return refusal
+        }
+        const spaceId = entry.unlockSpaceId
+        state.mints.push({
+          shape: 'child',
+          verb,
+          spaceId,
+          ...(signer ? { controller: signer.controller } : {})
+        })
+        state.calls.push(`mintChild:${verb}:${spaceId}`)
+        return {
+          zcapClient:
+            signer?.invoker ??
+            signer?.zcapClient ??
+            zcapStub('management-client'),
+          capability: { id: `urn:uuid:child-${verb}-${spaceId}`, spaceId }
+        }
+      }
+    ),
     getUnlockMethods: vi.fn(
       async ({
         session

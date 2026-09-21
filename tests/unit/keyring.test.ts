@@ -2589,7 +2589,7 @@ describe('standing unlock records (FW-154)', () => {
       idb
     })
     const cap = manageCapability as unknown as { allowedAction: string[] }
-    expect(cap.allowedAction).toEqual(['GET', 'PUT', 'DELETE'])
+    expect(cap.allowedAction).toEqual(['GET', 'PUT', 'DELETE', 'POST'])
   })
 
   it('mints the widened management zcap on every standing login too', async () => {
@@ -2616,7 +2616,7 @@ describe('standing unlock records (FW-154)', () => {
     // The registry backfill stores whichever capability the login minted, so
     // a narrow mint here would strip the standing record's re-PUT authority.
     const cap = found!.manageCapability as IDelegatedZcap
-    expect(cap.allowedAction).toEqual(['GET', 'PUT', 'DELETE'])
+    expect(cap.allowedAction).toEqual(['GET', 'PUT', 'DELETE', 'POST'])
   })
 })
 
@@ -2699,7 +2699,7 @@ describe('fetchTransientKeyring (FW-215)', () => {
     expect(found).not.toHaveProperty('persistClientKeys')
     expect(found).not.toHaveProperty('enrollClientKeys')
     const minted = found!.manageCapability as IDelegatedZcap
-    expect(minted.allowedAction).toEqual(['GET', 'PUT', 'DELETE'])
+    expect(minted.allowedAction).toEqual(['GET', 'PUT', 'DELETE', 'POST'])
     expect(minted.invocationTarget).toBe(
       `${wasState.url}/space/${found!.unlockSpaceId}/`
     )

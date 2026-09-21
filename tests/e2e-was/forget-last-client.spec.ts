@@ -22,10 +22,11 @@
  * Every stage pays the deliberately slow unlock KDF on top of several WAS
  * ceremonies, hence `test.slow()` and the generous timeouts.
  */
-import { test, expect, type Browser, type Page } from '@playwright/test'
+import { test, expect, type Page } from '@playwright/test'
 import { readLogFromString, resolveDIDFromLog } from '@interop/did-method-webvh'
 import {
   addCredentialViaPaste,
+  coldTerminal,
   expectDidWebProjectionMatches,
   fillSettled,
   forceRememberBrowser,
@@ -46,23 +47,6 @@ const REPLICA_DB_NAME_PATTERN = /-(?:wallet|credentials|sync)-db/
 // local runs, and the recovery tail's standing establishment refuses a
 // passphrase whose unlock Space already exists (UnlockSpaceCollisionError).
 const RECOVERED_PASSPHRASE = `Recovered-after-forget-${Date.now()}-Aa1!`
-
-/**
- * Opens a fresh, cold browser context (empty IndexedDB and localStorage) to
- * stand in for another terminal. Callers must close the returned context.
- *
- * @param browser {Browser}
- * @returns {Promise<{ context: Awaited<ReturnType<Browser['newContext']>>,
- *   page: Page }>}
- */
-async function coldTerminal(browser: Browser): Promise<{
-  context: Awaited<ReturnType<Browser['newContext']>>
-  page: Page
-}> {
-  const context = await browser.newContext({ baseURL: APP_URL })
-  const page = await context.newPage()
-  return { context, page }
-}
 
 /**
  * The wallet cards inside the connected-wallets list.
@@ -168,7 +152,7 @@ test.describe('The last-enrolled-client forget transition', () => {
     test.setTimeout(540_000)
 
     // --- Terminal A: the credential-anchored signup (no enrolled client). ---
-    const first = await coldTerminal(browser)
+    const first = await coldTerminal(browser, APP_URL)
     let passphrase: string
     let recoveryCode: string
     // Captured inside terminal B, read again from terminal C: Settings is
@@ -190,7 +174,7 @@ test.describe('The last-enrolled-client forget transition', () => {
     }
 
     // --- Terminal B: the remembered self-enrollment, then the forget. ---
-    const second = await coldTerminal(browser)
+    const second = await coldTerminal(browser, APP_URL)
     try {
       // The ceremony runs several ladder-signed WAS writes with no UI of its
       // own; a failure is far easier to place with the page's own errors in
@@ -334,7 +318,7 @@ test.describe('The last-enrolled-client forget transition', () => {
     }
 
     // --- Terminal C: the passphrase alone still opens the account. ---
-    const third = await coldTerminal(browser)
+    const third = await coldTerminal(browser, APP_URL)
     try {
       // The ordinary default transient login -- deliberately no remember
       // seam, and no enrolled client exists on the account to ride.
@@ -379,7 +363,7 @@ test.describe('The last-enrolled-client forget transition', () => {
     // still recovers the account. The locate step settles the code's
     // re-minted record (now ladder-VM-signed) against the document, and the
     // recovery's reveal entry rides the re-signed bridge. ---
-    const fourth = await coldTerminal(browser)
+    const fourth = await coldTerminal(browser, APP_URL)
     try {
       await fourth.page.goto('/#/recover')
       await fillSettled(

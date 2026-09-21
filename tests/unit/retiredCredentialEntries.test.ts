@@ -4,7 +4,7 @@
  * continuation's retirement report (`registryEntriesForCredentialVmIds` in
  * `src/session/credentialCoverage.ts`), and the session-less arm of the
  * deletion pre-flight the spend's Space deletes ride
- * (`unlockSpaceDeletionRefusal` in `src/session/unlockMethods.ts`).
+ * (`unlockSpaceCapabilityRefusal` in `src/session/unlockMethods.ts`).
  *
  * A recovery continuation strikes every pre-recovery standing credential from
  * the account document and reports their verification-method ids. The lookup
@@ -25,7 +25,7 @@ import { agentsFromSeed } from '@interop/was-client/identity'
 import { keyAgreementCommitment } from '@interop/wallet-core/webvh'
 import { registryEntriesForCredentialVmIds } from '@/session/credentialCoverage'
 import {
-  unlockSpaceDeletionRefusal,
+  unlockSpaceCapabilityRefusal,
   type UnlockMethod
 } from '@/session/unlockMethods'
 
@@ -149,7 +149,7 @@ describe('registryEntriesForCredentialVmIds', () => {
   })
 })
 
-describe('unlockSpaceDeletionRefusal with no session', () => {
+describe('unlockSpaceCapabilityRefusal with no session', () => {
   const entry = {
     type: 'passphrase',
     createdAt: '2026-09-01T00:00:00.000Z',
@@ -164,12 +164,12 @@ describe('unlockSpaceDeletionRefusal with no session', () => {
   } as unknown as UnlockMethod
 
   it('refuses a caller holding neither a session nor a signer', () => {
-    expect(unlockSpaceDeletionRefusal({ entry })).toBe('foreign-controller')
+    expect(unlockSpaceCapabilityRefusal({ entry })).toBe('foreign-controller')
   })
 
   it('admits the same entry once the caller states its own signer', () => {
     expect(
-      unlockSpaceDeletionRefusal({
+      unlockSpaceCapabilityRefusal({
         entry,
         signer: {
           zcapClient: {} as never,

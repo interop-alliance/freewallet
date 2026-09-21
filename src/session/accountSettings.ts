@@ -30,7 +30,6 @@ import {
   ladderVmKeyMultibase,
   ladderVmZcapClient,
   mintSpaceRootVerbCapability,
-  mintSpaceVerbCapability,
   spaceVerbTarget
 } from '@interop/wallet-core/clientAnnex'
 import { readUserKeyRoster } from '@interop/wallet-core/keys'
@@ -70,11 +69,11 @@ import {
   deleteUnlockMethodSpace,
   deleteUnlockSpaceForEntry,
   getUnlockMethods,
-  managementZcapClient,
   revokeUnlockMethod,
   unlockEntryReaderFor,
   UnlockRegistryStaleSealError,
-  unlockSpaceDeletionRefusal,
+  unlockSpaceCapabilityRefusal,
+  unlockSpaceVerbInvocation,
   updateUnlockMethods,
   revokeUnlockMethodByCeremony,
   upsertPasskeyUnlockMethod,
@@ -2735,7 +2734,7 @@ export async function deleteAccount({
         if (entry.unlockSpaceId === credential.unlock.spaceId) {
           continue
         }
-        const refusalReason = unlockSpaceDeletionRefusal({
+        const refusalReason = unlockSpaceCapabilityRefusal({
           session,
           entry,
           ...(deleter ? { signer: deleter } : {})
@@ -2744,46 +2743,35 @@ export async function deleteAccount({
           siblingEntries.push({ entry, discovery: 'unknown', refusalReason })
           continue
         }
-        // A management zcap that allows DELETE but not GET is deletable and
-        // unprobeable: the probe is skipped rather than minted (the mint
-        // would throw and refuse the whole run), and the entry keeps an
-        // `unknown` discovery, which the 404 rule already grades honestly.
-        if (
-          unlockSpaceDeletionRefusal({
-            session,
-            entry,
-            ...(deleter ? { signer: deleter } : {}),
-            verb: 'GET'
-          })
-        ) {
+        // A management zcap the GET probe cannot be minted from is still
+        // deletable: the probe is refused rather than minted, and the entry
+        // keeps an `unknown` discovery, which the 404 rule already grades
+        // honestly. The refusal is reported as it came back, so an expired
+        // parent is not logged as a missing verb.
+        const probe = await unlockSpaceVerbInvocation({
+          session,
+          entry,
+          ...(deleter ? { signer: deleter } : {}),
+          verb: 'GET'
+        })
+        if (typeof probe === 'string') {
           log.warn(
-            "An unlock method's management zcap allows no GET; its Space is " +
-              'deleted unprobed',
-            { methodType: entry.type, unlockSpaceId: entry.unlockSpaceId }
+            "An unlock method's management zcap refused the GET probe; its " +
+              'Space is deleted unprobed',
+            {
+              methodType: entry.type,
+              unlockSpaceId: entry.unlockSpaceId,
+              refusal: probe
+            }
           )
           siblingEntries.push({ entry, discovery: 'unknown' })
           continue
         }
-        const parent = entry.manageCapability as IZcap
-        const delegator = deleter
-          ? deleter.zcapClient
-          : managementZcapClient({ session, capability: parent })
-        const probeClient = deleter ? deleter.invoker : delegator
-        const capability = await mintSpaceVerbCapability({
-          zcapClient: delegator,
-          parent,
-          verb: 'GET',
-          controller:
-            deleter?.controller ??
-            (parent as { controller: string }).controller,
-          ttlMs: DELETION_ZCAP_TTL_MS
-        })
         siblingEntries.push({
           entry,
           discovery: await probeSpace({
-            zcapClient: probeClient,
             spaceId: entry.unlockSpaceId,
-            capability
+            ...probe
           })
         })
       }

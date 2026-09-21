@@ -2,7 +2,67 @@
 
 ## 0.44.0 - TBD
 
+### Changed
+
+- The standing management zcap the login and the bind mint on a sibling unlock
+  Space now carries `POST` beside `GET`, `PUT` and `DELETE`, taken from
+  wallet-core's `UNLOCK_MANAGEMENT_ACTIONS` rather than written out at each of
+  the five mint sites. The backup export invokes `POST /space/{id}/export`
+  there, and on the client-annex Space through the record's `delegatedClients`
+  delegation, which wallet-core widened to `GET`, `PUT`, `POST`. POST adds no
+  authority under a Space container, since PUT already creates Resources by id
+  and Update Space Metadata is controller-only. An entry minted before this
+  carries the old set until the login-time widening refresh replaces it.
+- The one-verb child mint over an entry's management zcap is one function,
+  `unlockSpaceVerbInvocation`, which the deletion walk's DELETE, its
+  discovery probe's GET, and the backup export's POST all ride; the read-only
+  pre-flight is renamed `unlockSpaceCapabilityRefusal` (it answers for every
+  verb, not the DELETE alone) and its five refusals are their own type,
+  `UnlockSpaceCapabilityRefusal`, which `UnlockSpaceDeletionOutcome` extends.
+- `WASRemoteStore.exportSpace` takes an optional Space id, signer,
+  capability, and `AbortSignal`, so one method exports the store's own Space
+  and, for the backup export, the account's other Spaces.
+
 ### Added
+
+- Backing this wallet up to one file. The Storage page's export action now
+  opens a dialog (`src/components/storage/BackupExportDialog.tsx`) offering a
+  password-protected or an unprotected backup, and
+  `src/session/backupExport.ts` runs `@interop/wallet-backup`'s
+  `exportBundle`: it mints a fresh recovery code labeled with the date,
+  exports every Space the account names -- the account Space, the
+  client-annex Space, and one unlock Space per unlock-methods registry entry,
+  the new code's included -- and packs them into one tar. The packed code
+  makes the file self-sufficient: it plus that code restores the account, and
+  without an export password the file is a bearer credential, which the
+  dialog says. The export password seals that packed code alone. The bundle
+  still carries the unlock Space archives and the user key roster, so the
+  file's bound is the weaker of the export password and the wallet
+  passphrase, which the dialog's copy now states.
+  The code is listed and removable under Settings > Recovery
+  codes like any other. A Space that cannot be exported fails the whole run
+  rather than writing a bundle that reads as complete, and so does a registry
+  that does not list the code just issued or whose unlock methods change
+  while the run is under way. The stored management zcaps are pre-flighted
+  before the code is minted, so a refused run leaves no orphan code behind,
+  and every unlock Space is exported through a freshly minted POST-only
+  child rather than through the stored zcap itself. A refusal names the
+  entry and says what refreshes it:
+  a passphrase's and a passkey's are re-minted by a login with that
+  credential, while a recovery code's has no refresh path and the remedy is
+  to remove the code and issue a new one. Where the browser has a save
+  picker the dialog opens it before the run, so a dismissed picker mints no
+  code.
+
+- The backup export resolves the client-annex Space from the account
+  document's pointer on both session kinds, and pre-flights its capability
+  and the account Space's for `POST` alongside the registry entries, before
+  the code is minted. A named annex Space this session cannot reach refuses
+  the run.
+- The backup export checks the account Space's exported archive against this
+  visit's pinned chain head for the account log before the bundle is
+  written. A mismatch refuses the run (`BackupContinuityError`); a visit
+  holding no pin for that log skips the check.
 
 - Importing another wallet's content from a backup bundle. The Storage page
   offers "Import from another wallet" to every session kind, a guest and a
@@ -23,6 +83,17 @@
   renders the per-collection report. Only content travels: the old account's
   DID, every grant and app key, every share, and the public links stay
   behind, which the dialog states before the run.
+
+- A WAS e2e spec for the backup export
+  (`tests/e2e-was/backup-export.spec.ts`). A transient session's bundle is
+  read back in node: the manifest's profile and account controller, one
+  account archive, one client-annex archive and two unlock archives, the
+  exporting server's Service Description inside each of them, and the packed
+  code in both modes. Two cells run offline with no server contact -- the
+  bundle opens from the wallet passphrase and from its own packed code, and
+  every unlock record's members outside the frame, the `binding` and the
+  proof are ciphertext naming neither the account DID nor its Space. A last
+  cell repeats the Space-set assertions on a remembered session.
 
 - The storage browser's collection and resource pages carry a collapsed
   Metadata card over the `/meta` document, read on first expand and rendered
@@ -119,6 +190,10 @@
 
 ### Fixed
 
+- The WAS e2e store oracle reads the run's own data root (`.was-e2e-data`),
+  where the harness points the server, instead of the server checkout's
+  `data/`; the transient passphrase-change cell's roster assertions read a
+  real roster again.
 - The login-time Space-controller promotion is pinned to a validator, so it
   writes instead of being refused. It read the Space Description with
   `describe()` and handed that etag-less answer to `Space.configure` as its

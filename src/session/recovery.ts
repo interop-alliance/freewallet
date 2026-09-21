@@ -145,6 +145,7 @@ import { base58 } from '@scure/base'
 import {
   preflightUnlockCredentialRetirement,
   publishUnlockKey,
+  UNLOCK_MANAGEMENT_ACTIONS,
   unlockClientIdentityFromSeed,
   unlockKeyVmId
 } from '@interop/wallet-core/unlock'
@@ -304,16 +305,17 @@ async function bindRecoveryRecord({
     spaceId: unlock.spaceId,
     record
   })
-  // GET/PUT/DELETE, not the default GET/DELETE: PUT is what lets the
-  // revocation cascade re-PUT the code's record with a freshly minted
+  // `UNLOCK_MANAGEMENT_ACTIONS`, not the default GET/DELETE: PUT is what lets
+  // the revocation cascade re-PUT the code's record with a freshly minted
   // delegation when the original's signing client is revoked -- the record's
   // JWE recipient stays the code's unlock KAK, so the re-wrap needs only the
-  // public half the registry records.
+  // public half the registry records. POST is what the backup export invokes
+  // on the code's unlock Space.
   const manageCapability = await delegateUnlockManagement({
     zcapClient: unlock.zcapClient,
     spaceId: unlock.spaceId,
     controller: unlockManagementGrantee({ pointer, controller }),
-    allowedActions: ['GET', 'PUT', 'DELETE']
+    allowedActions: [...UNLOCK_MANAGEMENT_ACTIONS]
   })
   // The unlock KAK's public identity, recorded so the revocation cascade can
   // later re-wrap the record without the code (encryption needs no secret).
@@ -445,7 +447,7 @@ export function recoveryEntriesOf({
  * @param options.session {Session}
  * @param options.entry {RecoveryCodeUnlockMethod}
  * @param [options.dropKids] {string[]}   recovery kids to remove
- * @returns {Promise<void>}
+ * @returns {Promise<UnlockMethodsRecord>}   the registry as written
  */
 export async function recordRecoveryMethod({
   session,
@@ -455,9 +457,9 @@ export async function recordRecoveryMethod({
   session: Session
   entry: RecoveryCodeUnlockMethod
   dropKids?: string[]
-}): Promise<void> {
+}): Promise<UnlockMethodsRecord> {
   const dropped = new Set([entry.recoveryKid, ...dropKids])
-  await updateUnlockMethods({
+  const written = await updateUnlockMethods({
     session,
     mutate: existing => {
       const record = existing ?? emptyUnlockMethodsRegistry()
@@ -471,6 +473,8 @@ export async function recordRecoveryMethod({
       return { ...record, methods }
     }
   })
+  // The mutation above never resolves `null`, so the CAS always writes.
+  return written as UnlockMethodsRecord
 }
 
 /**
@@ -566,7 +570,9 @@ function rosterUnwrapKey({
  *   (`generateRecoveryCode`) so the confirm-once dialog can display it before
  *   anything becomes durable
  * @param options.label {string}   the display label for the registry entry
- * @returns {Promise<{ entry: RecoveryCodeUnlockMethod }>}
+ * @returns {Promise<{ entry: RecoveryCodeUnlockMethod, registry:
+ *   UnlockMethodsRecord }>}   the entry, and the registry as the write that
+ *   recorded it left it
  */
 export async function issueRecoveryCode({
   session,
@@ -576,7 +582,10 @@ export async function issueRecoveryCode({
   session: Session
   code: string
   label: string
-}): Promise<{ entry: RecoveryCodeUnlockMethod }> {
+}): Promise<{
+  entry: RecoveryCodeUnlockMethod
+  registry: UnlockMethodsRecord
+}> {
   // Wait out the login-time registry passes rather than racing their
   // read-modify-writes; on a settled session the chain resolved long ago.
   await session.registryReady
@@ -668,9 +677,9 @@ export async function issueRecoveryCode({
     unlockKeyAgreementKeyId: bound.unlockKeyAgreementKeyId,
     unlockKeyAgreementKeyMultibase: bound.unlockKeyAgreementKeyMultibase
   })
-  await recordRecoveryMethod({ session, entry })
+  const registry = await recordRecoveryMethod({ session, entry })
 
-  return { entry }
+  return { entry, registry }
 }
 
 /**
