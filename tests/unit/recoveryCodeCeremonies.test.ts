@@ -297,7 +297,7 @@ async function ceremonyContext(): Promise<AccountCeremonyContext> {
       ...shared,
       kind: 'enrolled',
       signer: {
-        kind: 'client',
+        kind: 'enrolled',
         updateKeys: { updateSeed: new Uint8Array(32) }
       },
       clientWebvhKeys: { updateSeed: new Uint8Array(32) },

@@ -980,7 +980,7 @@ vi.mock('@/session/accountCeremonyContext', () => ({
               webvhIdStore: vi.fn(() => ({ isWebvhIdStore: true }))
             },
             signer: {
-              kind: 'client',
+              kind: 'enrolled',
               updateKeys: { updateSeed: new Uint8Array(32) }
             },
             idStore: { isWebvhIdStore: true },

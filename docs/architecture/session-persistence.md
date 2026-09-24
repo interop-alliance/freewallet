@@ -197,8 +197,8 @@ the collection epochs installed under the key the roster delivers), and the
 registry arm, which re-fires the read-first registry hook when an earlier
 arm mended. Nothing encrypted predates the roster arm's mint, so a fresh
 user key orphans nothing. A partial collection fan-out is not a refusal: the
-stranded collections are named in a warn, the only trace on a client-less
-account no login sweep revisits.
+stranded collections are named in a warn, the only trace on a
+credential-anchored account, which no login sweep revisits.
 
 The composition maps the mend's report onto its typed refusals:
 

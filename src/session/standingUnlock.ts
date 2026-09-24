@@ -715,7 +715,7 @@ export async function establishClientAnnexGeneration({
         clientAnnexDid: generationDid
       }),
     idStore: remoteStore.webvhIdStore(),
-    signer: { kind: 'client', updateKeys: clientWebvhKeys }
+    signer: { kind: 'enrolled', updateKeys: clientWebvhKeys }
   })
   const clientAnnexDid = pointed.clientAnnexDid
   if (pointed.generationMinted) {

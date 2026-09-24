@@ -30,7 +30,7 @@
  *   what the browser's login routing would enroll: a new enrolled client
  *   with `rememberBrowser`, and otherwise (the default) the fresh
  *   credential's LADDER VM -- the transient variant, which lands the account
- *   client-less and ladder-anchored with zero local residue.
+ *   ladder-anchored, with no enrolled client and zero local residue.
  * - `revokeRecoveryCode` -- the Settings removal, on either kind: the
  *   retirement gate read-only, the document entry out (the code's whole
  *   inventory, its ladder VM claimed seedlessly from the registry-recorded
@@ -846,7 +846,7 @@ async function completeRecoveryRecordProof({
     }
     // The allowlist is the record-signer set, not the enrolled-client set:
     // a code's record re-minted by the last-client forget is signed by the
-    // ladder VM, the one key a client-less account's document still lists.
+    // ladder VM, the one key a ladder-anchored account's document still lists.
     const signingKeys = await currentAccountRecordSigners({
       pointer: logPointer,
       ...(verifiedLog ? { verifiedLog } : { accountLogPinStore: pinStore })
@@ -1241,7 +1241,7 @@ async function retireCredentialsFromRegistry({
  * (today's flow -- the client-key record persists and the browser is
  * remembered), and otherwise -- the default, a public terminal -- the
  * TRANSIENT variant: the fresh credential's ladder VM stands in for an
- * enrolled client, the account lands client-less and ladder-anchored, and
+ * enrolled client, the account lands ladder-anchored, and
  * the visit continues as an ordinary transient session with zero local
  * residue. See the module doc for the shared sequence; every stage is
  * idempotent or convergent, so re-running with the same code after a tear
@@ -1693,7 +1693,7 @@ export async function recoverAccountWithCode({
     })
     await publishUnlockKey({
       idStore: remoteStore.webvhIdStore(),
-      signer: { kind: 'client', updateKeys: newClientUpdateSeeds },
+      signer: { kind: 'enrolled', updateKeys: newClientUpdateSeeds },
       unlockKeys: {
         keyAgreement: {
           commitment: await keyAgreementCommitment({
@@ -2348,7 +2348,7 @@ export async function resumeRecoverySpend({
         })
         await publishUnlockKey({
           idStore: remoteStore.webvhIdStore(),
-          signer: { kind: 'client', updateKeys: clientKeys.webvhUpdateKeys },
+          signer: { kind: 'enrolled', updateKeys: clientKeys.webvhUpdateKeys },
           unlockKeys: {
             keyAgreement: { commitment },
             updateKeyMultibase: rung0.keyMultibase
@@ -2607,10 +2607,10 @@ async function unwrapPriorEpochUserKey({
 /**
  * The TRANSIENT recovery variant (the default on a non-remembered browser):
  * `recoverWebvhLadderAnchored` publishes the fresh credential's ladder VM in
- * place of an enrolled client, so the account lands client-less and
- * ladder-anchored, and nothing touches browser-local storage (the visit's
- * log pins are in memory, as on every session, and die with the tab). The
- * freewallet wiring around the shared continuation:
+ * place of an enrolled client, so the account lands ladder-anchored, and
+ * nothing touches browser-local storage (the visit's log pins are in
+ * memory, as on every session, and die with the tab). The freewallet
+ * wiring around the shared continuation:
  *
  * 1. Inside the continuation's `onCommitted` seam (after the reveal entry
  *    validates the code, BEFORE the add entry publishes the ladder VM): a
@@ -2641,10 +2641,10 @@ async function unwrapPriorEpochUserKey({
  *    hand before the entry, so the window in which the typed code is dead
  *    and the new credential holds no wrap is the append itself. A tear
  *    inside it is the stated residue: the spent code can no longer re-run
- *    (its key left the document), and no login sweep runs on a client-less
- *    account, so the current epoch stays wrapped to the removed code alone
- *    until a repair that holds both the spent code and the new
- *    passphrase runs the append anchored at the same entry.
+ *    (its key left the document), and no login sweep runs on an account
+ *    with no enrolled client, so the current epoch stays wrapped to the
+ *    removed code alone until a repair that holds both the spent code and
+ *    the new passphrase runs the append anchored at the same entry.
  * 3. The epoch cascade and the registry update (spent entry out, replacement
  *    and new-passphrase entries in, re-sealed to the rotated user key) ride
  *    the same delegation; the spent code's unlock Space is deleted last.

@@ -831,7 +831,7 @@ async function settlePendingRecordProof({
     // The allowlist is the record-signer set (enrolled clients plus the
     // ladder VMs), not the enrolled-client set alone: after the last-client
     // forget every other unlock method's record is re-signed by the ladder
-    // VM, the one key the client-less account's document still lists.
+    // VM, the one key the ladder-anchored account's document still lists.
     const signingKeys = await currentAccountRecordSigners({
       pointer: {
         did: pointer.did!,

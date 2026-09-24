@@ -16,7 +16,7 @@
  *   `lastClient: true`, confirmed against transition-stating copy): when
  *   this browser is the account's LAST enrolled client, wallet-core's
  *   `forgetLastEnrolledClient` runs instead -- the two-entry ceremony that
- *   lands the account client-less and ladder-anchored (the state a
+ *   lands the account ladder-anchored with no enrolled client (the state a
  *   credential-anchored signup and a transient recovery produce): the ladder
  *   VM's install entry, the ladder-signed roster rotation anchored there and
  *   the fan-out under this client's still-standing authority, the forced
@@ -211,7 +211,7 @@ export type ForgetOutcome = ForgetCeremonyOutcome & {
  * carry different consequences the user confirms against: `false` is
  * wallet-core's `forgetEnrolledClient` (rotation, fan-out, removal entry --
  * the self-forget inversion), and `true` is `forgetLastEnrolledClient` (the
- * two-entry transition to the client-less, ladder-anchored account; see the
+ * two-entry transition to the credential-anchored account; see the
  * module doc). A `false` run that turns out to be the last client -- the
  * caller's listing was stale -- refuses with wallet-core's name-stable
  * `LastEnrolledClientForgetError` before any write, so the caller can

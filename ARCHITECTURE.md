@@ -574,10 +574,10 @@ account shape can fire.
 The open gaps come in three classes. First, a stated residue with no mender
 built:
 
-- The transient recovery's roster-append repair, on a client-less account
-  (invariant `recovery-spend-is-completed`).
-- A user-key rotation torn mid-fan-out on a client-less account (invariant
-  `collection-epochs-name-the-current-user-key`).
+- The transient recovery's roster-append repair, on a credential-anchored
+  account (invariant `recovery-spend-is-completed`).
+- A user-key rotation torn mid-fan-out on a credential-anchored account
+  (invariant `collection-epochs-name-the-current-user-key`).
 - A recovery-code issuance torn after its document entry leaves a saved code
   that locates no account, plus a document `keyAgreement` entry and a roster
   wrap nothing names (invariant
@@ -634,11 +634,11 @@ Second, a residue whose only mender is a remembered login:
   since the departing client's authority ends at its own entry and the
   transient login runs no collection seal.
 - The annex generation GC, which runs from the remembered-login chain only
-  (invariant `no-annex-generation-outlives-its-pointer`). On a client-less
-  account the pointed generation's log grows by one entry per transient
-  visit with nothing collecting it, and every visit resolves that log from
-  genesis. A `gen-` collection orphaned by a crashed first visit waits for
-  the same sweep, and an account-log pointer entry left by one is
+  (invariant `no-annex-generation-outlives-its-pointer`). On an account with
+  no enrolled client the pointed generation's log grows by one entry per
+  transient visit with nothing collecting it, and every visit resolves that
+  log from genesis. A `gen-` collection orphaned by a crashed first visit
+  waits for the same sweep, and an account-log pointer entry left by one is
   append-only. The constraint is authority: the swap re-points the account
   log, the collect fan-out is controller-tier, and a ladder VM can sign
   neither.
@@ -648,8 +648,8 @@ Second, a residue whose only mender is a remembered login:
 - A credential-anchored signup whose pointer backfill failed leaves the
   unlock record pointing at the signup-time did:key (invariant
   `account-pointer-names-the-account-did`). The heal that converges it is
-  registered on the remembered-login block alone, which a client-less
-  account never runs.
+  registered on the remembered-login block alone, which a
+  credential-anchored account never runs.
 - An establishment torn between the record re-bind and the promotion leaves
   the KMS keystore's controller on the ladder's bare did:key, outside the
   current-key-set rule (invariant `keystore-controller-is-the-account-did`).
@@ -683,8 +683,8 @@ tracks the decision rather than a build:
   rather than refusing; the user's own reissue is the mender.
 
 One bound is not an open gap. An account that runs the last-client
-transition with several standing credentials lands client-less carrying one
-standing ladder VM per credential, since the transition strikes only the
+transition with several standing credentials lands ladder-anchored, carrying
+one standing ladder VM per credential, since the transition strikes only the
 departing client's inventory. Each stays a live delegation signer until its
 credential is retired. The credential ceremonies run on the ladder kind, so
 a transient login with any one standing credential retires the others
@@ -1059,7 +1059,7 @@ base64url(SHA-256(unlock did:key))` (a discovery convention).
   client. Its document publishes that ladder VM and no enrolled client, so
   its log state is **ladder-anchored** and every visit is a transient
   session unless someone opts into remembering a browser. Avoid:
-  client-less signup, transitional account.
+  client-less, client-less signup, transitional account.
 - **Remembered browser** -- a browser holding a client-key record for an
   unlock credential, so a login on it proceeds as (or self-enrolls into) an
   enrolled client. Remembering is a deliberate opt-in (`rememberBrowser`),

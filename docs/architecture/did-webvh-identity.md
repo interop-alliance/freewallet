@@ -349,8 +349,8 @@ That refusal routes to the **last-client transition**: the same
 and confirmed against transition-stating copy (a stale listing's refusal
 flips the dialog to that copy for a second confirm). It runs wallet-core's
 `forgetLastEnrolledClient`, the two-entry ceremony that lands the account
-client-less and ladder-anchored (wallet-core decision 0004). Its stages, in
-order:
+ladder-anchored, with no enrolled client (wallet-core decision 0004). Its
+stages, in order:
 
 1. The ladder VM's install entry, while the client's inventory stays.
 2. The roster rotation off this client's wrap: ladder-signed and anchored at
@@ -376,8 +376,8 @@ order:
 7. The local teardown: replication stopped, then the local wipe.
 
 Stages 2 through 5 precede the removal entry because the removed client's
-signatures rot there, and on a client-less account no remembered login's
-refresh block will ever heal them.
+signatures rot there, and on a credential-anchored account no remembered
+login's refresh block will ever heal them.
 
 The transition's refusals:
 

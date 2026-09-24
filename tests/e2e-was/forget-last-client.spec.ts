@@ -1,8 +1,8 @@
 /**
  * The last-enrolled-client forget transition, end to end (WAS mode): an
  * account that has exactly one connected browser forgets it, and lands
- * client-less -- anchored on the sign-in credential's ladder alone, the same
- * shape a credential-anchored signup starts in.
+ * ladder-anchored, with no enrolled client. That is the shape a
+ * credential-anchored signup starts in.
  *
  * The walk: a credential-anchored signup (no enrolled client anywhere), a
  * second cold browser that self-enrolls and is therefore the account's

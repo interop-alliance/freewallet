@@ -247,7 +247,7 @@ function enrolledContext(): AccountCeremonyContext {
       host: 'https://storage.example'
     },
     controller: ACCOUNT_DID,
-    signer: { kind: 'client', updateKeys: {} },
+    signer: { kind: 'enrolled', updateKeys: {} },
     clientWebvhKeys: { updateSeed: new Uint8Array(32).fill(3) },
     clientKeyAgreementKey: { id: 'did:key:zClientKak' },
     idStore: {},

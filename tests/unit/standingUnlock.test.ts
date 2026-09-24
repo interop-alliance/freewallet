@@ -38,7 +38,10 @@ function enrolledContextStub() {
     kind: 'enrolled',
     remoteStore: { webvhIdStore: vi.fn(() => ({ isWebvhIdStore: true })) },
     pointer: POINTER,
-    signer: { kind: 'client', updateKeys: { updateSeed: new Uint8Array(32) } },
+    signer: {
+      kind: 'enrolled',
+      updateKeys: { updateSeed: new Uint8Array(32) }
+    },
     idStore: { isWebvhIdStore: true },
     rosterStore: { rosterStore: true },
     invoker: { zcapClient: { isZcapClient: true } },
@@ -255,7 +258,7 @@ describe('establishClientAnnexGeneration', () => {
         wasServerUrl: POINTER.host,
         mintController: 'did:key:zClient',
         signer: {
-          kind: 'client',
+          kind: 'enrolled',
           updateKeys: expect.objectContaining({
             updateSeed: expect.any(Uint8Array)
           })

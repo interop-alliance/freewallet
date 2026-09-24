@@ -462,7 +462,10 @@ describe('the cascade, rotated path', () => {
         rosterStore: { rosterStore: true },
         // An enrolled client's context signs the document edit with its own
         // did:webvh update keys.
-        signer: { kind: 'client', updateKeys: session.profile.clientWebvhKeys },
+        signer: {
+          kind: 'enrolled',
+          updateKeys: session.profile.clientWebvhKeys
+        },
         revokedClient: REVOKED,
         knownLatentHashes: [],
         userKey: OLD_USER_KEY,

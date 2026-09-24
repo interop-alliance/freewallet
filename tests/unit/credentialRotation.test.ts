@@ -457,7 +457,10 @@ describe('the ceremony hand-off', () => {
         rosterStore: { rosterStore: true },
         // An enrolled client's context signs the retirement entry with its
         // own did:webvh update keys.
-        signer: { kind: 'client', updateKeys: session.profile.clientWebvhKeys },
+        signer: {
+          kind: 'enrolled',
+          updateKeys: session.profile.clientWebvhKeys
+        },
         expectedDid: POINTER.did,
         verb: 'changing the passphrase',
         userKey: OLD_USER_KEY,

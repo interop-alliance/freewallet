@@ -134,7 +134,7 @@ interface CeremonyContextBase {
  */
 export interface EnrolledCeremonyContext extends CeremonyContextBase {
   kind: 'enrolled'
-  signer: { kind: 'client'; updateKeys: ClientWebvhUpdateKeys }
+  signer: { kind: 'enrolled'; updateKeys: ClientWebvhUpdateKeys }
   clientWebvhKeys: ClientWebvhUpdateKeys
   clientKeyAgreementKey: IKeyAgreementKey
   keyAgent: ICapabilityAgent
@@ -290,7 +290,7 @@ function resolveEnrolledContext({
     context: {
       kind: 'enrolled',
       ...reach,
-      signer: { kind: 'client', updateKeys: material.clientWebvhKeys },
+      signer: { kind: 'enrolled', updateKeys: material.clientWebvhKeys },
       get idStore() {
         return (idStore ??= reach.remoteStore.webvhIdStore())
       },

@@ -137,7 +137,7 @@ function ceremonyContext(): object | null {
       remoteStore,
       pointer: POINTER,
       controller: 'did:key:z6MkAccountController',
-      signer: { kind: 'client', updateKeys: CLIENT_UPDATE_KEYS },
+      signer: { kind: 'enrolled', updateKeys: CLIENT_UPDATE_KEYS },
       idStore: ROOT_ID_STORE,
       rosterStore: ENROLLED_ROSTER_STORE,
       invoker: { zcapClient: { isZcapClient: true } },
@@ -260,7 +260,7 @@ describe('the enrolled kind (a remembered session)', () => {
 
     expect(vi.mocked(approveEnrollmentCore)).toHaveBeenCalledWith({
       request: REQUEST,
-      signer: { kind: 'client', updateKeys: CLIENT_UPDATE_KEYS },
+      signer: { kind: 'enrolled', updateKeys: CLIENT_UPDATE_KEYS },
       clientKeyAgreementKey: CLIENT_KAK,
       userKeyRosterStore: ENROLLED_ROSTER_STORE,
       idStore: ROOT_ID_STORE

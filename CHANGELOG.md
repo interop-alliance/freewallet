@@ -4,6 +4,12 @@
 
 ### Changed
 
+- The menders account-shape value `client-less` is now `ladder-anchored`,
+  following wallet-core's `ACCOUNT_SHAPES`, and the word is retired from
+  ARCHITECTURE.md, `docs/architecture/`, and code comments: a transient client
+  is still a client, so the shape is a credential-anchored account with no
+  enrolled client. The Glossary lists `client-less` under `Avoid:`.
+
 - The standing management zcap the login and the bind mint on a sibling unlock
   Space now carries `POST` beside `GET`, `PUT` and `DELETE`, taken from
   wallet-core's `UNLOCK_MANAGEMENT_ACTIONS` rather than written out at each of
@@ -22,6 +28,8 @@
 - `WASRemoteStore.exportSpace` takes an optional Space id, signer,
   capability, and `AbortSignal`, so one method exports the store's own Space
   and, for the backup export, the account's other Spaces.
+- The account-log signer's enrolled-client arm is `kind: 'enrolled'`
+  (was `'client'`), following wallet-core's `AccountLogSigner` rename.
 
 ### Added
 

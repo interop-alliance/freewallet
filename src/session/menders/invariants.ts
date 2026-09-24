@@ -40,7 +40,7 @@ const DECLARATIONS: ReadonlyArray<
     id: 'roster-wraps-exactly-the-document-key-set',
     statement:
       "The user key roster's current epoch wraps the user key to exactly the key-agreement keys the account document lists: no recipient the document has stopped keying, and no keyed client left without a wrap.",
-    standsOn: ['client-less', 'enrolled'],
+    standsOn: ['ladder-anchored', 'enrolled'],
     authority: 'account',
     triggers: ['remembered-login-chain', 'ceremony-tail'],
     ceremonies: [
@@ -66,7 +66,7 @@ const DECLARATIONS: ReadonlyArray<
     id: 'governed-log-heads-anchor-past-the-membership-change',
     statement:
       "A governed log's verified head (the roster's, and each encrypted collection's `meta/log`) is anchored at a controller version no earlier than the controller's latest assertion-key removal.",
-    standsOn: ['client-less', 'enrolled'],
+    standsOn: ['ladder-anchored', 'enrolled'],
     authority: 'account',
     triggers: ['remembered-login-chain', 'ceremony-tail'],
     ceremonies: [
@@ -87,7 +87,7 @@ const DECLARATIONS: ReadonlyArray<
     id: 'collection-epochs-name-the-current-user-key',
     statement:
       "Every encrypted collection's current key epoch names the current user key generation.",
-    standsOn: ['client-less', 'enrolled'],
+    standsOn: ['ladder-anchored', 'enrolled'],
     authority: 'account',
     triggers: ['remembered-login-chain', 'ceremony-tail'],
     ceremonies: [
@@ -113,7 +113,7 @@ const DECLARATIONS: ReadonlyArray<
     id: 'unlock-registry-opens-under-the-current-user-key',
     statement:
       "The unlock-methods registry record is sealed to the account's current user key generation.",
-    standsOn: ['client-less', 'enrolled'],
+    standsOn: ['ladder-anchored', 'enrolled'],
     authority: 'account',
     triggers: ['remembered-login-chain', 'transient-login-chain'],
     ceremonies: [
@@ -137,7 +137,7 @@ const DECLARATIONS: ReadonlyArray<
     id: 'registry-passphrase-entry-names-the-standing-credential',
     statement:
       "The registry's passphrase entry names the credential the account document anchors, and no superseded passphrase credential is left standing behind it.",
-    standsOn: ['client-less', 'enrolled'],
+    standsOn: ['ladder-anchored', 'enrolled'],
     authority: 'account',
     triggers: ['remembered-login-chain', 'transient-login-chain'],
     ceremonies: ['unlock-credential-rotation', 'credential-anchored-genesis'],
@@ -161,7 +161,7 @@ const DECLARATIONS: ReadonlyArray<
     id: 'passkey-entry-carries-its-standing-configuration',
     statement:
       "Every passkey entry in the registry carries its credential's standing configuration rather than a bare shape.",
-    standsOn: ['client-less', 'enrolled'],
+    standsOn: ['ladder-anchored', 'enrolled'],
     authority: 'account',
     triggers: ['remembered-login-chain', 'transient-login-chain'],
     ceremonies: ['unlock-credential-rotation'],
@@ -176,7 +176,7 @@ const DECLARATIONS: ReadonlyArray<
     id: 'registry-lists-the-passphrase-method',
     statement:
       "The registry lists a passphrase entry whenever the account can be unlocked by one, with that credential's current fields.",
-    standsOn: ['client-less', 'enrolled'],
+    standsOn: ['ladder-anchored', 'enrolled'],
     authority: 'account',
     triggers: ['remembered-login-chain', 'transient-login-chain'],
     ceremonies: [],
@@ -195,7 +195,7 @@ const DECLARATIONS: ReadonlyArray<
     id: 'standing-delegations-verify-under-the-current-document',
     statement:
       "The acting credential's bridge delegation and its `delegatedClients` sibling are unexpired, outside the renewal window, and signed by a key the verified account document still lists under `capabilityDelegation`.",
-    standsOn: ['client-less', 'enrolled'],
+    standsOn: ['ladder-anchored', 'enrolled'],
     authority: 'account',
     triggers: ['remembered-login-chain', 'login-routing'],
     ceremonies: [
@@ -231,7 +231,7 @@ const DECLARATIONS: ReadonlyArray<
     id: 'unlock-record-points-at-the-account-did',
     statement:
       "The acting credential's unlock record points at the account's did:webvh.",
-    standsOn: ['client-less', 'enrolled'],
+    standsOn: ['ladder-anchored', 'enrolled'],
     authority: 'ladder',
     triggers: ['login-routing'],
     ceremonies: ['credential-anchored-genesis'],
@@ -245,7 +245,7 @@ const DECLARATIONS: ReadonlyArray<
     id: 'account-pointer-names-the-account-did',
     statement:
       "Every unlock record's persisted account pointer names the account's did:webvh rather than the signup-time did:key.",
-    standsOn: ['client-less', 'enrolled'],
+    standsOn: ['ladder-anchored', 'enrolled'],
     authority: 'enrolled',
     triggers: ['remembered-login-chain'],
     ceremonies: ['account-genesis', 'credential-anchored-genesis'],
@@ -259,7 +259,7 @@ const DECLARATIONS: ReadonlyArray<
   {
     id: 'space-controller-is-the-account-did',
     statement: "The data Space's controller is the account's did:webvh.",
-    standsOn: ['client-less', 'enrolled'],
+    standsOn: ['ladder-anchored', 'enrolled'],
     authority: 'account',
     triggers: ['remembered-login-chain', 'login-routing'],
     ceremonies: ['account-genesis', 'credential-anchored-genesis'],
@@ -275,7 +275,7 @@ const DECLARATIONS: ReadonlyArray<
     id: 'roster-and-collection-epochs-exist',
     statement:
       'The account has a user key roster whose current epoch the acting credential can open, and every encrypted collection carries an epoch under it.',
-    standsOn: ['client-less'],
+    standsOn: ['ladder-anchored'],
     authority: 'ladder',
     triggers: ['login-routing'],
     ceremonies: ['credential-anchored-genesis'],
@@ -290,7 +290,7 @@ const DECLARATIONS: ReadonlyArray<
     id: 'registry-records-the-establishing-credential',
     statement:
       'A credential whose establishment landed has its registry entry, with its delegations recorded.',
-    standsOn: ['client-less'],
+    standsOn: ['ladder-anchored'],
     authority: 'ladder',
     triggers: ['login-routing'],
     ceremonies: ['credential-anchored-genesis'],
@@ -304,7 +304,7 @@ const DECLARATIONS: ReadonlyArray<
     id: 'annex-generation-is-reachable',
     statement:
       "The account document points at a published annex generation in a live auxiliary Space, and the acting credential's sibling delegation aims at that Space.",
-    standsOn: ['client-less', 'enrolled'],
+    standsOn: ['ladder-anchored', 'enrolled'],
     authority: 'ladder',
     triggers: ['login-routing'],
     ceremonies: ['credential-anchored-genesis'],
@@ -321,7 +321,7 @@ const DECLARATIONS: ReadonlyArray<
     id: 'generation-delegation-is-current',
     statement:
       "The pointed generation's embedded delegation is unexpired and signed by a key the verified account document still lists.",
-    standsOn: ['client-less', 'enrolled'],
+    standsOn: ['ladder-anchored', 'enrolled'],
     authority: 'account',
     triggers: ['remembered-login-chain', 'login-routing', 'ceremony-tail'],
     ceremonies: ['client-revocation', 'unlock-credential-rotation'],
@@ -338,7 +338,7 @@ const DECLARATIONS: ReadonlyArray<
     id: 'acting-credential-manage-zcap-is-current',
     statement:
       "The acting credential's registry entry carries an unexpired management zcap for its own unlock Space.",
-    standsOn: ['client-less'],
+    standsOn: ['ladder-anchored'],
     authority: 'ladder',
     triggers: ['transient-login-chain'],
     ceremonies: [],
@@ -353,7 +353,7 @@ const DECLARATIONS: ReadonlyArray<
     id: 'did-web-projection-matches-the-log',
     statement:
       "The served `id/did.json` matches the account log's current document; any inventory-changing ceremony can violate it, which is prose rather than a list of ids.",
-    standsOn: ['client-less', 'enrolled'],
+    standsOn: ['ladder-anchored', 'enrolled'],
     authority: 'account',
     triggers: ['transient-login-chain'],
     ceremonies: [],
@@ -366,7 +366,7 @@ const DECLARATIONS: ReadonlyArray<
     id: 'no-annex-generation-outlives-its-pointer',
     statement:
       'Every non-pointed `gen-` collection is digested and deleted, and the pointed generation is inside its swap period.',
-    standsOn: ['client-less', 'enrolled'],
+    standsOn: ['ladder-anchored', 'enrolled'],
     authority: 'enrolled',
     triggers: ['remembered-login-chain'],
     ceremonies: [],
@@ -380,7 +380,7 @@ const DECLARATIONS: ReadonlyArray<
     id: 'app-keys-live-only-in-app-connections',
     statement:
       'No app-key credential remains in `private-credentials`, and no world-readable app-key copy stands with no private row behind it.',
-    standsOn: ['client-less', 'enrolled'],
+    standsOn: ['ladder-anchored', 'enrolled'],
     authority: 'account',
     triggers: ['remembered-login-chain'],
     ceremonies: [],
@@ -406,7 +406,7 @@ const DECLARATIONS: ReadonlyArray<
     id: 'this-browser-is-still-an-enrolled-client',
     statement:
       'A client-key record holding a user key names a verification method the verified account document still lists.',
-    standsOn: ['client-less', 'enrolled'],
+    standsOn: ['ladder-anchored', 'enrolled'],
     authority: 'none',
     triggers: ['login-routing'],
     ceremonies: [
@@ -445,7 +445,7 @@ const DECLARATIONS: ReadonlyArray<
     id: 'recovery-spend-is-completed',
     statement:
       "A spent recovery code's roster escrows, standing backfill, registry mutation, and record completion have all landed.",
-    standsOn: ['client-less', 'enrolled'],
+    standsOn: ['ladder-anchored', 'enrolled'],
     authority: 'enrolled',
     triggers: ['login-routing'],
     ceremonies: ['recovery-code-spend'],
@@ -461,7 +461,7 @@ const DECLARATIONS: ReadonlyArray<
     id: 'retired-credential-leaves-no-annex-inventory',
     statement:
       "A retired credential's annex rung hashes and ladder VMs are struck from the pointed generation.",
-    standsOn: ['client-less', 'enrolled'],
+    standsOn: ['ladder-anchored', 'enrolled'],
     authority: 'account',
     triggers: ['ceremony-tail'],
     ceremonies: ['unlock-credential-rotation'],
@@ -475,7 +475,7 @@ const DECLARATIONS: ReadonlyArray<
     id: 'document-lists-the-acting-credential',
     statement:
       "The account document lists this credential's `keyAgreement` inventory (a passphrase's commitment, a passkey's verbatim key).",
-    standsOn: ['client-less', 'enrolled'],
+    standsOn: ['ladder-anchored', 'enrolled'],
     authority: 'none',
     triggers: ['login-routing'],
     ceremonies: ['credential-anchored-genesis', 'unlock-credential-rotation'],
@@ -503,7 +503,7 @@ const DECLARATIONS: ReadonlyArray<
     id: 'keystore-controller-is-the-account-did',
     statement:
       "The WebKMS keystore's controller is the account's did:webvh rather than the ladder's bare did:key.",
-    standsOn: ['client-less'],
+    standsOn: ['ladder-anchored'],
     authority: 'account',
     triggers: ['remembered-login-chain'],
     ceremonies: ['credential-anchored-genesis'],
@@ -517,7 +517,7 @@ const DECLARATIONS: ReadonlyArray<
     id: 'account-document-publishes-an-authentication-key',
     statement:
       'The account document publishes an `authentication` verification method, so the account can present `web` and `webvh` identities.',
-    standsOn: ['client-less', 'enrolled'],
+    standsOn: ['ladder-anchored', 'enrolled'],
     authority: 'ladder',
     triggers: [],
     ceremonies: ['credential-anchored-genesis', 'account-genesis'],
@@ -531,7 +531,7 @@ const DECLARATIONS: ReadonlyArray<
     id: 'every-document-key-agreement-entry-has-a-locatable-credential',
     statement:
       'Every `keyAgreement` entry in the account document belongs to a credential the unlock-methods registry names.',
-    standsOn: ['client-less', 'enrolled'],
+    standsOn: ['ladder-anchored', 'enrolled'],
     authority: 'account',
     triggers: [],
     ceremonies: ['recovery-code-issuance', 'unlock-credential-rotation'],
@@ -543,7 +543,7 @@ const DECLARATIONS: ReadonlyArray<
     id: 'no-unlock-space-outlives-its-credential',
     statement:
       'No unlock Space stands whose credential the account has retired or whose account is gone.',
-    standsOn: ['client-less', 'enrolled'],
+    standsOn: ['ladder-anchored', 'enrolled'],
     authority: 'ladder',
     triggers: [],
     ceremonies: [
@@ -561,7 +561,7 @@ const DECLARATIONS: ReadonlyArray<
     id: 'no-keystore-outlives-its-account',
     statement:
       'No WebKMS keystore stands for an account whose Space has been deleted.',
-    standsOn: ['client-less', 'enrolled'],
+    standsOn: ['ladder-anchored', 'enrolled'],
     authority: 'ladder',
     triggers: [],
     ceremonies: ['account-deletion'],
@@ -579,7 +579,7 @@ const DECLARATIONS: ReadonlyArray<
     id: 'saved-recovery-codes-locate-their-account',
     statement:
       'Every recovery code the account has issued still locates a record the account can spend, and the count the user was given matches the count that stands.',
-    standsOn: ['client-less', 'enrolled'],
+    standsOn: ['ladder-anchored', 'enrolled'],
     authority: 'none',
     triggers: ['remembered-login-chain', 'transient-login-chain'],
     ceremonies: [
@@ -609,7 +609,7 @@ const DECLARATIONS: ReadonlyArray<
     id: 'standard-collections-are-provisioned',
     statement:
       'The account Space carries every standard collection the wallet writes to, each with its descriptor.',
-    standsOn: ['client-less', 'enrolled'],
+    standsOn: ['ladder-anchored', 'enrolled'],
     authority: 'account',
     triggers: ['remembered-login-chain'],
     ceremonies: ['account-genesis', 'credential-anchored-genesis'],
@@ -622,7 +622,7 @@ const DECLARATIONS: ReadonlyArray<
     id: 'no-auxiliary-space-stands-unnamed',
     statement:
       'No `gen-` auxiliary Space stands that no account-log pointer entry names.',
-    standsOn: ['client-less', 'enrolled'],
+    standsOn: ['ladder-anchored', 'enrolled'],
     authority: 'enrolled',
     triggers: [],
     ceremonies: [],

@@ -135,7 +135,7 @@ test.describe.serial('transient recovery (the login-axis cell)', () => {
     }
   })
 
-  test('recovering on a cold terminal lands client-less and residue-zero', async ({
+  test('recovering on a cold terminal lands ladder-anchored and residue-zero', async ({
     browser
   }) => {
     test.setTimeout(360_000)

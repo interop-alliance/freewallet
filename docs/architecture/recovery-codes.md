@@ -111,8 +111,8 @@ attribute is reported on the outcome's `unclaimedCredentialVmIds` rather
 than struck, keeping a committed rung it could still reveal. A retired
 credential's bridge delegation is not revoked, but the entry strikes the
 ladder VM that signed it, so it stays live and inert. The account lands
-client-less and ladder-anchored, reachable by the new passphrase and the
-replacement code alone, and the recovery page says so.
+ladder-anchored, with no enrolled client, reachable by the new passphrase
+and the replacement code alone, and the recovery page says so.
 
 The continuation's persist-before-publish seam runs after the reveal entry
 validates the code and before the ladder VM publishes. It mints a fresh

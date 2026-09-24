@@ -991,9 +991,9 @@ export async function transientSessionFromKeyringHit({
     })
     const epochsFailed = report.rosterEpochs?.epochsFailed
     if (epochsFailed && epochsFailed.length > 0) {
-      // A partial collection fan-out. On a client-less account no login
-      // sweep ever revisits a stranded collection, so this line is the only
-      // trace that one stayed on an earlier key.
+      // A partial collection fan-out. On an account with no enrolled client
+      // no login sweep ever revisits a stranded collection, so this line is
+      // the only trace that one stayed on an earlier key.
       log.warn('The mend left collection epochs incomplete', {
         collectionIds: epochsFailed.map(({ collectionId }) => collectionId)
       })
