@@ -72,7 +72,13 @@ vi.mock('@interop/wallet-core/keys', async importOriginal => ({
   }))
 }))
 
-vi.mock('@/session/unlockMethods', () => ({
+vi.mock('@/session/unlockMethods', async () => ({
+  // The real helper: the latent-hash hand-off reads it.
+  latentUpdateKeyMultibasesOf: (
+    await vi.importActual<typeof import('@/session/unlockMethods')>(
+      '@/session/unlockMethods'
+    )
+  ).latentUpdateKeyMultibasesOf,
   // The registry entries resolve the visit's authority themselves, off the
   // live profile stamp, so what is recorded here is the stamp the read was
   // made under rather than an argument the caller threaded.
@@ -635,11 +641,12 @@ describe('the options the ladder branch hands over, and the ones it withholds', 
       session: transientSession(),
       client: REVOKED
     })
+    // In registry order: the sibling passphrase's rung, then the code's.
     expect(vi.mocked(revokeAccountClient)).toHaveBeenCalledWith(
       expect.objectContaining({
         knownLatentHashes: [
-          await deriveNextKeyHash('z6MkCodeUpdate'),
-          await deriveNextKeyHash('z6MkSiblingPassphraseRung')
+          await deriveNextKeyHash('z6MkSiblingPassphraseRung'),
+          await deriveNextKeyHash('z6MkCodeUpdate')
         ]
       })
     )

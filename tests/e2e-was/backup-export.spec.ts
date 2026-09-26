@@ -22,12 +22,18 @@
  * same archives are reached by root invocation and by a POST-only child of
  * each stored management zcap, signed by the enrolled client, instead.
  */
-import { test, expect, type BrowserContext, type Page } from '@playwright/test'
+import {
+  test,
+  expect,
+  type BrowserContext,
+  type Locator,
+  type Page
+} from '@playwright/test'
 import {
   BUNDLE_ROLE,
   migrateBundle,
   readBundle,
-  unpackRecoveryCode,
+  unpackBackupCredential,
   type MigrationSink,
   type SinkOutcome
 } from '@interop/wallet-backup'
@@ -84,6 +90,7 @@ interface OpenedBundle {
 interface OpenedArchive {
   spaceId: string
   files: Map<string, Uint8Array>
+  service?: Record<string, unknown>
 }
 
 /**
@@ -94,7 +101,7 @@ interface OpenedArchive {
  *
  * @param options {object}
  * @param options.page {Page}   a page holding a logged-in session
- * @param [options.exportPassphrase] {string}   seals the packed code;
+ * @param [options.exportPassphrase] {string}   seals the packed credential;
  *   absent, the unprotected mode is picked
  * @returns {Promise<Uint8Array>}   the bundle's tar bytes
  */
@@ -167,7 +174,11 @@ async function openArchive(bytes: Uint8Array): Promise<OpenedArchive> {
       files.set(entry.name, await entry.bytes())
     }
   }
-  return { spaceId: archive.spaceId, files }
+  return {
+    spaceId: archive.spaceId,
+    files,
+    ...(archive.service ? { service: archive.service } : {})
+  }
 }
 
 /**
@@ -194,14 +205,24 @@ function archiveTexts({
 }
 
 /**
- * The bundle's `recovery-code.json`, parsed.
+ * The Settings rows under "Backup credentials", one Remove button each.
+ *
+ * @param page {Page}
+ * @returns {Locator}
+ */
+function backupRows(page: Page): Locator {
+  return page.getByRole('button', { name: 'Remove this backup credential' })
+}
+
+/**
+ * The bundle's `backup-credential.json`, parsed.
  *
  * @param bundle {OpenedBundle}
  * @returns {Record<string, unknown>}
  */
-function packedCodeOf(bundle: OpenedBundle): Record<string, unknown> {
-  const bytes = bundle.files.get('recovery-code.json')
-  expect(bytes, 'the bundle carries no recovery-code.json').toBeDefined()
+function packedCredentialOf(bundle: OpenedBundle): Record<string, unknown> {
+  const bytes = bundle.files.get('backup-credential.json')
+  expect(bytes, 'the bundle carries no backup-credential.json').toBeDefined()
   return JSON.parse(new TextDecoder().decode(bytes!)) as Record<string, unknown>
 }
 
@@ -257,13 +278,13 @@ function expectServiceDescription({
   archive: OpenedArchive
   served: unknown
 }): void {
-  const bytes = archive.files.get('service.json')
+  // The reader parses `service.json` ahead of the entries and serves it as
+  // `service`, so it is read there rather than from the entry map.
   expect(
-    bytes,
+    archive.service,
     `the archive of Space "${archive.spaceId}" carries no service.json`
   ).toBeDefined()
-  const carried = JSON.parse(new TextDecoder().decode(bytes!)) as unknown
-  expect(carried).toEqual(served)
+  expect(archive.service).toEqual(served)
 }
 
 /**
@@ -293,7 +314,8 @@ function spacesByRole(bundle: OpenedBundle): {
 /**
  * Asserts the Space set a one-credential account's first backup names: one
  * account archive, one annex archive, and two unlock archives -- the
- * passphrase's Space and the Space of the code this very export minted.
+ * passphrase's Space and the Space of the backup credential this very export
+ * established.
  *
  * @param bundle {OpenedBundle}
  * @returns {{ account: BundleSpace, annex: BundleSpace, unlock: BundleSpace[] }}
@@ -432,17 +454,16 @@ test.describe.serial('The backup export from a transient session', () => {
     const bundle = await openBundle(bundleBytes)
     await expectWholeAccountBundle({ bundle, served })
 
-    // Unprotected: the code travels in the clear, so the file alone is the
-    // secret.
-    const packed = packedCodeOf(bundle)
+    // Unprotected: the secret travels in the clear, so the file alone is
+    // the credential. 32 random bytes, base64url with no padding.
+    const packed = packedCredentialOf(bundle)
     expect(packed.form).toBe('plain')
-    expect(typeof packed.code).toBe('string')
-    expect(packed.code as string).not.toHaveLength(0)
+    expect(packed.secret).toMatch(/^[A-Za-z0-9_-]{43}$/)
   })
 
-  test('the bundle opens offline from the passphrase and from its own code', async () => {
+  test('the bundle opens offline from the passphrase and from its own credential', async () => {
     test.setTimeout(300_000)
-    for (const secret of [{ passphrase }, { packedCode: {} }] as const) {
+    for (const secret of [{ passphrase }, { packedCredential: {} }] as const) {
       const sink = recordingSink()
       const report = await migrateBundle({
         bundle: bundleBytes,
@@ -554,13 +575,13 @@ test.describe.serial('The backup export from a transient session', () => {
     expect(recordsSeen).toBeGreaterThan(0)
   })
 
-  test('the protected mode seals the packed code under the export passphrase', async () => {
+  test('the protected mode seals the packed credential under the export passphrase', async () => {
     test.setTimeout(300_000)
     const exportPassphrase = 'export-pass-e2e'
-    const first = packedCodeOf(
+    const first = packedCredentialOf(
       await openBundle(await exportBundleBytes({ page, exportPassphrase }))
     )
-    const second = packedCodeOf(
+    const second = packedCredentialOf(
       await openBundle(await exportBundleBytes({ page, exportPassphrase }))
     )
 
@@ -573,34 +594,57 @@ test.describe.serial('The backup export from a transient session', () => {
     expect(typeof saltOf(first)).toBe('string')
     expect(saltOf(first)).not.toBe(saltOf(second))
 
-    const code = await unpackRecoveryCode({
+    const secret = await unpackBackupCredential({
       document: first,
       exportPassphrase
     })
-    expect(typeof code).toBe('string')
-    expect(code).not.toHaveLength(0)
+    expect(secret).toHaveLength(32)
 
-    const refusal = await unpackRecoveryCode({
+    const refusal = await unpackBackupCredential({
       document: first,
       exportPassphrase: 'not-the-export-pass'
     }).then(
       () => undefined,
       (err: unknown) => err as Error
     )
-    expect(refusal, 'a wrong export passphrase opened the code').toBeDefined()
+    expect(
+      refusal,
+      'a wrong export passphrase opened the credential'
+    ).toBeDefined()
     expect(refusal!.name).toBe('KeyUnwrapError')
   })
 
-  test("the export lists its code in Settings under the dialog's label", async () => {
+  test("the export lists its credential in Settings under the dialog's label", async () => {
     test.setTimeout(120_000)
     await page.goto('/#/settings')
-    await expect(page.getByText('Recovery codes', { exact: true })).toBeVisible(
-      { timeout: 30_000 }
-    )
-    // Every run above minted one code labeled with the locale-formatted date.
+    await expect(
+      page.getByText('Backup credentials', { exact: true })
+    ).toBeVisible({ timeout: 30_000 })
+    // Every run above established one credential labeled with the
+    // locale-formatted date: three exports, three rows (counted by their
+    // Remove buttons, since the section heading also starts with "Backup"),
+    // none of them a recovery code.
     await expect(page.getByText(/^Backup /).first()).toBeVisible({
       timeout: 60_000
     })
+    await expect(backupRows(page)).toHaveCount(3)
+    await expect(
+      page.getByRole('button', { name: 'Revoke this recovery code' })
+    ).toHaveCount(0)
+  })
+
+  test('removing a backup credential from Settings retires it', async () => {
+    test.setTimeout(240_000)
+    await page.goto('/#/settings')
+    await expect(backupRows(page)).toHaveCount(3, { timeout: 60_000 })
+    // The removal is the ordinary revoke: strike, roster rotation, Space
+    // delete, entry drop. The row goes and the other two stand.
+    page.once('dialog', dialog => void dialog.accept())
+    await backupRows(page).first().click()
+    await expect(page.getByText('Backup credential removed.')).toBeVisible({
+      timeout: 120_000
+    })
+    await expect(backupRows(page)).toHaveCount(2)
   })
 })
 
@@ -630,7 +674,7 @@ test('a remembered session exports the same Space set', async ({
     // management zcap on the siblings.
     const bundle = await openBundle(await exportBundleBytes({ page }))
     await expectWholeAccountBundle({ bundle, served })
-    expect(packedCodeOf(bundle).form).toBe('plain')
+    expect(packedCredentialOf(bundle).form).toBe('plain')
   } finally {
     await context.close()
   }

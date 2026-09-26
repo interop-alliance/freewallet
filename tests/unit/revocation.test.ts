@@ -68,6 +68,19 @@ vi.mock('@/session/rosterStore', () => ({
 }))
 
 vi.mock('@/session/unlockMethods', () => ({
+  // Every recorded update key, as the real helper reads them; the real
+  // module is not imported here, since its graph reaches the real
+  // user-key adoption this file exercises.
+  latentUpdateKeyMultibasesOf: vi.fn(
+    ({
+      record
+    }: {
+      record?: { methods: Array<{ updateKeyMultibase?: string }> } | null
+    }) =>
+      (record?.methods ?? []).flatMap(method =>
+        method.updateKeyMultibase ? [method.updateKeyMultibase] : []
+      )
+  ),
   getUnlockMethods: vi.fn(async () => null),
   rewrapUnlockMethodsRecord: vi.fn(async () => {
     state.calls.push('rewrapUnlockMethodsRecord')

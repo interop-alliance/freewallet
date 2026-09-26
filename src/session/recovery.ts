@@ -181,7 +181,7 @@ import {
 } from '@/session/unlockMethods'
 import {
   accountCeremonyContext,
-  canRunAccountCeremonies,
+  canRunUserKeyCeremonies,
   requireEnrolledCeremonyContext,
   type AccountCeremonyContext
 } from '@/session/accountCeremonyContext'
@@ -493,7 +493,7 @@ export function canIssueRecoveryCode({
 }: {
   session: Session
 }): boolean {
-  return canRunAccountCeremonies({ session }) && !!session.profile.userKey
+  return canRunUserKeyCeremonies({ session })
 }
 
 /**

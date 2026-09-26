@@ -135,8 +135,29 @@ import {
 } from '@/lib/sessionKey'
 import { createLogger } from '@/lib/log'
 import { wasServiceDescription } from '@/lib/wasService'
+import type { StandingCredentialEntry } from '@/session/unlockMethods'
 
 const log = createLogger('fw:session:keyring')
+
+/**
+ * How a standing credential of a kind publishes its `keyAgreement` key in the
+ * account document: a passphrase is low-entropy, so only its hash commitment
+ * is published; a passkey's PRF output and a backup credential's random
+ * secret are high-entropy, so the key publishes verbatim. The one place the
+ * rule is written, so every login, every retirement, and every cleanup that
+ * looks the key up asks the same question the establishment answered.
+ *
+ * @param options {object}
+ * @param options.type {StandingCredentialEntry['type']}
+ * @returns {'commitment' | 'verbatim'}
+ */
+export function keyAgreementPublicationOf({
+  type
+}: {
+  type: StandingCredentialEntry['type']
+}): 'commitment' | 'verbatim' {
+  return type === 'passphrase' ? 'commitment' : 'verbatim'
+}
 
 /**
  * The version stamped on the stored `{ version, encryption, wrapped }`

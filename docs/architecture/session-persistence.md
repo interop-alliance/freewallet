@@ -252,7 +252,8 @@ session reaches every account-management ceremony but the two whose subject
 is this browser. One refusal is left there. Removing the passkey a transient
 session entered on would take the ladder VM all three of its stages act
 through, so it refuses (`ActingCredentialRemovalError`); a remembered
-session may still remove its own login passkey.
+session may still remove its own login passkey. Removing the backup
+credential a transient session entered on refuses the same way.
 
 A passphrase change on the ladder branch replaces the generation delegation
 before its strike entry lands, and adopts the replacement into the live
@@ -264,24 +265,78 @@ through that credential's sibling delegation. Every App Connect grant the
 visit chained under the old delegation ends with it.
 
 **The backup export's stage order** (`src/session/backupExport.ts`). The
-ceremony waits out `session.registryReady` and `session.mends`, resolves the
-account-ceremony context once, and then pre-flights the account Space's, the
-client-annex Space's, and every registry entry's capability for `POST`,
-before anything is minted. The client-annex Space is resolved from the
+export packs a backup credential into the bundle. That is a standing unlock
+credential (`src/session/backupCredential.ts`) whose secret is 32 random
+bytes, derived under wallet-core's `BACKUP_CREDENTIAL_KDF`. The bundle
+carries the secret as `backup-credential.json`, sealed under an export
+passphrase or in the clear. A restore is a transient login on the
+credential's record, which is not built yet: no login form accepts a backup
+credential today. Nothing is retired and no key is rotated.
+
+The ceremony waits out `session.registryReady` and `session.mends` and
+resolves the account-ceremony context once. The pre-flight runs next, before
+anything is minted, so a refusal there leaves no "Backup <date>" row behind.
+It checks the account Space's, the client-annex Space's, and every registry
+entry's capability for `POST`. The client-annex Space is resolved from the
 account document's `#DelegatedClients` pointer on both session kinds, and a
-named annex Space this session cannot reach refuses the run there, before
-the code is minted. Four stages follow in order. First the recovery code: a
-fresh code is minted through the ordinary issuance ceremony, labeled with
-the date, so everything after it already names the code's own unlock Space.
-Then the Space listing, read after that issuance: the account Space, the
-client-annex Space, and one unlock Space per unlock-methods registry entry.
-A registry read back from the server that carries no entry for the Space
-the issuance just reported refuses the run there, since a bundle missing
-the Space its own packed code opens does not restore the account. Then one
-export per Space, in listing order; the account Space's archive is checked
-against this visit's pinned chain head for the account log before the
-bundle is written, and a mismatch refuses the run. A visit holding no pin
-for that log skips the check. Then the packing.
+named annex Space this session cannot reach refuses the run there. One more
+condition rides the annex. The establishment must commit the new
+credential's rung into the pointed generation, signed by this session's own
+ladder rung. A session holding no ladder seed cannot. On an account naming
+an annex Space, such a session refuses here with `BackupAnnexCommitError`. The new credential's own entry is minted with
+the full verb set, so the pre-flight does not check it.
+
+Four stages follow in order. First the establishment, which is the pivot.
+Then the Space listing, read back from the server after it: the account
+Space, the client-annex Space, and one unlock Space per unlock-methods
+registry entry. A registry that carries no entry for the new credential's
+unlock Space refuses the run (`BackupCredentialNotListedError`), since a
+bundle missing that Space does not restore the account. Then one export per
+Space, in listing order. The account Space's archive is checked against this
+visit's pinned chain head for the account log before the bundle is written,
+and a mismatch refuses the run. A visit holding no pin for that log skips
+the check. Then the packing.
+
+The establishment (`establishBackupCredential`) is entry-first, in the
+passkey's shape with one difference. A passkey writes a bare entry and
+completes it afterwards, because that passkey's own next login rebuilds a
+bare row. A backup credential has no next login until a restore runs it, and
+its secret exists only in memory until the file is written. So its first
+write carries everything Settings needs to remove it with no secret in hand.
+That is the standing fields derivable in memory (the unlock Space id, the
+roster kid, the key-agreement multibase, rung 0's update key, the client
+DID) and a pre-minted management zcap. Then `establishStandingUnlock` runs
+with its annex rung commit required: the roster wrap, the delegations, the
+record, the annex rung commit, and the document entry, in that order. The
+commit sits before the document entry, so a commit that cannot land throws
+over inert writes alone. It must land before the annex Space is exported,
+because a restore login on an uncommitted rung mints a fresh generation and
+loses every restored grant. Last, the completion write adds the delegation
+fields and swaps in the establishment's own management zcap.
+
+A failure inside the establishment runs the verify-then-act cleanup the
+passkey add runs, shared through `src/session/standingEstablishment.ts`. The
+record is re-fetched first. A standing record the document lists is a lost
+response to a success, and completes the entry. Otherwise anything published
+is retired first, and then the unlock Space is deleted and the row dropped. The run then fails with `BackupAnnexCommitError` when the
+annex rung commit was what failed, and with
+`BackupCredentialNotEstablishedError` otherwise.
+
+The secret reaches only the establishment and the packing. Nothing stores
+it, returns it elsewhere, or logs it.
+
+| Tear point                                  | What it leaves                                                                  | Mender                                                                                    |
+| ------------------------------------------- | ------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------- |
+| Pre-flight refusal                          | nothing                                                                         | re-run                                                                                    |
+| After the entry-first write                 | a row naming a Space that does not exist and a key no document lists            | Remove under Settings > Backup credentials, which deletes nothing and drops the row       |
+| Inside the establishment, cleanup ran       | nothing, or the row and whatever the cleanup could not clear                    | the cleanup itself; a remaining row's Remove                                              |
+| Inside the establishment, cleanup never ran | the entry-first row and whatever the establishment reached                      | the row's Remove, which converges it (strike, roster rotation, Space delete, entry drop)  |
+| At the completion write                     | a standing credential under the entry-first row, recording no delegation expiry | none needed: the bundle restores through it, and a login with it refreshes the delegation |
+| After the establishment completed           | an ordinary labeled backup credential                                           | re-run; the row is listed and removable like any other                                    |
+
+The Remove tolerates every one of those states. The strike tolerates a
+verification method the document never listed, and the Space delete
+tolerates a 404.
 
 Which capability each export rides depends on the kind. An enrolled session
 root-invokes the account and annex Spaces and invokes each entry's stored
@@ -295,10 +350,10 @@ zcap: an entry whose zcap allows no `POST`, has expired, or names a
 delegatee this session cannot act through is refused before the request, so
 the report names the entry rather than a server refusal. What refreshes such
 a zcap differs by entry. A passphrase's and a passkey's are re-minted by a
-login with that credential. A recovery code's has no refresh path at all --
-only the code's own unlock identity can re-delegate it -- so the remedy
-there is to remove the code under Settings > Recovery codes and issue a new
-one, which is what the refusal says.
+login with that credential. A recovery code's and a backup credential's
+have no refresh path from Settings. Only the entry's own unlock identity can
+re-delegate them, so the remedy is to remove the entry and issue or export
+again, which is what the refusal says.
 
 The export is a walk rather than a snapshot. Each Space is read at its own
 moment and nothing on the server holds the set still, so the bundle is only
@@ -312,27 +367,35 @@ with no consumer attached), that check still runs before the caller sees a
 single byte.
 
 The rule is fail-whole: one Space that cannot be exported fails the run, so
-no bundle is written that reads as complete and is not. The pivot is the
-code issuance, and it is the only durable write the ceremony makes. A run
-torn past a COMPLETED issuance leaves an ordinary labeled recovery code,
-listed and removable in Settings like any other, so the mender is a re-run.
-A tear inside the issuance is not that: the issuance is itself staged
-(`src/session/recovery.ts`, the registry entry last), and a tear after its
-document entry is the open gap
-`every-document-key-agreement-entry-has-a-locatable-credential`, where a
-document `keyAgreement` entry and a roster wrap stand for a code nothing can
-locate. The code string reaches only the packing; nothing stores it, returns
-it, or logs it. The export passphrase seals the packed code and nothing
-else: the bundle carries every unlock Space archive and the account Space's
-user key roster, so a holder can guess the wallet passphrase offline and the
-file's bound is the weaker of the two secrets.
+no bundle is written that reads as complete and is not. The export
+passphrase seals the packed secret and nothing else. The bundle carries
+every unlock Space archive and the account Space's user key roster, so a
+holder can guess the wallet passphrase offline, and the file's bound is the
+weaker of the two secrets.
 
 The save is asked first. The dialog opens the browser's save picker before
-the ceremony starts where the browser has one, so a dismissed picker mints
-no code, and pipes the bundle into the chosen file afterwards; a browser
-without the File System Access API buffers the finished bundle into a Blob
-instead. A cancelled run renders the cancelled message, which says the code
-it may already have issued is listed in Settings.
+the ceremony starts where the browser has one, so a dismissed picker
+establishes no credential. It pipes the bundle into the chosen file
+afterwards. A browser without the File System Access API buffers the
+finished bundle into a Blob instead. A cancelled run renders the cancelled
+message, which says any backup credential it already established is listed
+under Settings > Backup credentials.
+
+**Removing a backup credential.** Settings > Backup credentials lists one
+"Backup <date>" row per entry of the `backup-credential` kind. Its Remove
+runs `removeAccountBackupCredential`, the passkey removal minus the
+authenticator: the ordinary revoke, with no secret in hand. It strikes the
+credential's ladder VM and key agreement from the account document, rotates
+the user key off its roster wrap, deletes its unlock Space through the
+entry's management zcap, and drops the entry. On the ladder kind the
+generation delegation this visit rides is replaced first, best-effort, in
+case the credential's ladder VM signed it. A transient session refuses to
+remove the backup credential it entered on (`ActingCredentialRemovalError`),
+since every stage would act through the VM being struck. An entry recording
+no management zcap refuses with `BackupCredentialNotRemovableError`. After
+the removal the bundle no longer signs in to the live account. It still
+opens every row it carries offline, so removal bounds the live account and
+not a file already written.
 
 Contacts are reachable in a transient session. The remote-direct backend
 serves all seven contact operations against the remote `contacts` and

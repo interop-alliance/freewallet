@@ -2,6 +2,22 @@
 
 ## 0.44.0 - TBD
 
+### Fixed
+
+- The backup export's pre-flight now also refuses, read-only, a session whose
+  rung the pointed client-annex generation neither reveals nor commits
+  (wallet-core's `clientAnnexRungAdmitted`), beside the no-ladder-seed case.
+  Before, that refusal surfaced only after the roster wrap and the unlock
+  record were written, and the cleanup ran a full user-key rotation on every
+  retry. The generation the pre-flight resolves is handed through to the
+  establishment, so the commit targets the generation the refusal covered.
+  The two refusals get their own dialog copy, naming a remedy that works.
+- A backup export no longer clears the passkey-only safety notice: only
+  entries a login accepts (`isLoginEntry`) count as a second unlock method,
+  the same rule the Settings last-method refusal applies.
+- The failed-establishment cleanup reads and verifies the account log once
+  instead of twice.
+
 ### Changed
 
 - The menders account-shape value `client-less` is now `ladder-anchored`,
@@ -37,36 +53,60 @@
   opens a dialog (`src/components/storage/BackupExportDialog.tsx`) offering a
   password-protected or an unprotected backup, and
   `src/session/backupExport.ts` runs `@interop/wallet-backup`'s
-  `exportBundle`: it mints a fresh recovery code labeled with the date,
-  exports every Space the account names -- the account Space, the
-  client-annex Space, and one unlock Space per unlock-methods registry entry,
-  the new code's included -- and packs them into one tar. The packed code
-  makes the file self-sufficient: it plus that code restores the account, and
-  without an export password the file is a bearer credential, which the
-  dialog says. The export password seals that packed code alone. The bundle
-  still carries the unlock Space archives and the user key roster, so the
-  file's bound is the weaker of the export password and the wallet
-  passphrase, which the dialog's copy now states.
-  The code is listed and removable under Settings > Recovery
-  codes like any other. A Space that cannot be exported fails the whole run
-  rather than writing a bundle that reads as complete, and so does a registry
-  that does not list the code just issued or whose unlock methods change
-  while the run is under way. The stored management zcaps are pre-flighted
-  before the code is minted, so a refused run leaves no orphan code behind,
-  and every unlock Space is exported through a freshly minted POST-only
-  child rather than through the stored zcap itself. A refusal names the
-  entry and says what refreshes it:
-  a passphrase's and a passkey's are re-minted by a login with that
-  credential, while a recovery code's has no refresh path and the remedy is
-  to remove the code and issue a new one. Where the browser has a save
-  picker the dialog opens it before the run, so a dismissed picker mints no
-  code.
-
+  `exportBundle`. It establishes a backup credential
+  (`src/session/backupCredential.ts`), a standing unlock credential whose
+  secret is 32 random bytes, labeled with the date. It then exports every
+  Space the account names -- the account Space, the client-annex Space, and
+  one unlock Space per unlock-methods registry entry, the new credential's
+  included -- and packs them into one tar with the secret as
+  `backup-credential.json`, plain or sealed. The file plus that secret
+  carries everything a restore login on the credential's record needs (that
+  login is not built yet), with nothing retired and no key rotated. Without an
+  export password the file is a bearer credential, which the dialog says. The
+  export password seals the packed secret alone. The bundle still carries the
+  unlock Space archives and the user key roster, so the file's bound is the
+  weaker of the export password and the wallet passphrase.
+  A Space that cannot be exported fails the whole run rather than writing a
+  bundle that reads as complete, and so does a registry that does not list
+  the new credential (`BackupCredentialNotListedError`) or whose unlock
+  methods change while the run is under way. The stored management zcaps are
+  pre-flighted before anything is minted, and every unlock Space is exported
+  through a freshly minted POST-only child rather than through the stored
+  zcap itself. A refusal names the entry and says what refreshes it: a
+  passphrase's and a passkey's are re-minted by a login with that credential,
+  while a recovery code's and a backup credential's have no refresh path and
+  the remedy is to remove the entry and issue or export again. Where the
+  browser has a save picker the dialog opens it before the run, so a
+  dismissed picker establishes no credential.
+- The backup credential's establishment writes its registry entry first,
+  carrying a pre-minted management zcap, so a row a torn export leaves is
+  removable under Settings with no secret in hand. It requires the
+  credential's annex rung commit and runs it before the document entry, and
+  a failure runs the passkey add's verify-then-act cleanup, now shared in
+  `src/session/standingEstablishment.ts`. The export refuses with
+  `BackupAnnexCommitError` when the session cannot commit that rung, in the
+  pre-flight when it holds no ladder seed, since a restore on an uncommitted
+  rung would lose every connected app.
+- Settings > Backup credentials (`src/components/BackupCredentialsSection.tsx`),
+  beside Recovery codes, lists one "Backup <date>" row per backup credential.
+  Its Remove runs the ordinary revoke with no secret
+  (`removeAccountBackupCredential`), and refuses the credential a transient
+  session entered on.
+- The `backup-credential` unlock-methods registry kind
+  (`BackupCredentialUnlockMethod`), matched by its `unlockSpaceId`.
+- `establishStandingUnlock` takes a `requiredAnnexCommit` option naming the
+  pre-flighted generation. With it, the annex rung commit runs before the
+  document entry and throws its skip or failure; without it the commit stays
+  best-effort after the entry.
+- The entry-first order a passkey addition and a backup export share (the
+  bare entry, the establishment, the cleanup, the completion) lives once in
+  `src/session/standingEstablishment.ts`, and their removals share
+  `removeStandingCredential`.
 - The backup export resolves the client-annex Space from the account
   document's pointer on both session kinds, and pre-flights its capability
   and the account Space's for `POST` alongside the registry entries, before
-  the code is minted. A named annex Space this session cannot reach refuses
-  the run.
+  the credential is established. A named annex Space this session cannot
+  reach refuses the run.
 - The backup export checks the account Space's exported archive against this
   visit's pinned chain head for the account log before the bundle is
   written. A mismatch refuses the run (`BackupContinuityError`); a visit
@@ -75,7 +115,8 @@
 - Importing another wallet's content from a backup bundle. The Storage page
   offers "Import from another wallet" to every session kind, a guest and a
   no-WAS deployment included: it takes the bundle file and one old secret --
-  the old passphrase, a recovery code, or the code the bundle carries -- and
+  the old passphrase, a recovery code, or the backup credential inside the
+  bundle (the `packedCredential` secret kind) -- and
   `src/session/contentMigration.ts` runs `@interop/wallet-backup`'s walk over
   a sink built on `StorageManager`'s new import methods
   (`importCredential`, `importContactHead`, `importContactRevision`,
@@ -97,8 +138,9 @@
   read back in node: the manifest's profile and account controller, one
   account archive, one client-annex archive and two unlock archives, the
   exporting server's Service Description inside each of them, and the packed
-  code in both modes. Two cells run offline with no server contact -- the
-  bundle opens from the wallet passphrase and from its own packed code, and
+  backup credential in both modes. Two cells run offline with no server
+  contact -- the bundle opens from the wallet passphrase and from its own
+  packed backup credential, and
   every unlock record's members outside the frame, the `binding` and the
   proof are ciphertext naming neither the account DID nor its Space. A last
   cell repeats the Space-set assertions on a remembered session.
@@ -147,6 +189,9 @@
   driver now treats was-client's `NotSupportedError` as a permanent refusal
   and stops that one collection's replication rather than re-sending the
   batch forever.
+- The backup export and content migration require `@interop/wallet-backup`
+  0.3.0, which packs a backup credential in place of a recovery code, and
+  `@interop/wallet-core` 0.80.0, for `BACKUP_CREDENTIAL_KDF`.
 - Every unlock Space (passphrase, passkey, and recovery-code alike) is
   created with the Space type `['AuxiliarySpace', 'Space', 'UnlockSpace']`,
   so a reader can recognize one from its Space Metadata object alone. The

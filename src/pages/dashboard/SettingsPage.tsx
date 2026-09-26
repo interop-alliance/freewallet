@@ -33,6 +33,7 @@ import { peekVerifiedAccountLog } from '@/session/verifiedLog'
 import {
   canRevokeWithoutCeremony,
   getUnlockMethods,
+  isLoginEntry,
   UnlockRegistryStaleSealError,
   type PasskeyUnlockMethod,
   type UnlockMethodsRecord
@@ -62,6 +63,7 @@ import { forgetBrowserWalletData } from '@/session/forget'
 import { PassphraseStrengthField } from '@/components/PassphraseStrengthField'
 import { formatDate } from '@/lib/viewMappers/formatDate'
 import { RecoveryCodesSection } from '@/components/RecoveryCodesSection'
+import { BackupCredentialsSection } from '@/components/BackupCredentialsSection'
 import { EnrolledClientsSection } from '@/components/EnrolledClientsSection'
 import { useAsyncLoad } from '@/hooks/useAsyncLoad'
 import { dashboardStyles } from '@/styles/appStyles'
@@ -353,9 +355,12 @@ export function SettingsPage() {
   const hasPassphraseEntry = !!unlockRegistry?.methods.some(
     method => method.type === 'passphrase'
   )
-  // The registry has at most one unlock method left -- removing it would leave
-  // the wallet unrecoverable after logout, so Settings refuses the removal.
-  const isLastUnlockMethod = (unlockRegistry?.methods.length ?? 0) <= 1
+  // The registry has at most one unlock method left that signs in today --
+  // removing it would leave the wallet unrecoverable after logout, so
+  // Settings refuses the removal. A backup credential is not counted
+  // (`isLoginEntry`).
+  const isLastUnlockMethod =
+    (unlockRegistry?.methods ?? []).filter(isLoginEntry).length <= 1
   const removeNeedsCeremony = removeTarget
     ? !canRevokeWithoutCeremony(removeTarget)
     : false
@@ -1261,6 +1266,8 @@ export function SettingsPage() {
             <EnrolledClientsSection session={session} />
             <Divider />
             <RecoveryCodesSection session={session} />
+            <Divider />
+            <BackupCredentialsSection session={session} />
           </>
         )}
 

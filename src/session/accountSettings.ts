@@ -43,22 +43,16 @@ import {
   WAS_SERVER_URL
 } from '@/app.config'
 import { assertPasskeyPrf, registerPasskey } from '@/lib/passkey'
-import {
-  establishStandingUnlock,
-  standingFieldsOfKeyringHit
-} from '@/session/standingUnlock'
+import { establishStandingUnlock } from '@/session/standingUnlock'
 import type { StandingUnlockFields } from '@/session/unlockMethods'
 import {
   changePassphrase,
   deleteKeyring,
-  deleteUnlockMethod,
   deriveUnlockCredential,
-  fetchKeyring,
   unlockKeyAgreementMembers,
   verifyPassphrase,
   verifyUnlockSecret,
   WrongPassphraseError,
-  type KeyringFetchResult,
   type UnlockCredential
 } from '@/session/keyring'
 import {
@@ -76,8 +70,8 @@ import {
   unlockSpaceVerbInvocation,
   updateUnlockMethods,
   revokeUnlockMethodByCeremony,
-  upsertPasskeyUnlockMethod,
   upsertPassphraseUnlockMethod,
+  type BackupCredentialUnlockMethod,
   type PassphraseUnlockMethod,
   type PasskeyUnlockMethod,
   type UnlockMethod,
@@ -103,6 +97,7 @@ import {
   type LadderDeleter
 } from '@/session/accountCeremonyContext'
 import { documentListsCredential } from '@/session/pendingRetirement'
+import { establishEntryFirstStandingCredential } from '@/session/standingEstablishment'
 import { executeLocalWipe, snapshotWipeTargets } from '@/session/wipe'
 import {
   isUnclaimedLadderVmRefusal,
@@ -110,7 +105,7 @@ import {
   rotateOffUnlockCredential
 } from '@/session/credentialRotation'
 import { reportCeremonyTail } from '@/session/menders/ceremonyTail'
-import { adoptRotatedUserKey } from '@/session/userKeyAdoption'
+import { adoptRotatedUserKey, rotationSpaceId } from '@/session/userKeyAdoption'
 import {
   invalidateVerifiedLog,
   verifiedAccountLog
@@ -1005,18 +1000,6 @@ async function standingFieldsOfCredential({
 }
 
 /**
- * The data Space id a rotated user key is adopted against -- the account
- * pointer's, falling back to the session storage's.
- *
- * @param options {object}
- * @param options.session {Session}
- * @returns {string}
- */
-function rotationSpaceId({ session }: { session: Session }): string {
-  return session.profile.accountPointer?.spaceId ?? session.storage.spaceId!
-}
-
-/**
  * Writes the registry's passphrase entry for a change that has already
  * landed: it points at the new unlock Space and carries the standing configuration
  * the caller decided on (the new credential's, or the old one's when the
@@ -1122,7 +1105,7 @@ export class PasskeyNotEstablishedError extends Error {
  *    body: roster wrap, verbatim document entry (the PRF output is
  *    high-entropy), bridge delegation, standing-layout record. Its failure
  *    fails `addAccountPasskey` (`PasskeyNotEstablishedError`), after the
- *    verify-then-act cleanup below.
+ *    verify-then-act cleanup.
  * 4. On success the same entry is completed in place -- the key-agreement
  *    multibase, the standing fields, and the establishment's wide
  *    management zcap -- and the passkey-safety notice is cleared once the
@@ -1130,11 +1113,12 @@ export class PasskeyNotEstablishedError extends Error {
  *    fails reports `recorded: false`; the bare shape it leaves is the one
  *    this passkey's next login rebuilds.
  *
- * The cleanup is verify-then-act (see
- * `recoverFailedPasskeyEstablishment`): re-fetch the record first, treat a
- * standing record as a lost-response success, delete the unlock Space only
- * when nothing was published, and clean a partial establishment by an
- * actual retirement rather than by deleting the record.
+ * Steps 2 to 4 are the entry-first order every high-entropy standing
+ * credential shares (`establishEntryFirstStandingCredential`), the backup
+ * credential included. The cleanup is verify-then-act: re-fetch the record
+ * first, treat a standing record as a lost-response success, delete the
+ * unlock Space only when nothing was published, and clean a partial
+ * establishment by an actual retirement rather than by deleting the record.
  *
  * @param options {object}
  * @param options.session {Session}
@@ -1193,435 +1177,24 @@ export async function addAccountPasskey({
     backupState: registration.backupState,
     unlockSpaceId: credential.unlock.spaceId
   }
-  // 2. The bare entry-first write, merged into a fresh read (a concurrent
-  // write must survive); the registry is minted with the handle the passkey
-  // just registered under when none has been written yet.
+  // 2-4. The entry-first write, the establishment, and the completion, in
+  // the order both entry-first kinds share. The ladder seed is minted HERE
+  // so a failure cleanup still holds rung 0 and the attribution seed an
+  // actual retirement needs, even when the ceremony threw before returning
+  // them.
   try {
-    await updateUnlockMethods({
-      session,
-      mutate: fresh =>
-        upsertPasskeyUnlockMethod({ record: fresh ?? base, entry })
-    })
-  } catch (err) {
-    throw new PasskeyNotEstablishedError({ cause: err })
-  }
-  // 3. The establishment. The ladder seed is minted HERE so a failure
-  // cleanup still holds rung 0 and the attribution seed an actual
-  // retirement needs, even when the ceremony threw before returning them.
-  const ladderSeed = generateLadderSeed()
-  let established: Awaited<ReturnType<typeof establishStandingUnlock>>
-  try {
-    established = await establishStandingUnlock({
+    return await establishEntryFirstStandingCredential({
       session,
       context,
       secret: registration.prfOutput,
       kdf: PASSKEY_KDF,
-      lowEntropy: false,
-      email: session.user.email,
       credential,
-      ladderSeed
-    })
-  } catch (err) {
-    log.error('Could not establish the new passkey as a standing credential', {
-      err
-    })
-    const recovered = await recoverFailedPasskeyEstablishment({
-      session,
-      context,
-      secret: registration.prfOutput,
-      credential,
-      ladderSeed,
+      ladderSeed: generateLadderSeed(),
       entry,
       base
     })
-    if (recovered) {
-      return recovered
-    }
+  } catch (err) {
     throw new PasskeyNotEstablishedError({ cause: err })
-  }
-  // 4. The completion write.
-  return await completePasskeyEntry({
-    session,
-    base,
-    entry: {
-      ...entry,
-      ...(established.manageCapability
-        ? { manageCapability: established.manageCapability }
-        : {}),
-      ...established.standingFields
-    }
-  })
-}
-
-/**
- * The add-a-passkey completion write: merges the completed entry into a
- * FRESH registry read (anything written since the ceremony's own read --
- * another tab, another client, a login-time refresh -- must survive), then
- * clears the passkey-only safety notice once the account positively has a
- * second unlock method. A fresh read that comes back empty falls back to
- * the ceremony's base, so the handle the passkey registered under is the
- * one persisted; a fresh read carrying a different handle wins anyway (the
- * stored record is the source of truth).
- *
- * @param options {object}
- * @param options.session {Session}
- * @param options.base {UnlockMethodsRecord}   the ceremony's registry base
- * @param options.entry {PasskeyUnlockMethod}   the completed entry
- * @returns {Promise<{ record: UnlockMethodsRecord, recorded: boolean }>}
- */
-async function completePasskeyEntry({
-  session,
-  base,
-  entry
-}: {
-  session: Session
-  base: UnlockMethodsRecord
-  entry: PasskeyUnlockMethod
-}): Promise<{ record: UnlockMethodsRecord; recorded: boolean }> {
-  let record: UnlockMethodsRecord = upsertPasskeyUnlockMethod({
-    record: base,
-    entry
-  })
-  try {
-    record =
-      (await updateUnlockMethods({
-        session,
-        mutate: fresh =>
-          upsertPasskeyUnlockMethod({ record: fresh ?? base, entry })
-      })) ?? record
-  } catch (err) {
-    // The passkey is standing and will log in; only the entry's completion
-    // failed to persist. The registry still holds the bare shape from the
-    // entry-first write, which this passkey's next login rebuilds.
-    log.error('Could not record the new passkey in the registry', { err })
-    return { record, recorded: false }
-  }
-  // The account now has a second unlock method, so the dashboard's
-  // passkey-only safety prompt is resolved. Non-fatal.
-  if (record.methods.length > 1) {
-    try {
-      await session.persistence.passkeyNotices.delete({
-        controller: session.user.id
-      })
-    } catch (err) {
-      log.warn('Could not clear the passkey-safety notice', { err })
-    }
-  }
-  return { record, recorded: true }
-}
-
-/**
- * The verify-then-act cleanup behind a failed passkey establishment.
- *
- * Verify first: the record at the credential's unlock Space is re-fetched,
- * because the failure can be a lost response to the establishment's final
- * record PUT with the credential fully standing server-side -- deleting on
- * the error alone would destroy a succeeded credential. A standing record
- * is treated as SUCCESS: the entry is completed from the hit and the
- * ceremony returns normally (the non-null return).
- *
- * Otherwise, act by what was published. When nothing was (no document
- * `keyAgreement` entry, no roster wrap, and the record absent or plain),
- * the unlock Space and its local state are deleted and the bare registry
- * entry dropped: the credential then never exists -- the simplest mendable
- * state. When something WAS published (or that could not be told), the
- * cleanup is an ACTUAL retirement (`rotateOffUnlockCredential` with the
- * ceremony-minted ladder seed -- the tapped-removal pattern minus the tap,
- * since the PRF output's credential is in hand), never a record delete:
- * the record is the retirement's anchor. Only after the retirement do the
- * unlock Space and the bare entry go. A retirement, re-fetch, or delete
- * that itself fails leaves the bare entry and the record standing as
- * mendable residue, and the surrounding ceremony still fails.
- *
- * @param options {object}
- * @param options.session {Session}
- * @param options.secret {Uint8Array}   the passkey's PRF output
- * @param options.credential {UnlockCredential}   its derived credential
- * @param options.ladderSeed {Uint8Array}   the ceremony-minted ladder seed
- * @param options.context {AccountCeremonyContext | null}   the ceremony
- *   context the failed establishment ran on
- * @param options.entry {PasskeyUnlockMethod}   the bare entry as written
- * @param options.base {UnlockMethodsRecord}   the ceremony's registry base
- * @returns {Promise<{ record: UnlockMethodsRecord, recorded: boolean } | null>}
- *   the ceremony outcome when the re-fetch proved the establishment
- *   succeeded, else null (the caller fails the ceremony)
- */
-async function recoverFailedPasskeyEstablishment({
-  session,
-  context,
-  secret,
-  credential,
-  ladderSeed,
-  entry,
-  base
-}: {
-  session: Session
-  context: AccountCeremonyContext | null
-  secret: Uint8Array
-  credential: UnlockCredential
-  ladderSeed: Uint8Array
-  entry: PasskeyUnlockMethod
-  base: UnlockMethodsRecord
-}): Promise<{ record: UnlockMethodsRecord; recorded: boolean } | null> {
-  let found: KeyringFetchResult | null
-  try {
-    found = await fetchKeyring({
-      secret,
-      kdf: PASSKEY_KDF,
-      credential,
-      mintManageCapability: true,
-      accountLogPinStore: session.persistence.logPins
-    })
-  } catch (err) {
-    // Cannot verify, so nothing is acted on: the bare entry and whatever the
-    // establishment left stand as mendable residue.
-    log.warn(
-      'Could not re-fetch the passkey unlock record after the failed establishment; leaving the residue for the standing menders',
-      { err }
-    )
-    return null
-  }
-  if (
-    found?.standing?.ladderSeed &&
-    (await passkeyEntryPublished({ session, context, credential }))
-  ) {
-    // The lost-response case: the record is standing AND the document lists
-    // the credential (the record is written before the entry, so a standing
-    // record alone proves only the earlier stage), so the establishment
-    // succeeded server-side after all. Complete the entry from the hit.
-    log.warn(
-      'The passkey unlock record is standing after all; completing the registry entry'
-    )
-    const standing = await standingFieldsOfKeyringHit({ found })
-    return await completePasskeyEntry({
-      session,
-      base,
-      entry: {
-        ...entry,
-        ...(found.manageCapability
-          ? { manageCapability: found.manageCapability }
-          : {}),
-        ...standing
-      }
-    })
-  }
-  try {
-    if (await passkeyEstablishmentPublished({ session, context, credential })) {
-      // The retirement: document inventory out (where the entry landed), the
-      // user key rotated off the roster wrap (where one landed), every
-      // encrypted collection re-epoch'd. Its stages no-op over anything the
-      // establishment never reached.
-      const rung0 = await ladderRung({ ladderSeed, index: 0 })
-      const rotation = await rotateOffUnlockCredential({
-        session,
-        context,
-        method: {
-          type: 'passkey',
-          keyAgreementKeyMultibase:
-            credential.standing.keyAgreementKeyMultibase,
-          updateKeyMultibase: rung0.keyMultibase,
-          ladderSeed,
-          unlockSpaceId: credential.unlock.spaceId
-        },
-        verb: 'cleaning up a failed passkey addition'
-      })
-      if (rotation) {
-        reportCeremonyTail({ mended: rotation.mended })
-      }
-      if (rotation?.rotated && rotation.userKey) {
-        await adoptRotatedUserKey({
-          session,
-          spaceId: rotationSpaceId({ session }),
-          userKey: rotation.userKey
-        })
-      }
-    }
-  } catch (err) {
-    if (isUnclaimedLadderVmRefusal(err)) {
-      // The gate, named rather than reported as a transport tear: the
-      // retirement published nothing, and the credential keeps a ladder VM
-      // that no seedless retry can claim. The residue is the same either
-      // way -- the bare entry and the record stand -- but only this arm says
-      // that a retry cannot mend it on its own.
-      log.error(
-        'Could not retire the partially established passkey credential: its ladder VM could not be claimed, so the retirement refused before publishing anything',
-        {
-          err,
-          unclaimedLadderVmIds: (err as { unclaimedLadderVmIds?: string[] })
-            .unclaimedLadderVmIds,
-          retryableWithLadderSeed: (
-            err as { retryableWithLadderSeed?: boolean }
-          ).retryableWithLadderSeed
-        }
-      )
-      return null
-    }
-    // The retirement tore: the bare entry and the record stay standing --
-    // the state the standing menders already own.
-    log.error(
-      'Could not retire the partially established passkey credential; its bare entry and record are left for the standing menders',
-      { err }
-    )
-    return null
-  }
-  // Nothing published (or the retirement swept it): the unlock Space, the
-  // local state, and the bare entry go, so the credential never exists.
-  try {
-    await deleteUnlockMethod({ secret, kdf: PASSKEY_KDF, credential })
-  } catch (err) {
-    log.warn('Could not delete the failed passkey unlock Space', { err })
-    return null
-  }
-  await dropBarePasskeyEntry({
-    session,
-    credentialId: entry.credentialId
-  })
-  return null
-}
-
-/**
- * Whether the account document lists the passkey credential's verbatim
- * `keyAgreement` entry: the establishment's document entry landed. A check
- * that fails resolves to `false`, so the caller falls through to the cleanup
- * by retirement, which no-ops over anything never published.
- *
- * @param options {object}
- * @param options.session {Session}
- * @param options.context {AccountCeremonyContext | null}
- * @param options.credential {UnlockCredential}
- * @returns {Promise<boolean>}
- */
-async function passkeyEntryPublished({
-  session,
-  context,
-  credential
-}: {
-  session: Session
-  context: AccountCeremonyContext | null
-  credential: UnlockCredential
-}): Promise<boolean> {
-  if (!context) {
-    return false
-  }
-  try {
-    // A fresh read: the establishment primed the session's verified-log
-    // memo with the PRE-entry document, so the memo can never show the
-    // entry the torn run itself published.
-    invalidateVerifiedLog({ profile: session.profile })
-    const { doc } = await verifiedAccountLog({
-      session,
-      pointer: context.pointer
-    })
-    return await documentListsCredential({
-      doc,
-      did: context.pointer.did,
-      keyAgreementKeyMultibase: credential.standing.keyAgreementKeyMultibase,
-      published: 'verbatim'
-    })
-  } catch (err) {
-    log.warn(
-      'Could not check whether the passkey establishment published its document entry; cleaning by retirement',
-      { err }
-    )
-    return false
-  }
-}
-
-/**
- * Whether a torn passkey establishment left anything published server-side:
- * the credential's verbatim `keyAgreement` entry in the verified account
- * document, or its wrap in any user-key roster epoch. A check that fails
- * resolves to `true` -- the conservative direction, since the retirement it
- * routes to no-ops over anything never published. A session with no
- * enrolled-client context resolves to `false`: the establishment refused
- * before its first write there.
- *
- * @param options {object}
- * @param options.session {Session}
- * @param options.context {AccountCeremonyContext | null}
- * @param options.credential {UnlockCredential}
- * @returns {Promise<boolean>}
- */
-async function passkeyEstablishmentPublished({
-  session,
-  context,
-  credential
-}: {
-  session: Session
-  context: AccountCeremonyContext | null
-  credential: UnlockCredential
-}): Promise<boolean> {
-  if (!context) {
-    return false
-  }
-  try {
-    // A fresh read, for the same reason as `passkeyEntryPublished`.
-    invalidateVerifiedLog({ profile: session.profile })
-    const { doc } = await verifiedAccountLog({
-      session,
-      pointer: context.pointer
-    })
-    const listed = await documentListsCredential({
-      doc,
-      did: context.pointer.did,
-      keyAgreementKeyMultibase: credential.standing.keyAgreementKeyMultibase,
-      // A passkey's PRF-derived key is high-entropy and publishes verbatim.
-      published: 'verbatim'
-    })
-    if (listed) {
-      return true
-    }
-    const roster = await context.rosterStore.read()
-    return (roster?.descriptor.epochs ?? []).some(epoch =>
-      epoch.recipients.some(
-        recipient => recipient.header.kid === credential.standing.recipientKid
-      )
-    )
-  } catch (err) {
-    log.warn(
-      'Could not check what a failed passkey establishment published; cleaning by retirement',
-      { err }
-    )
-    return true
-  }
-}
-
-/**
- * Drops the entry-first BARE passkey entry after a cleanup that deleted the
- * credential's unlock Space, matched by its `credentialId`. Best-effort: a
- * leftover bare entry names a Space that no longer exists and is removable
- * from Settings.
- *
- * @param options {object}
- * @param options.session {Session}
- * @param options.credentialId {string}
- * @returns {Promise<void>}
- */
-async function dropBarePasskeyEntry({
-  session,
-  credentialId
-}: {
-  session: Session
-  credentialId: string
-}): Promise<void> {
-  try {
-    await updateUnlockMethods({
-      session,
-      mutate: current => {
-        if (!current) {
-          return null
-        }
-        const methods = current.methods.filter(
-          method =>
-            !(method.type === 'passkey' && method.credentialId === credentialId)
-        )
-        return methods.length === current.methods.length
-          ? null
-          : { ...current, methods }
-      }
-    })
-  } catch (err) {
-    log.warn('Could not drop the bare passkey entry after the cleanup', { err })
   }
 }
 
@@ -1710,17 +1283,45 @@ export async function removeAccountPasskey({
   session: Session
   entry: PasskeyUnlockMethod
 }): Promise<void> {
+  await removeStandingCredential({ session, entry, verb: 'removing a passkey' })
+}
+
+/**
+ * The removal every high-entropy standing credential shares (a passkey, a
+ * backup credential): the acting-credential refusal, the generation
+ * delegation's replacement on the ladder branch, the revocation, and the
+ * rotated key's adoption. A passkey entry carrying no management zcap takes
+ * the WebAuthn ceremony path; every other entry revokes through its zcap.
+ *
+ * @param options {object}
+ * @param options.session {Session}
+ * @param options.entry {PasskeyUnlockMethod | BackupCredentialUnlockMethod}
+ * @param options.verb {string}   names the ceremony in refusals and logs
+ * @returns {Promise<void>}
+ * @throws {ActingCredentialRemovalError}   the credential named is the one
+ *   this transient session entered on, whose ladder every stage of the
+ *   removal acts through
+ */
+export async function removeStandingCredential({
+  session,
+  entry,
+  verb
+}: {
+  session: Session
+  entry: PasskeyUnlockMethod | BackupCredentialUnlockMethod
+  verb: string
+}): Promise<void> {
   // Wait out the login-time registry passes rather than racing their
   // read-modify-writes; on a settled session the chain resolved long ago.
   await session.registryReady
-  const verb = 'removing a passkey'
   const context = await accountCeremonyContext({ session })
   // The acting-credential refusal. On the ladder branch every stage acts
   // through the credential this session entered on: the strike entry is
   // signed by its rung, the licensed roster append by its ladder VM, and the
-  // annex stage by its committed rung. Removing that very passkey would take
-  // the VM out from under all three. A remembered session may still remove
-  // its own login passkey, since the strike takes no key it invokes with.
+  // annex stage by its committed rung. Removing that very credential would
+  // take the VM out from under all three. A remembered session may still
+  // remove its own login passkey, since the strike takes no key it invokes
+  // with.
   if (
     context?.kind === 'ladder' &&
     entry.unlockSpaceId === context.unlockSpaceId
@@ -1728,15 +1329,16 @@ export async function removeAccountPasskey({
     throw new ActingCredentialRemovalError()
   }
   // The rule for a struck signer: the strike entry below takes the removed
-  // passkey's ladder VM out of the document, and on the ladder branch that VM
-  // may be what signed the generation delegation this visit's every request
-  // rides. The replacement is signed by the ACTING credential's ladder VM,
-  // which stands throughout, installed through that credential's sibling and
-  // adopted into the live session BEFORE the strike lands. Best-effort: a
-  // delegation the policy leaves standing costs one read, and a renewal that
-  // could not run leaves the stages below to refuse for themselves. Every App
-  // Connect grant this visit chained under the replaced delegation ends with
-  // it, the same mid-generation death an ordinary disconnect causes.
+  // credential's ladder VM out of the document, and on the ladder branch that
+  // VM may be what signed the generation delegation this visit's every
+  // request rides. The replacement is signed by the ACTING credential's
+  // ladder VM, which stands throughout, installed through that credential's
+  // sibling and adopted into the live session BEFORE the strike lands.
+  // Best-effort: a delegation the policy leaves standing costs one read, and
+  // a renewal that could not run leaves the stages below to refuse for
+  // themselves. Every App Connect grant this visit chained under the
+  // replaced delegation ends with it, the same mid-generation death an
+  // ordinary disconnect causes.
   if (context?.kind === 'ladder') {
     // Which key is about to lose its authority, as the entry records it: the
     // bridge delegation's proof verification method, which under invariant 17
@@ -1752,16 +1354,17 @@ export async function removeAccountPasskey({
       })
     } catch (err) {
       log.warn(
-        'Could not replace the generation delegation before the passkey ' +
+        "Could not replace the generation delegation before the credential's " +
           'strike; the visit may lose its authority when the removed ' +
-          "passkey's ladder VM leaves the document",
+          "credential's ladder VM leaves the document",
         { err }
       )
     }
   }
-  const outcome = canRevokeWithoutCeremony(entry)
-    ? await revokeUnlockMethod({ session, context, entry, verb })
-    : await revokeUnlockMethodByCeremony({ session, context, entry, verb })
+  const outcome =
+    entry.type === 'passkey' && !canRevokeWithoutCeremony(entry)
+      ? await revokeUnlockMethodByCeremony({ session, context, entry, verb })
+      : await revokeUnlockMethod({ session, context, entry, verb })
   // The retirement adopted the fresh key in band -- re-sealing the registry
   // to it before the teardown above, which therefore ran under the same keys
   // as the record. This call returns on its id guard when that landed, and

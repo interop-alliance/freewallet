@@ -236,6 +236,16 @@
       "saveError": "The recovery code could not be created. Nothing was saved -- please try again.",
       "revokeError": "The recovery code could not be revoked. Please try again."
     },
+    "backupCredentials": {
+      "section": "Backup credentials",
+      "intro": "Each backup you export creates one backup credential and packs it into that backup file. That credential is what a restore of the file will sign in to this account with; restoring a backup is not available yet. Removing a credential here stops its file signing in; it does not make a file you already exported safe.",
+      "none": "No backups have been exported yet.",
+      "remove": "Remove this backup credential",
+      "removeConfirm": "Remove this backup credential? The backup file it came from will no longer sign in to this account, and this cannot be undone.",
+      "removed": "Backup credential removed.",
+      "revokeError": "The backup credential could not be removed. Please try again.",
+      "actingCredential": "This is the backup credential you signed in with, so it cannot remove itself. Sign in another way to remove it."
+    },
     "deleteFarewellTitle": "Your account is deleted",
     "deleteFarewellAction": "Sign out",
     "deleteForgetBrowserAction": "Forget all wallet data on this browser",
@@ -716,7 +726,7 @@
       "secretKinds": {
         "passphrase": "The old wallet's passphrase",
         "recoveryCode": "A recovery code for the old wallet",
-        "packedCode": "The recovery code inside the backup"
+        "packedCredential": "The backup credential inside the backup file"
       },
       "passphraseLabel": "Old wallet passphrase",
       "recoveryCodeLabel": "Recovery code",
@@ -771,22 +781,22 @@
     },
     "backup": {
       "title": "Back up this wallet",
-      "intro": "Writes one backup file holding everything this account keeps on the storage server. The backup includes a fresh recovery code, so the file plus that code restores the account on its own.",
-      "modeLegend": "How the recovery code travels in the file",
+      "intro": "Writes one backup file holding everything this account keeps on the storage server. The backup includes a fresh backup credential, the one a restore of the file will sign in with. Restoring a backup is not available yet.",
+      "modeLegend": "How the backup credential travels in the file",
       "modes": {
         "protected": "Password-protected (recommended)",
         "unprotected": "Unprotected"
       },
       "passphraseLabel": "Export password",
       "confirmLabel": "Confirm export password",
-      "passphraseHelp": "Seals the recovery code inside this file. It does not have to match your wallet passphrase, and you can reuse it for later backups. Anyone holding the file can still try your wallet passphrase against it offline, so the file is only as strong as the weaker of the two.",
+      "passphraseHelp": "Seals the backup credential inside this file. It does not have to match your wallet passphrase, and you can reuse it for later backups. Anyone holding the file can still try your wallet passphrase against it offline, so the file is only as strong as the weaker of the two.",
       "passphraseMismatch": "The two entries do not match.",
-      "unprotectedWarning": "Without a password the file is a bearer credential: anyone who holds it holds this account, with no guessing. Its recovery code is listed under Settings > Recovery codes, where you can remove it.",
-      "codeNote": "Each backup adds one recovery code, labeled with today's date, to Settings > Recovery codes.",
-      "removalNote": "Removing that code later stops it opening the live account. It does not make a file you already exported safe.",
-      "codeLabel": "Backup {{date}}",
+      "unprotectedWarning": "Without a password the file is a bearer credential: anyone who holds it can sign in to this account, with no guessing. Its backup credential is listed under Settings > Backup credentials, where you can remove it.",
+      "credentialNote": "Each backup adds one backup credential, labeled with today's date, to Settings > Backup credentials.",
+      "removalNote": "Removing that credential later stops it opening the live account. It does not make a file you already exported safe.",
+      "credentialLabel": "Backup {{date}}",
       "progress": {
-        "issuingCode": "Issuing the backup's recovery code...",
+        "establishingCredential": "Establishing the backup's credential...",
         "exportingSpace": "Exporting space {{index}} of {{total}}...",
         "packing": "Packing the backup file..."
       },
@@ -795,15 +805,17 @@
       "close": "Close",
       "success": "Backup written.",
       "errors": {
-        "cancelled": "The backup was cancelled. Any recovery code it had already issued is listed under Settings > Recovery codes.",
+        "cancelled": "The backup was cancelled. Any backup credential it had already established is listed under Settings > Backup credentials.",
         "missingCapability": {
           "recoveryCode": "The recovery code \"{{label}}\" records no management capability, so its part of the backup cannot be exported. A recovery code's capability cannot be refreshed by signing in: remove that code under Settings > Recovery codes, issue a new one, then try again.",
+          "backupCredential": "The backup credential \"{{label}}\" records no management capability, so its part of the backup cannot be exported. Remove that credential under Settings > Backup credentials, then try again.",
           "passkey": "The passkey \"{{label}}\" records no management capability, so its part of the backup cannot be exported. Sign in with that passkey once, then try again.",
           "passphrase": "This account's passphrase records no management capability, so its part of the backup cannot be exported. Sign in with the passphrase once, then try again.",
           "generic": "One part of this account records no management capability, so it cannot be exported and no backup was written."
         },
         "unsupportedCapability": {
           "recoveryCode": "The management capability of the recovery code \"{{label}}\" cannot carry this backup: it is expired, or it was recorded before backups were supported. A recovery code's capability cannot be refreshed by signing in: remove that code under Settings > Recovery codes, issue a new one, then try again.",
+          "backupCredential": "The management capability of the backup credential \"{{label}}\" cannot carry this backup: it is expired, or it was recorded before backups were supported. Remove that credential under Settings > Backup credentials, then try again.",
           "passkey": "The management capability of the passkey \"{{label}}\" cannot carry this backup: it is expired, or it was recorded before backups were supported. Sign in with that passkey once to refresh it, then try again.",
           "passphrase": "The management capability of this account's passphrase cannot carry this backup: it is expired, or it was recorded before backups were supported. Sign in with the passphrase once to refresh it, then try again.",
           "generic": "One part of this account records a management capability that cannot carry this backup, so no backup was written."
@@ -811,7 +823,12 @@
         "spaceExportFailed": "The storage server could not export part of this account, so no backup was written.",
         "accountSpaceMissing": "This account names no storage space to export.",
         "failed": "The backup could not be written.",
-        "codeNotListed": "No backup was written: the recovery code this run issued is not listed among this account's unlock methods. The account log may still carry an entry for it. Try again, and if a \"Backup <date>\" row appears under Settings > Recovery codes, you can remove it there.",
+        "credentialNotListed": "No backup was written: the backup credential this run established is not listed among this account's unlock methods. Try again, and if a \"Backup <date>\" row appears under Settings > Backup credentials, you can remove it there.",
+        "notEstablished": "No backup was written: the backup credential could not be established. Try again, and if a \"Backup <date>\" row appears under Settings > Backup credentials, you can remove it there.",
+        "annexCommit": {
+          "noLadderSeed": "No backup was written: this browser's saved sign-in cannot record the backup credential in the account's client annex, so a restore from the file would lose the account's connected apps. Change your passphrase or add a passkey, sign in again with it, then try again.",
+          "rungUncommitted": "No backup was written: the account's client annex does not list this sign-in, so it cannot record the backup credential there, and a restore from the file would lose the account's connected apps. Sign in with a different passphrase or passkey of this account, then try again."
+        },
         "registryChanged": "This account's unlock methods changed while the backup was being written, so no backup was written. Try again.",
         "continuity": "The exported account archive does not carry the account history this session verified, so no backup was written. Sign in again and try again. If it keeps happening, the storage server may be serving a different account log."
       }

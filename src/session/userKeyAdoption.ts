@@ -140,6 +140,18 @@ export async function resealUnlockRegistryForRotation({
 }
 
 /**
+ * The data Space id a rotated user key is adopted against -- the account
+ * pointer's, falling back to the session storage's.
+ *
+ * @param options {object}
+ * @param options.session {Session}
+ * @returns {string}
+ */
+export function rotationSpaceId({ session }: { session: Session }): string {
+  return session.profile.accountPointer?.spaceId ?? session.storage.spaceId!
+}
+
+/**
  * The in-band adoption: the whole body of a rotation ceremony's
  * `onUserKeyAdopted`, in the one order that leaves nothing stranded.
  *

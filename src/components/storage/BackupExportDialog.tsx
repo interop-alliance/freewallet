@@ -2,12 +2,14 @@
  * The backup-export dialog behind the Storage page's export action: the two
  * bundle modes, the run's progress, and the file save.
  *
- * Every export mints a fresh recovery code and packs it in the bundle, so
- * the file plus that code restores the account on its own. The mode decides
- * how the code travels. Password-protected, the default, seals it under an
- * export passphrase chosen here, which never has to match the wallet
- * passphrase. Unprotected, it travels in the clear, which makes the file a
- * bearer credential: whoever holds it holds the account.
+ * Every export establishes a fresh backup credential and packs its secret
+ * in the bundle, so the file plus that secret carries everything a restore
+ * login needs (that login is not built yet). The mode decides how the secret
+ * travels. Password-protected, the
+ * default, seals it under an export passphrase chosen here, which never has
+ * to match the wallet passphrase. Unprotected, it travels in the clear, which
+ * makes the file a bearer credential: whoever holds it signs in to the
+ * account.
  *
  * The export passphrase seals that one file, and no more. The bundle still
  * carries every unlock Space archive and the account Space's user key
@@ -26,8 +28,8 @@
  * just on a successful one.
  *
  * Where the file goes is asked first, before the ceremony starts, since the
- * export's first stage mints a recovery code into the account: a save picker
- * the user dismisses then costs no code and no run. A browser without the
+ * export's first stage establishes a backup credential into the account: a
+ * save picker the user dismisses then costs no credential and no run. A browser without the
  * File System Access API has no picker to open, so there the finished bundle
  * is buffered into a Blob and downloaded as before.
  */
@@ -136,9 +138,9 @@ export function BackupExportDialog({
     const now = new Date()
     const fileName = `wallet-backup-${fileDate(now)}.tar`
     // Where the file goes is asked BEFORE the ceremony runs, and outside the
-    // try that renders the run's failures: the export mints a recovery code,
-    // and a picker the user dismisses should cost neither that code nor the
-    // run, and should leave the form exactly as it was -- no message, and
+    // try that renders the run's failures: the export establishes a backup
+    // credential, and a picker the user dismisses should cost neither that
+    // credential nor the run, and should leave the form exactly as it was -- no message, and
     // both passphrase fields kept. A browser with no picker answers nothing
     // here and takes the Blob download below instead.
     let target
@@ -160,7 +162,7 @@ export function BackupExportDialog({
     try {
       const stream = await exportBackup({
         session,
-        codeLabel: t('storage.backup.codeLabel', {
+        credentialLabel: t('storage.backup.credentialLabel', {
           date: formatDate({
             isoDate: now.toISOString(),
             locale: i18n.language
@@ -178,8 +180,9 @@ export function BackupExportDialog({
       showToast({ message: t('storage.backup.success') })
       onClose()
     } catch (err) {
-      // A cancelled run renders too: past the code issuance it has left a
-      // recovery code standing, and the cancelled message is what says so.
+      // A cancelled run renders too: past the establishment it has left a
+      // backup credential standing, and the cancelled message is what says
+      // so.
       if (!backupExportCancelled(err)) {
         log.error('Could not export a backup bundle', { err })
       }
@@ -204,8 +207,8 @@ export function BackupExportDialog({
    * @returns {string}
    */
   function progressText(): string {
-    if (!progress || progress.stage === 'issuing-code') {
-      return t('storage.backup.progress.issuingCode')
+    if (!progress || progress.stage === 'establishing-credential') {
+      return t('storage.backup.progress.establishingCredential')
     }
     if (progress.stage === 'packing') {
       return t('storage.backup.progress.packing')
@@ -280,7 +283,7 @@ export function BackupExportDialog({
           )}
 
           <Typography variant="body2" color="text.secondary">
-            {t('storage.backup.codeNote')}
+            {t('storage.backup.credentialNote')}
           </Typography>
           <Typography variant="body2" color="text.secondary">
             {t('storage.backup.removalNote')}

@@ -109,7 +109,13 @@ vi.mock('@/session/accountCeremonyContext', () => ({
 const { requireEnrolledCeremonyContext } =
   await import('@/session/accountCeremonyContext')
 
-vi.mock('@/session/unlockMethods', () => ({
+vi.mock('@/session/unlockMethods', async () => ({
+  // The real helper: the latent-hash hand-off reads it.
+  latentUpdateKeyMultibasesOf: (
+    await vi.importActual<typeof import('@/session/unlockMethods')>(
+      '@/session/unlockMethods'
+    )
+  ).latentUpdateKeyMultibasesOf,
   getUnlockMethods: vi.fn(),
   managementZcapClient: vi.fn(() => ({ managementZcapClient: true })),
   refreshStandingDelegationFields: vi.fn(),

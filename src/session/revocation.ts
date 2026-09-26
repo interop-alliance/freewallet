@@ -56,7 +56,10 @@ import {
   ensureGenerationDelegation,
   renewTransientGenerationDelegation
 } from '@/session/annexReach'
-import { getUnlockMethods } from '@/session/unlockMethods'
+import {
+  getUnlockMethods,
+  latentUpdateKeyMultibasesOf
+} from '@/session/unlockMethods'
 import type { UnlockMethodsRecord } from '@/session/unlockMethods'
 import {
   accountCeremonyContext,
@@ -67,7 +70,6 @@ import {
   adoptRotatedUserKey,
   adoptRotatedUserKeyInBand
 } from '@/session/userKeyAdoption'
-import { recoveryEntriesOf } from '@/session/recovery'
 import {
   cascadeCollections,
   type UserKeyCascadeResult
@@ -237,22 +239,15 @@ export async function revokeEnrolledClient({
       signer: context.ladderDeleter
     })
   }
-  const entries = recoveryEntriesOf({ record: registryRecord })
-  // The standing passphrase/passkey credentials commit a ladder rung the
-  // same way a recovery code commits its update key; both sets are latent
-  // hashes the document edit must tell apart from the revoked client's
-  // staged commitment. The recorded rung may lag the ladder (self-enrolled
-  // logins refresh it best-effort), in which case the edit's attribution
-  // fails closed rather than guessing.
-  const latentMultibases = [
-    ...entries.map(entry => entry.updateKeyMultibase),
-    ...(registryRecord?.methods ?? []).flatMap(method =>
-      (method.type === 'passphrase' || method.type === 'passkey') &&
-      method.updateKeyMultibase
-        ? [method.updateKeyMultibase]
-        : []
-    )
-  ]
+  // The standing passphrase, passkey, and backup credentials commit a
+  // ladder rung the same way a recovery code commits its update key; both
+  // sets are latent hashes the document edit must tell apart from the
+  // revoked client's staged commitment. The recorded rung may lag the ladder
+  // (self-enrolled logins refresh it best-effort), in which case the edit's
+  // attribution fails closed rather than guessing.
+  const latentMultibases = latentUpdateKeyMultibasesOf({
+    record: registryRecord
+  })
 
   // The cascade opens with a document edit, so nothing may keep reading a
   // memo taken before it. Dropped up front (the edit lands early in the call)

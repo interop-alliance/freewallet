@@ -74,6 +74,11 @@ that file's header; the rules that apply when working an item:
   to one past the highest id across both files, then take it.
 - Statuses are edited in place; acceptance checkboxes are ticked as they are
   met.
+- After any edit to `_spec/ROADMAP.md`, run
+  `node _spec/tools/roadmap-order.mjs`: it orders each section's items by
+  their `depends-on` edges, writes the derived `blocks:` field and title
+  markers, and regenerates the index block. The roadmap file's header
+  describes the markers and the hand-maintained session tag.
 - **Completing an item includes archiving it**: in the same pass that marks
   it `done`, move it verbatim (number, title, field block, prose, with its
   `done` date) from `_spec/ROADMAP.md` to

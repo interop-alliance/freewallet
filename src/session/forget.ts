@@ -110,13 +110,13 @@ import {
   type LadderDeleter
 } from '@/session/accountCeremonyContext'
 import type { KeyringFetchResult } from '@/session/keyring'
-import { recoveryEntriesOf } from '@/session/recovery'
 import { findPendingPassphraseEntries } from '@/session/credentialCoverage'
 import { sessionRosterStore } from '@/session/rosterStore'
 import { sessionCollectionStores } from '@/session/collectionLogStore'
 import { unlockLogStore } from '@/session/standingUnlock'
 import {
   getUnlockMethods,
+  latentUpdateKeyMultibasesOf,
   refreshStandingDelegationFields,
   unlockEntryReaderFor
 } from '@/session/unlockMethods'
@@ -314,17 +314,7 @@ export async function forgetThisBrowser({
     }),
     epochPins.load({ accountDid: pointer.did })
   ])
-  const latentMultibases = [
-    ...recoveryEntriesOf({ record: registry }).map(
-      entry => entry.updateKeyMultibase
-    ),
-    ...(registry?.methods ?? []).flatMap(method =>
-      (method.type === 'passphrase' || method.type === 'passkey') &&
-      method.updateKeyMultibase
-        ? [method.updateKeyMultibase]
-        : []
-    )
-  ]
+  const latentMultibases = latentUpdateKeyMultibasesOf({ record: registry })
 
   // The transition's pending-retirement guard, before anything is written:
   // a passphrase change torn before its retirement landed leaves a registry

@@ -12,6 +12,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 import { addSink, captureSink } from '@interop/logger'
 import { base64urlnopad } from '@scure/base'
+import type { Session } from '@/types/auth'
 
 const state = vi.hoisted(() => ({
   calls: [] as string[],
@@ -272,7 +273,13 @@ vi.mock('@/session/credentialRotation', () => ({
 vi.mock('@/session/userKeyAdoption', () => ({
   adoptRotatedUserKey: vi.fn(async () => {
     state.calls.push('adoptRotatedUserKey')
-  })
+  }),
+  // The real helper: the account pointer's Space id, else the storage's,
+  // which is what the adoption assertions below name.
+  rotationSpaceId: vi.fn(
+    ({ session }: { session: Session }) =>
+      session.profile.accountPointer?.spaceId ?? session.storage.spaceId
+  )
 }))
 
 vi.mock('@/session/standingUnlock', () => ({
@@ -381,6 +388,9 @@ class FakeWrongPassphraseError extends Error {}
 
 vi.mock('@/session/keyring', () => ({
   WrongPassphraseError: FakeWrongPassphraseError,
+  keyAgreementPublicationOf: vi.fn(({ type }: { type: string }) =>
+    type === 'passphrase' ? 'commitment' : 'verbatim'
+  ),
   verifyPassphrase: vi.fn(async () => {
     state.calls.push('verifyPassphrase')
     if (state.verifyFails === 'wrong') {
@@ -635,6 +645,34 @@ vi.mock('@/session/unlockMethods', async importOriginal => {
         // entry then its completion or drop) reads its own first write back.
         state.registry = next
         return next
+      }
+    ),
+    // The registry drop rides the same seam as the read-modify-writes above,
+    // so a ceremony's drop shows up in `state.puts` like its other writes.
+    dropRegistryEntry: vi.fn(
+      async ({
+        entry
+      }: {
+        entry: { type: string; unlockSpaceId?: string }
+      }) => {
+        const current = state.registry as UnlockRecord | null
+        if (!current) {
+          return
+        }
+        const methods = current.methods.filter(
+          method =>
+            !(
+              method.type === entry.type &&
+              method.unlockSpaceId === entry.unlockSpaceId
+            )
+        )
+        if (methods.length === current.methods.length) {
+          return
+        }
+        const next = { ...current, methods }
+        state.calls.push('putUnlockMethods')
+        state.puts.push(next)
+        state.registry = next
       }
     ),
     refreshStandingDelegationFields: vi.fn(async () => {}),
@@ -893,6 +931,8 @@ vi.mock('@/lib/loginCredential', () => ({
 }))
 
 vi.mock('@/session/pendingRetirement', () => ({
+  keyAgreementPublicationOf: ({ type }: { type: string }) =>
+    type === 'passphrase' ? 'commitment' : 'verbatim',
   documentListsCredential: vi.fn(
     async ({ published }: { published?: 'commitment' | 'verbatim' }) =>
       // The verbatim form is the passkey cleanup's published-check; the

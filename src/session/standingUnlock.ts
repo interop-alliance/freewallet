@@ -213,6 +213,19 @@ export function unlockLogStore({
  *   when this ceremony throws before returning). When absent, the seed a
  *   prior run sealed into the credential's standing record for this account
  *   is reused, and a fresh one is minted only when no such record stands
+ * @param [options.requiredAnnexCommit] {object}   makes the bound
+ *   credential's annex rung commit required on the enrolled kind. By default
+ *   the commit is best-effort: it runs after the document entry and logs a
+ *   skip or a failure, leaving the credential to wait for the next generation
+ *   swap. Required, it runs BEFORE the document entry, so a commit that
+ *   cannot land leaves only inert writes behind, and throws the skip or the
+ *   failure: the backup export passes it, since a restore login on an
+ *   uncommitted rung mints a fresh generation and loses every restored grant.
+ *   The ladder kind commits before its entry, blocking, either way
+ * @param options.requiredAnnexCommit.clientAnnexDid {string | null}   the
+ *   client-annex generation the caller's pre-flight resolved from the account
+ *   document (`null`: it names none), used in place of this ceremony's own
+ *   resolution, so the commit targets the generation the refusal covered
  * @param [options.idb] {IDBFactory}
  * @returns {Promise<object>}   the new record's unlock Space id, management
  *   zcap, persist closure (absent on the ladder kind, which writes nothing
@@ -227,6 +240,7 @@ export async function establishStandingUnlock({
   email,
   credential: derived,
   ladderSeed: mintedLadderSeed,
+  requiredAnnexCommit,
   idb
 }: {
   session: Session
@@ -237,6 +251,7 @@ export async function establishStandingUnlock({
   email?: string
   credential?: UnlockCredential
   ladderSeed?: Uint8Array
+  requiredAnnexCommit?: { clientAnnexDid: string | null }
   idb?: IDBFactory
 }): Promise<{
   unlockSpaceId: string
@@ -304,11 +319,15 @@ export async function establishStandingUnlock({
     let delegatedClients: IZcap | undefined
     let clientAnnexDid: string | undefined
     try {
-      const { doc } = await verifiedAccountLog({
-        session,
-        pointer
-      })
-      clientAnnexDid = delegatedClientsPointer({ doc })
+      if (requiredAnnexCommit) {
+        clientAnnexDid = requiredAnnexCommit.clientAnnexDid ?? undefined
+      } else {
+        const { doc } = await verifiedAccountLog({
+          session,
+          pointer
+        })
+        clientAnnexDid = delegatedClientsPointer({ doc })
+      }
       if (clientAnnexDid) {
         delegatedClients = await mintDelegatedClientsDelegation({
           zcapClient: boundZcapClient,
@@ -489,6 +508,14 @@ export async function establishStandingUnlock({
       idb
     })
 
+    // 3b. The annex rung commit, when the caller requires it: BEFORE the
+    // entry, so a commit that cannot land (the honest skip, or an acting
+    // rung the generation does not commit) throws over inert writes alone,
+    // a roster wrap and a record no document names.
+    if (minted.clientAnnexDid && requiredAnnexCommit) {
+      await commitAnnexRung({ clientAnnexDid: minted.clientAnnexDid })
+    }
+
     // 4. The document entry: the keyAgreement publication (commitment for a
     // low-entropy credential, verbatim for a high-entropy one) and the hash
     // of ladder rung 0 in `nextKeyHashes`.
@@ -512,7 +539,7 @@ export async function establishStandingUnlock({
 
     // 4b. The annex rung commit, best-effort: nothing licenses a bind to
     // mint a generation, and the lockout consequence stands as documented.
-    if (minted.clientAnnexDid) {
+    if (minted.clientAnnexDid && !requiredAnnexCommit) {
       try {
         await commitAnnexRung({ clientAnnexDid: minted.clientAnnexDid })
       } catch (err) {
@@ -574,8 +601,10 @@ export async function establishStandingUnlock({
 
 /**
  * The bind's annex-commit stage had no acting ladder seed to sign with. The
- * enrolled branch logs and carries on; the ladder branch never raises it,
- * since a session on that branch holds a seed by construction.
+ * enrolled branch logs and carries on by default and throws it when the
+ * commit is required; the ladder branch never raises it, since a session on
+ * that branch holds a seed by construction. Matched by name where it is
+ * caught outside this module.
  */
 class ClientAnnexRungCommitSkipped extends Error {
   constructor() {

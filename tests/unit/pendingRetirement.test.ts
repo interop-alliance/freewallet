@@ -102,7 +102,12 @@ vi.mock('@/session/credentialRotation', () => ({
 vi.mock('@/session/userKeyAdoption', () => ({
   adoptRotatedUserKey: vi.fn(async () => {
     state.calls.push('adoptRotatedUserKey')
-  })
+  }),
+  // The real helper: the account pointer's Space id, else the storage's.
+  rotationSpaceId: vi.fn(
+    ({ session }: { session: Session }) =>
+      session.profile.accountPointer?.spaceId ?? session.storage.spaceId
+  )
 }))
 
 vi.mock('@/session/standingUnlock', () => ({

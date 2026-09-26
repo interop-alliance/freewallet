@@ -313,7 +313,7 @@ function importedCollections(
  * @param options.session {Session}   the account imported INTO
  * @param options.bundle {ByteSource}   the bundle tar's bytes, or a stream
  * @param options.secret {MigrationSecret}   the OLD account's passphrase,
- *   its recovery code, or the code the bundle carries
+ *   its recovery code, or the backup credential the bundle carries
  * @param [options.bundleBytes] {number}   the bundle's size, for the quota
  *   pre-check, when the caller knows it without draining a stream
  * @param [options.signal] {AbortSignal}   cancels between rows; an aborted

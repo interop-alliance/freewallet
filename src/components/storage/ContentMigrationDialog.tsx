@@ -75,7 +75,7 @@ const NOT_MIGRATED_KEYS = [
 /**
  * Which of the three secret inputs the form is showing.
  */
-type SecretKind = 'passphrase' | 'recoveryCode' | 'packedCode'
+type SecretKind = 'passphrase' | 'recoveryCode' | 'packedCredential'
 
 /**
  * How often the per-collection counters are pushed into React state. The walk
@@ -161,11 +161,11 @@ export function ContentMigrationDialog({
     if (secretKind === 'recoveryCode') {
       return { recoveryCode }
     }
-    if (secretKind === 'packedCode') {
-      // An empty field is the plain packed code: the export was written
+    if (secretKind === 'packedCredential') {
+      // An empty field is the plain packed credential: the export was written
       // without a password, so there is nothing to unseal it with.
       return {
-        packedCode: exportPassphrase ? { exportPassphrase } : {}
+        packedCredential: exportPassphrase ? { exportPassphrase } : {}
       }
     }
     return { passphrase }
@@ -280,9 +280,9 @@ export function ContentMigrationDialog({
                 label={t('storage.migration.secretKinds.recoveryCode')}
               />
               <FormControlLabel
-                value="packedCode"
+                value="packedCredential"
                 control={<Radio />}
-                label={t('storage.migration.secretKinds.packedCode')}
+                label={t('storage.migration.secretKinds.packedCredential')}
               />
             </RadioGroup>
           </FormControl>
@@ -308,7 +308,7 @@ export function ContentMigrationDialog({
               autoComplete="off"
             />
           )}
-          {secretKind === 'packedCode' && (
+          {secretKind === 'packedCredential' && (
             <TextField
               type="password"
               label={t('storage.migration.exportPassphraseLabel')}

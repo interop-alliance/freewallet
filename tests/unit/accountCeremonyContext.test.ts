@@ -23,6 +23,7 @@ vi.mock('@/app.config', async importOriginal => ({
 }))
 
 import {
+  canRunUserKeyCeremonies,
   enrolledCeremonyContext,
   requireEnrolledCeremonyContext
 } from '@/session/accountCeremonyContext'
@@ -151,6 +152,7 @@ describe('the gates derived from it', () => {
   it('enables both surfaces for an enrolled client on a promoted account', () => {
     const session = sessionWith()
     expect(canManageAccountClients({ session })).toBe(true)
+    expect(canRunUserKeyCeremonies({ session })).toBe(true)
     expect(canIssueRecoveryCode({ session })).toBe(true)
   })
 
@@ -174,6 +176,7 @@ describe('the gates derived from it', () => {
     const session = sessionWith({ userKey: undefined })
     // Nothing else is missing: the clients surface stays enabled.
     expect(canManageAccountClients({ session })).toBe(true)
+    expect(canRunUserKeyCeremonies({ session })).toBe(false)
     expect(canIssueRecoveryCode({ session })).toBe(false)
   })
 })

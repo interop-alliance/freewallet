@@ -67,7 +67,7 @@ import { keyAgreementCommitment } from '@interop/wallet-core/webvh'
 import { unlockKeyVmId } from '@interop/wallet-core/unlock'
 import { KEYRING_KDF } from '@interop/wallet-core/keyring'
 import type { Session } from '@/types/auth'
-import { documentListsVmId } from '@/session/keyring'
+import { documentListsVmId, keyAgreementPublicationOf } from '@/session/keyring'
 import type { KeyringFetchResult, UnlockCredential } from '@/session/keyring'
 import {
   accountCeremonyContext,
@@ -78,7 +78,7 @@ import {
   rotateOffUnlockCredential
 } from '@/session/credentialRotation'
 import { reportCeremonyTail } from '@/session/menders/ceremonyTail'
-import { adoptRotatedUserKey } from '@/session/userKeyAdoption'
+import { adoptRotatedUserKey, rotationSpaceId } from '@/session/userKeyAdoption'
 import {
   establishStandingUnlock,
   standingFieldsOfKeyringHit
@@ -319,8 +319,7 @@ export async function repairTornPassphraseRetirement({
       // keys.
       await adoptRotatedUserKey({
         session,
-        spaceId:
-          session.profile.accountPointer?.spaceId ?? session.storage.spaceId!,
+        spaceId: rotationSpaceId({ session }),
         userKey: outcome.userKey
       })
     }
@@ -609,7 +608,7 @@ export async function rebuildBarePasskeyEntry({
       doc,
       did: context.pointer.did,
       keyAgreementKeyMultibase: standingClient.keyAgreementKeyMultibase,
-      published: 'verbatim'
+      published: keyAgreementPublicationOf({ type: 'passkey' })
     }))
   ) {
     return 'noop'

@@ -397,6 +397,23 @@ export function canRunAccountCeremonies({
 }
 
 /**
+ * Whether this session can run a ceremony that wraps or rotates the user
+ * key: an account-ceremony context resolves and the user key is unlocked.
+ * The recovery-code issuance and the backup export both gate on it.
+ *
+ * @param options {object}
+ * @param options.session {Session}
+ * @returns {boolean}
+ */
+export function canRunUserKeyCeremonies({
+  session
+}: {
+  session: Session
+}): boolean {
+  return canRunAccountCeremonies({ session }) && !!session.profile.userKey
+}
+
+/**
  * The authority kind this session HOLDS, with the key material that decided
  * it, whether or not the account preconditions a full resolution adds are
  * met. A caller consumes what was tested rather than restating the test.

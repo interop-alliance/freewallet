@@ -73,13 +73,19 @@ update-key ladder seed (`@interop/wallet-core/unlock`, bound by
 generation, that establishment also appends one atomic hash-restating annex
 commit entry with the new credential's rung-0 hash, signed by the login
 credential's committed rung. Without it the credential could not enter a
-transient session until the next generation swap. The append is
-best-effort.
+transient session until the next generation swap. A ladder-anchored
+session runs the append before the document entry, and a failure there
+fails the establishment. An enrolled session runs it after the entry, as a
+best-effort step. A backup credential's establishment is the exception
+there. It requires the append and runs it before the document entry (the
+`requiredAnnexCommit` option), since a restore login on an uncommitted rung
+mints a fresh generation and loses every restored grant.
 
 The document carries a passphrase-derived `keyAgreement` key only as a hash
 commitment (`MultikeyCommitment`), which the roster's recipient resolver
 verifies the roster-carried key against. A passkey's PRF-derived key is
-high-entropy and publishes verbatim (see "Recovery codes" in recovery-codes.md).
+high-entropy and publishes verbatim (see "Recovery codes" in recovery-codes.md),
+and so does a backup credential's, derived from 32 random bytes.
 
 The connect-another-wallet ceremony (see "The client enrollment ceremony" in client-enrollment.md)
 survives for records without standing authority, for the rendezvous

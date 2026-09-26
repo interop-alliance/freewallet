@@ -84,6 +84,7 @@ import { unlockLogStore } from '@/session/standingUnlock'
 import {
   deriveUnlockCredential,
   fetchTransientKeyring,
+  keyAgreementPublicationOf,
   type TransientKeyringFetchResult,
   type UnlockCredential
 } from '@/session/keyring'
@@ -662,7 +663,7 @@ export async function transientSessionFromKeyringHit({
       doc: verified.doc,
       did: accountDid,
       keyAgreementKeyMultibase: found.standingClient.keyAgreementKeyMultibase,
-      published: type === 'passkey' ? 'verbatim' : 'commitment'
+      published: keyAgreementPublicationOf({ type })
     }))
   ) {
     throw new TransientLoginUnavailableError({

@@ -9,11 +9,16 @@ import { describe, expect, it, vi } from 'vitest'
 import type { Session } from '@/types/auth'
 import { STORAGE_IN_MEMORY, STORAGE_INDEXEDDB } from '@/session/persistence'
 
-const { backfillPassphraseUnlockMethod, upsertPassphraseUnlockMethod } =
-  await import('@/session/unlockMethods')
+const {
+  backfillPassphraseUnlockMethod,
+  upsertUnlockMethod,
+  isStandingCredentialEntry,
+  upsertPassphraseUnlockMethod
+} = await import('@/session/unlockMethods')
 type PassphraseUnlockMethod =
   import('@/session/unlockMethods').PassphraseUnlockMethod
 type UnlockMethodsRecord = import('@/session/unlockMethods').UnlockMethodsRecord
+type UnlockMethod = import('@/session/unlockMethods').UnlockMethod
 
 /**
  * A minimal session shaped as `backfillPassphraseUnlockMethod` reads it: the
@@ -202,5 +207,69 @@ describe('upsertPassphraseUnlockMethod (the establishment marker)', () => {
     expect(entry).not.toHaveProperty('pendingEstablishment')
     // The repoint drops the carried standing members with it.
     expect(entry).not.toHaveProperty('keyAgreementKeyMultibase')
+  })
+})
+
+describe('backup-credential entries', () => {
+  const passphrase: UnlockMethod = {
+    type: 'passphrase',
+    createdAt: '2026-09-01T00:00:00Z',
+    unlockSpaceId: 'unlock-space-passphrase',
+    kdfVersion: 1
+  }
+  const backupA: UnlockMethod = {
+    type: 'backup-credential',
+    label: '2026-09-01',
+    createdAt: '2026-09-01T00:00:00Z',
+    unlockSpaceId: 'unlock-space-backup-a'
+  }
+  const backupB: UnlockMethod = {
+    type: 'backup-credential',
+    label: '2026-09-02',
+    createdAt: '2026-09-02T00:00:00Z',
+    unlockSpaceId: 'unlock-space-backup-b'
+  }
+
+  it('upserts a backup entry by its unlock Space alone', () => {
+    // Two backup exports leave two entries; a write naming one of them must
+    // replace that one in place and leave the other standing.
+    const record = {
+      webAuthnUserId: 'HANDLE',
+      methods: [passphrase, backupA, backupB] as UnlockMethod[]
+    } as UnlockMethodsRecord
+    const renamed = { ...backupA, label: 'renamed' }
+    expect(upsertUnlockMethod({ record, entry: renamed }).methods).toEqual([
+      passphrase,
+      renamed,
+      backupB
+    ])
+  })
+
+  it('counts the three standing kinds as standing credentials', () => {
+    expect(isStandingCredentialEntry(passphrase)).toBe(true)
+    expect(
+      isStandingCredentialEntry({
+        type: 'passkey',
+        label: 'Laptop',
+        createdAt: '2026-09-01T00:00:00Z',
+        credentialId: 'cred-1',
+        transports: [],
+        backupEligibility: false,
+        backupState: false,
+        unlockSpaceId: 'unlock-space-passkey'
+      })
+    ).toBe(true)
+    expect(isStandingCredentialEntry(backupA)).toBe(true)
+    expect(
+      isStandingCredentialEntry({
+        type: 'recovery-code',
+        label: 'Code 1',
+        createdAt: '2026-09-01T00:00:00Z',
+        unlockSpaceId: 'unlock-space-code',
+        recoveryKid: 'kid-1',
+        keyAgreementKeyMultibase: 'z6LSCode',
+        updateKeyMultibase: 'z6MkCode'
+      })
+    ).toBe(false)
   })
 })

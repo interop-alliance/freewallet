@@ -240,12 +240,37 @@ export interface RecoveryCodeUnlockMethod {
 }
 
 /**
+ * A backup-credential unlock method: the standing credential a backup export
+ * establishes from 32 random bytes and packs into the bundle, so the file
+ * restores the account through the ordinary transient login on this
+ * credential's record. It is a passkey in every server-held respect (a
+ * verbatim `keyAgreement` entry, a ladder VM, a roster wrap, a
+ * standing-layout record), with no authenticator behind it: the secret exists
+ * in the bundle alone, so nothing here can re-derive it. `unlockSpaceId` is
+ * the entry's identity. The entry is written BEFORE the establishment, with
+ * the standing fields derivable in memory and a pre-minted
+ * `manageCapability`, so a row left by a torn export is removable from
+ * Settings with no secret in hand; the delegation fields join it once the
+ * establishment completes. `label` is the export date.
+ */
+export interface BackupCredentialUnlockMethod extends StandingUnlockFields {
+  type: 'backup-credential'
+  label: string
+  createdAt: string
+  unlockSpaceId: string
+  manageCapability?: IZcap
+}
+
+/**
  * A single unlock-method entry -- a discriminated union on `type`, kept
  * additive (the quorum seam: a future method joins the union rather than
  * changing the record shape).
  */
 export type UnlockMethod =
-  PassphraseUnlockMethod | PasskeyUnlockMethod | RecoveryCodeUnlockMethod
+  | PassphraseUnlockMethod
+  | PasskeyUnlockMethod
+  | RecoveryCodeUnlockMethod
+  | BackupCredentialUnlockMethod
 
 /**
  * The version-1 unlock-methods registry record. `webAuthnUserId` is a
@@ -965,10 +990,76 @@ function requireSpaceId(session: Session): string {
 }
 
 /**
+ * Whether a registry entry is a standing unlock credential: a passphrase, a
+ * passkey, or a backup credential. Each carries a document inventory (a
+ * `keyAgreement` member and a ladder VM), a committed rung hash, and a roster
+ * wrap, so removing one rotates it off before its Space and entry go. A
+ * recovery-code entry is not one: it rotates in its own ceremony.
+ *
+ * @param entry {UnlockMethod}
+ * @returns {boolean}
+ */
+export function isStandingCredentialEntry(
+  entry: UnlockMethod
+): entry is StandingCredentialEntry {
+  return (
+    entry.type === 'passphrase' ||
+    entry.type === 'passkey' ||
+    entry.type === 'backup-credential'
+  )
+}
+
+/**
+ * The standing unlock credential entry kinds, the set
+ * `isStandingCredentialEntry` narrows to. `StandingCredentialEntry['type']`
+ * is the kind vocabulary a retirement or a publication rule takes.
+ */
+export type StandingCredentialEntry =
+  PassphraseUnlockMethod | PasskeyUnlockMethod | BackupCredentialUnlockMethod
+
+/**
+ * Every update-key multibase the registry's entries commit ahead of use: a
+ * recovery code's update key and a standing credential's recorded ladder
+ * rung. Both are latent hashes a document edit must tell apart from a
+ * revoked client's staged commitment. A standing entry whose rung is not
+ * recorded contributes nothing, and the edit's attribution then fails closed
+ * rather than guessing.
+ *
+ * @param options {object}
+ * @param [options.record] {UnlockMethodsRecord | null}
+ * @returns {string[]}
+ */
+export function latentUpdateKeyMultibasesOf({
+  record
+}: {
+  record?: UnlockMethodsRecord | null
+}): string[] {
+  return (record?.methods ?? []).flatMap(method =>
+    method.updateKeyMultibase ? [method.updateKeyMultibase] : []
+  )
+}
+
+/**
+ * Whether a registry entry is one a login accepts today: a passphrase, a
+ * passkey, or a recovery code (the recovery page's spend). A backup credential
+ * is not one: it signs in only through the restore login on the bundle it is
+ * packed in, which is not built yet. The Settings page's last-method refusal
+ * and the passkey-safety notice both count login entries alone, so a backup
+ * export neither unlocks a removal nor clears the notice.
+ *
+ * @param entry {UnlockMethod}
+ * @returns {boolean}
+ */
+export function isLoginEntry(entry: UnlockMethod): boolean {
+  return entry.type !== 'backup-credential'
+}
+
+/**
  * Whether a registry entry names a given unlock method: a passkey entry matches
- * on `credentialId`, a recovery-code entry on `recoveryKid`, a passphrase
- * entry on its type (there is only ever one passphrase entry). Used to drop
- * the retired entry from the methods list.
+ * on `credentialId`, a recovery-code entry on `recoveryKid`, a
+ * backup-credential entry on `unlockSpaceId`, a passphrase entry on its type
+ * (there is only ever one passphrase entry). Used to drop the retired entry
+ * from the methods list.
  *
  * @param candidate {UnlockMethod}   an entry in the stored registry
  * @param target {UnlockMethod}   the entry being removed
@@ -987,20 +1078,28 @@ function isSameMethod(candidate: UnlockMethod, target: UnlockMethod): boolean {
       candidate.recoveryKid === target.recoveryKid
     )
   }
+  if (target.type === 'backup-credential') {
+    return (
+      candidate.type === 'backup-credential' &&
+      candidate.unlockSpaceId === target.unlockSpaceId
+    )
+  }
   return candidate.type === target.type
 }
 
 /**
  * Reloads the registry, drops the given entry, and writes the result. Shared
- * by both revocation paths -- the Space and keyring cache are already gone by
- * the time this runs, so a missing registry is simply a no-op.
+ * by both revocation paths and by the entry-first establishment's cleanup --
+ * the Space and keyring cache are already gone by the time this runs, so a
+ * missing registry, or one no longer listing the entry, is simply a no-op.
  *
  * @param options {object}
  * @param options.session {Session}
  * @param options.entry {UnlockMethod}   the entry to remove
+ * @param [options.capability] {IZcap}   the registry write's capability
  * @returns {Promise<void>}
  */
-async function dropRegistryEntry({
+export async function dropRegistryEntry({
   session,
   entry,
   capability
@@ -1502,22 +1601,21 @@ export async function revokeUnlockMethod({
       )
     }
   }
-  // A standing passphrase or passkey is retired for real: its document
-  // inventory out, the user key rotated off its roster wrap, every encrypted
-  // collection re-epoch'd. Run BEFORE the Space delete and the registry drop
+  // A standing passphrase, passkey, or backup credential is retired for
+  // real: its document inventory out, the user key rotated off its roster
+  // wrap, every encrypted collection re-epoch'd. Run BEFORE the Space delete and the registry drop
   // below, which then go out under the ROTATED vault keys: the retirement
   // adopts the fresh key in band (re-sealing the stored record to it and
   // swapping the live session onto it), so the drop reads and re-seals under
   // one key. A recovery-code entry has already rotated in its own ceremony.
-  const rotation =
-    entry.type === 'passphrase' || entry.type === 'passkey'
-      ? await rotateOffUnlockCredential({
-          session,
-          ...(context !== undefined ? { context } : {}),
-          method: entry,
-          verb
-        })
-      : null
+  const rotation = isStandingCredentialEntry(entry)
+    ? await rotateOffUnlockCredential({
+        session,
+        ...(context !== undefined ? { context } : {}),
+        method: entry,
+        verb
+      })
+    : null
   // The retirement's ceremony-tail entry, reported from the ceremony's own
   // call site: it carries no registration, so no login chain's runner ever
   // sees it.
@@ -1839,6 +1937,29 @@ export function upsertPasskeyUnlockMethod({
 }: {
   record: UnlockMethodsRecord
   entry: PasskeyUnlockMethod
+}): UnlockMethodsRecord {
+  return upsertUnlockMethod({ record, entry })
+}
+
+/**
+ * Upserts one entry into the registry by its own identity (`isSameMethod`:
+ * a passkey's `credentialId`, a backup credential's `unlockSpaceId`, a
+ * recovery code's `recoveryKid`, the passphrase's type): the entry it names
+ * is replaced in place, and a new one is appended. Everything else in the
+ * record -- the user handle and the other entries -- is carried forward
+ * untouched. The upsert every entry-first establishment rides.
+ *
+ * @param options {object}
+ * @param options.record {UnlockMethodsRecord}   the registry to update
+ * @param options.entry {UnlockMethod}   the entry
+ * @returns {UnlockMethodsRecord}   the updated registry
+ */
+export function upsertUnlockMethod({
+  record,
+  entry
+}: {
+  record: UnlockMethodsRecord
+  entry: UnlockMethod
 }): UnlockMethodsRecord {
   const exists = record.methods.some(method => isSameMethod(method, entry))
   const methods = exists
@@ -2231,7 +2352,7 @@ export async function refreshTransientManageCapability({
         }
         const stored = record.methods.find(
           method =>
-            (method.type === 'passphrase' || method.type === 'passkey') &&
+            isStandingCredentialEntry(method) &&
             method.unlockSpaceId === unlockSpaceId
         )
         if (!stored) {
@@ -2330,7 +2451,7 @@ export async function refreshStandingDelegationFields({
       }
       const stored = record.methods.find(
         method =>
-          (method.type === 'passphrase' || method.type === 'passkey') &&
+          isStandingCredentialEntry(method) &&
           method.unlockSpaceId === unlockSpaceId
       )
       if (!stored) {

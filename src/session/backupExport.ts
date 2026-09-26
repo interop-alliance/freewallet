@@ -1,57 +1,63 @@
 /**
- * The backup-export ceremony: a recovery code minted into the account, then
- * every Space the account names exported and packed into one bundle file.
+ * The backup-export ceremony: a backup credential established into the
+ * account, then every Space the account names exported and packed into one
+ * bundle file.
  *
- * `@interop/wallet-backup` owns the order -- the code first, then the Space
- * listing, then one export per Space, then the packing -- and this module
- * owns every effect it reaches for. The code is minted through the wallet's
- * own issuance ceremony, so the listing that follows already names the
- * code's unlock Space and the bundle carries the Space the packed code
- * opens. The code string is handed to the package and held nowhere else:
+ * `@interop/wallet-backup` owns the order -- the credential first, then the
+ * Space listing, then one export per Space, then the packing -- and this
+ * module owns every effect it reaches for. The credential is a standing
+ * unlock credential (`backupCredential.ts`), established the way a passkey
+ * registration is, from 32 random bytes the bundle packs, so the listing
+ * that follows already names the credential's unlock Space and the bundle
+ * carries the Space its secret opens. A restore is then the ordinary
+ * transient login on that credential's record: nothing retired, no key
+ * rotated. The secret is handed to the package and held nowhere else:
  * nothing here stores it, returns it, or logs it, and neither is the export
  * passphrase.
  *
  * The Spaces are the account Space, the client-annex Space, and one unlock
- * Space per entry of the unlock-methods registry (passphrase, passkey, and
- * every recovery code, the one just issued included). The client-annex Space
- * is the one the account document's `#DelegatedClients` pointer names, on
- * both branches. Only a document naming none skips that archive; a named
- * Space this session cannot reach refuses the run. Every export rides a
- * freshly minted POST-only child of the entry's management zcap: an enrolled
- * session signs that child with the stored zcap's own delegatee, and a
- * ladder-anchored one with the acting credential's ladder VM. The account and
- * annex Spaces answer to the session itself -- an enrolled session
- * root-invokes both, and a ladder-anchored one rides the generation
- * delegation on the account Space and the record's `delegatedClients`
- * delegation on the annex.
+ * Space per entry of the unlock-methods registry (passphrase, passkey, every
+ * recovery code, and every backup credential, the one just established
+ * included). The client-annex Space is the one the account document's
+ * `#DelegatedClients` pointer names, on both branches. Only a document
+ * naming none skips that archive; a named Space this session cannot reach
+ * refuses the run. Every export rides a freshly minted POST-only child of
+ * the entry's management zcap: an enrolled session signs that child with the
+ * stored zcap's own delegatee, and a ladder-anchored one with the acting
+ * credential's ladder VM. The account and annex Spaces answer to the session
+ * itself -- an enrolled session root-invokes both, and a ladder-anchored one
+ * rides the generation delegation on the account Space and the record's
+ * `delegatedClients` delegation on the annex.
  *
- * The capability pre-flight runs FIRST, before the recovery code is minted: a
- * refusal there leaves no orphan "Backup <date>" code behind. It covers all
- * three capabilities the run needs -- the account Space's, the annex Space's,
- * and every registry entry's management zcap -- each checked for `POST`
- * locally. The code's own entry is minted with the full verb set, so it needs
- * no pre-check, and each export re-checks its own entry as it goes.
+ * The capability pre-flight runs FIRST, before the credential is
+ * established: a refusal there leaves no orphan "Backup <date>" row behind.
+ * It covers all three capabilities the run needs -- the account Space's, the
+ * annex Space's, and every registry entry's management zcap -- each checked
+ * for `POST` locally, and one more condition: a session that cannot commit
+ * the new credential's rung into the pointed annex generation (an enrolled
+ * session holding no ladder seed) refuses here, since a bundle written
+ * anyway would restore an account whose first login loses every grant. The
+ * credential's own entry is minted with the full verb set, so it needs no
+ * pre-check, and each export re-checks its own entry as it goes.
  *
  * The rule is fail-whole. A Space that cannot be exported -- an entry
  * recording no management zcap, one whose `allowedAction` carries no `POST`,
  * or a request the server refuses -- fails the whole export rather than
  * writing a bundle that reads as complete and is not. The same rule covers
  * the listing: a registry read back from the server that does not name the
- * code just issued, and a registry whose entries change while the Spaces are
- * being exported, both refuse rather than write a bundle whose contents no
- * single moment of the account ever had. It covers the account archive too:
- * its `did.jsonl` is read before the bundle is packed, and an archive not
- * carrying the log entry this visit pinned refuses. A visit holding no pin
- * for that log checks nothing and says so.
+ * credential just established, and a registry whose entries change while
+ * the Spaces are being exported, both refuse rather than write a bundle
+ * whose contents no single moment of the account ever had. It covers the
+ * account archive too: its `did.jsonl` is read before the bundle is packed,
+ * and an archive not carrying the log entry this visit pinned refuses. A
+ * visit holding no pin for that log checks nothing and says so.
  *
- * The pivot is the code issuance, which is the ceremony's one durable write.
- * A run torn after that issuance has COMPLETED leaves an ordinary labeled
- * recovery code, listed and removable in Settings like any other, so the
- * mender is a re-run. A tear INSIDE the issuance is the issuance ceremony's
- * own torn state, not this one's: it is the open gap
- * `every-document-key-agreement-entry-has-a-locatable-credential`, where a
- * document `keyAgreement` entry and a roster wrap stand for a code nothing
- * can locate.
+ * The pivot is the credential's establishment, the ceremony's one durable
+ * write. A run torn after it has COMPLETED leaves an ordinary labeled backup
+ * credential, listed and removable under Settings > Backup credentials like
+ * any other, so the mender is a re-run. A tear INSIDE it leaves the row its
+ * entry-first write recorded, whose Remove converges whatever the
+ * establishment reached (`backupCredential.ts`).
  */
 import { BUNDLE_ROLE, exportBundle } from '@interop/wallet-backup'
 import type { ByteSource } from '@interop/wallet-backup'
@@ -62,7 +68,10 @@ import {
   readSpaceArchive
 } from '@interop/space-archive'
 import type { IZcap } from '@interop/data-integrity-core'
-import { delegatedClientsDelegationSpaceId } from '@interop/wallet-core/clientAnnex'
+import {
+  clientAnnexRungAdmitted,
+  delegatedClientsDelegationSpaceId
+} from '@interop/wallet-core/clientAnnex'
 import { errorNameOf } from '@interop/wallet-core/menders'
 import { DID_LOG_RESOURCE, ID_COLLECTION } from '@interop/wallet-core/space'
 import { accountLogPinId } from '@interop/wallet-core/webvh'
@@ -70,20 +79,26 @@ import { createLogger } from '@/lib/log'
 import { causeChain } from '@/lib/storageErrors'
 import {
   accountCeremonyContext,
+  canRunUserKeyCeremonies,
   requireEnrolledCeremonyContext,
   type AccountCeremonyContext
 } from '@/session/accountCeremonyContext'
 import {
-  canIssueRecoveryCode,
-  generateRecoveryCode,
-  issueRecoveryCode
-} from '@/session/recovery'
-import { pointedClientAnnexReach } from '@/session/annexReach'
+  BackupAnnexCommitError,
+  establishBackupCredential
+} from '@/session/backupCredential'
+import { wasServiceDescription } from '@/lib/wasService'
+import {
+  pointedClientAnnexReach,
+  standingClientAnnexReachOf,
+  type ClientAnnexReach
+} from '@/session/annexReach'
 import {
   getUnlockMethods,
   unlockSpaceCapabilityRefusal,
   unlockSpaceVerbInvocation,
   type UnlockMethod,
+  type UnlockMethodsRecord,
   type UnlockSpaceCapabilityRefusal
 } from '@/session/unlockMethods'
 import type { Session } from '@/types/auth'
@@ -139,9 +154,9 @@ export class BackupCapabilityMissingError extends BackupCapabilityError {
  *
  * What refreshes such a zcap depends on the entry. A passphrase's and a
  * passkey's are re-minted by a login with that credential. A recovery code's
- * has no refresh path at all -- only the code's own unlock identity can
- * re-delegate it -- so the remedy there is to remove the code and issue a new
- * one.
+ * and a backup credential's have no refresh path from Settings -- only their
+ * own unlock identity can re-delegate -- so the remedy there is to remove the
+ * entry and export or issue again.
  */
 export class BackupCapabilityUnsupportedError extends BackupCapabilityError {
   constructor(...args: ConstructorParameters<typeof BackupCapabilityError>) {
@@ -185,16 +200,15 @@ function backupCapabilityRefusal({
 }
 
 /**
- * Thrown when the registry the issuance wrote does not list the code the run
- * just issued (or the issuance recorded no registry at all). The bundle's
- * whole claim is that the file plus the packed code restores the account, and
- * a listing missing that code's unlock Space would not carry the Space the
- * code opens.
+ * Thrown when the registry read back after the establishment does not list
+ * the credential the run just established. The bundle's whole claim is that
+ * the file plus its packed secret restores the account, and a listing missing
+ * that credential's unlock Space would not carry the Space the secret opens.
  */
-export class BackupCodeNotListedError extends Error {
+export class BackupCredentialNotListedError extends Error {
   constructor(message: string) {
     super(message)
-    this.name = 'BackupCodeNotListedError'
+    this.name = 'BackupCredentialNotListedError'
   }
 }
 
@@ -214,7 +228,7 @@ export class BackupRegistryChangedError extends Error {
  * Thrown when the account Space's archive does not carry the account log this
  * visit verified: its `did.jsonl` holds no entry with the pinned head's
  * `versionId`, or it carries no `did.jsonl` at all. The archive may legitimately
- * be AHEAD of the pin -- this run's own code issuance appends an entry -- so
+ * be AHEAD of the pin -- this run's own establishment appends an entry -- so
  * what is required is that the pinned entry is somewhere in the archived chain.
  * An archive that is not is a different log, and a bundle built on it would
  * restore an account this visit never saw.
@@ -242,22 +256,25 @@ export class BackupSpaceExportError extends Error {
  * Space's place in the listing so a dialog can say "Space 2 of 5".
  */
 export interface BackupExportProgress {
-  stage: 'issuing-code' | 'exporting-space' | 'packing'
+  stage: 'establishing-credential' | 'exporting-space' | 'packing'
   index?: number
   total?: number
 }
 
 /**
- * Whether this session can produce a backup. It mints a recovery code, so it
- * needs everything the issuance needs, and it exports Spaces, so it needs a
- * remote backend: a guest and a no-WAS deployment are offered no backup.
+ * Whether this session can produce a backup. It establishes a standing
+ * credential, so it needs an account-ceremony context and the user key, and
+ * it exports Spaces, so it needs a remote backend: a guest and a no-WAS
+ * deployment are offered no backup.
  *
  * @param options {object}
  * @param options.session {Session}
  * @returns {boolean}
  */
 export function canExportBackup({ session }: { session: Session }): boolean {
-  return canIssueRecoveryCode({ session }) && session.storage.hasRemoteStorage
+  return (
+    canRunUserKeyCeremonies({ session }) && session.storage.hasRemoteStorage
+  )
 }
 
 /**
@@ -287,29 +304,33 @@ function zcapAllowsVerb({
 }
 
 /**
- * The client-annex Space this run exports, resolved from the account document
- * on both branches: the `#DelegatedClients` pointer names the live generation,
- * and its Space is the only annex Space this account has. `undefined` means
- * the document names none, which is an ordinary state and skips the archive.
+ * The client-annex generation this run exports and commits into, resolved
+ * from the account document on both branches: the `#DelegatedClients` pointer
+ * names the live generation, and its Space is the only annex Space this
+ * account has. `undefined` means the document names none, which is an
+ * ordinary state and skips the archive and the commit.
  *
  * The record's `delegatedClients` delegation is this session's REACH into that
  * Space on the ladder branch, not its name: a session holding none, or holding
  * one that targets some other Space, cannot export the annex the document
  * names, and refuses rather than writing a bundle that reads as complete. An
- * enrolled session root-invokes, so the pointer alone settles it.
+ * enrolled session root-invokes, so the pointer alone settles it. The reach
+ * handed back reads the generation's log the way this session may: the
+ * standing client under the sibling delegation on the ladder branch, the root
+ * key on the enrolled one.
  *
  * @param options {object}
  * @param options.session {Session}
  * @param options.context {AccountCeremonyContext}
- * @returns {Promise<string | undefined>}
+ * @returns {Promise<ClientAnnexReach | undefined>}
  */
-async function annexSpaceIdFor({
+async function pointedAnnexFor({
   session,
   context
 }: {
   session: Session
   context: AccountCeremonyContext
-}): Promise<string | undefined> {
+}): Promise<ClientAnnexReach | undefined> {
   const reach = await pointedClientAnnexReach({
     session,
     pointer: context.pointer
@@ -319,10 +340,11 @@ async function annexSpaceIdFor({
     return undefined
   }
   if (context.kind === 'enrolled') {
-    return reach.spaceId
+    return reach
   }
   const sibling = context.sibling
-  if (!sibling) {
+  const standingClient = session.profile.standingUnlock?.standingClient
+  if (!sibling || !standingClient) {
     throw new BackupCapabilityMissingError(
       'This session holds no delegation into the client-annex Space, so ' +
         'its archive cannot be exported.'
@@ -342,7 +364,13 @@ async function annexSpaceIdFor({
         'POST, so that Space cannot be exported.'
     )
   }
-  return reach.spaceId
+  return standingClientAnnexReachOf({
+    pointer: context.pointer,
+    clientAnnexDid: reach.clientAnnexDid,
+    standing: { standingClient, delegatedClients: sibling },
+    pinStore: session.persistence.logPins,
+    serviceDescription: await wasServiceDescription()
+  })
 }
 
 /**
@@ -430,9 +458,10 @@ function refuseUnexportableEntry({
 
 /**
  * Runs the capability pre-flight over every Space this run will export,
- * BEFORE the recovery code is minted. A refusal here therefore leaves nothing
- * behind: no code, no entry, no Space. The code this run is about to issue is
- * minted with the full verb set, so it is not among the entries checked here.
+ * BEFORE the backup credential is established. A refusal here therefore
+ * leaves nothing behind: no credential, no entry, no Space. The credential
+ * this run is about to establish is minted with the full verb set, so it is
+ * not among the entries checked here.
  *
  * Three capabilities carry the run. The account Space answers to the
  * generation delegation on the ladder branch and to a root invocation on the
@@ -441,15 +470,27 @@ function refuseUnexportableEntry({
  * answers to a child of its entry's management zcap. All three are checked
  * for `POST` here, since a record sealed before the delegated-clients action
  * set carried `POST` passes every other check and is refused only by the
- * server, past the pivot, leaving one orphan "Backup <date>" code per retry.
+ * server, past the pivot, leaving one orphan "Backup <date>" row per retry.
  *
- * The annex Space id the pointer resolves to is handed back, so the listing
- * does not resolve it a second time.
+ * One more condition rides the annex: the establishment must commit the new
+ * credential's rung into the pointed generation, signed by this session's
+ * own ladder rung. Two sessions cannot: an enrolled one whose record sealed
+ * no ladder seed (the commit's honest skip), and one whose rung the pointed
+ * generation neither reveals nor commits (the mid-generation lockout). Both
+ * are read-only questions, so both are refused here rather than after the
+ * roster wrap and the record are written and the cleanup has to retire them.
+ *
+ * The pointed generation and the registry are handed back -- the
+ * generation's Space id for the listing and its DID for the establishment,
+ * the registry as the establishment's base -- so neither is read a second
+ * time: the generation the establishment commits into is the one this
+ * pre-flight checked the session's rung against. The annex questions and
+ * the registry read are independent, so they go out together.
  *
  * @param options {object}
  * @param options.session {Session}
  * @param options.context {AccountCeremonyContext}
- * @returns {Promise<{ annexSpaceId?: string }>}
+ * @returns {Promise<{ annex?: ClientAnnexReach, registry: UnlockMethodsRecord | null }>}
  */
 async function preflightBackupCapabilities({
   session,
@@ -457,7 +498,10 @@ async function preflightBackupCapabilities({
 }: {
   session: Session
   context: AccountCeremonyContext
-}): Promise<{ annexSpaceId?: string }> {
+}): Promise<{
+  annex?: ClientAnnexReach
+  registry: UnlockMethodsRecord | null
+}> {
   if (context.kind === 'ladder') {
     const generation = session.profile.invocationCapability
     if (!generation) {
@@ -473,12 +517,53 @@ async function preflightBackupCapabilities({
       )
     }
   }
-  const annexSpaceId = await annexSpaceIdFor({ session, context })
-  const registry = await getUnlockMethods({ session })
+  const [annex, registry] = await Promise.all([
+    committableAnnexFor({ session, context }),
+    getUnlockMethods({ session })
+  ])
   for (const entry of registry?.methods ?? []) {
     refuseUnexportableEntry({ session, context, entry })
   }
-  return annexSpaceId ? { annexSpaceId } : {}
+  return { ...(annex ? { annex } : {}), registry }
+}
+
+/**
+ * The pointed client-annex generation, refused unless this session can
+ * commit the new credential's rung into it: the pre-flight's annex half.
+ *
+ * @param options {object}
+ * @param options.session {Session}
+ * @param options.context {AccountCeremonyContext}
+ * @returns {Promise<ClientAnnexReach | undefined>}   `undefined` when the
+ *   document names no generation
+ * @throws {BackupAnnexCommitError}   this session cannot commit into it
+ */
+async function committableAnnexFor({
+  session,
+  context
+}: {
+  session: Session
+  context: AccountCeremonyContext
+}): Promise<ClientAnnexReach | undefined> {
+  const annex = await pointedAnnexFor({ session, context })
+  if (!annex) {
+    return undefined
+  }
+  const ladderSeed = session.profile.ladderSeed
+  if (!ladderSeed) {
+    throw new BackupAnnexCommitError({ reason: 'no-ladder-seed' })
+  }
+  if (
+    !(await clientAnnexRungAdmitted({
+      store: annex.logStore(),
+      ladderSeed,
+      generationId: annex.generationId,
+      expectedDid: annex.clientAnnexDid
+    }))
+  ) {
+    throw new BackupAnnexCommitError({ reason: 'rung-uncommitted' })
+  }
+  return annex
 }
 
 /**
@@ -531,7 +616,7 @@ async function archivedAccountLogVersions({
  * packed.
  *
  * The archive may legitimately be ahead of the pin, by the entries this run
- * itself wrote (the code issuance appends one), so what is required is that
+ * itself wrote (the establishment appends one), so what is required is that
  * the pinned entry appears in the archived chain rather than that it is the
  * tail. A visit holding no pin for this log checks nothing: nothing was read
  * under a pin this visit, so there is no continuity to compare against.
@@ -658,32 +743,34 @@ function streamFromPack({
  * Runs the export ceremony and hands back the bundle as a stream.
  *
  * The capability pre-flight runs before anything is minted, so a refusal
- * leaves no orphan code behind. The recovery code is minted next, so the
- * bundle is self-sufficient: the
- * file plus that code opens the account with nothing else. Every Space the
- * account names then follows, in the order the bundle lists them -- the
- * account Space, the client-annex Space, then one per unlock-methods
- * registry entry -- and any one of them failing fails the whole run.
+ * leaves no orphan credential behind. The backup credential is established
+ * next, so the bundle is self-sufficient: the file plus its packed secret
+ * carries everything a restore login on the credential's record needs.
+ * Every Space the account names then
+ * follows, in the order the bundle lists them -- the account Space, the
+ * client-annex Space, then one per unlock-methods registry entry -- and any
+ * one of them failing fails the whole run.
  *
  * @param options {object}
  * @param options.session {Session}
- * @param options.codeLabel {string}   the label the minted recovery code is
- *   listed under in Settings
- * @param [options.exportPassphrase] {string}   seals the packed code; without
- *   it the code travels in the clear and the file is a bearer credential
+ * @param options.credentialLabel {string}   the label the backup credential
+ *   is listed under in Settings
+ * @param [options.exportPassphrase] {string}   seals the packed secret;
+ *   without it the secret travels in the clear and the file is a bearer
+ *   credential
  * @param [options.signal] {AbortSignal}
  * @param [options.onProgress] {Function}
  * @returns {Promise<ReadableStream<Uint8Array>>}
  */
 export async function exportBackup({
   session,
-  codeLabel,
+  credentialLabel,
   exportPassphrase,
   signal,
   onProgress
 }: {
   session: Session
-  codeLabel: string
+  credentialLabel: string
   exportPassphrase?: string
   signal?: AbortSignal
   onProgress?: (progress: BackupExportProgress) => void
@@ -704,12 +791,13 @@ export async function exportBackup({
   }
 
   // Before the pivot: a capability this run cannot export under refuses here,
-  // where nothing has been minted yet, rather than after the issuance has
-  // left a "Backup <date>" code nothing wrote a bundle for.
-  const { annexSpaceId } = await preflightBackupCapabilities({
+  // where nothing has been minted yet, rather than after the establishment
+  // has left a "Backup <date>" credential nothing wrote a bundle for.
+  const { annex, registry } = await preflightBackupCapabilities({
     session,
     context
   })
+  const annexSpaceId = annex?.spaceId
 
   /**
    * The registry entries this run exports, by Space id, filled in by the
@@ -722,39 +810,44 @@ export async function exportBackup({
    */
   let spaceOrder: string[] = []
   /**
-   * What the issuance recorded: the code's entry, and the registry as the
-   * write that recorded it left it, which is what the listing reads.
+   * The unlock Space id of the credential the establishment recorded, which
+   * the listing checks the registry for.
    */
-  let issued: Awaited<ReturnType<typeof issueRecoveryCode>> | undefined
+  let establishedSpaceId: string | undefined
 
   const pack = await exportBundle({
     meta: {
       created: new Date().toISOString(),
       createdBy: { controller: context.pointer.did, client: BACKUP_CLIENT }
     },
-    issueRecoveryCode: async () => {
-      const code = generateRecoveryCode()
-      issued = await issueRecoveryCode({ session, code, label: codeLabel })
-      return code
+    establishBackupCredential: async () => {
+      const established = await establishBackupCredential({
+        session,
+        context,
+        label: credentialLabel,
+        clientAnnexDid: annex?.clientAnnexDid ?? null,
+        registry
+      })
+      establishedSpaceId = established.unlockSpaceId
+      return established.secret
     },
     listSpaces: async () => {
       // The listing is read back from the server rather than taken from the
-      // record the issuance's own write handed back: that record has the
-      // entry appended to it in memory, so it names the code whatever the
-      // server stored. The check that follows is therefore about what the
-      // account now holds, and the settle read at the end is about the set
-      // still being that one once the archives are in hand.
+      // record the establishment's own writes handed back, so the check that
+      // follows is about what the account now holds, and the settle read at
+      // the end is about the set still being that one once the archives are
+      // in hand.
       const registry = await getUnlockMethods({ session })
       if (
         !registry ||
         !registry.methods.some(
-          entry => entry.unlockSpaceId === issued?.entry.unlockSpaceId
+          entry => entry.unlockSpaceId === establishedSpaceId
         )
       ) {
-        throw new BackupCodeNotListedError(
-          'The unlock-methods registry does not list the recovery code this ' +
-            'backup just issued, so the bundle would not carry the Space ' +
-            'that code opens.'
+        throw new BackupCredentialNotListedError(
+          'The unlock-methods registry does not list the backup credential ' +
+            'this backup just established, so the bundle would not carry ' +
+            'the Space its secret opens.'
         )
       }
       const spaces: Array<{ spaceId: string; role: string }> = [
@@ -898,8 +991,9 @@ async function settledRegistry({
  *
  * The two capability refusals resolve to a key per unlock-method kind, since
  * what refreshes the zcap differs: a passphrase's and a passkey's are
- * re-minted by a login with that credential, while a recovery code's has no
- * refresh path and the remedy is to remove the code and issue another.
+ * re-minted by a login with that credential, while a recovery code's and a
+ * backup credential's have no refresh path from Settings and the remedy is
+ * to remove the entry and issue or export again.
  * {@link backupExportErrorLabel} carries the entry's own label for those
  * keys.
  *
@@ -908,9 +1002,25 @@ async function settledRegistry({
  */
 export function backupExportErrorKey(err: unknown): string {
   const names = errorNameChain(err)
-  // The user cancelled. The code, if it was already minted, stands.
+  // The user cancelled. The credential, if it was already established,
+  // stands.
   if (backupExportCancelled(err)) {
     return 'storage.backup.errors.cancelled'
+  }
+  // This session cannot commit the credential's rung into the annex: its
+  // record sealed no ladder seed, or the generation does not admit its rung.
+  // The remedy differs, so the copy is keyed on the refusal's reason.
+  const annexRefusal = [...causeChain(err)].find(
+    current => errorNameOf(current) === 'BackupAnnexCommitError'
+  ) as { reason?: string } | undefined
+  if (annexRefusal) {
+    return annexRefusal.reason === 'no-ladder-seed'
+      ? 'storage.backup.errors.annexCommit.noLadderSeed'
+      : 'storage.backup.errors.annexCommit.rungUncommitted'
+  }
+  // The establishment failed, after its cleanup.
+  if (names.includes('BackupCredentialNotEstablishedError')) {
+    return 'storage.backup.errors.notEstablished'
   }
   // An unlock method records no management zcap at all.
   if (names.includes('BackupCapabilityMissingError')) {
@@ -921,9 +1031,9 @@ export function backupExportErrorKey(err: unknown): string {
   if (names.includes('BackupCapabilityUnsupportedError')) {
     return `storage.backup.errors.unsupportedCapability.${refusedVariant(err)}`
   }
-  // The registry does not name the code this run just issued.
-  if (names.includes('BackupCodeNotListedError')) {
-    return 'storage.backup.errors.codeNotListed'
+  // The registry does not name the credential this run just established.
+  if (names.includes('BackupCredentialNotListedError')) {
+    return 'storage.backup.errors.credentialNotListed'
   }
   // The exported account archive is not the log this visit verified.
   if (names.includes('BackupContinuityError')) {
@@ -974,6 +1084,8 @@ function refusedVariant(err: unknown): string {
       return 'passkey'
     case 'passphrase':
       return 'passphrase'
+    case 'backup-credential':
+      return 'backupCredential'
     default:
       return 'generic'
   }

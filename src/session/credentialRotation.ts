@@ -74,6 +74,8 @@ import {
   invalidateVerifiedLog,
   verifiedAccountLog
 } from '@/session/verifiedLog'
+import { keyAgreementPublicationOf } from '@/session/keyring'
+import type { StandingCredentialEntry } from '@/session/unlockMethods'
 import { createLogger } from '@/lib/log'
 import { wasServiceDescription } from '@/lib/wasService'
 
@@ -154,7 +156,7 @@ function annexInventoryEntry(
  * @param options.method {object}   the retired credential's public inventory,
  *   as its unlock-methods registry entry recorded it; the recorded update key
  *   is an anchor for the ceremony's ladder attribution, not trusted verbatim
- * @param options.method.type {'passphrase' | 'passkey'}
+ * @param options.method.type {StandingCredentialEntry['type']}
  * @param [options.method.keyAgreementKeyMultibase] {string}
  * @param [options.method.updateKeyMultibase] {string}
  * @param [options.method.ladderSeed] {Uint8Array}   the credential's ladder
@@ -211,7 +213,7 @@ export async function rotateOffUnlockCredential({
   session: Session
   context?: AccountCeremonyContext | null
   method: {
-    type: 'passphrase' | 'passkey'
+    type: StandingCredentialEntry['type']
     keyAgreementKeyMultibase?: string
     updateKeyMultibase?: string
     ladderSeed?: Uint8Array
@@ -446,7 +448,7 @@ export function isUnclaimedLadderVmRefusal(err: unknown): boolean {
  * @param options.session {Session}
  * @param options.method {object}   the credential's recorded public
  *   inventory, as {@link rotateOffUnlockCredential} takes it
- * @param options.method.type {'passphrase' | 'passkey'}
+ * @param options.method.type {StandingCredentialEntry['type']}
  * @param [options.method.keyAgreementKeyMultibase] {string}
  * @param [options.method.updateKeyMultibase] {string}
  * @param [options.method.ladderSeed] {Uint8Array}   the credential's ladder
@@ -463,7 +465,7 @@ export async function preflightCredentialRetirement({
   session: Session
   context?: AccountCeremonyContext | null
   method: {
-    type: 'passphrase' | 'passkey'
+    type: StandingCredentialEntry['type']
     keyAgreementKeyMultibase?: string
     updateKeyMultibase?: string
     ladderSeed?: Uint8Array
@@ -494,13 +496,14 @@ export async function preflightCredentialRetirement({
 }
 
 /**
- * How the credential's key-agreement key stands in the account document: a
- * low-entropy passphrase publishes only a hash commitment of it, while a
- * passkey's PRF-derived key publishes verbatim. The inventory the document
- * carries is what a removal, and its pre-flight, must name.
+ * How the credential's key-agreement key stands in the account document, by
+ * the publication rule its kind decides (`keyAgreementPublicationOf`): the
+ * hash commitment for a low-entropy passphrase, the key itself for a passkey
+ * or a backup credential. The inventory the document carries is what a
+ * removal, and its pre-flight, must name.
  *
  * @param options {object}
- * @param options.type {'passphrase' | 'passkey'}
+ * @param options.type {StandingCredentialEntry['type']}
  * @param options.keyAgreementKeyMultibase {string}
  * @returns {Promise<StandingUnlockKeys['keyAgreement']>}
  */
@@ -508,10 +511,10 @@ async function standingKeyAgreementOf({
   type,
   keyAgreementKeyMultibase
 }: {
-  type: 'passphrase' | 'passkey'
+  type: StandingCredentialEntry['type']
   keyAgreementKeyMultibase: string
 }): Promise<StandingUnlockKeys['keyAgreement']> {
-  return type === 'passphrase'
+  return keyAgreementPublicationOf({ type }) === 'commitment'
     ? { commitment: await keyAgreementCommitment({ keyAgreementKeyMultibase }) }
     : { publicKeyMultibase: keyAgreementKeyMultibase }
 }
