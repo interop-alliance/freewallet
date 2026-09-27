@@ -4,8 +4,9 @@
  * `https://w3id.org/pws` / `0.5` spec-and-version pair. Every `WasClient`
  * the app builds is given the discovered description, so no client makes
  * its own `HEAD` probe and a test that drives such a path has to supply a
- * stand-in. Minimal on purpose -- nothing under test reads past `url` and
- * the WAS version entry.
+ * stand-in. Minimal on purpose -- nothing under test reads past `url`, the
+ * WAS version entry, and the client annex entry the signup's host gate
+ * checks (the shape the teaching server lists).
  */
 import type { ServiceDescription } from '@interop/was-client'
 
@@ -14,7 +15,8 @@ export const TEST_SERVICE_DESCRIPTION: ServiceDescription = {
   specs: {
     'https://w3id.org/pws': [
       { version: '0.5', spaces: 'http://localhost/spaces/' }
-    ]
+    ],
+    'https://w3id.org/pws/client-annex': [{ version: '0.1' }]
   }
 }
 

@@ -18,6 +18,25 @@ credential alone from any browser. The plain genesis
 (`ensureAccountGenesis`) is the other path: a no-WAS deployment's signup,
 and the login-time heal for any account it provisioned.
 
+**The host gate.** Before anything else, a WAS signup reads the configured
+server's service description and refuses a server that does not claim the
+client annex profile (`https://w3id.org/pws/client-annex`, checked by
+wallet-core's `assertHostClaimsClientAnnexProfile`). The establishment
+publishes a ladder VM, and the delegation clause that bounds what that VM may
+delegate fails open on a server that does not enforce it. The check runs
+before the key derivation, and on a passkey signup before the WebAuthn
+ceremony, so a refused signup writes nothing and leaves no passkey on the
+authenticator. The refusal is was-client's `IncompatibleServerError`, shown
+with the `auth.errors.storageIncompatible` copy. The check runs once per
+account. The heal re-run of a torn signup does not repeat it, and neither
+does any later ceremony that publishes a ladder VM: adding a passkey or a
+passphrase, a backup export, a recovery-code issuance, a passphrase change,
+a recovery spend, or the last-client transition. Nothing re-checks the host
+at login either. So on a host that drops the claim after signup, the
+existing ladder VMs stay standing and more can be added. The claim is
+self-reported, so the check catches a server whose software does not
+enforce the clause, not one that lies about it.
+
 **The credential-anchored establishment.** Every WAS signup, passphrase or
 passkey and remembered or not, runs this establishment first, through
 wallet-core's `establishCredentialAnchoredAccount`

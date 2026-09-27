@@ -27,6 +27,7 @@ import { Trans, useTranslation } from 'react-i18next'
 import { AuthPageHeader } from '@/components/AuthPageHeader'
 import { authStyles } from '@/styles/appStyles'
 import type { SubmitEvent } from 'react'
+import { errorNameOf } from '@interop/wallet-core/menders'
 import { signUpWithPasskey, signUpWithPassphrase } from '@/session/signup'
 import { isStorageUnreachable } from '@/lib/storageErrors'
 import {
@@ -96,6 +97,12 @@ function signupErrorKey(err: unknown): string | null {
   if (isStorageUnreachable(err)) {
     // The WAS storage server is unreachable -- offer a guest-mode fallback.
     return 'auth.errors.storageUnreachable'
+  }
+  if (errorNameOf(err) === 'IncompatibleServerError') {
+    // The configured server does not offer what a signup needs, the client
+    // annex profile among it. Retrying will not help.
+    log.error('Signup refused by the storage server check', { err })
+    return 'auth.errors.storageIncompatible'
   }
   log.error('Error completing signup', { err })
   return 'auth.errors.setupFailed'
@@ -294,10 +301,11 @@ export function SignupPage() {
           {t('auth.signup.heading')}
         </Typography>
 
-        {errorKey === 'auth.errors.storageUnreachable' ? (
+        {errorKey === 'auth.errors.storageUnreachable' ||
+        errorKey === 'auth.errors.storageIncompatible' ? (
           <Alert severity="error" sx={authStyles.userMessage}>
             <Trans
-              i18nKey="auth.errors.storageUnreachable"
+              i18nKey={errorKey}
               components={{
                 guest: (
                   <Link

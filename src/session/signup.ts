@@ -15,7 +15,10 @@
 import { base64urlnopad } from '@scure/base'
 import { KEYRING_KDF, type AccountPointer } from '@interop/wallet-core/keyring'
 import { mintAccountKeySet as mintSharedAccountKeySet } from '@interop/wallet-core/genesis'
-import { generateLadderSeed } from '@interop/wallet-core/clientAnnex'
+import {
+  assertHostClaimsClientAnnexProfile,
+  generateLadderSeed
+} from '@interop/wallet-core/clientAnnex'
 import { setClientLabel } from '@interop/wallet-core/keys'
 import {
   clientSigningKeyMultibase,
@@ -65,6 +68,7 @@ import {
   forcedSignupTearAfterEstablishment
 } from '@/lib/e2eSeams'
 import { registerPasskey } from '@/lib/passkey'
+import { wasServiceDescription } from '@/lib/wasService'
 import { mintSpaceId } from '@/stores/wasRemoteStore'
 import type { StageNotifier } from '@interop/wallet-core'
 import type { Session } from '@/types/auth'
@@ -108,6 +112,23 @@ async function mintAccountKeySet() {
 }
 
 /**
+ * Refuses a signup on a storage server whose service description does not
+ * claim the client annex profile. Every WAS signup publishes a ladder
+ * verification method, and the delegation clause that bounds it fails open on
+ * a server that does not enforce it. Runs before the key derivation and before
+ * any durable write, so a refused signup leaves nothing behind.
+ *
+ * @returns {Promise<void>}
+ * @throws {IncompatibleServerError}   when the server does not claim the
+ *   profile, or its service description is otherwise refused
+ */
+async function refuseHostWithoutClientAnnexProfile(): Promise<void> {
+  assertHostClaimsClientAnnexProfile({
+    serviceDescription: await wasServiceDescription()
+  })
+}
+
+/**
  * The establishment half of the credential-anchored passphrase signup: one
  * KDF run, the create-nothing existing-account probe (`fetchTransientKeyring`
  * -- the remembered probe would self-enroll this browser), and the whole
@@ -147,6 +168,7 @@ async function establishPassphraseAnchoredAccount({
       accountLog: PublishedWebvhLog
     }
 > {
+  await refuseHostWithoutClientAnnexProfile()
   const mark = stageMarker({
     log,
     ceremony: 'credential-anchored-genesis',
@@ -522,6 +544,9 @@ async function signUpCredentialAnchoredWithPasskey({
   promptForPrfRetry: () => Promise<boolean>
   onStage?: StageNotifier
 }): Promise<{ session: Session }> {
+  // Before the WebAuthn ceremony, so a refused host leaves no passkey behind
+  // on the authenticator.
+  await refuseHostWithoutClientAnnexProfile()
   const mark = stageMarker({
     log,
     ceremony: 'credential-anchored-genesis',

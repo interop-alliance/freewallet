@@ -58,6 +58,12 @@
 
 ### Added
 
+- A WAS signup refuses a storage server whose service description does not
+  claim the client annex profile, before the key derivation and before any
+  passkey is registered. The signup publishes a ladder verification method,
+  and the delegation clause bounding it fails open on a server that does not
+  enforce it. The signup page names the refusal with its own error copy.
+
 - The consent row for a private-collection grant now says when the named
   collection already exists, and who created it. A second application
   naming the collection is admitted into every key epoch it has, as a
