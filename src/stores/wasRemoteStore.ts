@@ -382,14 +382,17 @@ export class WASRemoteStore {
    *
    * @param options {object}
    * @param options.collectionId {string}   the WAS collection id
-   * @returns {Promise<{ encryption?: CollectionEncryption, custom?: unknown } | undefined>}
+   * @returns {Promise<{ encryption?: CollectionEncryption, custom?: unknown,
+   *   generator?: string, generatorOrigin?: string } | undefined>}
    */
-  async collectionMetadata({
-    collectionId
-  }: {
-    collectionId: string
-  }): Promise<
-    { encryption?: CollectionEncryption; custom?: unknown } | undefined
+  async collectionMetadata({ collectionId }: { collectionId: string }): Promise<
+    | {
+        encryption?: CollectionEncryption
+        custom?: unknown
+        generator?: string
+        generatorOrigin?: string
+      }
+    | undefined
   > {
     const metadata = await this.#space().collection(collectionId).describe()
     return metadata ?? undefined

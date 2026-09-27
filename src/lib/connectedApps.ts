@@ -23,6 +23,12 @@
  * derives as unknown rather than orphaned; its chain is dead exactly when
  * the generation delegation it chains under no longer belongs to the
  * generation the account document points at.
+ * `lookupCollectionCreators` reads the same two sources the other way round:
+ * given the `generator` DIDs stamped on existing collections, it answers each
+ * with the creating app's display name and canonical `appUrl`, from the app
+ * key where the app is still connected and from its App Connect Login
+ * activities where it is not, for the consent row's existing-collection
+ * reading.
  * Wallet-core's `grantRevocationSkip` (`/clientAnnex`) is the revocation-time
  * reading of the same document, applied per grant by
  * `StorageManager#revokeZcaps`: a grant that is expired, orphaned, or chained
@@ -298,9 +304,28 @@ export function deriveGrantsState({
 }
 
 /**
- * Whether an activity is the App Connect Login for a given origin. Matches a
- * `Login` activity whose recorded origin equals `origin` and which carries an
- * `appConnect` member (distinguishing it from a plain "Login with Wallet").
+ * Whether an activity is an App Connect Login: a `Login` activity carrying an
+ * `appConnect` member (distinguishing it from a plain "Login with Wallet" and
+ * from an agent-grant Login).
+ *
+ * @param options {object}
+ * @param options.doc {{ type?: string[]; object?: unknown }}
+ * @returns {boolean}
+ */
+function isAppConnectLogin({
+  doc
+}: {
+  doc: { type?: string[]; object?: unknown }
+}): boolean {
+  return (
+    Array.isArray(doc.type) &&
+    doc.type.includes('Login') &&
+    loginAppName(doc.object) !== undefined
+  )
+}
+
+/**
+ * Whether an activity is the App Connect Login for a given origin.
  *
  * @param options {object}
  * @param options.doc {{ type?: string[]; object?: unknown }}
@@ -314,12 +339,7 @@ function isAppConnectLoginFor({
   doc: { type?: string[]; object?: unknown }
   origin: string
 }): boolean {
-  return (
-    Array.isArray(doc.type) &&
-    doc.type.includes('Login') &&
-    loginOrigin(doc.object) === origin &&
-    loginAppName(doc.object) !== undefined
-  )
+  return isAppConnectLogin({ doc }) && loginOrigin(doc.object) === origin
 }
 
 /**
@@ -330,19 +350,24 @@ function isAppConnectLoginFor({
  * @param options {object}
  * @param options.storage {StorageManager}
  * @param [options.items] {Awaited<ReturnType<StorageManager['listHistoryItems']>>}
+ * @param [options.appKeys] {Awaited<ReturnType<StorageManager['listAppKeys']>>}
+ *   an already-listed app-key collection, so a caller holding one does not
+ *   list it again
  *   the activity history, when the caller has already read it (the sibling
  *   agent listing scans the same collection)
  * @returns {Promise<ConnectedApp[]>}   sorted latest-connected first
  */
 export async function listConnectedApps({
   storage,
-  items
+  items,
+  appKeys
 }: {
   storage: StorageManager
   items?: Awaited<ReturnType<StorageManager['listHistoryItems']>>
+  appKeys?: Awaited<ReturnType<StorageManager['listAppKeys']>>
 }): Promise<ConnectedApp[]> {
   const [{ appKeys: credentials }, history] = await Promise.all([
-    storage.listAppKeys(),
+    appKeys ?? storage.listAppKeys(),
     items ?? storage.listHistoryItems()
   ])
 
@@ -525,6 +550,77 @@ export async function revokeAppAccess({
     skipped: outcome.skipped
   })
   return { ...outcome, rotated: rotation.rotated }
+}
+
+/**
+ * What the wallet's own records say about the applications that created a
+ * set of collections, by the `generator` did:key stamped on each: the display
+ * name and the canonical `appUrl`, for the consent row's existing-collection
+ * reading. A connected app answers from its app key and latest Login
+ * ({@link listConnectedApps}). A disconnected one has no app key left, since
+ * removing it is what a disconnect does, so its App Connect Login activities
+ * answer instead: the latest one whose recorded grants were delegated to
+ * that DID supplies both members. A creator neither source knows is absent
+ * from the result, and the row names its origin.
+ *
+ * @param options {object}
+ * @param options.storage {StorageManager}
+ * @param options.generators {Iterable<string>}   the `generator` DIDs to look
+ *   up
+ * @returns {Promise<ReadonlyMap<string, { name: string; appUrl: string }>>}
+ */
+export async function lookupCollectionCreators({
+  storage,
+  generators
+}: {
+  storage: StorageManager
+  generators: Iterable<string>
+}): Promise<ReadonlyMap<string, { name: string; appUrl: string }>> {
+  const wanted = new Set(generators)
+  const creators = new Map<string, { name: string; appUrl: string }>()
+  if (wanted.size === 0) {
+    return creators
+  }
+  const [history, appKeys] = await Promise.all([
+    storage.listHistoryItems(),
+    storage.listAppKeys()
+  ])
+  // Latest connect first, so the first entry for a subject DID stays.
+  for (const app of await listConnectedApps({
+    storage,
+    items: history,
+    appKeys
+  })) {
+    if (wanted.has(app.subjectDid) && !creators.has(app.subjectDid)) {
+      creators.set(app.subjectDid, { name: app.name, appUrl: app.appUrl })
+    }
+  }
+  // The rest are disconnected: the latest App Connect Login that recorded
+  // grants delegated to the DID still names the app.
+  const latestLoginByController = new Map<
+    string,
+    { created: string; name: string; appUrl: string }
+  >()
+  for (const { doc } of history) {
+    if (!isAppConnectLogin({ doc })) {
+      continue
+    }
+    const controller = loginGrantController(doc.object)
+    if (!controller || !wanted.has(controller) || creators.has(controller)) {
+      continue
+    }
+    const appUrl = loginAppUrl(doc.object)
+    const name = loginAppName(doc.object)
+    const created = doc.created ?? ''
+    const current = latestLoginByController.get(controller)
+    if (appUrl && name && (!current || current.created < created)) {
+      latestLoginByController.set(controller, { created, name, appUrl })
+    }
+  }
+  for (const [controller, { name, appUrl }] of latestLoginByController) {
+    creators.set(controller, { name, appUrl })
+  }
+  return creators
 }
 
 /**

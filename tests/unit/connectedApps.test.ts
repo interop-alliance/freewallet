@@ -17,6 +17,7 @@ import type { User } from '@/types/auth'
 import {
   deriveGrantsState,
   listConnectedApps,
+  lookupCollectionCreators,
   revokeAppAccess,
   type AppGrant,
   type ConnectedApp
@@ -423,6 +424,128 @@ describe('listConnectedApps', () => {
 
     expect(app.grants[0].signerKeyId).toBe('did:webvh:s:h:x#zClientKey')
     expect(app.grants[1].signerKeyId).toBeUndefined()
+  })
+})
+
+describe('lookupCollectionCreators', () => {
+  const OTHER_DID = 'did:key:zOtherApp'
+  const OTHER_URL = 'https://app.example/notes'
+
+  /**
+   * A recorded grant delegated to a controller, as the App Connect approval
+   * writes one onto the Login activity's `object.zcaps`.
+   */
+  function grantTo(controller: string) {
+    return {
+      id: `urn:zcap:${controller}`,
+      target: 'https://was.example/space/s/docs/',
+      allowedActions: ['read'],
+      expires: '2099-01-01T00:00:00Z',
+      zcap: { id: `urn:zcap:${controller}`, controller }
+    }
+  }
+
+  it('answers a connected app from its app key and latest Login', async () => {
+    const storage = fakeStorage({
+      appKeys: [
+        appKeyCredential({
+          cid: 'k1',
+          origin: 'https://app.example',
+          appUrl: APP_URL
+        })
+      ],
+      history: [
+        loginActivity({
+          origin: 'https://app.example',
+          appUrl: APP_URL,
+          name: 'Editor',
+          created: '2026-07-02T00:00:00Z'
+        })
+      ]
+    })
+
+    const creators = await lookupCollectionCreators({
+      storage,
+      generators: [APP_DID]
+    })
+
+    expect(creators.get(APP_DID)).toEqual({ name: 'Editor', appUrl: APP_URL })
+  })
+
+  it('answers a disconnected app from the Login that recorded grants to its DID', async () => {
+    // The disconnect deleted the app key, so only the activity history
+    // still names the app: the grants it recorded were delegated to the
+    // creator DID, and the record carries the appUrl and the display name.
+    const storage = fakeStorage({
+      appKeys: [],
+      history: [
+        loginActivity({
+          origin: 'https://app.example',
+          appUrl: OTHER_URL,
+          name: 'Notes (old)',
+          created: '2026-07-01T00:00:00Z',
+          grants: [grantTo(OTHER_DID)]
+        }),
+        loginActivity({
+          origin: 'https://app.example',
+          appUrl: OTHER_URL,
+          name: 'Notes',
+          created: '2026-07-03T00:00:00Z',
+          grants: [grantTo(OTHER_DID)]
+        })
+      ]
+    })
+
+    const creators = await lookupCollectionCreators({
+      storage,
+      generators: [OTHER_DID]
+    })
+
+    expect(creators.get(OTHER_DID)).toEqual({
+      name: 'Notes',
+      appUrl: OTHER_URL
+    })
+  })
+
+  it('leaves a creator neither source knows absent', async () => {
+    const storage = fakeStorage({
+      appKeys: [
+        appKeyCredential({
+          cid: 'k1',
+          origin: 'https://app.example',
+          appUrl: APP_URL
+        })
+      ],
+      history: [
+        loginActivity({
+          origin: 'https://app.example',
+          appUrl: APP_URL,
+          name: 'Editor',
+          created: '2026-07-02T00:00:00Z',
+          grants: [grantTo(APP_DID)]
+        })
+      ]
+    })
+
+    const creators = await lookupCollectionCreators({
+      storage,
+      generators: ['did:key:zNobody']
+    })
+
+    expect(creators.size).toBe(0)
+  })
+
+  it('reads nothing when no collection is attributed', async () => {
+    const storage = fakeStorage({ appKeys: [], history: [] })
+
+    const creators = await lookupCollectionCreators({
+      storage,
+      generators: []
+    })
+
+    expect(creators.size).toBe(0)
+    expect(storage.listAppKeys).not.toHaveBeenCalled()
+    expect(storage.listHistoryItems).not.toHaveBeenCalled()
   })
 })
 

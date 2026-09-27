@@ -14,9 +14,15 @@ The page (`src/pages/external/ExternalRequestPage.tsx`) is the
 `WalletGetPage` shape minus CHAPI. It opens the exchange, classifies the
 VPR, renders the storage-access consent panel, delegates through the
 ordinary grant engine, and POSTs the unsigned zcap-only presentation back
-with the exchange URL. Without a live app session it runs the ordinary login
-in place and adopts it app-wide. The Login activity records the grant under
-the fixed origin marker `n/a (API request)`, which the Applications page
+with the exchange URL. Its consent rows carry the same existing-collection
+reading the popup's rows do, through the same hook (`useAttributedGrants`)
+and second resolution pass (`attributeExistingCollections`). A collection
+another application created names that application. An interaction-URL
+grant stamps no attribution, so an agent re-requesting a collection it
+provisioned reads `unattributed` and gets the plain existing-collection
+note. Without a live app session it runs the ordinary login in place and
+adopts it app-wide. The Login activity records the grant under the fixed
+origin marker `n/a (API request)`, which the Applications page
 keys agent rows on.
 
 A request may name its requester through the VPR's root `agent: { name }`

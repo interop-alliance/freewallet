@@ -261,21 +261,135 @@ const COLLECTION_NAME_RE = /^[a-z0-9][a-z0-9-]{0,63}$/
  * {@link existingCollectionsFrom} over
  * `StorageManager.listCollectionPublicStates()`.
  */
-export type ExistingCollections = ReadonlyMap<string, { isPublic: boolean }>
+export type ExistingCollections = ReadonlyMap<
+  string,
+  {
+    isPublic: boolean
+    // The collection's app attribution once it has been read off its own
+    // metadata. Absent while unread, so resolution reports no
+    // existing-collection reading for it yet.
+    attribution?: CollectionAttribution
+  }
+>
+
+/**
+ * A collection's app attribution as grant resolution reads it: the two
+ * members App Connect provisioning stamps on the Collection Metadata object
+ * at creation (`generator`, the did:key of the application the collection was
+ * provisioned for, and `generatorOrigin`, the Web origin that DID was bound
+ * to), plus the creating app as the wallet's own records know it, joined onto
+ * `generator` by the caller (`lookupCollectionCreators` in
+ * `lib/connectedApps.ts`) so two applications sharing one origin can be told
+ * apart. An empty object is a collection read and found unstamped.
+ */
+export interface CollectionAttribution {
+  generator?: string
+  generatorOrigin?: string
+  creatorApp?: { name: string; appUrl: string }
+}
 
 /**
  * Builds the {@link ExistingCollections} snapshot from a collection listing
  * (`StorageManager.listCollectionPublicStates()` or anything shaped like it).
+ * The listing carries no attribution; a caller that has read it supplies it
+ * per collection.
  *
- * @param collections {Array<{ id: string, isPublic?: boolean }>}
+ * @param collections {Array<{ id: string, isPublic?: boolean, attribution?:
+ *   CollectionAttribution }>}
  * @returns {ExistingCollections}
  */
 export function existingCollectionsFrom(
-  collections: Array<{ id: string; isPublic?: boolean }>
+  collections: Array<{
+    id: string
+    isPublic?: boolean
+    attribution?: CollectionAttribution
+  }>
 ): ExistingCollections {
   return new Map(
-    collections.map(({ id, isPublic }) => [id, { isPublic: !!isPublic }])
+    collections.map(({ id, isPublic, attribution }) => [
+      id,
+      { isPublic: !!isPublic, attribution }
+    ])
   )
+}
+
+/**
+ * How an existing private collection stands in relation to the requester,
+ * reported on a satisfiable target naming one so the consent row can say the
+ * collection already exists and who created it. The signal is the attribution
+ * App Connect provisioning stamps on the Collection Metadata object at
+ * creation (`generator`, `generatorOrigin`), read against the requester's
+ * did:key, its canonical `appUrl`, and its attested origin. A collection that
+ * already stands admits the requester into every key epoch it has, so the
+ * row states it before approval.
+ */
+export interface ExistingCollectionReading {
+  // Who provisioned the collection: `this-app` (the requester's own did:key),
+  // `this-application` (a key the same application held earlier -- the site
+  // reconnecting after a disconnect minted a new one), `other` (a different
+  // application), or `unattributed` (nothing stamped: a collection an
+  // interaction-URL grant provisioned, which records no origin).
+  creator: 'this-app' | 'this-application' | 'other' | 'unattributed'
+  generator?: string
+  generatorOrigin?: string
+  // The creating app's display name, where the wallet's own records know it.
+  creatorName?: string
+}
+
+/**
+ * The {@link ExistingCollectionReading} for a collection target, or undefined
+ * when the target names nothing that already stands as a private
+ * app-provisioned collection: a new name, a public collection (which carries
+ * no key epochs to admit anyone into), a protected wallet collection, or a
+ * collection whose attribution has not been read yet.
+ *
+ * The same-application test compares canonical app URLs, since the wallet
+ * tells apps apart by `appUrl` and several may share one origin. A requester
+ * that carries an `appUrl` (an App Connect request) reads `this-application`
+ * only when the creator's app URL is known and equal; a creator whose app URL
+ * the wallet cannot recover reads `other`, the cautious side. A requester
+ * with no `appUrl` (a plain zcap request) has only its origin to offer, and
+ * the origin comparison decides.
+ *
+ * @param options {object}
+ * @param options.collectionId {string}
+ * @param options.collections {ExistingCollections}
+ * @param options.requester {{ controller?: string; origin?: string; appUrl?:
+ *   string }}
+ * @returns {ExistingCollectionReading | undefined}
+ */
+function existingCollectionReading({
+  collectionId,
+  collections,
+  requester
+}: {
+  collectionId: string
+  collections: ExistingCollections
+  requester: { controller?: string; origin?: string; appUrl?: string }
+}): ExistingCollectionReading | undefined {
+  const existing = collections.get(collectionId)
+  if (!existing?.attribution || existing.isPublic) {
+    return undefined
+  }
+  if (isProtectedCollection(collectionId)) {
+    return undefined
+  }
+  const { generator, generatorOrigin, creatorApp } = existing.attribution
+  if (!generator) {
+    return { creator: 'unattributed' }
+  }
+  if (requester.controller && generator === requester.controller) {
+    return { creator: 'this-app', generator, generatorOrigin }
+  }
+  const sameApplication = requester.appUrl
+    ? creatorApp?.appUrl === requester.appUrl
+    : !!requester.origin && generatorOrigin === requester.origin
+  return {
+    creator: sameApplication ? 'this-application' : 'other',
+    generator,
+    generatorOrigin,
+    creatorName: creatorApp?.name
+  }
 }
 
 /**
@@ -332,6 +446,10 @@ interface ResolvedTarget {
   collectionId?: string
   // A standard EDV-encrypted collection: the RP will only see ciphertext.
   encrypted: boolean
+  // Present when the target names a private collection that already stands
+  // (see {@link ExistingCollectionReading}); absent on a new name, a public
+  // or protected collection, a Space, or an unsatisfiable target.
+  existing?: ExistingCollectionReading
 }
 
 /**
@@ -708,17 +826,23 @@ function classifySpaceTarget({
  * @param options.descriptor {string | { type: string; name?: string }}
  * @param options.space {SpaceLocation}   the user's Space, structurally
  * @param options.collections {ExistingCollections}   the Space's existing
- *   collections and their public state
+ *   collections, their public state, and their attribution
+ * @param options.requester {{ controller?: string; origin?: string; appUrl?:
+ *   string }}   the grantee did:key, the attested requesting origin, and the
+ *   app's canonical URL, read only to class an existing collection's creator
+ *   (`existing` on the result)
  * @returns {ResolvedTarget}
  */
 export function resolveInvocationTarget({
   descriptor,
   space,
-  collections
+  collections,
+  requester
 }: {
   descriptor: string | { type?: string; name?: string }
   space: SpaceLocation
   collections: ExistingCollections
+  requester: { controller?: string; origin?: string; appUrl?: string }
 }): ResolvedTarget {
   if (typeof descriptor === 'string') {
     const parsed = classifySpaceTarget({ target: descriptor, space })
@@ -760,7 +884,12 @@ export function resolveInvocationTarget({
             }),
       collectionId,
       encrypted: !!standardCollection(collectionId)?.encryption,
-      targetClass: collectionClassFor({ collectionId, collections })
+      targetClass: collectionClassFor({ collectionId, collections }),
+      existing: existingCollectionReading({
+        collectionId,
+        collections,
+        requester
+      })
     }
   }
 
@@ -793,8 +922,11 @@ export function resolveInvocationTarget({
       // wallet itself, never here. An existing private RP collection still
       // flags provisioning: the provisioning step is idempotent and, on the App
       // Connect path, is what re-admits a reconnecting app to an existing
-      // collection's recipient roster. An existing PUBLIC collection never
-      // does: it is classed public-collection whichever way the
+      // collection's recipient roster. The same step admits a DIFFERENT
+      // application naming the collection, into every key epoch it has; that
+      // is the decided policy, and `existing` below is what lets the consent
+      // row say so before approval. An existing PUBLIC collection never
+      // flags provisioning: it is classed public-collection whichever way the
       // target is spelled, and re-provisioning it here would re-run the
       // public-policy setup on a live collection -- or, on App Connect, set
       // up a recipient roster on a world-readable plaintext collection.
@@ -802,7 +934,12 @@ export function resolveInvocationTarget({
         !isProtectedCollection(name) && collectionClass !== 'public-collection',
       collectionId: name,
       encrypted: !!standard?.encryption,
-      targetClass: collectionClass
+      targetClass: collectionClass,
+      existing: existingCollectionReading({
+        collectionId: name,
+        collections,
+        requester
+      })
     }
   }
 
@@ -945,23 +1082,30 @@ function capActions({
  * @param [options.allowMissingController] {boolean}   App Connect
  *   consent-preview only: the app-key DID may not exist yet, so an absent
  *   controller is not yet a failure there
+ * @param [options.requester] {{ origin?: string; appUrl?: string }}   the
+ *   attested requesting origin, when the request arrived with one, and the
+ *   requesting app's canonical URL, on the App Connect path; read only to
+ *   class an existing collection's creator
  * @returns {ResolvedGrant}
  */
 export function resolveGrant({
   descriptor,
   space,
   collections,
-  allowMissingController = false
+  allowMissingController = false,
+  requester
 }: {
   descriptor: ICapabilityQueryDetail
   space: SpaceLocation
   collections: ExistingCollections
   allowMissingController?: boolean
+  requester?: { origin?: string; appUrl?: string }
 }): ResolvedGrant {
   let target = resolveInvocationTarget({
     descriptor: descriptor.invocationTarget,
     space,
-    collections
+    collections,
+    requester: { controller: descriptor.controller, ...requester }
   })
   // A grant with no recipient cannot be delegated: the wire type requires a
   // `controller` but an actual request body can omit it, which would render a
@@ -1018,25 +1162,31 @@ export function resolveGrant({
  * @param options.collections {ExistingCollections}
  * @param [options.allowMissingController] {boolean}   App Connect
  *   consent-preview only (see {@link resolveGrant})
+ * @param [options.requester] {{ origin?: string; appUrl?: string }}   the
+ *   attested requesting origin and the app's canonical URL (see
+ *   {@link resolveGrant})
  * @returns {ResolvedGrant[]}
  */
 export function resolveGrants({
   zcapRequests,
   space,
   collections,
-  allowMissingController
+  allowMissingController,
+  requester
 }: {
   zcapRequests: ICapabilityQueryDetail[]
   space: SpaceLocation
   collections: ExistingCollections
   allowMissingController?: boolean
+  requester?: { origin?: string; appUrl?: string }
 }): ResolvedGrant[] {
   return zcapRequests.map(descriptor =>
     resolveGrant({
       descriptor,
       space,
       collections,
-      allowMissingController
+      allowMissingController,
+      requester
     })
   )
 }

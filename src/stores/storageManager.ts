@@ -2046,6 +2046,33 @@ export class StorageManager {
     return await this.#remoteStore.listCollectionPublicStates()
   }
 
+  /**
+   * One collection's app attribution off its Collection Metadata object:
+   * `generator`, the did:key of the application it was provisioned for, and
+   * `generatorOrigin`, the Web origin that DID was bound to. One signed read
+   * per call; the lean listing above carries neither member. Resolves
+   * `undefined` without a remote store, and for a collection that is missing
+   * or not visible. Network errors throw through.
+   *
+   * @param options {object}
+   * @param options.collectionId {string}
+   * @returns {Promise<{ generator?: string, generatorOrigin?: string } | undefined>}
+   */
+  async collectionAttribution({
+    collectionId
+  }: {
+    collectionId: string
+  }): Promise<{ generator?: string; generatorOrigin?: string } | undefined> {
+    const metadata = await this.#remoteStore?.collectionMetadata({
+      collectionId
+    })
+    if (!metadata) {
+      return undefined
+    }
+    const { generator, generatorOrigin } = metadata
+    return { generator, generatorOrigin }
+  }
+
   async listCollectionResources({
     collectionUrl
   }: {

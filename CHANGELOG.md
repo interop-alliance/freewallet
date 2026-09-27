@@ -49,6 +49,27 @@
 
 ### Added
 
+- The consent row for a private-collection grant now says when the named
+  collection already exists, and who created it. A second application
+  naming the collection is admitted into every key epoch it has, as a
+  reconnecting app is, and the row states that before approval. It names
+  the creating app where the wallet's records know it, and its origin
+  otherwise. A collection with no attribution gets a plainer note. One left
+  by an earlier connection of the same application is reported as that
+  application regaining its data (`this-application`). Same application
+  means the same canonical `appUrl`, so a different app on the same origin
+  gets the creator warning. The reading is `existing` on the target
+  `resolveInvocationTarget` resolves, over the `generator` and
+  `generatorOrigin` read off each named collection's own metadata
+  (`StorageManager.collectionAttribution`). The creator's app URL and
+  display name come from `lookupCollectionCreators` in
+  `src/lib/connectedApps.ts`: the app key while the creator is connected,
+  and its App Connect Login activities once it is not. The consent screen
+  renders first, over the Space listing alone. The rows show their note once
+  the second pass (`attributeExistingCollections`) settles. The CHAPI get
+  popup and the interaction-URL request page share both passes through
+  `useAttributedGrants`. English and Spanish copy.
+
 - Backing this wallet up to one file. The Storage page's export action now
   opens a dialog (`src/components/storage/BackupExportDialog.tsx`) offering a
   password-protected or an unprotected backup, and

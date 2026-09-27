@@ -35,13 +35,26 @@
  * approval -- the honest ceiling that removing access later cannot take back
  * what has already been read. It never shows the ordinary "only sees
  * ciphertext" note, which would be exactly wrong.
+ *
+ * A private-collection grant naming a collection that already stands states
+ * so on the row, from the resolver's `existing` reading: created by another
+ * application (a warning naming that app where the wallet's records know
+ * it, else the creator origin, else its DID), unattributed, or left by an
+ * earlier connection of the same application. The admitted app reads every
+ * key epoch the collection has, and the row says so before approval. The
+ * reading is absent until the caller has read the collection's attribution,
+ * so the row shows no note the metadata has yet to refine.
  */
 import Box from '@mui/material/Box'
 import Chip from '@mui/material/Chip'
 import Stack from '@mui/material/Stack'
 import Typography from '@mui/material/Typography'
 import { useTranslation } from 'react-i18next'
-import { isSatisfiable, type ResolvedGrant } from '@/lib/walletRequest'
+import {
+  isSatisfiable,
+  type ExistingCollectionReading,
+  type ResolvedGrant
+} from '@/lib/walletRequest'
 import { SiteProvidedText } from './SiteProvidedText'
 
 /**
@@ -78,6 +91,22 @@ function targetLabel(
     }
   }
   return ''
+}
+
+// The existing-collection note per creator reading; `this-app` (the
+// requester's own collection) gets none.
+const EXISTING_NOTES: Partial<
+  Record<ExistingCollectionReading['creator'], { key: string; color: string }>
+> = {
+  other: { key: 'chapi.get.zcapExistingOther', color: 'warning.main' },
+  unattributed: {
+    key: 'chapi.get.zcapExistingUnattributed',
+    color: 'text.secondary'
+  },
+  'this-application': {
+    key: 'chapi.get.zcapExistingApplication',
+    color: 'text.secondary'
+  }
 }
 
 export function ZcapGrantsPanel({
@@ -117,6 +146,8 @@ export function ZcapGrantsPanel({
         const { target, allowedActions, descriptor, write } = grant
         const satisfiable = isSatisfiable(target)
         const share = target.targetClass === 'share'
+        const existingNote =
+          target.existing && EXISTING_NOTES[target.existing.creator]
         // Warning border for whole-Space, public-collection, and write grants.
         const highlight =
           target.targetClass === 'space' ||
@@ -220,6 +251,21 @@ export function ZcapGrantsPanel({
                     sx={{ display: 'block', mt: 0.5 }}
                   >
                     {t('chapi.get.zcapWriteWarning')}
+                  </Typography>
+                )}
+
+                {target.existing && existingNote && (
+                  <Typography
+                    variant="caption"
+                    color={existingNote.color}
+                    sx={{ display: 'block', mt: 0.5 }}
+                  >
+                    {t(existingNote.key, {
+                      creator:
+                        target.existing.creatorName ??
+                        target.existing.generatorOrigin ??
+                        target.existing.generator
+                    })}
                   </Typography>
                 )}
 

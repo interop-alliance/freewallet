@@ -78,7 +78,6 @@ import {
   type IVerifiableCredential,
   type IVPRDetails,
   type IVPRQuery,
-  type ResolvedGrant,
   type WalletRequestProfile
 } from '@/lib/walletRequest'
 import {
@@ -87,6 +86,7 @@ import {
   findAppKeyCredential
 } from '@interop/wallet-request'
 import { fetchAppManifest } from '@/lib/appManifest'
+import { useAttributedGrants } from '@/hooks/useAttributedGrants'
 import { useAsyncLoad } from '@/hooks/useAsyncLoad'
 import { ZcapGrantsPanel } from './ZcapGrantsPanel'
 import { SiteProvidedText } from './SiteProvidedText'
@@ -223,7 +223,9 @@ export function WalletGetPage() {
     StoredCredential[]
   >([])
   const [selectedCids, setSelectedCids] = useState<Set<string>>(new Set())
-  const [resolvedGrants, setResolvedGrants] = useState<ResolvedGrant[]>([])
+  // The consent screen's grants: the first pass at once, then the pass with
+  // the existing collections' attribution read in.
+  const { grants: resolvedGrants, attributeGrants } = useAttributedGrants()
   // App Connect: whether no stored app key matched at login time (the consent
   // copy differs); the authoritative match-or-mint happens at approve time.
   const [appKeyFirstRun, setAppKeyFirstRun] = useState(false)
@@ -418,13 +420,23 @@ export function WalletGetPage() {
       // resolution: a public grant that would convert an existing collection
       // resolves unsatisfiable, and a target naming an already-public
       // collection is classed public-collection. Fetched once for the
-      // preview; the
-      // approve-time delegation re-fetches its own authoritative snapshot.
+      // preview; the approve-time delegation re-fetches its own authoritative
+      // snapshot. The creator of a private collection that already stands
+      // is read afterwards, off each collection's own metadata, without
+      // holding the consent screen (`attributeExistingCollections`).
       const existingCollections = wantsGrants
         ? existingCollectionsFrom(
             await loggedIn.storage.listCollectionPublicStates()
           )
         : existingCollectionsFrom([])
+      const resolveAndAttribute = (
+        resolution: Parameters<typeof resolveGrants>[0]
+      ) =>
+        attributeGrants({
+          resolution,
+          grants: resolveGrants(resolution),
+          storage: loggedIn.storage
+        })
 
       const space = loggedIn.storage.spaceLocation
 
@@ -457,22 +469,25 @@ export function WalletGetPage() {
         setAppKeyFirstRun(!existing)
         setPreviewedAppKeyDid(existingDid || null)
         if (profile.appConnect.capabilityQueries.length > 0 && space) {
-          setResolvedGrants(
-            resolveGrants({
-              zcapRequests: appConnectZcapRequests({
-                capabilityQueries: profile.appConnect.capabilityQueries,
-                // On first run the app-key DID does not exist yet, so the
-                // controller is empty here. Resolution reads it only to
-                // validate a share's recipient derivation, and the opt-out
-                // below suspends the no-recipient refusal for exactly this
-                // case; the approved path re-derives with the real subject DID.
-                controller: existingDid
-              }),
-              space,
-              collections: existingCollections,
-              allowMissingController: true
-            })
-          )
+          resolveAndAttribute({
+            zcapRequests: appConnectZcapRequests({
+              capabilityQueries: profile.appConnect.capabilityQueries,
+              // On first run the app-key DID does not exist yet, so the
+              // controller is empty here. Resolution reads it only to
+              // validate a share's recipient derivation and to class an
+              // existing collection's creator, and the opt-out below
+              // suspends the no-recipient refusal for exactly this case; the
+              // approved path re-derives with the real subject DID.
+              controller: existingDid
+            }),
+            space,
+            collections: existingCollections,
+            allowMissingController: true,
+            requester: {
+              origin: requestOrigin,
+              appUrl: profile.appConnect.app.appUrl
+            }
+          })
         }
         setSession(loggedIn)
         setPageState('selecting')
@@ -497,13 +512,12 @@ export function WalletGetPage() {
       setSelectedCids(new Set(loginMatch ? [loginMatch.cid] : []))
 
       if (profile.zcapRequests.length > 0 && space) {
-        setResolvedGrants(
-          resolveGrants({
-            zcapRequests: profile.zcapRequests,
-            space,
-            collections: existingCollections
-          })
-        )
+        resolveAndAttribute({
+          zcapRequests: profile.zcapRequests,
+          space,
+          collections: existingCollections,
+          requester: { origin: requestOrigin }
+        })
       }
 
       setSession(loggedIn)

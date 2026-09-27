@@ -44,7 +44,6 @@ import {
   resolveGrants,
   WalletResponseFailure,
   type IVPRDetails,
-  type ResolvedGrant,
   type WalletRequestProfile
 } from '@/lib/walletRequest'
 import {
@@ -56,6 +55,7 @@ import {
   precheckExternalRequest,
   type ExternalRequestRefusal
 } from '@/lib/walletRequest/externalRequest'
+import { useAttributedGrants } from '@/hooks/useAttributedGrants'
 import { ChapiInitializing } from '@/pages/chapi/ChapiInitializing'
 import { CHAPILoginForm } from '@/pages/chapi/CHAPILoginForm'
 import { RequestSourcePanel } from '@/pages/chapi/RequestSourcePanel'
@@ -115,7 +115,9 @@ export function ExternalRequestPage() {
   const [deliveryHost, setDeliveryHost] = useState('')
   const [profile, setProfile] = useState<WalletRequestProfile | null>(null)
   const [session, setSession] = useState<Session | null>(null)
-  const [resolvedGrants, setResolvedGrants] = useState<ResolvedGrant[]>([])
+  // The consent screen's grants: the first pass at once, then the pass with
+  // the existing collections' attribution read in.
+  const { grants: resolvedGrants, attributeGrants } = useAttributedGrants()
   const [loginError, setLoginError] = useState<string | null>(null)
   // What the mint will actually produce: under a transient session's
   // generation delegation each configured TTL is clamped to that parent.
@@ -156,20 +158,28 @@ export function ExternalRequestPage() {
       block('zcapUnavailable')
       return
     }
-    const grants = resolveGrants({
+    // The existing collections' public state, consulted by grant resolution.
+    // The creator of a private collection that already stands is read
+    // afterwards, off each collection's own metadata, without holding the
+    // consent screen (`useAttributedGrants`). An interaction-URL grant stamps
+    // no attribution, so a collection an agent itself provisioned gets the
+    // plain existing-collection note, and one another application created
+    // names that application.
+    const resolution = {
       zcapRequests: requestProfile.zcapRequests,
       space,
       collections: existingCollectionsFrom(
         await loggedIn.storage.listCollectionPublicStates()
       )
-    })
+    }
+    const grants = resolveGrants(resolution)
     // The allowlist: the first point a target's class is known is after
     // resolution, so the check runs here, still before consent renders.
     if (barredGrants(grants).length > 0) {
       block('barredGrant')
       return
     }
-    setResolvedGrants(grants)
+    attributeGrants({ resolution, grants, storage: loggedIn.storage })
     setPageState('consenting')
   }
 

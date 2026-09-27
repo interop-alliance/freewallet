@@ -186,6 +186,47 @@ plain URL string. The user is always a recipient of an encrypted collection
 in their own Space, and any future exception needs its own explicit consent
 surface.
 
+Two applications may name the same private collection, since a request
+names it by `name` alone. The second is admitted exactly as a reconnecting
+app is: the idempotent provisioning escrows its key-agreement key into every
+key epoch the collection has, so it reads what the first app stored. That is
+the decided policy, and the consent row is what keeps it from being
+silent. `resolveInvocationTarget` reports, on a target naming a private
+collection that already stands, an `existing` reading of its creator: the
+requester's own did:key (`this-app`), a key the same application held
+earlier (`this-application`, the site reconnecting after a disconnect), a
+different application (`other`), or nothing stamped (`unattributed`, a
+collection an interaction-URL grant provisioned). The signal is the
+`generator` and `generatorOrigin` attribution stamped at creation, read off
+each named collection's own Collection Metadata object. The lean Space
+listing grant resolution consults carries neither member. A collection entry
+in the resolution snapshot therefore carries an optional `attribution`, and
+while it is absent the resolver reports no `existing` reading, so the row
+shows no note. The consent page resolves once over the listing, so the
+screen renders at once. A second pass then reads the named private
+collections' metadata in parallel, sets each `attribution`, and resolves
+again (`attributeExistingCollections` in
+`src/lib/walletRequest/attributeExistingCollections.ts`). Both consent pages
+drive the two passes through one hook, `useAttributedGrants` in
+`src/hooks/useAttributedGrants.ts`. It shows the first pass, runs the second
+behind it, and drops a superseded pass's late result. A second pass that
+fails outright is logged, and the rows settle over the first resolution. A
+metadata read that fails, or a collection the store cannot see, gets an
+empty attribution and reads `unattributed`. The second pass also joins the
+creating app (`creatorApp: { name, appUrl }`) onto `generator` from the
+wallet's own records (`lookupCollectionCreators` in
+`src/lib/connectedApps.ts`). The app key answers while the creator is
+connected. Once it is not, the App Connect Login activities that recorded
+grants to its DID answer, since a disconnect deletes the app key. The
+same-application test compares app URLs rather than origins, because the
+wallet tells apps apart by `appUrl` and two may share one origin. An App
+Connect requester whose creator app URL the wallet cannot recover reads
+`other`, the cautious side. A plain zcap request carries no app URL, and its
+attested origin decides. The reading carries the creator's display name from
+the same join (`creatorName`), and the row names the creator by it, or by
+its origin otherwise. A public collection carries no roster and reports no
+reading.
+
 Because the user is recipient zero, the wallet decrypts these collections in
 the storage browser as an ordinary recipient with its vault KAK,
 descriptor-driven from the collection's governing log. Revoking a connected
