@@ -25,14 +25,14 @@ const NO_CREATORS: ReadonlyMap<string, CollectionCreator> = new Map()
 /**
  * @param options {object}
  * @param [options.storage] {StorageManager}   the session's storage
- * @param options.generators {string[]}   the `generator` DIDs to look up; an
+ * @param options.generators {string[]}   the `generator.id` DIDs to look up; an
  *   empty list leaves the load off
  * @param [options.items] {HistoryItems}
  *   the activity history, when the caller has already read it; the load then
  *   runs no history read of its own
  * @param [options.enabled] {boolean}   false leaves the load off entirely
  *   (the caller's own history read has not landed); defaults to true
- * @returns {ReadonlyMap<string, CollectionCreator>}   keyed by `generator`
+ * @returns {ReadonlyMap<string, CollectionCreator>}   keyed by `generator.id`
  *   DID; empty while loading, when the load is off, and after a failed load
  */
 export function useCollectionCreators({

@@ -214,9 +214,10 @@ requester's own did:key (`this-app`), a key the same application held
 earlier (`this-application`, the site reconnecting after a disconnect), a
 different application (`other`), or nothing stamped (`unattributed`, a
 collection an interaction-URL grant provisioned). The signal is the
-`generator` and `generatorOrigin` attribution stamped at creation, read off
-each named collection's own Collection Metadata object. The lean Space
-listing grant resolution consults carries neither member. A collection entry
+`generator` object stamped at creation (`{ id, origin, url, name }`: the
+app's did:key, its attested origin, its canonical app URL, and its display
+name), read off each named collection's own Collection Metadata object.
+The lean Space listing grant resolution consults does not carry it. A collection entry
 in the resolution snapshot therefore carries an optional `attribution`, and
 while it is absent the resolver reports no `existing` reading, so the row
 shows no note. The consent page resolves once over the listing, so the
@@ -230,7 +231,7 @@ behind it, and drops a superseded pass's late result. A second pass that
 fails outright is logged, and the rows settle over the first resolution. A
 metadata read that fails, or a collection the store cannot see, gets an
 empty attribution and reads `unattributed`. The second pass also joins the
-creating app (`creatorApp: { name, appUrl }`) onto `generator` from the
+creating app (`creatorApp: { name, appUrl }`) onto `generator.id` from the
 wallet's own records (`lookupCollectionCreators` in
 `src/lib/connectedApps.ts`). The app key answers while the creator is
 connected. Once it is not, the App Connect Login activities that recorded
@@ -240,12 +241,17 @@ named the same way on both. The CHAPI get popup has already listed
 `app-connections` for its app-key match, and hands that listing to the
 second pass rather than listing the collection again. The
 same-application test compares app URLs rather than origins, because the
-wallet tells apps apart by `appUrl` and two may share one origin. An App
-Connect requester whose creator app URL the wallet cannot recover reads
-`other`, the cautious side. An interaction-URL agent carries no app URL, so
-it reads `other` unless the collection is its own (`this-app`). The reading carries the creator's display name from
-the same join (`creatorName`), and the row names the creator by it, or by
-its origin otherwise. A public collection carries no roster and reports no
+wallet tells apps apart by `appUrl` and two may share one origin. The
+creator's app URL is the collection's own `generator.url` when it carries
+one, so a matching URL reads `this-application` and a different URL on the
+same origin reads `other`, whatever the wallet's records say. Only a
+collection stamped without `generator.url` falls back to the app URL the
+join recovers. An App Connect requester whose creator app URL is known from
+neither reads `other`, the cautious side. An interaction-URL agent carries no
+app URL, so it reads `other` unless the collection is its own (`this-app`).
+The reading carries the creator's display name (`creatorName`): the stamped
+`generator.name`, else the name the join recovers. The row names the creator
+by it, or by `generator.origin` otherwise. A public collection carries no roster and reports no
 reading. The same metadata read says whether the collection carries an
 `encryption` descriptor. A string target admits the grantee to no roster,
 so on an encrypted collection the row gets the ciphertext note once the
@@ -267,7 +273,7 @@ target (see "The interaction-URL request page" in external-request.md).
 
 Which collections that rotation covers is the union of two sources. The
 first is the Space's collection listing: every collection whose Collection
-Metadata names the app's subject DID as its `generator`, the attribution
+Metadata names the app's subject DID as its `generator.id`, the attribution
 stamped at provisioning. The second is the collections the app's recorded
 grants target, expired grants included, which reaches a collection the app
 was admitted to but did not create. A grant expires on its own; a recipient
@@ -282,7 +288,7 @@ then persisted with the signed grants and the connect's `firstRun`. Only
 after that is each share escrowed and each collection provisioned
 (`beforeProvision` in `processZcaps`, wired in
 `composeAndDeliverResponse`). This matters for an existing private
-collection, whose `generator` still names its first creator: the recorded
+collection, whose `generator.id` still names its first creator: the recorded
 grants are the only source that names it for the second app. A failed
 persist fails the request with nothing escrowed. A share or provisioning
 step that fails after the persist fails the request too, and the Login is

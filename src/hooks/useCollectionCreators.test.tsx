@@ -30,8 +30,7 @@ const CREATOR_URL = 'https://notes.example/app'
 const NOTES: StorageCollection = {
   id: 'notes',
   url: 'https://was.example/space/s/notes/',
-  generator: CREATOR_DID,
-  generatorOrigin: CREATOR_ORIGIN
+  generator: { id: CREATOR_DID, origin: CREATOR_ORIGIN }
 }
 
 /**
@@ -74,8 +73,7 @@ function storageDouble() {
     ]),
     listCollectionShares: vi.fn(async () => []),
     collectionAttribution: vi.fn(async () => ({
-      generator: CREATOR_DID,
-      generatorOrigin: CREATOR_ORIGIN
+      generator: { id: CREATOR_DID, origin: CREATOR_ORIGIN }
     }))
   }
 }

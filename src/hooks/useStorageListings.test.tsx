@@ -72,7 +72,7 @@ describe('useStorageListings', () => {
         {
           id: 'app-notes',
           url: 'https://was.example/spaces/s/collections/app-notes',
-          generator: 'did:key:z6MkApp'
+          generator: { id: 'did:key:z6MkApp' }
         } as StorageCollection
       ]
     })

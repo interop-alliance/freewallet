@@ -28,7 +28,6 @@
  * BrowserStore.
  */
 import type {
-  IDID,
   IKeyAgreementKey,
   IKeyResolver,
   IVerifiableCredential,
@@ -47,6 +46,7 @@ import {
 import type { RxCollection, RxStorage } from 'rxdb/plugins/core'
 import type {
   CollectionEncryption,
+  CollectionGenerator,
   IDelegatedZcap,
   ServiceDescription,
   SpaceMetadata
@@ -2064,8 +2064,8 @@ export class StorageManager {
 
   /**
    * One collection's app attribution off its Collection Metadata object:
-   * `generator`, the did:key of the application it was provisioned for, and
-   * `generatorOrigin`, the Web origin that DID was bound to. Beside them,
+   * `generator`, the application it was provisioned for (its did:key, and
+   * the Web origin and canonical app URL that DID was bound to). Beside it,
    * `encrypted` says whether the same object carries an `encryption`
    * descriptor. One signed read per call; the lean listing above carries none
    * of the three. Resolves `undefined` without a remote store, and for a
@@ -2073,16 +2073,15 @@ export class StorageManager {
    *
    * @param options {object}
    * @param options.collectionId {string}
-   * @returns {Promise<{ generator?: string, generatorOrigin?: string,
-   *   encrypted: boolean } | undefined>}
+   * @returns {Promise<{ generator?: CollectionGenerator, encrypted: boolean }
+   *   | undefined>}
    */
   async collectionAttribution({
     collectionId
   }: {
     collectionId: string
   }): Promise<
-    | { generator?: string; generatorOrigin?: string; encrypted: boolean }
-    | undefined
+    { generator?: CollectionGenerator; encrypted: boolean } | undefined
   > {
     const metadata = await this.#remoteStore?.collectionMetadata({
       collectionId
@@ -2090,8 +2089,8 @@ export class StorageManager {
     if (!metadata) {
       return undefined
     }
-    const { generator, generatorOrigin, encryption } = metadata
-    return { generator, generatorOrigin, encrypted: Boolean(encryption) }
+    const { generator, encryption } = metadata
+    return { generator, encrypted: Boolean(encryption) }
   }
 
   async listCollectionResources({
@@ -2357,38 +2356,32 @@ export class StorageManager {
    * remote backend. With `isPublic`, the collection also gets a
    * collection-level world-readable (PublicCanRead) policy.
    *
-   * `generator` and `generatorOrigin` are the collection's app attribution,
-   * stamped on the create (see {@link WASRemoteStore.ensureCollection}).
+   * `generator` is the collection's app attribution, stamped on the create (see {@link WASRemoteStore.ensureCollection}).
    *
    * @param options {object}
    * @param options.id {string}
    * @param [options.name] {string}
    * @param [options.isPublic] {boolean}
-   * @param [options.generator] {IDID}   the DID of the application this
+   * @param [options.generator] {CollectionGenerator}   the application this
    *   collection is provisioned for
-   * @param [options.generatorOrigin] {string}   the Web origin that DID was
-   *   bound to at provisioning time
    * @returns {Promise<void>}
    */
   async ensureCollection({
     id,
     name,
     isPublic,
-    generator,
-    generatorOrigin
+    generator
   }: {
     id: string
     name?: string
     isPublic?: boolean
-    generator?: IDID
-    generatorOrigin?: string
+    generator?: CollectionGenerator
   }): Promise<void> {
     await this.#requireRemote('Provisioning a collection').ensureCollection({
       id,
       name,
       isPublic,
-      generator,
-      generatorOrigin
+      generator
     })
   }
 
@@ -2428,22 +2421,18 @@ export class StorageManager {
    * @param options.recipient {RecipientPublicKey}   the grantee's identity
    *   public key-agreement key, the X25519 twin of its controller `did:key`
    *   (its `id` is the recipient `kid`)
-   * @param [options.generator] {IDID}   the DID of the application this
+   * @param [options.generator] {CollectionGenerator}   the application this
    *   collection is provisioned for, stamped as the collection's attribution
-   * @param [options.generatorOrigin] {string}   the Web origin that DID was
-   *   bound to at provisioning time
    * @returns {Promise<CollectionEncryption>}   the current descriptor
    */
   async provisionEncryptedCollection({
     collectionId,
     recipient,
-    generator,
-    generatorOrigin
+    generator
   }: {
     collectionId: string
     recipient: RecipientPublicKey
-    generator?: IDID
-    generatorOrigin?: string
+    generator?: CollectionGenerator
   }): Promise<CollectionEncryption> {
     const remote = this.#requireRemote('Provisioning an encrypted collection')
     const { keyAgreementKey } = this.#vaultKeys
@@ -2454,8 +2443,7 @@ export class StorageManager {
     // so an existing roster is adopted, never overwritten.
     await remote.ensureGovernedCollection({
       id: collectionId,
-      generator,
-      generatorOrigin
+      generator
     })
     const store = await this.#collectionStore({
       collectionId,
@@ -3675,7 +3663,7 @@ export class StorageManager {
    * The candidate collections are the union of two sources, because a grant
    * expires on its own while a recipient entry does not. The first is the
    * Space's collection listing: every collection whose Collection Metadata
-   * names this app's subject DID as its `generator`, the attribution stamped
+   * names this app's subject DID as its `generator.id`, the attribution stamped
    * at App Connect provisioning. The second is the recorded grant zcaps'
    * `invocationTarget`s, expired grants included, which reaches a collection
    * the app was admitted to but did not provision. Standard / protected
@@ -3795,7 +3783,7 @@ export class StorageManager {
    * or `attributedTo` names a grantee. A collection the listing reports
    * public is no candidate, since a public collection carries no key-epoch
    * roster, and that saves a governed-log read per public target. With
-   * `attributedTo`, every listed collection whose `generator` is that DID is
+   * `attributedTo`, every listed collection whose `generator.id` is that DID is
    * a further candidate. A listing that cannot be read is logged and counted
    * as one failure, with or without `attributedTo`: the public targets can
    * no longer be told apart, and a public target's governed-log read throws.
@@ -3830,7 +3818,7 @@ export class StorageManager {
     items?: HistoryItems
     listing: {
       read: () => Promise<
-        Array<{ id: string; isPublic?: boolean; generator?: string }>
+        Array<Pick<StorageCollection, 'id' | 'isPublic' | 'generator'>>
       >
       attributedTo?: string
     }
@@ -3875,7 +3863,7 @@ export class StorageManager {
         for (const collection of listed) {
           if (
             listing.attributedTo &&
-            collection.generator === listing.attributedTo &&
+            collection.generator?.id === listing.attributedTo &&
             !isProtectedCollection(collection.id)
           ) {
             candidates.add(collection.id)

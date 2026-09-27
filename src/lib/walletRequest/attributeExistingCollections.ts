@@ -28,10 +28,11 @@ const log = createLogger('fw:request:attribution')
 
 /**
  * Re-resolves the grants with each existing collection's attribution read in.
- * It reads each such collection's own metadata (`generator`,
- * `generatorOrigin`), in parallel, joins the creator's canonical `appUrl`
- * and display name from the wallet's records (`lookupCollectionCreators`),
- * and resolves again. A string target naming an encrypted collection also
+ * It reads each such collection's own metadata (the `generator` object), in
+ * parallel, joins the creator's display name and canonical `appUrl` from the
+ * wallet's records (`lookupCollectionCreators`, keyed by `generator.id`), and
+ * resolves again. The joined `appUrl` matters only for a collection stamped
+ * without `generator.url`. A string target naming an encrypted collection also
  * gets that collection's current key-epoch recipients
  * (`listCollectionShares`, handed an empty history so it reads no activity).
  * A standard collection's is read at once, usually off the session's cached
@@ -142,10 +143,7 @@ export async function attributeExistingCollections({
         const read = await storage.collectionAttribution({ collectionId })
         encrypted = !!read?.encrypted
         reads.set(collectionId, {
-          attribution: {
-            generator: read?.generator,
-            generatorOrigin: read?.generatorOrigin
-          },
+          attribution: { generator: read?.generator },
           encrypted
         })
       } catch (err) {
@@ -165,8 +163,13 @@ export async function attributeExistingCollections({
     }),
     ...knownEncryptedIds.map(readRoster)
   ])
+  // A stamp carrying both `url` and `name` answers the consent row on its
+  // own, so only the others are joined against the wallet's records.
   const generators = [...reads.values()].flatMap(
-    ({ attribution: { generator } }) => (generator ? [generator] : [])
+    ({ attribution: { generator } }) =>
+      generator && (generator.url === undefined || generator.name === undefined)
+        ? [generator.id]
+        : []
   )
   let creators: ReadonlyMap<string, CollectionCreator> = new Map()
   try {
@@ -182,7 +185,7 @@ export async function attributeExistingCollections({
         return { id, isPublic, recipientIds }
       }
       const { generator } = read.attribution
-      const creatorApp = generator ? creators.get(generator) : undefined
+      const creatorApp = generator ? creators.get(generator.id) : undefined
       return {
         id,
         isPublic,

@@ -60,8 +60,8 @@ importers:
         specifier: ^0.2.0
         version: 0.2.1
       '@interop/storage-core':
-        specifier: ^0.19.1
-        version: 0.19.1
+        specifier: ^0.20.0
+        version: 0.20.0
       '@interop/vc':
         specifier: ^11.0.9
         version: 11.0.9
@@ -76,19 +76,19 @@ importers:
         version: 0.5.3
       '@interop/wallet-backup':
         specifier: ^0.3.0
-        version: 0.3.0(@interop/wallet-core@0.80.1(@interop/jsonld-signatures@11.8.6)(@interop/was-client@0.72.0(@interop/jsonld-signatures@11.8.6)))(@interop/was-client@0.72.0(@interop/jsonld-signatures@11.8.6))
+        version: 0.3.0(@interop/wallet-core@0.80.1(@interop/jsonld-signatures@11.8.6)(@interop/was-client@0.73.0(@interop/jsonld-signatures@11.8.6)))(@interop/was-client@0.73.0(@interop/jsonld-signatures@11.8.6))
       '@interop/wallet-core':
         specifier: ^0.80.1
-        version: 0.80.1(@interop/jsonld-signatures@11.8.6)(@interop/was-client@0.72.0(@interop/jsonld-signatures@11.8.6))
+        version: 0.80.1(@interop/jsonld-signatures@11.8.6)(@interop/was-client@0.73.0(@interop/jsonld-signatures@11.8.6))
       '@interop/wallet-request':
         specifier: ^0.3.2
         version: 0.3.2(@interop/jsonld-signatures@11.8.6)
       '@interop/was-client':
-        specifier: ^0.72.0
-        version: 0.72.0(@interop/jsonld-signatures@11.8.6)
+        specifier: ^0.73.0
+        version: 0.73.0(@interop/jsonld-signatures@11.8.6)
       '@interop/was-sync':
         specifier: ^0.5.1
-        version: 0.5.1(@interop/was-client@0.72.0(@interop/jsonld-signatures@11.8.6))(rxdb@17.5.0(react@19.3.0)(rxjs@7.8.2)(supports-color@7.2.0))
+        version: 0.5.1(@interop/was-client@0.73.0(@interop/jsonld-signatures@11.8.6))(rxdb@17.5.0(react@19.3.0)(rxjs@7.8.2)(supports-color@7.2.0))
       '@interop/webkms-client':
         specifier: ^15.0.2
         version: 15.0.2
@@ -252,12 +252,12 @@ importers:
 
 packages:
 
-  '@asamuzakjp/css-color@7.1.0':
-    resolution: {integrity: sha512-s6vMrO4hds+skR2OMmdwSORZiiEbqhAjd56W/0gc/x4PYpTibh/ey5Oy9ywkZ+ycX9EgTcJruhE1T/KkbU7LNA==}
+  '@asamuzakjp/css-color@7.1.1':
+    resolution: {integrity: sha512-XiECZfC7glpDldWNCSp4UG2D0JxYKxYGSy+SDzIWfcuLs+NrM91z7rFz67s3e5unJdrY9wh1Wal8mBTW7ivD6A==}
     engines: {node: ^22.22.2 || ^24.15.0 || >=26.0.0}
 
-  '@asamuzakjp/dom-selector@9.2.1':
-    resolution: {integrity: sha512-NT4s3yZLjovPpliRpTvdsdzyPjqRqiCZj9MxnarBihbaY5MbAG7DWAJcrLlhmC7xKTNCXsTELcqB8YsqpLnUFQ==}
+  '@asamuzakjp/dom-selector@9.2.2':
+    resolution: {integrity: sha512-lSWTBMjAcmu2xn5yEDU7jh6QDV+C8GEKtdJ4pIQhXh26RkKQ7S3FuQlt+zZkUbTdJ4d3XyV1kPI/G0zWXxqaqw==}
     engines: {node: ^22.22.2 || ^24.15.0 || >=26.0.0}
 
   '@babel/code-frame@7.29.7':
@@ -680,6 +680,10 @@ packages:
     resolution: {integrity: sha512-DVyQ4biz9RprwO/XSjm+Iz+RbFkJvaOVCziEeueA/F7TrhDkBSs9YgwfJJp2QWcT/5puu95Jq7e7itq//KbQuw==}
     engines: {node: '>=22.0'}
 
+  '@interop/storage-core@0.20.0':
+    resolution: {integrity: sha512-hMUl57Y5plOlvvgXOSvYIt7VdB3HP5JjUEJ12aJ/0xjWQGTF0RqbKk1BAjnOmRqlp/bi//vtBhe55YcpNx5TDw==}
+    engines: {node: '>=22.0'}
+
   '@interop/vc-bitstring-status-list@3.0.8':
     resolution: {integrity: sha512-YYhFIHKsXYiN1dUJplhXSF0aSn/4puEdfrp3OtIIz8K+r5l1vi9VYDK71TgBeJsP/mq/3KBzVpEEQDLTQYhvRw==}
     engines: {node: '>=24.0'}
@@ -717,8 +721,8 @@ packages:
     resolution: {integrity: sha512-KYS9Yv0lRv9oN8Lgps5ntd5WRK92KDvysGgXBSm9Dk4T/IS2NfKoYBSG2JtwK7HiRwdaDJuU3CM43YjmzTL8Lw==}
     engines: {node: '>=24.0'}
 
-  '@interop/was-client@0.72.0':
-    resolution: {integrity: sha512-mMNJb6kKrtCRtxl7BjCGeoPXiLjFuBTY+UyP9ky12AvQp7eeOMU6obCSQkJRxE2iwEHPzYeYRM2YKzcealREpA==}
+  '@interop/was-client@0.73.0':
+    resolution: {integrity: sha512-g5RQuUU7vvlaVhPfuJUnvvLPvNoXKpI6q20zoUDRtMkQk+4aqo5V2y2vRP4Kpfu3nA+UmDFN53XElBlFt03yBw==}
     engines: {node: '>=24.0'}
 
   '@interop/was-sync@0.5.1':
@@ -3643,7 +3647,7 @@ packages:
 
 snapshots:
 
-  '@asamuzakjp/css-color@7.1.0':
+  '@asamuzakjp/css-color@7.1.1':
     dependencies:
       '@csstools/css-calc': 3.4.1(@csstools/css-parser-algorithms@4.0.1(@csstools/css-tokenizer@4.0.2))(@csstools/css-tokenizer@4.0.2)
       '@csstools/css-color-parser': 4.2.4(@csstools/css-parser-algorithms@4.0.1(@csstools/css-tokenizer@4.0.2))(@csstools/css-tokenizer@4.0.2)
@@ -3651,7 +3655,7 @@ snapshots:
       '@csstools/css-tokenizer': 4.0.2
       lru-cache: 11.5.3
 
-  '@asamuzakjp/dom-selector@9.2.1':
+  '@asamuzakjp/dom-selector@9.2.2':
     dependencies:
       bidi-js: 1.1.0
       css-tree: 3.2.1
@@ -4176,6 +4180,10 @@ snapshots:
     dependencies:
       '@interop/data-integrity-core': 8.8.0
 
+  '@interop/storage-core@0.20.0':
+    dependencies:
+      '@interop/data-integrity-core': 8.8.0
+
   '@interop/vc-bitstring-status-list@3.0.8':
     dependencies:
       '@digitalbazaar/bitstring': 3.1.0
@@ -4221,13 +4229,13 @@ snapshots:
       '@interop/did-method-webvh': 5.11.0
       '@interop/storage-core': 0.19.1
 
-  '@interop/wallet-backup@0.3.0(@interop/wallet-core@0.80.1(@interop/jsonld-signatures@11.8.6)(@interop/was-client@0.72.0(@interop/jsonld-signatures@11.8.6)))(@interop/was-client@0.72.0(@interop/jsonld-signatures@11.8.6))':
+  '@interop/wallet-backup@0.3.0(@interop/wallet-core@0.80.1(@interop/jsonld-signatures@11.8.6)(@interop/was-client@0.73.0(@interop/jsonld-signatures@11.8.6)))(@interop/was-client@0.73.0(@interop/jsonld-signatures@11.8.6))':
     dependencies:
       '@interop/social-core': 0.8.1
       '@interop/space-archive': 0.2.1
       '@interop/vh-resource-log': 0.5.3
-      '@interop/wallet-core': 0.80.1(@interop/jsonld-signatures@11.8.6)(@interop/was-client@0.72.0(@interop/jsonld-signatures@11.8.6))
-      '@interop/was-client': 0.72.0(@interop/jsonld-signatures@11.8.6)
+      '@interop/wallet-core': 0.80.1(@interop/jsonld-signatures@11.8.6)(@interop/was-client@0.73.0(@interop/jsonld-signatures@11.8.6))
+      '@interop/was-client': 0.73.0(@interop/jsonld-signatures@11.8.6)
       '@scure/base': 2.4.0
       events: 3.3.0
       tar-stream: 3.2.1
@@ -4237,7 +4245,7 @@ snapshots:
       - bare-buffer
       - react-native-b4a
 
-  '@interop/wallet-core@0.80.1(@interop/jsonld-signatures@11.8.6)(@interop/was-client@0.72.0(@interop/jsonld-signatures@11.8.6))':
+  '@interop/wallet-core@0.80.1(@interop/jsonld-signatures@11.8.6)(@interop/was-client@0.73.0(@interop/jsonld-signatures@11.8.6))':
     dependencies:
       '@interop/capability-agent': 0.2.1
       '@interop/data-integrity-core': 8.8.0
@@ -4247,7 +4255,7 @@ snapshots:
       '@interop/ezcap': 7.4.10
       '@interop/social-core': 0.8.1
       '@interop/vh-resource-log': 0.5.3
-      '@interop/was-client': 0.72.0(@interop/jsonld-signatures@11.8.6)
+      '@interop/was-client': 0.73.0(@interop/jsonld-signatures@11.8.6)
       '@interop/x25519-key-agreement-key': 5.4.1
       '@noble/ciphers': 2.4.0
       '@noble/hashes': 2.4.0
@@ -4272,7 +4280,7 @@ snapshots:
       - '@interop/jsonld-signatures'
       - react-native-get-random-values
 
-  '@interop/was-client@0.72.0(@interop/jsonld-signatures@11.8.6)':
+  '@interop/was-client@0.73.0(@interop/jsonld-signatures@11.8.6)':
     dependencies:
       '@interop/capability-agent': 0.2.1
       '@interop/data-integrity-core': 8.8.0
@@ -4281,7 +4289,7 @@ snapshots:
       '@interop/ezcap': 7.4.10
       '@interop/http-client': 1.0.5
       '@interop/minimal-cipher': 7.10.3
-      '@interop/storage-core': 0.19.1
+      '@interop/storage-core': 0.20.0
       '@interop/vh-resource-log': 0.5.3
       '@interop/x25519-key-agreement-key': 5.4.1
       '@noble/hashes': 2.4.0
@@ -4292,10 +4300,10 @@ snapshots:
       - expo-crypto
       - react-native-get-random-values
 
-  '@interop/was-sync@0.5.1(@interop/was-client@0.72.0(@interop/jsonld-signatures@11.8.6))(rxdb@17.5.0(react@19.3.0)(rxjs@7.8.2)(supports-color@7.2.0))':
+  '@interop/was-sync@0.5.1(@interop/was-client@0.73.0(@interop/jsonld-signatures@11.8.6))(rxdb@17.5.0(react@19.3.0)(rxjs@7.8.2)(supports-color@7.2.0))':
     dependencies:
       '@interop/social-core': 0.8.1
-      '@interop/was-client': 0.72.0(@interop/jsonld-signatures@11.8.6)
+      '@interop/was-client': 0.73.0(@interop/jsonld-signatures@11.8.6)
       json-canonicalize: 3.0.1
       uuidv7: 1.2.1
     optionalDependencies:
@@ -5951,8 +5959,8 @@ snapshots:
 
   jsdom@30.1.1(@noble/hashes@2.4.0):
     dependencies:
-      '@asamuzakjp/css-color': 7.1.0
-      '@asamuzakjp/dom-selector': 9.2.1
+      '@asamuzakjp/css-color': 7.1.1
+      '@asamuzakjp/dom-selector': 9.2.2
       '@bramus/specificity': 2.4.2
       '@csstools/css-syntax-patches-for-csstree': 1.1.14(css-tree@3.2.1)
       '@exodus/bytes': 1.16.0(@noble/hashes@2.4.0)

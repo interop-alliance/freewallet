@@ -11,6 +11,10 @@ import { formatDateTime } from '@/lib/viewMappers/formatDate'
 // string.
 const TIMESTAMP_KEYS = ['createdAt', 'updatedAt']
 
+// The nested-object members rendered as one row per member, keyed
+// `parent.member`, rather than left to the raw source view.
+const EXPANDED_KEYS = ['generator']
+
 /**
  * Renders one metadata value for display, or returns null when the value has
  * no flat rendering (a nested object such as the `encryption` descriptor,
@@ -69,7 +73,9 @@ export function formatMetadataValue({
  * Derives the card's rows from a metadata document: the known members first,
  * in the order the caller listed them, then anything else the server sent
  * that has a flat rendering, so a member this wallet does not know about
- * still shows up. `custom` is excluded -- the card renders it separately.
+ * still shows up. The Collection Metadata object's `generator` yields one row
+ * per member, keyed `generator.member`. `custom` is excluded -- the card renders it
+ * separately.
  *
  * @param options {object}
  * @param options.meta {Record<string, unknown>}
@@ -95,9 +101,51 @@ export function metadataRows({
     if (key === 'custom') {
       continue
     }
-    const value = formatMetadataValue({ key, value: meta[key], locale })
-    if (value !== null && value !== '') {
-      rows.push({ key, value })
+    rows.push(...memberRows({ key, value: meta[key], locale }))
+  }
+  return rows
+}
+
+/**
+ * The rows one metadata member renders as: one row for a flat value, one per
+ * flat member for an expanded nested object, and none otherwise.
+ *
+ * @param options {object}
+ * @param options.key {string}
+ * @param options.value {unknown}
+ * @param options.locale {string}
+ * @returns {Array<{ key: string, value: string }>}
+ */
+function memberRows({
+  key,
+  value,
+  locale
+}: {
+  key: string
+  value: unknown
+  locale: string
+}): Array<{ key: string; value: string }> {
+  const flat = formatMetadataValue({ key, value, locale })
+  if (flat !== null) {
+    return flat === '' ? [] : [{ key, value: flat }]
+  }
+  if (
+    !EXPANDED_KEYS.includes(key) ||
+    typeof value !== 'object' ||
+    value === null ||
+    Array.isArray(value)
+  ) {
+    return []
+  }
+  const rows: Array<{ key: string; value: string }> = []
+  for (const [member, memberValue] of Object.entries(value)) {
+    const formatted = formatMetadataValue({
+      key: member,
+      value: memberValue,
+      locale
+    })
+    if (formatted !== null && formatted !== '') {
+      rows.push({ key: `${key}.${member}`, value: formatted })
     }
   }
   return rows

@@ -695,8 +695,12 @@
         "id": "Identificador",
         "name": "Nombre",
         "type": "Tipo",
-        "generator": "Aplicación",
-        "generatorOrigin": "Origen de la aplicación",
+        "generator": {
+          "id": "DID de la aplicación",
+          "origin": "Origen de la aplicación",
+          "url": "URL de la aplicación",
+          "name": "Nombre de la aplicación"
+        },
         "url": "URL"
       }
     },

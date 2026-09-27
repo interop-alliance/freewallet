@@ -1,15 +1,17 @@
 /**
  * The "Created by ..." caption a collection carries in the storage browser:
- * the application it was provisioned for, by the name the wallet's records
- * hold for it (linked while the app is still connected), the bare origin
- * recorded at provisioning when no record names the app, or the wallet itself
- * for the collections it provisions.
+ * the application it was provisioned for, by the name stamped on the
+ * collection's `generator` or else the name the wallet's records hold for it
+ * (linked while the app is still connected), the bare origin recorded at
+ * provisioning when neither names the app, or the wallet itself for the
+ * collections it provisions.
  */
 import Box from '@mui/material/Box'
 import Link from '@mui/material/Link'
 import Typography from '@mui/material/Typography'
 import { Trans, useTranslation } from 'react-i18next'
 import { Link as RouterLink } from 'react-router'
+import { collectionCreatorLabel } from '@/lib/collectionAttribution'
 import type { CollectionCreator } from '@/lib/connectedApps'
 import type { StorageCollection } from '@/lib/storage'
 import { storageStyles } from '@/styles/appStyles'
@@ -49,10 +51,11 @@ export function CollectionAttribution({
 }
 
 /**
- * The app half of the caption: a creator the wallet's records name is named,
- * and linked to its Applications row while it is still connected; one
- * stamped with an origin alone names that origin as plain text; one with
- * neither has no caption.
+ * The app half of the caption: a creator named by its stamped
+ * `generator.name`, or else by the wallet's records, is named, and linked to
+ * its Applications row while it is still connected; one stamped with an
+ * origin alone names that origin as plain text; one with neither has no
+ * caption.
  */
 function appCaption({
   collection,
@@ -63,7 +66,10 @@ function appCaption({
   creator?: CollectionCreator
   linkToApp: boolean
 }) {
-  const label = creator?.name ?? collection.generatorOrigin
+  const label = collectionCreatorLabel({
+    generator: collection.generator,
+    recordName: creator?.name
+  })
   if (!label) {
     return null
   }

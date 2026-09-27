@@ -317,18 +317,54 @@ describe('resolveInvocationTarget existing-collection reading', () => {
     type: 'https://w3id.org/byoe#private-collection',
     name: 'docs'
   }
-  // The attribution as the resolver sees it: the two stamped members off the
+  // The attribution as the resolver sees it: the `generator` object off the
   // collection, plus the creating app as the wallet's own records know it.
+  // This one carries no `generator.url` or `generator.name`, so the join
+  // answers both.
   const createdByApp = existingCollectionsFrom([
     {
       id: 'docs',
       attribution: {
-        generator: APP_DID,
-        generatorOrigin: APP_ORIGIN,
+        generator: { id: APP_DID, origin: APP_ORIGIN },
         creatorApp: { name: 'Editor', appUrl: APP_URL }
       }
     }
   ])
+
+  /**
+   * A collection stamped with the full `generator` object, and optionally a
+   * joined record of the creator.
+   *
+   * @param options {object}
+   * @param options.url {string}   the stamped `generator.url`
+   * @param [options.name] {string}   the stamped `generator.name`
+   * @param [options.creatorApp] {{ name: string, appUrl: string }}
+   * @returns {ReturnType<typeof existingCollectionsFrom>}
+   */
+  function stampedWithUrl({
+    url,
+    name,
+    creatorApp
+  }: {
+    url: string
+    name?: string
+    creatorApp?: { name: string; appUrl: string }
+  }) {
+    return existingCollectionsFrom([
+      {
+        id: 'docs',
+        attribution: {
+          generator: {
+            id: APP_DID,
+            origin: APP_ORIGIN,
+            url,
+            ...(name && { name })
+          },
+          creatorApp
+        }
+      }
+    ])
+  }
 
   it('reports nothing for a collection that does not exist yet', () => {
     const target = resolveInvocationTarget({
@@ -363,12 +399,65 @@ describe('resolveInvocationTarget existing-collection reading', () => {
     })
     expect(target.existing).toEqual({
       creator: 'this-app',
-      generator: APP_DID,
-      generatorOrigin: APP_ORIGIN
+      generator: { id: APP_DID, origin: APP_ORIGIN }
     })
   })
 
-  it('reads a collection an earlier key of the same app created as this-application', () => {
+  it('reads a stamped generator.url equal to the requester appUrl as this-application', () => {
+    // The app reconnects under a new did:key and the wallet holds no record
+    // of the creator at all: the collection's own `generator.url` vouches.
+    const target = resolveInvocationTarget({
+      descriptor: DOCS,
+      space: SPACE,
+      collections: stampedWithUrl({ url: APP_URL }),
+      requester: { controller: OTHER_DID, appUrl: APP_URL }
+    })
+    expect(target.existing?.creator).toBe('this-application')
+  })
+
+  it('reads a stamped generator.url on the same origin but another path as other', () => {
+    // The stamped URL decides ahead of the join: even a joined record naming
+    // the requester's app URL does not override it.
+    const target = resolveInvocationTarget({
+      descriptor: DOCS,
+      space: SPACE,
+      collections: stampedWithUrl({
+        url: 'https://app.example/notes',
+        creatorApp: { name: 'Notes', appUrl: APP_URL }
+      }),
+      requester: { controller: OTHER_DID, appUrl: APP_URL }
+    })
+    expect(target.existing?.creator).toBe('other')
+  })
+
+  it('names the creator by generator.name ahead of the join', () => {
+    const target = resolveInvocationTarget({
+      descriptor: DOCS,
+      space: SPACE,
+      collections: stampedWithUrl({
+        url: APP_URL,
+        name: 'Stamped Editor',
+        creatorApp: { name: 'Editor', appUrl: APP_URL }
+      }),
+      requester: { controller: OTHER_DID }
+    })
+    expect(target.existing?.creatorName).toBe('Stamped Editor')
+  })
+
+  it('names the creator through the join when generator.name is absent', () => {
+    const target = resolveInvocationTarget({
+      descriptor: DOCS,
+      space: SPACE,
+      collections: stampedWithUrl({
+        url: APP_URL,
+        creatorApp: { name: 'Editor', appUrl: APP_URL }
+      }),
+      requester: { controller: OTHER_DID }
+    })
+    expect(target.existing?.creatorName).toBe('Editor')
+  })
+
+  it('falls back to the joined app URL on a collection with no generator.url', () => {
     // The site was disconnected (its app key deleted) and reconnects: a new
     // did:key, the same attested origin, the same canonical app URL.
     const target = resolveInvocationTarget({
@@ -404,7 +493,7 @@ describe('resolveInvocationTarget existing-collection reading', () => {
       collections: existingCollectionsFrom([
         {
           id: 'docs',
-          attribution: { generator: APP_DID, generatorOrigin: APP_ORIGIN }
+          attribution: { generator: { id: APP_DID, origin: APP_ORIGIN } }
         }
       ]),
       requester: { controller: OTHER_DID, appUrl: APP_URL }
@@ -437,8 +526,7 @@ describe('resolveInvocationTarget existing-collection reading', () => {
     })
     expect(target.existing).toEqual({
       creator: 'other',
-      generator: APP_DID,
-      generatorOrigin: APP_ORIGIN,
+      generator: { id: APP_DID, origin: APP_ORIGIN },
       creatorName: 'Editor'
     })
     expect(isSatisfiable(target)).toBe(true)
@@ -467,8 +555,15 @@ describe('resolveInvocationTarget existing-collection reading', () => {
 
   it('reports nothing for a public or a protected collection', () => {
     const collections = existingCollectionsFrom([
-      { id: 'docs', isPublic: true, attribution: { generator: APP_DID } },
-      { id: 'private-credentials', attribution: { generator: APP_DID } }
+      {
+        id: 'docs',
+        isPublic: true,
+        attribution: { generator: { id: APP_DID } }
+      },
+      {
+        id: 'private-credentials',
+        attribution: { generator: { id: APP_DID } }
+      }
     ])
     const requester = { controller: OTHER_DID }
     expect(

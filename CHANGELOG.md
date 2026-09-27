@@ -64,6 +64,14 @@
 
 ### Changed
 
+- BREAKING: a collection's app attribution is one `generator` object on
+  the Collection Metadata object, `{ id, origin, url, name }`, replacing the
+  flat `generator` DID and `generatorOrigin`. App Connect provisioning stamps
+  the app's canonical `appUrl` as `url` and its display name as `name`. The
+  consent row's existing-collection reading compares the requester's
+  `appUrl` against `generator.url`, and falls back to the wallet's records
+  only for a collection stamped without it. Surfaces name the creator by
+  `generator.name`, then the wallet's records, then `generator.origin`.
 - An interaction-URL agent grant now provisions its private collection
   encrypted, escrowing the agent's key-agreement key beside the user's, as
   App Connect does. A grant there to a controller that is not an Ed25519

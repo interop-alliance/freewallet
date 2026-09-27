@@ -40,6 +40,29 @@ describe('metadataRows', () => {
     expect(rows[0].value).toContain('KB')
   })
 
+  it('renders the `generator` object one row per member', () => {
+    const rows = metadataRows({
+      meta: {
+        name: 'docs',
+        generator: {
+          id: 'did:key:z6MkApp',
+          origin: 'https://app.example',
+          url: 'https://app.example/docs',
+          name: 'Docs App'
+        }
+      },
+      fieldOrder: ['name', 'generator'],
+      locale: 'en'
+    })
+    expect(rows).toEqual([
+      { key: 'name', value: 'docs' },
+      { key: 'generator.id', value: 'did:key:z6MkApp' },
+      { key: 'generator.origin', value: 'https://app.example' },
+      { key: 'generator.url', value: 'https://app.example/docs' },
+      { key: 'generator.name', value: 'Docs App' }
+    ])
+  })
+
   it('formats timestamps, scalars and scalar arrays', () => {
     expect(
       formatMetadataValue({

@@ -614,7 +614,7 @@ describe('WASRemoteStore.ensureCollection', () => {
     expect(setPublic).not.toHaveBeenCalled()
   })
 
-  it('stamps the attribution pair on the create', async () => {
+  it('stamps the generator attribution on the create', async () => {
     const describeWithEtag = vi.fn().mockResolvedValue(null)
     const replaceDescription = vi.fn(echo)
     const collection = vi
@@ -626,14 +626,22 @@ describe('WASRemoteStore.ensureCollection', () => {
 
     await store.ensureCollection({
       id: 'example-app-data',
-      generator: 'did:key:z6MkApp',
-      generatorOrigin: 'https://app.example'
+      generator: {
+        id: 'did:key:z6MkApp',
+        origin: 'https://app.example',
+        url: 'https://app.example/app',
+        name: 'Example App'
+      }
     })
     expect(replaceDescription).toHaveBeenCalledWith(
       {
         name: 'example-app-data',
-        generator: 'did:key:z6MkApp',
-        generatorOrigin: 'https://app.example'
+        generator: {
+          id: 'did:key:z6MkApp',
+          origin: 'https://app.example',
+          url: 'https://app.example/app',
+          name: 'Example App'
+        }
       },
       { ifNoneMatch: true }
     )

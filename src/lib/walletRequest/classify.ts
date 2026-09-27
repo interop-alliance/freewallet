@@ -42,8 +42,8 @@ export {
  * message event, so a real browser only ever hands over a canonical value;
  * the e2e injection seam and the plain string type do not enforce that, and
  * every record downstream (the app-key credential's `credentialSubject.origin`,
- * the returning-app match, the Login activity, the Collection Description's
- * `generatorOrigin`) joins on the value byte-for-byte, so one serialization
+ * the returning-app match, the Login activity, the Collection Metadata
+ * object's `generator.origin`) joins on the value byte-for-byte, so one serialization
  * is fixed here. A value that does not parse is treated as no origin at all,
  * and so is one whose scheme has an opaque origin (`mailto:`, `data:`,
  * `file:`), which serializes as the string `null` and attributes the request

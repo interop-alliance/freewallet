@@ -444,16 +444,21 @@ deployment (a server URL like `https://host/was`) the link addresses exactly
 the resource replication wrote, with per-segment encoding.
 
 A collection provisioned for a connected application carries its attribution
-on the Collection Metadata object: `generator`, the app's did:key, and
-`generatorOrigin`, the Web origin that DID was bound to. Both are stamped
-when App Connect provisioning creates the collection, and a collection that
-already stands keeps its attribution, so a second app admitted to it does not
-rename the creator. One reader, `lookupCollectionCreators`
-(`src/lib/connectedApps.ts`), names the app behind a `generator`, for the
+on the Collection Metadata object, as one `generator` object: `id`, the app's
+did:key; `origin`, the Web origin that DID was bound to; `url`, the app's
+canonical app URL; and `name`, its display name. App Connect provisioning
+stamps it when it creates the collection, taking `url` and `name` from the
+validated request's `app`, the source the app-key credential records. A
+collection that already stands keeps its attribution, so a second app
+admitted to it does not rename the creator. An interaction-URL grant stamps
+none. The listing carries the object whole to every surface. A surface
+names the creator by `generator.name` first. For a collection stamped
+without it, one reader, `lookupCollectionCreators`
+(`src/lib/connectedApps.ts`), names the app behind `generator.id`, for the
 consent row, the Storage page's listing, and the collection contents page.
 A connected app answers from its app key. A disconnected one answers from
 the App Connect Login activities that recorded grants to its DID. A creator
-no record names is shown by its `generatorOrigin`.
+neither names is shown by its `generator.origin`.
 
 Content migration brings another account's backup bundle into this one. The
 Storage page's "Import from another wallet" action

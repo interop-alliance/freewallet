@@ -103,6 +103,7 @@ import {
 import { standingZcapStale } from '@interop/wallet-core/webvh'
 import { renewTransientGenerationDelegation } from '@/session/annexReach'
 import { peekVerifiedAccountLog } from '@/session/verifiedLog'
+import { collectionCreatorLabel } from '@/lib/collectionAttribution'
 import {
   RP_ZCAP_TTL_MS,
   RP_ZCAP_WRITE_TTL_MS,
@@ -123,7 +124,7 @@ import {
   toUrl
 } from '@interop/was-client/paths'
 import type { IDID } from '@interop/data-integrity-core'
-import type { IDelegatedZcap } from '@interop/was-client'
+import type { CollectionGenerator, IDelegatedZcap } from '@interop/was-client'
 import type { ICapabilityQueryDetail, IZcap } from './types'
 
 /**
@@ -287,18 +288,20 @@ export type ExistingCollections = ReadonlyMap<
 type ProvisionedByRequest = ReadonlyMap<string, { isPublic: boolean }>
 
 /**
- * A collection's app attribution as grant resolution reads it: the two
- * members App Connect provisioning stamps on the Collection Metadata object
- * at creation (`generator`, the did:key of the application the collection was
- * provisioned for, and `generatorOrigin`, the Web origin that DID was bound
- * to), plus the creating app as the wallet's own records know it, joined onto
- * `generator` by the caller (`lookupCollectionCreators` in
- * `lib/connectedApps.ts`) so two applications sharing one origin can be told
- * apart. An empty object is a collection read and found unstamped.
+ * A collection's app attribution as grant resolution reads it: the
+ * `generator` object App Connect provisioning stamps on the Collection
+ * Metadata object at creation (`id`, the did:key of the application the
+ * collection was provisioned for; `origin`, the Web origin that DID was bound
+ * to; `url`, the app's canonical app URL; `name`, its display name), plus
+ * the creating app as the wallet's own records know it, joined onto
+ * `generator.id` by the caller (`lookupCollectionCreators` in
+ * `lib/connectedApps.ts`). The join is the fallback for a collection stamped
+ * without `generator.url` or `generator.name`: it supplies the creator's app
+ * URL and display name there. An empty object is a collection read and found
+ * unstamped.
  */
 export interface CollectionAttribution {
-  generator?: string
-  generatorOrigin?: string
+  generator?: CollectionGenerator
   creatorApp?: { name: string; appUrl: string }
 }
 
@@ -364,8 +367,8 @@ function isCurrentRecipient({
  * reported on a satisfiable target naming one so the consent row can say the
  * collection already exists and who created it. The signal is the attribution
  * App Connect provisioning stamps on the Collection Metadata object at
- * creation (`generator`, `generatorOrigin`), read against the requester's
- * did:key, its canonical `appUrl`, and its attested origin. A collection that
+ * creation (`generator`), read against the requester's did:key and its
+ * canonical `appUrl`. A collection that
  * already stands admits the requester into every key epoch it has, so the
  * row states it before approval.
  */
@@ -376,9 +379,9 @@ export interface ExistingCollectionReading {
   // application), or `unattributed` (nothing stamped: a collection an
   // interaction-URL grant provisioned, which records no origin).
   creator: 'this-app' | 'this-application' | 'other' | 'unattributed'
-  generator?: string
-  generatorOrigin?: string
-  // The creating app's display name, where the wallet's own records know it.
+  generator?: CollectionGenerator
+  // The creating app's display name: the collection's own `generator.name`,
+  // else the name the wallet's own records hold for the creator.
   creatorName?: string
 }
 
@@ -390,10 +393,13 @@ export interface ExistingCollectionReading {
  * collection whose attribution has not been read yet.
  *
  * The same-application test compares canonical app URLs, since the wallet
- * tells apps apart by `appUrl` and several may share one origin. A requester
- * that carries an `appUrl` (an App Connect request) reads `this-application`
- * only when the creator's app URL is known and equal; a creator whose app URL
- * the wallet cannot recover reads `other`, the cautious side. A requester
+ * tells apps apart by `appUrl` and several may share one origin. The
+ * creator's app URL is the collection's own `generator.url` when it carries
+ * one. Only a collection stamped without it falls back to the app URL the
+ * wallet's records join onto `generator.id`. A requester that carries an
+ * `appUrl` (an App Connect request) reads `this-application` only when the
+ * creator's app URL is known and equal; a creator whose app URL is not known
+ * reads `other`, the cautious side. A requester
  * with no `appUrl` (an interaction-URL agent) is never the same application
  * as a collection's creator, so it reads `other` unless it is `this-app`.
  *
@@ -419,20 +425,23 @@ function existingCollectionReading({
   if (isProtectedCollection(collectionId)) {
     return undefined
   }
-  const { generator, generatorOrigin, creatorApp } = existing.attribution
+  const { generator, creatorApp } = existing.attribution
   if (!generator) {
     return { creator: 'unattributed' }
   }
-  if (requester.controller && generator === requester.controller) {
-    return { creator: 'this-app', generator, generatorOrigin }
+  if (requester.controller && generator.id === requester.controller) {
+    return { creator: 'this-app', generator }
   }
+  const creatorAppUrl = generator.url ?? creatorApp?.appUrl
   const sameApplication =
-    !!requester.appUrl && creatorApp?.appUrl === requester.appUrl
+    !!requester.appUrl && creatorAppUrl === requester.appUrl
   return {
     creator: sameApplication ? 'this-application' : 'other',
     generator,
-    generatorOrigin,
-    creatorName: creatorApp?.name
+    creatorName: collectionCreatorLabel({
+      generator,
+      recordName: creatorApp?.name
+    })
   }
 }
 
@@ -1350,10 +1359,11 @@ export function resolveGrants({
  * @param [options.shareTtlMs] {number}   share grant lifetime; defaults to
  *   SHARE_ZCAP_TTL_MS (deliberately long -- the settings panel, not expiry, is
  *   the removal mechanism for a share)
- * @param [options.app] {{ name: string, origin: string }}   present only on the
- *   App Connect path: recorded on each share activity so the settings panel can
- *   name the app instead of showing a bare did:key, and stamped as the
- *   attribution of each collection this call creates.
+ * @param [options.app] {{ name: string, origin: string, appUrl: string }}
+ *   present only on the App Connect path: the name and origin are recorded on
+ *   each share activity so the settings panel can name the app instead of
+ *   showing a bare did:key, and all three are stamped as the attribution of
+ *   each collection this call creates.
  * @param [options.beforeProvision] {Function}   `(zcaps) => Promise<void>`,
  *   awaited with every signed grant once signing is done and before any
  *   share is escrowed or collection provisioned; called only when some grant
@@ -1374,7 +1384,7 @@ export async function processZcaps({
   ttlMs?: number
   writeTtlMs?: number
   shareTtlMs?: number
-  app?: { name: string; origin: string }
+  app?: { name: string; origin: string; appUrl: string }
   beforeProvision?: (zcaps: IZcap[]) => Promise<void>
 }): Promise<IZcap[]> {
   if (zcapRequests.length === 0) {
@@ -1503,11 +1513,14 @@ export async function processZcaps({
    * could not.
    *
    * On the App Connect path a collection this call creates also carries its
-   * attribution: the grantee did:key as `generator` and the requesting
-   * origin as `generatorOrigin`, so the storage browser can name the
-   * application a collection belongs to. A collection that already stands
-   * keeps whatever attribution it has, since was-client's ensure stamps the
-   * pair on the guarded create only: the re-admit pass that adds a second
+   * attribution, the `generator` object: the grantee did:key as `id`, the
+   * requesting origin as `origin`, the app's canonical app URL as `url` (when it has no query or
+   * fragment, which the server refuses there), and
+   * the app's display name as `name` when it gave one. So the storage browser
+   * can name the application a collection belongs to, and a reconnecting app
+   * is told apart from another app on its origin. A
+   * collection that already stands keeps whatever attribution it has, since
+   * was-client's ensure stamps it on the guarded create only: the re-admit pass that adds a second
    * app to an existing private collection cannot rename its creator. An
    * interaction-URL agent grant stamps nothing -- there is no attested origin
    * to record.
@@ -1538,10 +1551,16 @@ export async function processZcaps({
     // earns the `IDID` -- it proves the `did:key:` prefix the type asserts --
     // and a controller that fails it was never a stampable app identity, so
     // it stamps nothing rather than recording a non-DID as the creator.
-    // was-client drops a lone `generatorOrigin` on the same terms.
     const attribution =
       app && isEd25519DidKey(controller)
-        ? { generator: controller as IDID, generatorOrigin: app.origin }
+        ? {
+            generator: {
+              id: controller as IDID,
+              origin: app.origin,
+              url: app.appUrl,
+              ...(app.name && { name: app.name })
+            }
+          }
         : {}
     if (!isPublic) {
       if (!recipient) {
@@ -1663,7 +1682,8 @@ export async function processZcaps({
       collectionId,
       recipient,
       zcap,
-      app
+      // The share activity records the app's name and origin alone.
+      ...(app && { app: { name: app.name, origin: app.origin } })
     })
   }
   for (const entry of pending.values()) {

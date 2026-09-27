@@ -35,7 +35,7 @@ const NO_SHARES: Record<string, CollectionShare[]> = {}
  *   the creators lookup runs only once one of them carries a `generator`
  * @returns {{ sharesByCollection: Record<string, CollectionShare[]>,
  *   creators: ReadonlyMap<string, CollectionCreator>, reload: () =>
- *   Promise<void> }}   the two listings, the creators keyed by `generator`
+ *   Promise<void> }}   the two listings, the creators keyed by `generator.id`
  *   DID, and a reload that re-reads the history and re-runs both
  */
 export function useStorageListings({
@@ -94,7 +94,7 @@ export function useStorageListings({
   const creators = useCollectionCreators({
     storage: session?.storage,
     generators: collections.flatMap(({ generator }) =>
-      generator ? [generator] : []
+      generator ? [generator.id] : []
     ),
     items,
     enabled: items !== undefined

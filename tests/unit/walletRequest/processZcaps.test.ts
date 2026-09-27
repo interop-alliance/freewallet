@@ -6,6 +6,7 @@ import { securityLoader } from '@interop/security-document-loader'
 import type { Session } from '@/types/auth'
 import type { ICapabilityQueryDetail, IZcap } from '@/lib/walletRequest'
 import { x25519RecipientFromDidKey } from '@interop/was-client/edv'
+import type { CollectionGenerator } from '@interop/was-client'
 import {
   APP_CONNECTIONS_COLLECTION,
   KEY_MAP_COLLECTION,
@@ -200,7 +201,7 @@ let ensureCalls: Array<{ id: string; isPublic?: boolean }>
 let provisionCalls: Array<{
   collectionId: string
   recipientId: string
-  generator?: string
+  generator?: CollectionGenerator
 }>
 let shareCalls: Array<{
   collectionId: string
@@ -300,7 +301,7 @@ beforeAll(async () => {
     }: {
       collectionId: string
       recipient: { id: string }
-      generator?: string
+      generator?: CollectionGenerator
     }) {
       provisionCalls.push({
         collectionId,
@@ -1530,7 +1531,11 @@ describe('processZcaps', () => {
         publicCollectionDetail
       ],
       session,
-      app: { name: 'Example App', origin: 'https://app.example' }
+      app: {
+        name: 'Example App',
+        origin: 'https://app.example',
+        appUrl: 'https://app.example/app'
+      }
     })
 
     // The private collection routed through provisionEncryptedCollection (with
@@ -1541,7 +1546,12 @@ describe('processZcaps', () => {
     expect(provisionCalls[0].recipientId).toBe(
       x25519RecipientFromDidKey({ did: granteeDid }).id
     )
-    expect(provisionCalls[0].generator).toBe(granteeDid)
+    expect(provisionCalls[0].generator).toEqual({
+      id: granteeDid,
+      origin: 'https://app.example',
+      url: 'https://app.example/app',
+      name: 'Example App'
+    })
     expect(ensureCalls).toEqual([{ id: 'example-app-public', isPublic: true }])
   })
 
@@ -2009,7 +2019,11 @@ describe('processZcaps', () => {
     await processZcaps({
       zcapRequests: [shareDetail],
       session,
-      app: { name: 'Text Editor', origin: 'https://app.example' }
+      app: {
+        name: 'Text Editor',
+        origin: 'https://app.example',
+        appUrl: 'https://app.example/editor'
+      }
     })
     expect(shareCalls[0].app).toEqual({
       name: 'Text Editor',

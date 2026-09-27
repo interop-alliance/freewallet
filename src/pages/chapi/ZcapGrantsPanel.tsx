@@ -240,8 +240,7 @@ export function ZcapGrantsPanel({
                     {t(existingNote.key, {
                       creator:
                         target.existing.creatorName ??
-                        target.existing.generatorOrigin ??
-                        target.existing.generator
+                        target.existing.generator?.id
                     })}
                   </Typography>
                 )}

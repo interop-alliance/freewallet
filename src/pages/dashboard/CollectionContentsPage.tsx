@@ -74,7 +74,6 @@ const COLLECTION_META_FIELDS = [
   'updatedAt',
   'createdBy',
   'generator',
-  'generatorOrigin',
   'epoch',
   'etag',
   'url'
@@ -177,16 +176,16 @@ export function CollectionContentsPage() {
   )
 
   // The application that created this collection, for the header's
-  // "Created by" line, by its `generator` DID: the same reader the Storage
+  // "Created by" line, by its `generator.id` DID: the same reader the Storage
   // page and the consent row use. A collection stamped with no generator
   // names no app, so the load is off there rather than decrypting the
   // activity log for nothing.
-  const generator = collection?.generator
+  const generatorId = collection?.generator?.id
   const creators = useCollectionCreators({
     storage,
-    generators: generator ? [generator] : []
+    generators: generatorId ? [generatorId] : []
   })
-  const creator = generator ? creators.get(generator) : undefined
+  const creator = generatorId ? creators.get(generatorId) : undefined
 
   const resources = contentsError ? [] : (contents?.resources ?? [])
   const errorKey = contentsError

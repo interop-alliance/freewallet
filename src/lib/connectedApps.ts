@@ -24,7 +24,7 @@
  * the generation delegation it chains under no longer belongs to the
  * generation the account document points at.
  * `lookupCollectionCreators` reads the same two sources the other way round:
- * given the `generator` DIDs stamped on existing collections, it answers each
+ * given the `generator.id` DIDs stamped on existing collections, it answers each
  * with the creating app's display name and canonical `appUrl`, from the app
  * key where the app is still connected and from its App Connect Login
  * activities where it is not. It is the one reader behind every surface that
@@ -534,7 +534,7 @@ export async function revokeAppAccess({
  * interactive revoke ({@link revokeAppAccess}) and the login-time sweep of
  * stranded app keys run. The key rotation runs first
  * (`revokeAppCollectionRecipients`): for each collection the app provisioned
- * or was granted -- found through the Collection Metadata `generator`
+ * or was granted -- found through the Collection Metadata `generator.id`
  * attribution as well as the recorded grants, so an app whose grants have all
  * expired is still rotated out -- it appends a fresh epoch without the app's
  * key and revokes those collections' pull-axis grants with it, so the app
@@ -645,7 +645,7 @@ async function rotateThenRevokeGrants<Outcome>({
 /**
  * The application that created a collection, as the wallet's own records
  * name it: what every surface showing a collection's creator reads, by the
- * `generator` did:key stamped on the collection.
+ * `generator.id` did:key stamped on the collection.
  */
 export interface CollectionCreator {
   /**
@@ -666,7 +666,7 @@ export interface CollectionCreator {
 
 /**
  * What the wallet's own records say about the applications that created a
- * set of collections, by the `generator` did:key stamped on each: the display
+ * set of collections, by the `generator.id` did:key stamped on each: the display
  * name and the canonical `appUrl`. A connected app answers from its app key
  * and latest Login ({@link listConnectedApps}), with its app-key cid. A
  * disconnected one has no app key left, since removing it is what a
@@ -677,7 +677,7 @@ export interface CollectionCreator {
  *
  * @param options {object}
  * @param options.storage {StorageManager}
- * @param options.generators {Iterable<string>}   the `generator` DIDs to look
+ * @param options.generators {Iterable<string>}   the `generator.id` DIDs to look
  *   up
  * @param [options.items] {HistoryItems}
  *   the activity history, when the caller has already read it
@@ -685,7 +685,7 @@ export interface CollectionCreator {
  *   an already-listed app-key collection, so a caller holding one does not
  *   list it again
  * @returns {Promise<ReadonlyMap<string, CollectionCreator>>}   keyed by
- *   `generator` DID
+ *   `generator.id` DID
  */
 export async function lookupCollectionCreators({
   storage,

@@ -3,6 +3,8 @@
  * StorageCollection and StorageResource mirror the JSON shapes returned by the
  * WAS server's list endpoints; see the WAS spec for the authoritative schema.
  */
+import type { CollectionGenerator } from '@interop/was-client'
+
 export type StorageCollection = {
   id: string
   url: string
@@ -19,14 +21,11 @@ export type StorageCollection = {
   isPublic?: boolean
   isEncrypted?: boolean
   /**
-   * The DID of the application this collection was provisioned for,
+   * The application this collection was provisioned for (its DID, the Web
+   * origin that DID was bound to, and its canonical app URL),
    * controller-asserted at App Connect provisioning time.
    */
-  generator?: string
-  /**
-   * The Web origin the `generator` DID was bound to at provisioning time.
-   */
-  generatorOrigin?: string
+  generator?: CollectionGenerator
 }
 
 export type StorageResource = {

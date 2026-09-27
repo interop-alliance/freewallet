@@ -30,6 +30,7 @@ import {
   WasClient,
   type Collection,
   type CollectionEncryption,
+  type CollectionGenerator,
   type CollectionMetadata,
   type IZcap,
   type Resource,
@@ -383,14 +384,13 @@ export class WASRemoteStore {
    * @param options {object}
    * @param options.collectionId {string}   the WAS collection id
    * @returns {Promise<{ encryption?: CollectionEncryption, custom?: unknown,
-   *   generator?: string, generatorOrigin?: string } | undefined>}
+   *   generator?: CollectionGenerator } | undefined>}
    */
   async collectionMetadata({ collectionId }: { collectionId: string }): Promise<
     | {
         encryption?: CollectionEncryption
         custom?: unknown
-        generator?: string
-        generatorOrigin?: string
+        generator?: CollectionGenerator
       }
     | undefined
   > {
@@ -697,32 +697,28 @@ export class WASRemoteStore {
    * projection, which a Description PUT may not carry
    * (`encryption-history-log-governed`); the ensure never re-sends it.
    *
-   * `generator` and `generatorOrigin` are the collection's app attribution
-   * (the DID of the application it is provisioned for, and the Web origin
-   * that DID was bound to), stamped on the create.
+   * `generator` is the collection's app attribution (the DID of the
+   * application it is provisioned for, the Web origin that DID was bound to,
+   * and the app's canonical URL), stamped on the create.
    *
    * @param options {object}
    * @param options.id {string}   the WAS collection id (validated by the caller)
    * @param [options.name] {string}   display name; defaults to the id
    * @param [options.isPublic] {boolean}   grant collection-level world read
-   * @param [options.generator] {IDID}   the DID of the application this
+   * @param [options.generator] {CollectionGenerator}   the application this
    *   collection is provisioned for
-   * @param [options.generatorOrigin] {string}   the Web origin that DID was
-   *   bound to at provisioning time
    * @returns {Promise<string>}   the collection's base URL
    */
   async ensureCollection({
     id,
     name,
     isPublic,
-    generator,
-    generatorOrigin
+    generator
   }: {
     id: string
     name?: string
     isPublic?: boolean
-    generator?: IDID
-    generatorOrigin?: string
+    generator?: CollectionGenerator
   }): Promise<string> {
     try {
       await this.#ensureCollectionInSpace({
@@ -730,8 +726,7 @@ export class WASRemoteStore {
         name,
         encryption: 'plaintext',
         isPublic,
-        generator,
-        generatorOrigin
+        generator
       })
     } catch (err) {
       log.error('Error provisioning collection', { id, err })
@@ -756,35 +751,30 @@ export class WASRemoteStore {
    * client-written `encryption` member refuses rather than trip the server's
    * `encryption-immutable` refusal on the genesis.
    *
-   * `generator` and `generatorOrigin` are the collection's app attribution,
-   * stamped on the guarded create.
+   * `generator` is the collection's app attribution, stamped on the guarded
+   * create.
    *
    * @param options {object}
    * @param options.id {string}   the WAS collection id
    * @param [options.name] {string}   display name; defaults to the id
-   * @param [options.generator] {IDID}   the DID of the application this
+   * @param [options.generator] {CollectionGenerator}   the application this
    *   collection is provisioned for
-   * @param [options.generatorOrigin] {string}   the Web origin that DID was
-   *   bound to at provisioning time
    * @returns {Promise<void>}
    */
   async ensureGovernedCollection({
     id,
     name,
-    generator,
-    generatorOrigin
+    generator
   }: {
     id: string
     name?: string
-    generator?: IDID
-    generatorOrigin?: string
+    generator?: CollectionGenerator
   }): Promise<void> {
     await this.#ensureCollectionInSpace({
       id,
       name,
       encryption: 'governed',
-      generator,
-      generatorOrigin
+      generator
     })
   }
 
@@ -793,17 +783,15 @@ export class WASRemoteStore {
    * is skipped by supplying the description of the Space this session
    * already runs in, since the bound invocation capability (a transient
    * session's generation delegation) may be scoped below the bare Space URL.
-   * The attribution pair passes through as supplied: was-client stamps it on
-   * the create only, leaves a standing collection's attribution alone, and
-   * drops a lone `generatorOrigin` itself.
+   * The attribution passes through as supplied: was-client stamps it on the
+   * create only and leaves a standing collection's attribution alone.
    *
    * @param options {object}
    * @param options.id {string}
    * @param [options.name] {string}   display name; defaults to the id
    * @param options.encryption {'plaintext' | 'governed'}
    * @param [options.isPublic] {boolean}
-   * @param [options.generator] {IDID}
-   * @param [options.generatorOrigin] {string}
+   * @param [options.generator] {CollectionGenerator}
    * @returns {Promise<void>}
    */
   async #ensureCollectionInSpace({
@@ -811,15 +799,13 @@ export class WASRemoteStore {
     name,
     encryption,
     isPublic,
-    generator,
-    generatorOrigin
+    generator
   }: {
     id: string
     name?: string
     encryption: 'plaintext' | 'governed'
     isPublic?: boolean
-    generator?: IDID
-    generatorOrigin?: string
+    generator?: CollectionGenerator
   }): Promise<void> {
     await ensureSpaceAndCollection({
       was: this.was,
@@ -830,7 +816,6 @@ export class WASRemoteStore {
       encryption,
       isPublic,
       generator,
-      generatorOrigin,
       spaceDescription: {
         id: this.spaceId,
         type: ['Space'],
@@ -1047,8 +1032,7 @@ export class WASRemoteStore {
           ...item,
           isPublic,
           isEncrypted: Boolean(description?.encryption),
-          generator: description?.generator,
-          generatorOrigin: description?.generatorOrigin
+          generator: description?.generator
         }
       })
     )

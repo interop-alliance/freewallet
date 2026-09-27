@@ -27,7 +27,17 @@ const DAY_MS = 24 * 60 * 60 * 1000
 // grantee's recipient key-agreement key, derived from its controller, which
 // a placeholder string cannot satisfy.
 const APP_DID = 'did:key:z6MkqojacRDqmQgDi4ESKKhGDqnZx4C6cChAbQZXvnUFX7D7'
-const APP = { name: 'Docs App', origin: 'https://app.example' }
+const APP = {
+  name: 'Docs App',
+  origin: 'https://app.example',
+  appUrl: 'https://app.example/docs'
+}
+const APP_GENERATOR = {
+  id: APP_DID,
+  origin: APP.origin,
+  url: APP.appUrl,
+  name: APP.name
+}
 const WRITE_DESCRIPTOR: ICapabilityQueryDetail = {
   referenceId: 'docs',
   allowedAction: ['GET', 'PUT'],
@@ -372,7 +382,7 @@ describe('processZcaps delegation parent', () => {
 })
 
 describe('processZcaps collection attribution', () => {
-  it('stamps the app DID and origin on an App Connect encrypted collection', async () => {
+  it('stamps the app DID, origin, app URL, and name on an App Connect encrypted collection', async () => {
     const { session } = fakeSession()
     await processZcaps({
       zcapRequests: [APP_WRITE_DESCRIPTOR],
@@ -382,8 +392,7 @@ describe('processZcaps collection attribution', () => {
     expect(session.storage.provisionEncryptedCollection).toHaveBeenCalledWith(
       expect.objectContaining({
         collectionId: 'docs',
-        generator: APP_DID,
-        generatorOrigin: APP.origin
+        generator: APP_GENERATOR
       })
     )
   })
@@ -398,8 +407,7 @@ describe('processZcaps collection attribution', () => {
     expect(session.storage.ensureCollection).toHaveBeenCalledWith({
       id: 'gallery',
       isPublic: true,
-      generator: APP_DID,
-      generatorOrigin: APP.origin
+      generator: APP_GENERATOR
     })
   })
 
@@ -411,14 +419,31 @@ describe('processZcaps collection attribution', () => {
       app: { ...APP, origin: requestingOriginOf('https://App.example:443/')! }
     })
     expect(session.storage.ensureCollection).toHaveBeenCalledWith(
-      expect.objectContaining({ generatorOrigin: APP.origin })
+      expect.objectContaining({
+        generator: expect.objectContaining({ origin: APP.origin })
+      })
     )
   })
 
-  it('passes the pair on re-admit too, the standing collection keeping its own', async () => {
+  it('omits generator.name when the app gave no display name', async () => {
+    const { session } = fakeSession()
+    await processZcaps({
+      zcapRequests: [APP_PUBLIC_DESCRIPTOR],
+      session,
+      app: { ...APP, name: '' }
+    })
+    const [args] = vi.mocked(session.storage.ensureCollection).mock.calls[0]
+    expect(args.generator).toEqual({
+      id: APP_DID,
+      origin: APP.origin,
+      url: APP.appUrl
+    })
+  })
+
+  it('passes the attribution on re-admit too, the standing collection keeping its own', async () => {
     // The "a standing collection keeps its attribution" rule is enforced
-    // where the write happens (was-client stamps the pair on the guarded
-    // create only), so the call site does not consult a collections snapshot.
+    // where the write happens (was-client stamps it on the guarded create
+    // only), so the call site does not consult a collections snapshot.
     const { session } = fakeSession({ collections: [{ id: 'docs' }] })
     await processZcaps({
       zcapRequests: [APP_WRITE_DESCRIPTOR],
@@ -432,8 +457,7 @@ describe('processZcaps collection attribution', () => {
       .calls[0]
     expect(args).toMatchObject({
       collectionId: 'docs',
-      generator: APP_DID,
-      generatorOrigin: APP.origin
+      generator: APP_GENERATOR
     })
   })
 
@@ -448,7 +472,6 @@ describe('processZcaps collection attribution', () => {
       .calls[0]
     expect(args.collectionId).toBe('docs')
     expect(args).not.toHaveProperty('generator')
-    expect(args).not.toHaveProperty('generatorOrigin')
   })
 })
 

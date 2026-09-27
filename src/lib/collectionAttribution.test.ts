@@ -1,5 +1,8 @@
 import { describe, it, expect } from 'vitest'
-import { attributeCollectionsToApps } from './collectionAttribution'
+import {
+  attributeCollectionsToApps,
+  collectionCreatorLabel
+} from './collectionAttribution'
 import type { CollectionCreator } from '@/lib/connectedApps'
 import type { StorageCollection } from '@/lib/storage'
 
@@ -8,7 +11,7 @@ import type { StorageCollection } from '@/lib/storage'
  *
  * @param options {object}
  * @param options.id {string}
- * @param [options.generator] {string}
+ * @param [options.generator] {string}   the stamped `generator.id`
  * @returns {StorageCollection}
  */
 function collectionEntry({
@@ -16,9 +19,13 @@ function collectionEntry({
   generator
 }: {
   id: string
-  generator?: string
+  generator?: `did:${string}`
 }): StorageCollection {
-  return { id, url: `/space/abc/${id}`, generator }
+  return {
+    id,
+    url: `/space/abc/${id}`,
+    ...(generator && { generator: { id: generator } })
+  }
 }
 
 const CONNECTED: CollectionCreator = {
@@ -66,5 +73,50 @@ describe('attributeCollectionsToApps', () => {
       creators: new Map([['did:key:zNotes', disconnected]])
     })
     expect(attribution.get('notes')).toBe(disconnected)
+  })
+})
+
+describe('collectionCreatorLabel', () => {
+  const STAMPED: StorageCollection = {
+    id: 'docs',
+    url: '/space/abc/docs',
+    generator: {
+      id: 'did:key:zApp',
+      origin: 'https://app.example',
+      url: 'https://app.example/editor',
+      name: 'Stamped Editor'
+    }
+  }
+
+  it('prefers the stamped generator.name', () => {
+    expect(
+      collectionCreatorLabel({
+        generator: STAMPED.generator,
+        recordName: CONNECTED.name
+      })
+    ).toBe('Stamped Editor')
+  })
+
+  it("falls back to the wallet records' name when generator.name is absent", () => {
+    const generator = { ...STAMPED.generator!, name: undefined }
+    expect(
+      collectionCreatorLabel({ generator, recordName: CONNECTED.name })
+    ).toBe('Editor')
+  })
+
+  it('falls back to the stamped origin when nothing names the app', () => {
+    const generator = {
+      id: 'did:key:zApp' as const,
+      origin: 'https://app.example'
+    }
+    expect(collectionCreatorLabel({ generator })).toBe('https://app.example')
+  })
+
+  it('names nothing for an unattributed collection', () => {
+    expect(
+      collectionCreatorLabel({
+        generator: collectionEntry({ id: 'docs' }).generator
+      })
+    ).toBeUndefined()
   })
 })

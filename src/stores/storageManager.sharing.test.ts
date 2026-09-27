@@ -121,12 +121,12 @@ async function generateKey(): Promise<{
  * entry the way production does and try to read with it afterwards.
  */
 async function generateAppIdentity(): Promise<{
-  did: string
+  did: `did:${string}`
   recipient: RecipientPublicKey
   keyAgreementKey: IKeyAgreementKey
 }> {
   const key = await Ed25519VerificationKey.generate()
-  const did = `did:key:${key.fingerprint()}`
+  const did: `did:${string}` = `did:key:${key.fingerprint()}`
   const keyAgreementKey = X25519KeyAgreementKey2020.fromEd25519({
     controller: did,
     publicKeyMultibase: key.publicKeyMultibase,
@@ -2146,7 +2146,7 @@ describe('StorageManager.revokeAppCollectionRecipients', () => {
       {
         id: 'app-docs',
         url: 'https://was.example/space/s-space/app-docs/',
-        generator: app.did
+        generator: { id: app.did }
       }
     ])
 
@@ -2222,7 +2222,7 @@ describe('StorageManager.revokeAppCollectionRecipients', () => {
       {
         id: 'app-docs',
         url: 'https://was.example/space/s-space/app-docs/',
-        generator: app.did
+        generator: { id: app.did }
       }
     ])
     const before = await remoteStore.collectionEncryption({
@@ -2274,7 +2274,7 @@ describe('StorageManager.revokeAppCollectionRecipients', () => {
       {
         id: 'app-public',
         url: 'https://was.example/space/s-space/app-public/',
-        generator: app.did,
+        generator: { id: app.did },
         isPublic: true
       }
     ])

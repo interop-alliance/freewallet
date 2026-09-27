@@ -252,8 +252,11 @@ export async function processAppConnect({
           zcapRequests,
           session,
           // Names the app on any share activity this request records, so the
-          // settings panel reads "Text Editor (app.example)" and not a did:key.
-          app: { name: app.name, origin },
+          // settings panel reads "Text Editor (app.example)" and not a did:key,
+          // and stamps each collection it creates with the app's attribution.
+          // `app.appUrl` is the validated request's canonical app URL, the
+          // value the app-key credential's `credentialSubject.appUrl` holds.
+          app: { name: app.name, origin, appUrl: app.appUrl },
           // `firstRun` is settled by now, so the caller's early record of
           // this connect carries the same shape as a post-compose one.
           ...(beforeProvision && {
