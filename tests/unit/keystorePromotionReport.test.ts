@@ -14,6 +14,7 @@
 import { describe, expect, it } from 'vitest'
 import { browserLocalSessionPersistence } from '@/session/persistence'
 import { StorageManager } from '@/stores/storageManager'
+import { generateVaultKeys } from '@/stores/testing/vaultKeys'
 import type { WASRemoteStore } from '@/stores/wasRemoteStore'
 import type { ControllerProfile } from '@/types/auth'
 
@@ -47,10 +48,13 @@ function profileWithNoKeystore(): ControllerProfile {
   } as unknown as ControllerProfile
 }
 
+const VAULT_KEYS = await generateVaultKeys()
+
 describe('the keystore promotion a login keeps', () => {
   it('is empty until a promotion runs', () => {
     const storage = new StorageManager({
       remoteStore: promotedRemoteStore(),
+      vaultKeys: VAULT_KEYS,
       persistence: browserLocalSessionPersistence()
     })
     expect(storage.keystorePromotion).toBeUndefined()
@@ -59,6 +63,7 @@ describe('the keystore promotion a login keeps', () => {
   it('keeps the promotion a confirming promotion check fired', async () => {
     const storage = new StorageManager({
       remoteStore: promotedRemoteStore(),
+      vaultKeys: VAULT_KEYS,
       persistence: browserLocalSessionPersistence()
     })
 
@@ -76,6 +81,7 @@ describe('the keystore promotion a login keeps', () => {
   it('fires no promotion, and keeps none, without an account DID', async () => {
     const storage = new StorageManager({
       remoteStore: promotedRemoteStore(),
+      vaultKeys: VAULT_KEYS,
       persistence: browserLocalSessionPersistence()
     })
 

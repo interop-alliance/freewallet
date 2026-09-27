@@ -14,10 +14,11 @@
  * Deleting a stranded row also removes the app from the Applications page,
  * which lists connected apps out of the `app-connections` collection alone --
  * so the delete destroys the surface the user would revoke the app from. The
- * app's live authority is therefore retired BEFORE the row goes: the same two
- * calls, in the same order, that `revokeAppAccess` drives (rotate the app out
- * of its app-provisioned collections' key epochs and revoke those pull-axis
- * grants, then revoke the remaining recorded grants). Without that, an app's
+ * app's live authority is therefore retired BEFORE the row goes, through the
+ * one sequence `revokeAppAccess` also runs (`revokeAppAuthority`: rotate the
+ * app out of its collections' key epochs and revoke those pull-axis grants,
+ * then revoke the remaining recorded grants). A stage that does not fully
+ * land throws, and the row is left for the next login. Without that, an app's
  * delegated zcaps would stand until their TTL expired and it would stay a key
  * epoch recipient indefinitely, with nothing left to revoke it from.
  *
@@ -45,7 +46,8 @@ import {
 } from '@interop/wallet-request'
 import { isSelfIssued, subjectId } from '@/lib/vcShape'
 import type { IVerifiableCredential } from '@interop/data-integrity-core'
-import type { StorageManager } from '@/stores/storageManager'
+import type { HistoryItems, StorageManager } from '@/stores/storageManager'
+import { revokeAppAuthority } from '@/lib/connectedApps'
 import { createLogger } from '@/lib/log'
 
 const log = createLogger('fw:session:appkeys')
@@ -145,7 +147,7 @@ export async function sweepStrandedAppKeys({
     }
   }
 
-  let items: Awaited<ReturnType<StorageManager['listHistoryItems']>> | undefined
+  let items: HistoryItems | undefined
   let collections:
     Awaited<ReturnType<StorageManager['listCollections']>> | undefined
   let deleted = 0
@@ -154,23 +156,15 @@ export async function sweepStrandedAppKeys({
       if (origin && subjectDid) {
         items ??= await storage.listHistoryItems()
         collections ??= await storage.listCollections()
-        // Rotate the app out of its app-provisioned collections' key epochs
-        // (revoking those collections' pull-axis grants indivisibly) before
-        // anything else, then revoke the remaining recorded grants.
-        const rotation = await storage.revokeAppCollectionRecipients({
+        // Throws when a stage did not fully land, which leaves the row in
+        // place for the next login.
+        await revokeAppAuthority({
+          storage,
           origin,
           subjectDid,
           items,
           collections
         })
-        if (rotation.failed > 0) {
-          log.warn(
-            'Could not rotate every collection off the stranded app key; leaving it in place to retry at the next login',
-            { cid }
-          )
-          continue
-        }
-        await storage.revokeAppGrants({ origin, subjectDid, items })
       }
       // Through the ordinary delete path, so a stranded key that was ever
       // published as a public link has that world-readable copy retracted
@@ -180,7 +174,10 @@ export async function sweepStrandedAppKeys({
       await storage.deleteCredential({ cid, consultRemote: true })
       deleted += 1
     } catch (err) {
-      log.warn('Could not delete the stranded app key', { cid, err })
+      log.warn(
+        'Could not revoke and delete the stranded app key; leaving it in place to retry at the next login',
+        { cid, err }
+      )
     }
   }
 
@@ -216,7 +213,7 @@ async function retractOrphanPublicAppKeys({
 }: {
   storage: StorageManager
   privateCids: Set<string>
-  items?: Awaited<ReturnType<StorageManager['listHistoryItems']>>
+  items?: HistoryItems
   collections?: Awaited<ReturnType<StorageManager['listCollections']>>
 }): Promise<number> {
   let publicCopies: Awaited<ReturnType<StorageManager['listCredentials']>>
@@ -245,29 +242,21 @@ async function retractOrphanPublicAppKeys({
       if (origin && subjectDid) {
         history ??= await storage.listHistoryItems()
         listing ??= await storage.listCollections()
-        const rotation = await storage.revokeAppCollectionRecipients({
+        await revokeAppAuthority({
+          storage,
           origin,
           subjectDid,
           items: history,
           collections: listing
         })
-        if (rotation.failed > 0) {
-          log.warn(
-            'Could not rotate every collection off the orphaned public app key; leaving it in place to retry at the next login',
-            { cid }
-          )
-          continue
-        }
-        await storage.revokeAppGrants({
-          origin,
-          subjectDid,
-          items: history
-        })
       }
       await storage.retractPublicCopy({ cid, consultRemote: true })
       retracted += 1
     } catch (err) {
-      log.warn('Could not retract the orphaned public app key', { cid, err })
+      log.warn(
+        'Could not revoke and retract the orphaned public app key; leaving it in place to retry at the next login',
+        { cid, err }
+      )
     }
   }
   return retracted

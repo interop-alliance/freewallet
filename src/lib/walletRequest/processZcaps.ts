@@ -1,8 +1,11 @@
 /**
- * Zcap request processing for "Login with Wallet": resolves each requested
+ * Zcap request processing for App Connect and the interaction-URL page:
+ * resolves each requested
  * capability's abstract `invocationTarget` descriptor onto the user's own WAS
- * Space, provisions any missing RP collection, and delegates a capability to
- * the relying party's DID. All delegations are rooted at the user's Space root
+ * Space, delegates a capability to the relying party's DID, and provisions
+ * any missing RP collection. Every delegation is signed before any collection
+ * is provisioned, so the caller can persist the signed grants before a
+ * provisioning step escrows the grantee into a key epoch. All delegations are rooted at the user's Space root
  * capability (`urn:zcap:root:<spaceUrl>`); targets outside the Space are
  * unsatisfiable by construction.
  *
@@ -13,14 +16,11 @@
  * spec does not define never reaches an `allowedAction` the user's root key
  * signs. The classes:
  *
- * - whole Space -- read-only (a Space-wide write would permit rewriting the
- *   Space Description, i.e. controller takeover);
  * - a protected wallet collection -- the standard collections
  *   (`private-credentials`, `public-credentials`, `wallet-activity`) plus the
- *   account's system collections (`SYSTEM_COLLECTIONS`: `id`, `key-map`,
- *   `unlock-methods`) -- read-only: an RP may read but never rewrite or delete
- *   the user's own credentials, published identity, key material, or
- *   unlock-method registry;
+ *   account's grantable system collection (`id`) -- read-only: an RP may read
+ *   but not rewrite or delete the user's own credentials or published
+ *   identity;
  * - a share -- read-only (see below);
  * - a public collection -- the full vocabulary, the same as a private RP
  *   collection: published content is still the RP's own data, and
@@ -29,12 +29,25 @@
  *   fetched -- the nature of publication, not a reason to forbid it. The
  *   consent warning and the shorter write TTL are what bound it;
  * - an RP-provisioned private collection -- the full vocabulary, subject to the
- *   consent screen and the shorter write TTL.
+ *   consent screen and the shorter write TTL. It is provisioned encrypted,
+ *   with the user as recipient zero and the grantee's identity key-agreement
+ *   key (derived from its `did:key` controller) escrowed beside it, so a
+ *   controller that derivation cannot handle makes the grant unsatisfiable.
+ *
+ * Only two request paths reach this module: App Connect and the
+ * interaction-URL agent path. Each lists its grantees and can revoke them, so
+ * either may provision. A plain CHAPI request carrying a capability query is
+ * refused before consent (`precheckGetRequest`) and never resolves here.
  *
  * The class is resolved from the target itself, so it applies whether the
  * target arrives as a descriptor object or as a plain URL string under the
  * Space (the collection id is derived from the first path segment after the
- * Space URL either way) -- a string target cannot bypass it. Resolution also
+ * Space URL either way) -- a string target cannot bypass it. No target reaches
+ * the whole Space: the `https://w3id.org/byoe#space` descriptor type is
+ * reserved and a string naming the Space itself is unsatisfiable, as the App
+ * Connect spec requires. A string target never provisions, so it must name a
+ * collection that stood before the request, not one an earlier
+ * descriptor in the same request provisions. Resolution also
  * consults the existing collections' state (`collections`, a snapshot the
  * caller fetches from the user's Space), so a target naming a collection that
  * is ALREADY world-readable is classed public-collection whichever form it
@@ -55,15 +68,17 @@
  * (otherwise one consent approval could flip another app's private -- possibly
  * encrypted -- collection world-readable), while the idempotent re-grant on an
  * already-public collection stays satisfiable and provisions nothing. The rule
- * holds within a single request too: the delegation loop records each
- * collection it provisions, so a duplicate name later in the same request
- * resolves against it as an existing collection.
+ * holds within a single request too: resolution (`resolveGrants`, which the
+ * consent preview and the approval share) records each collection the
+ * request will provision, so a descriptor naming it later in the same
+ * request resolves against it as an existing collection.
  *
  * A `https://w3id.org/byoe#shared-wallet-collection` grant is the share flow: it asks not just to
  * fetch one of the wallet's own encrypted collections but to DECRYPT it. It
- * leaves the ordinary delegation loop entirely and routes to
- * `StorageManager.shareCollection`, which grants both axes -- the read-only
- * pull zcap and the key-epoch roster entry -- in one indivisible call. The
+ * leaves the ordinary delegation loop entirely. Its read-only pull zcap is
+ * signed with the other grants (`StorageManager.delegateShareGrant`), and
+ * once the grants are recorded `StorageManager.shareCollection` escrows the
+ * key-epoch roster entry and records the share. The
  * recipient key is never carried in the request: it is derived from the
  * grantee's `did:key` controller (`x25519RecipientFromDidKey`), so a request
  * cannot pair one entity's DID with another's decryption key. Only the
@@ -76,7 +91,11 @@
  * than read-only grants.
  */
 import type { Session } from '@/types/auth'
-import { APP_CONNECTIONS_COLLECTION } from '@interop/wallet-core/space'
+import {
+  APP_CONNECTIONS_COLLECTION,
+  KEY_MAP_COLLECTION,
+  UNLOCK_METHODS_COLLECTION
+} from '@interop/wallet-core/space'
 import {
   clampGrantExpires,
   GENERATION_DELEGATION_TTL_MS
@@ -88,7 +107,7 @@ import {
   RP_ZCAP_TTL_MS,
   RP_ZCAP_WRITE_TTL_MS,
   SHARE_ZCAP_TTL_MS,
-  SYSTEM_COLLECTIONS,
+  isProtectedCollection,
   WALLET_STANDARD_COLLECTIONS
 } from '@/app.config'
 import {
@@ -101,10 +120,10 @@ import {
   parseSpaceTarget,
   resourcePath,
   rootCapabilityId,
-  spacePath,
   toUrl
 } from '@interop/was-client/paths'
 import type { IDID } from '@interop/data-integrity-core'
+import type { IDelegatedZcap } from '@interop/was-client'
 import type { ICapabilityQueryDetail, IZcap } from './types'
 
 /**
@@ -145,11 +164,7 @@ type WasAction = (typeof WAS_ACTIONS)[number]
  * exactly one, and it is what `ACTION_CEILINGS` keys on.
  */
 type TargetClass =
-  | 'space'
-  | 'protected-collection'
-  | 'share'
-  | 'public-collection'
-  | 'collection'
+  'protected-collection' | 'share' | 'public-collection' | 'collection'
 
 /**
  * The most any grant on a target of each class may be delegated. Requested
@@ -157,16 +172,8 @@ type TargetClass =
  * matter what the request asks for.
  */
 const ACTION_CEILINGS: Record<TargetClass, readonly WasAction[]> = {
-  /**
-   * A whole-Space grant stays read-only because this row is GET/HEAD, and
-   * that limitation is the bound. The server adds only one thing on top of
-   * it: writing the Space Metadata object (`PUT /space/<S>/meta`) is
-   * controller-only, so no delegated capability reaches it. Its other
-   * Space-level writes do admit delegated capabilities.
-   */
-  space: ['GET', 'HEAD'],
-  // The user's own credentials, activity log, published DID artifacts, and
-  // private key-id map: readable by an RP, never writable by one.
+  // The user's own credentials, activity log, and published DID artifacts:
+  // readable by an RP, not writable by one.
   'protected-collection': ['GET', 'HEAD'],
   // A share hands over decryption as well as fetch; it is never a write grant.
   share: ['GET', 'HEAD'],
@@ -195,35 +202,24 @@ function includesWrite(allowedActions: string[]): boolean {
 }
 
 /**
- * Whether a resolved collection id names a protected wallet collection --
- * a standard collection (`private-credentials`, `public-credentials`,
- * `wallet-activity`, the contacts collections) or one of the account's system
- * collections (`SYSTEM_COLLECTIONS`: the `id` collection holding the published
- * DID artifacts, the `key-map` collection holding the private key material,
- * and the `unlock-methods` registry) -- which an RP may read but never write.
- *
- * @param collectionId {string | undefined}
- * @returns {boolean}
- */
-function isProtectedCollection(collectionId: string | undefined): boolean {
-  return (
-    !!collectionId &&
-    (SYSTEM_COLLECTIONS.some(entry => entry.id === collectionId) ||
-      WALLET_STANDARD_COLLECTIONS.some(entry => entry.id === collectionId))
-  )
-}
-
-/**
- * The collections no grant may ever name, whatever the descriptor spelling and
+ * The collections no grant may ever name, whatever the descriptor form and
  * whatever actions it asks for. `app-connections` holds one app-key credential
  * per connected app, each carrying that app's private seed in
- * `credentialSubject.seed`. The rule does two things. It keeps
- * `app-connections` out of `provisionFor`'s recipient roster, and it refuses
- * a target that names the collection directly, so such a grant is
- * unsatisfiable rather than merely read-only. Confidentiality of the seeds
- * rests elsewhere, on the epoch roster: the rows are EDV envelopes, and a
- * grantee is not an epoch recipient, so it decrypts nothing. A whole-Space
- * read grant reaches the ciphertext by attenuation and reads no seed.
+ * `credentialSubject.seed`. `resolveInvocationTarget` checks the resolved
+ * collection id against this list once, after every descriptor form, so a
+ * grant naming one of these collections is unsatisfiable rather than merely
+ * read-only. That also keeps `app-connections` out of `provisionFor`'s
+ * recipient roster, since an unsatisfiable grant never reaches provisioning.
+ * Confidentiality of the seeds rests elsewhere, on the epoch roster: the rows
+ * are EDV envelopes, and a grantee is not an epoch recipient, so it decrypts
+ * nothing.
+ *
+ * `key-map` is plaintext on the server. Its user key roster
+ * (`user-key.jsonl`) carries a passphrase credential's derived key-agreement
+ * key beside a wrap of the user key, so a read of it is an offline
+ * passphrase-guessing oracle. It also holds the KMS key map and the
+ * user-typed client labels. `unlock-methods` is the account's credential
+ * registry. Neither is any third party's business to read.
  *
  * Deliberately an explicit membership list rather than a roster-derived rule.
  * The roster's `shareable: false` cannot stand in for it -- `public-credentials`
@@ -232,7 +228,9 @@ function isProtectedCollection(collectionId: string | undefined): boolean {
  * than a statement about what the collection holds.
  */
 const NEVER_GRANTABLE_COLLECTION_IDS: readonly string[] = [
-  APP_CONNECTIONS_COLLECTION
+  APP_CONNECTIONS_COLLECTION,
+  KEY_MAP_COLLECTION.id,
+  UNLOCK_METHODS_COLLECTION.id
 ]
 
 /**
@@ -269,8 +267,24 @@ export type ExistingCollections = ReadonlyMap<
     // metadata. Absent while unread, so resolution reports no
     // existing-collection reading for it yet.
     attribution?: CollectionAttribution
+    // Whether the collection carries an `encryption` descriptor, read off the
+    // same metadata as the attribution. Absent while unread.
+    encrypted?: boolean
+    // The key-agreement key ids in the collection's current key epoch, read
+    // in for a string target naming an encrypted collection. Absent while
+    // unread, so no grantee counts as a current recipient yet.
+    recipientIds?: ReadonlySet<string>
   }
 >
+
+/**
+ * The collections earlier descriptors in the same request provision, keyed
+ * by collection id, with the public state each is provisioned in. It holds
+ * only names absent from the pre-request snapshot. {@link resolveGrants}
+ * builds it in request order, for the consent preview and the approval
+ * alike, so both resolve every row against the same view.
+ */
+type ProvisionedByRequest = ReadonlyMap<string, { isPublic: boolean }>
 
 /**
  * A collection's app attribution as grant resolution reads it: the two
@@ -295,7 +309,8 @@ export interface CollectionAttribution {
  * per collection.
  *
  * @param collections {Array<{ id: string, isPublic?: boolean, attribution?:
- *   CollectionAttribution }>}
+ *   CollectionAttribution, encrypted?: boolean, recipientIds?:
+ *   ReadonlySet<string> }>}
  * @returns {ExistingCollections}
  */
 export function existingCollectionsFrom(
@@ -303,14 +318,45 @@ export function existingCollectionsFrom(
     id: string
     isPublic?: boolean
     attribution?: CollectionAttribution
+    encrypted?: boolean
+    recipientIds?: ReadonlySet<string>
   }>
 ): ExistingCollections {
   return new Map(
-    collections.map(({ id, isPublic, attribution }) => [
-      id,
-      { isPublic: !!isPublic, attribution }
-    ])
+    collections.map(
+      ({ id, isPublic, attribution, encrypted, recipientIds }) => [
+        id,
+        { isPublic: !!isPublic, attribution, encrypted, recipientIds }
+      ]
+    )
   )
+}
+
+/**
+ * Whether a grantee's key-agreement key sits in a collection's current key
+ * epoch, per the recipient ids read in for it. A controller the recipient
+ * derivation cannot handle was never escrowed, so it is no recipient.
+ *
+ * @param options {object}
+ * @param [options.controller] {string}   the grantee did:key
+ * @param [options.recipientIds] {ReadonlySet<string>}
+ * @returns {boolean}
+ */
+function isCurrentRecipient({
+  controller,
+  recipientIds
+}: {
+  controller?: string
+  recipientIds?: ReadonlySet<string>
+}): boolean {
+  if (!controller || !recipientIds) {
+    return false
+  }
+  try {
+    return recipientIds.has(x25519RecipientFromDidKey({ did: controller }).id!)
+  } catch {
+    return false
+  }
 }
 
 /**
@@ -348,14 +394,13 @@ export interface ExistingCollectionReading {
  * that carries an `appUrl` (an App Connect request) reads `this-application`
  * only when the creator's app URL is known and equal; a creator whose app URL
  * the wallet cannot recover reads `other`, the cautious side. A requester
- * with no `appUrl` (a plain zcap request) has only its origin to offer, and
- * the origin comparison decides.
+ * with no `appUrl` (an interaction-URL agent) is never the same application
+ * as a collection's creator, so it reads `other` unless it is `this-app`.
  *
  * @param options {object}
  * @param options.collectionId {string}
  * @param options.collections {ExistingCollections}
- * @param options.requester {{ controller?: string; origin?: string; appUrl?:
- *   string }}
+ * @param options.requester {{ controller?: string; appUrl?: string }}
  * @returns {ExistingCollectionReading | undefined}
  */
 function existingCollectionReading({
@@ -365,7 +410,7 @@ function existingCollectionReading({
 }: {
   collectionId: string
   collections: ExistingCollections
-  requester: { controller?: string; origin?: string; appUrl?: string }
+  requester: { controller?: string; appUrl?: string }
 }): ExistingCollectionReading | undefined {
   const existing = collections.get(collectionId)
   if (!existing?.attribution || existing.isPublic) {
@@ -381,9 +426,8 @@ function existingCollectionReading({
   if (requester.controller && generator === requester.controller) {
     return { creator: 'this-app', generator, generatorOrigin }
   }
-  const sameApplication = requester.appUrl
-    ? creatorApp?.appUrl === requester.appUrl
-    : !!requester.origin && generatorOrigin === requester.origin
+  const sameApplication =
+    !!requester.appUrl && creatorApp?.appUrl === requester.appUrl
   return {
     creator: sameApplication ? 'this-application' : 'other',
     generator,
@@ -429,8 +473,8 @@ function collectionClassFor({
  * foreign URL, an invalid collection name, or an unknown descriptor type); it
  * is skipped at delegation time and shown as "cannot fulfill" on consent.
  *
- * The class is the one discriminator: a whole-Space grant is `'space'`, a
- * share `'share'`, a world-readable collection `'public-collection'`. Only
+ * The class is the one discriminator: a share is `'share'`, a world-readable
+ * collection `'public-collection'`. Only
  * `encrypted` and `needsProvisioning` vary independently of it.
  */
 interface ResolvedTarget {
@@ -444,11 +488,14 @@ interface ResolvedTarget {
   needsProvisioning: boolean
   // The WAS collection id, when the target is a (standard or RP) collection.
   collectionId?: string
-  // A standard EDV-encrypted collection: the RP will only see ciphertext.
+  // An encrypted collection the grantee does not join the key roster of, so
+  // the RP will only see ciphertext: a standard EDV collection, or an
+  // existing encrypted collection a string target names, whose current key
+  // epoch does not already list the grantee.
   encrypted: boolean
   // Present when the target names a private collection that already stands
   // (see {@link ExistingCollectionReading}); absent on a new name, a public
-  // or protected collection, a Space, or an unsatisfiable target.
+  // or protected collection, or an unsatisfiable target.
   existing?: ExistingCollectionReading
 }
 
@@ -695,16 +742,6 @@ export interface SpaceLocation {
 }
 
 /**
- * The canonical URL of the Space itself.
- *
- * @param space {SpaceLocation}
- * @returns {string}
- */
-function spaceTargetIn({ serverUrl, spaceId }: SpaceLocation): string {
-  return toUrl({ serverUrl, path: spacePath(spaceId) })
-}
-
-/**
  * The canonical URL of one Collection in the user's Space. `collectionId` has
  * already passed {@link isCollectionName}, so the reserved segments the path
  * builder refuses never reach it.
@@ -729,10 +766,10 @@ function collectionTargetIn({
 
 /**
  * Classifies a plain-URL invocation target against the user's Space with
- * was-client's own grammar (`parseSpaceTarget`): the Space itself, a
- * Collection in it, or a Resource in one, with the ids the builders re-emit
- * from. `undefined` is anything else -- a foreign origin or another Space, a
- * reserved sub-endpoint such as `meta` or `policy` at any depth, a path
+ * was-client's own grammar (`parseSpaceTarget`): a Collection in the Space,
+ * or a Resource in one, with the ids the builders re-emit from. `undefined` is
+ * anything else -- the Space itself (no grant reaches the whole Space), a
+ * foreign origin or another Space, a reserved sub-endpoint such as `meta` or `policy` at any depth, a path
  * deeper than a Resource -- so a string target can name nothing the typed
  * descriptors cannot. A container classifies the same whichever way it
  * arrived, with or without the trailing slash.
@@ -746,7 +783,7 @@ function collectionTargetIn({
  * @param options {object}
  * @param options.target {string}
  * @param options.space {SpaceLocation}
- * @returns {{ collectionId?: string, resourceId?: string } | undefined}
+ * @returns {{ collectionId: string, resourceId?: string } | undefined}
  */
 function classifySpaceTarget({
   target,
@@ -754,7 +791,7 @@ function classifySpaceTarget({
 }: {
   target: string
   space: SpaceLocation
-}): { collectionId?: string; resourceId?: string } | undefined {
+}): { collectionId: string; resourceId?: string } | undefined {
   let url: URL
   try {
     url = new URL(target)
@@ -770,9 +807,6 @@ function classifySpaceTarget({
   })
   if (!parsed || parsed.spaceId !== space.spaceId) {
     return undefined
-  }
-  if (parsed.kind === 'space') {
-    return {}
   }
   if (parsed.kind === 'collection') {
     return { collectionId: parsed.collectionId }
@@ -791,12 +825,19 @@ function classifySpaceTarget({
  *   so a URL under a standard collection (or at a Resource inside one) is
  *   flagged `collectionId` / `encrypted` and gets the same cap as its
  *   descriptor form -- including the public-collection class when the named
- *   collection is already world-readable. A container target is normalized
- *   to its canonical trailing-slash form whichever way it arrived, and the
- *   Space URL itself is a whole-Space grant. Any other string -- a foreign
- *   origin, a path that escapes the Space, a target carrying a query or
- *   fragment, a reserved sub-endpoint, a path deeper than a Resource, a
- *   collection segment that is not a valid collection id -- unsatisfiable;
+ *   collection is already world-readable. A string target never provisions,
+ *   per the App Connect spec, so one naming a collection absent from
+ *   `collections` (or a Resource inside one) is unsatisfiable: a grantee
+ *   cannot create a collection through its first write. A collection an
+ *   earlier descriptor in the same request provisions (`provisioned`) does
+ *   not count. An existing encrypted collection is flagged `encrypted` unless
+ *   its current key epoch already lists the grantee. A container target is
+ *   normalized to its canonical trailing-slash form whichever way it
+ *   arrived. Any other string -- the Space URL itself, a foreign origin, a
+ *   path that escapes the Space, a target carrying a query or fragment, a
+ *   reserved sub-endpoint, a path deeper than a Resource, a collection
+ *   segment that is not a valid collection id, a never-grantable
+ *   collection -- is unsatisfiable;
  * - `{ type: 'https://w3id.org/byoe#private-collection', name }` -- the
  *   Collection's canonical URL in the Space (`collectionPath`) after
  *   validating `name`, flagged `needsProvisioning` unless it is a standard
@@ -816,63 +857,134 @@ function classifySpaceTarget({
  *   but classed share: the grantee also joins the collection's key-epoch
  *   roster, so it can decrypt what it fetches. `name` must be one of the
  *   SHAREABLE standard collections; anything else (a plaintext collection, an
- *   RP collection, the whole Space, `app-connections`) is unsatisfiable -- a
- *   share is only meaningful where an epoch roster exists, and `app-connections`
- *   holds the connected apps' private seeds;
- * - `{ type: 'https://w3id.org/byoe#space' }` -- the Space URL, classed space;
- * - anything else -- unsatisfiable.
+ *   RP collection, a never-grantable collection) is unsatisfiable -- a share
+ *   is only meaningful where an epoch roster exists;
+ * - anything else -- unsatisfiable, including the reserved
+ *   `https://w3id.org/byoe#space` type: no grant reaches the whole Space.
+ *
+ * Whatever the form, a target resolving onto a never-grantable collection
+ * ({@link NEVER_GRANTABLE_COLLECTION_IDS}) is unsatisfiable.
  *
  * @param options {object}
  * @param options.descriptor {string | { type: string; name?: string }}
  * @param options.space {SpaceLocation}   the user's Space, structurally
  * @param options.collections {ExistingCollections}   the Space's existing
- *   collections, their public state, and their attribution
- * @param options.requester {{ controller?: string; origin?: string; appUrl?:
- *   string }}   the grantee did:key, the attested requesting origin, and the
- *   app's canonical URL, read only to class an existing collection's creator
- *   (`existing` on the result)
+ *   collections as they stood before the request, their public state, and
+ *   their attribution
+ * @param [options.provisioned] {ProvisionedByRequest}   the collections
+ *   earlier descriptors in the same request provision. A descriptor form
+ *   resolves against them as existing collections; a string target ignores
+ *   them.
+ * @param options.requester {{ controller?: string; appUrl?: string }}   the
+ *   grantee did:key and the app's canonical URL, read to class an existing
+ *   collection's creator (`existing` on the result) and to check the
+ *   grantee against a current key epoch
  * @returns {ResolvedTarget}
  */
-export function resolveInvocationTarget({
+export function resolveInvocationTarget(options: {
+  descriptor: string | { type?: string; name?: string }
+  space: SpaceLocation
+  collections: ExistingCollections
+  provisioned?: ProvisionedByRequest
+  requester: { controller?: string; appUrl?: string }
+}): ResolvedTarget {
+  const target = resolveTargetForm(options)
+  // One check covers every form: a target that resolves onto a
+  // never-grantable collection (or a Resource inside one) is refused, however
+  // the request named it.
+  if (isNeverGrantableCollection(target.collectionId)) {
+    return UNSATISFIABLE
+  }
+  return target
+}
+
+/**
+ * The collections a descriptor form resolves against: the pre-request
+ * snapshot, plus each collection an earlier descriptor in the same request
+ * provisions, with the public state it is provisioned in.
+ *
+ * @param options {object}
+ * @param options.snapshot {ExistingCollections}
+ * @param [options.provisioned] {ProvisionedByRequest}
+ * @returns {ExistingCollections}
+ */
+function withProvisioned({
+  snapshot,
+  provisioned
+}: {
+  snapshot: ExistingCollections
+  provisioned?: ProvisionedByRequest
+}): ExistingCollections {
+  if (!provisioned || provisioned.size === 0) {
+    return snapshot
+  }
+  const view = new Map(snapshot)
+  for (const [collectionId, { isPublic }] of provisioned) {
+    if (!view.has(collectionId)) {
+      view.set(collectionId, { isPublic })
+    }
+  }
+  return view
+}
+
+/**
+ * Resolves one descriptor form for {@link resolveInvocationTarget}, before the
+ * never-grantable check that applies to every form.
+ *
+ * @param options {object}
+ * @param options.descriptor {string | { type: string; name?: string }}
+ * @param options.space {SpaceLocation}
+ * @param options.collections {ExistingCollections}
+ * @param [options.provisioned] {ProvisionedByRequest}
+ * @param options.requester {{ controller?: string; appUrl?: string }}
+ * @returns {ResolvedTarget}
+ */
+function resolveTargetForm({
   descriptor,
   space,
-  collections,
+  collections: snapshot,
+  provisioned,
   requester
 }: {
   descriptor: string | { type?: string; name?: string }
   space: SpaceLocation
   collections: ExistingCollections
-  requester: { controller?: string; origin?: string; appUrl?: string }
+  provisioned?: ProvisionedByRequest
+  requester: { controller?: string; appUrl?: string }
 }): ResolvedTarget {
   if (typeof descriptor === 'string') {
+    const collections = snapshot
     const parsed = classifySpaceTarget({ target: descriptor, space })
     if (!parsed) {
       return UNSATISFIABLE
     }
     const { collectionId, resourceId } = parsed
-    // No collection: the target is the Space itself (with or without a
-    // trailing slash), which is a whole-Space grant.
-    if (collectionId === undefined) {
-      return {
-        ...SATISFIABLE_DEFAULTS,
-        invocationTarget: spaceTargetIn(space),
-        targetClass: 'space'
-      }
-    }
     // A segment that cannot be a collection id names nothing the Space can
     // hold, so there is nothing to delegate against.
     if (!isCollectionName(collectionId)) {
       return UNSATISFIABLE
     }
-    // A URL inside a never-grantable collection (or at a Resource inside one)
-    // is refused exactly like its descriptor form.
-    if (isNeverGrantableCollection(collectionId)) {
+    // A string target never provisions, per the App Connect spec. One
+    // naming a collection that does not exist yet is refused, so the
+    // grantee's first write cannot create it. It resolves against the
+    // pre-request snapshot alone, so a collection an earlier descriptor in
+    // the same request provisions does not count.
+    const existingEntry = collections.get(collectionId)
+    if (!existingEntry) {
       return UNSATISFIABLE
     }
-    // A URL under a standard collection (or at a Resource inside one) is
-    // capped exactly like its `https://w3id.org/byoe#private-collection`
-    // descriptor form. The target is re-emitted through the builders, so the
-    // grant names the canonical form whatever bytes the RP sent.
+    // A URL naming an existing collection (or a Resource inside one) is
+    // capped like its `https://w3id.org/byoe#private-collection` descriptor
+    // form. The target is re-emitted through the builders, so the grant names
+    // the canonical form whatever bytes the RP sent. It admits the grantee to
+    // no key roster. An encrypted collection therefore reads as ciphertext to
+    // it, unless its current key epoch already lists the grantee. A standard
+    // collection is known encrypted by its roster entry, any other by its own
+    // metadata once the attribution pass has read it. The same pass reads the
+    // current epoch's recipients.
+    const encryptedCollection =
+      !!standardCollection(collectionId)?.encryption ||
+      !!existingEntry.encrypted
     return {
       ...SATISFIABLE_DEFAULTS,
       invocationTarget:
@@ -883,7 +995,12 @@ export function resolveInvocationTarget({
               path: resourcePath(space.spaceId, collectionId, resourceId)
             }),
       collectionId,
-      encrypted: !!standardCollection(collectionId)?.encryption,
+      encrypted:
+        encryptedCollection &&
+        !isCurrentRecipient({
+          controller: requester.controller,
+          recipientIds: existingEntry.recipientIds
+        }),
       targetClass: collectionClassFor({ collectionId, collections }),
       existing: existingCollectionReading({
         collectionId,
@@ -893,20 +1010,14 @@ export function resolveInvocationTarget({
     }
   }
 
-  if (descriptor?.type === 'https://w3id.org/byoe#space') {
-    return {
-      ...SATISFIABLE_DEFAULTS,
-      invocationTarget: spaceTargetIn(space),
-      targetClass: 'space'
-    }
-  }
+  // A descriptor form counts a collection an earlier descriptor in the same
+  // request provisions as existing, so the create-only rule and the
+  // public-collection class see it.
+  const collections = withProvisioned({ snapshot, provisioned })
 
   if (descriptor?.type === 'https://w3id.org/byoe#private-collection') {
     const { name } = descriptor
     if (!isCollectionName(name)) {
-      return UNSATISFIABLE
-    }
-    if (isNeverGrantableCollection(name)) {
       return UNSATISFIABLE
     }
     const standard = standardCollection(name)
@@ -917,19 +1028,19 @@ export function resolveInvocationTarget({
     return {
       ...SATISFIABLE_DEFAULTS,
       invocationTarget: collectionTargetIn({ space, collectionId: name }),
-      // A protected collection -- a standard one or a system one (`id`,
-      // `key-map`, `unlock-methods`) -- is provisioned and maintained by the
+      // A protected collection -- a standard one or the `id` system
+      // collection -- is provisioned and maintained by the
       // wallet itself, never here. An existing private RP collection still
-      // flags provisioning: the provisioning step is idempotent and, on the App
-      // Connect path, is what re-admits a reconnecting app to an existing
-      // collection's recipient roster. The same step admits a DIFFERENT
-      // application naming the collection, into every key epoch it has; that
-      // is the decided policy, and `existing` below is what lets the consent
-      // row say so before approval. An existing PUBLIC collection never
-      // flags provisioning: it is classed public-collection whichever way the
-      // target is spelled, and re-provisioning it here would re-run the
-      // public-policy setup on a live collection -- or, on App Connect, set
-      // up a recipient roster on a world-readable plaintext collection.
+      // flags provisioning: the provisioning step is idempotent and is what
+      // re-admits a reconnecting grantee to an existing collection's
+      // recipient roster. The same step admits a DIFFERENT grantee naming the
+      // collection, into every key epoch it has; that is the decided policy,
+      // and `existing` below is what lets the consent row say so before
+      // approval. An existing PUBLIC collection never flags provisioning: it
+      // is classed public-collection whichever form the target arrives in,
+      // and re-provisioning it here would re-run the public-policy setup on a
+      // live collection, or set up a recipient roster on a world-readable
+      // plaintext collection.
       needsProvisioning:
         !isProtectedCollection(name) && collectionClass !== 'public-collection',
       collectionId: name,
@@ -950,10 +1061,8 @@ export function resolveInvocationTarget({
     }
     // A public grant on a protected wallet collection is refused
     // unconditionally: an RP must never be able to make the user's own
-    // credentials, activity log, or published identity world-readable. The
-    // never-grantable collections are already covered by that check; they are
-    // named again so the rule does not depend on the protected set.
-    if (isProtectedCollection(name) || isNeverGrantableCollection(name)) {
+    // credentials, activity log, or published identity world-readable.
+    if (isProtectedCollection(name)) {
       return UNSATISFIABLE
     }
     // A public collection is only ever created public, never converted: a
@@ -986,11 +1095,7 @@ export function resolveInvocationTarget({
     // apps' private seeds. Everything else -- a plaintext collection, an RP
     // collection, a made-up name -- has no roster to escrow a reader into.
     const shared = standardCollection(name)
-    if (
-      !shared?.encryption ||
-      !shared.shareable ||
-      isNeverGrantableCollection(name)
-    ) {
+    if (!shared?.encryption || !shared.shareable) {
       return UNSATISFIABLE
     }
     return {
@@ -1079,33 +1184,37 @@ function capActions({
  * @param options.descriptor {ICapabilityQueryDetail}
  * @param options.space {SpaceLocation}
  * @param options.collections {ExistingCollections}
+ * @param [options.provisioned] {ProvisionedByRequest}   the collections
+ *   earlier descriptors in the same request provision (see
+ *   {@link resolveGrants})
  * @param [options.allowMissingController] {boolean}   App Connect
  *   consent-preview only: the app-key DID may not exist yet, so an absent
  *   controller is not yet a failure there
- * @param [options.requester] {{ origin?: string; appUrl?: string }}   the
- *   attested requesting origin, when the request arrived with one, and the
- *   requesting app's canonical URL, on the App Connect path; read only to
- *   class an existing collection's creator
+ * @param [options.appUrl] {string}   the requesting app's canonical URL, on
+ *   the App Connect path; read only to class an existing collection's creator
  * @returns {ResolvedGrant}
  */
 export function resolveGrant({
   descriptor,
   space,
   collections,
+  provisioned,
   allowMissingController = false,
-  requester
+  appUrl
 }: {
   descriptor: ICapabilityQueryDetail
   space: SpaceLocation
   collections: ExistingCollections
+  provisioned?: ProvisionedByRequest
   allowMissingController?: boolean
-  requester?: { origin?: string; appUrl?: string }
+  appUrl?: string
 }): ResolvedGrant {
   let target = resolveInvocationTarget({
     descriptor: descriptor.invocationTarget,
     space,
     collections,
-    requester: { controller: descriptor.controller, ...requester }
+    provisioned,
+    requester: { controller: descriptor.controller, appUrl }
   })
   // A grant with no recipient cannot be delegated: the wire type requires a
   // `controller` but an actual request body can omit it, which would render a
@@ -1117,15 +1226,20 @@ export function resolveGrant({
   if (!descriptor.controller && !allowMissingController) {
     target = UNSATISFIABLE
   }
-  // A share's recipient key is DERIVED from the grantee's controller DID, so a
-  // controller the derivation cannot handle cannot be a share recipient. Run
-  // the real derivation rather than a shape check: a well-formed-looking but
-  // malformed did:key (a truncated identifier, a non-curve point) would
-  // otherwise preview as satisfiable and then throw mid-response, after earlier
-  // grants in the same request had already been delegated. An absent
-  // controller was already handled above (unsatisfiable, or the App Connect
-  // preview's opt-out).
-  if (target.targetClass === 'share' && descriptor.controller) {
+  // A share's recipient key is DERIVED from the grantee's controller DID, and
+  // so is the escrowed key of a private collection this grant provisions.
+  // Only a descriptor provisions; a string target never does. Every such
+  // collection is provisioned encrypted, so a controller the derivation
+  // cannot handle cannot be granted either. Run the real derivation rather
+  // than a shape check. A well-formed-looking but malformed did:key (a
+  // truncated identifier, a non-curve point) would otherwise preview as
+  // satisfiable and then throw mid-response, after earlier grants in the same
+  // request had already been delegated. An absent controller was already
+  // handled above (unsatisfiable, or the App Connect preview's opt-out).
+  const derivesRecipient =
+    target.targetClass === 'share' ||
+    (target.targetClass === 'collection' && target.needsProvisioning)
+  if (derivesRecipient && descriptor.controller) {
     try {
       x25519RecipientFromDidKey({ did: descriptor.controller })
     } catch {
@@ -1152,9 +1266,21 @@ export function resolveGrant({
 }
 
 /**
- * Resolves every requested capability against the user's Space, for the consent
- * preview. Pure -- no provisioning or delegation; the caller supplies the
- * existing-collections snapshot ({@link existingCollectionsFrom}).
+ * Resolves every requested capability against the user's Space, in request
+ * order. The consent preview and the approval (`processZcaps`) both resolve
+ * through here, so a row cannot preview one way and delegate another. Pure
+ * -- no provisioning or delegation; the caller supplies the pre-request
+ * existing-collections snapshot ({@link existingCollectionsFrom}), which
+ * stays unchanged.
+ *
+ * Each row that provisions a new collection is recorded, with the public
+ * state it provisions, and later descriptor forms resolve against it as an
+ * existing collection. So `#public-collection 'x'` then
+ * `#private-collection 'x'` resolves the second row public-collection (the
+ * world-readable collection the first creates, with the consent warning),
+ * and the reverse order refuses the `#public-collection` row under the
+ * create-only rule. A string target sees only the snapshot, so it never
+ * names a collection the request itself creates.
  *
  * @param options {object}
  * @param options.zcapRequests {ICapabilityQueryDetail[]}
@@ -1162,8 +1288,7 @@ export function resolveGrant({
  * @param options.collections {ExistingCollections}
  * @param [options.allowMissingController] {boolean}   App Connect
  *   consent-preview only (see {@link resolveGrant})
- * @param [options.requester] {{ origin?: string; appUrl?: string }}   the
- *   attested requesting origin and the app's canonical URL (see
+ * @param [options.appUrl] {string}   the app's canonical URL (see
  *   {@link resolveGrant})
  * @returns {ResolvedGrant[]}
  */
@@ -1172,32 +1297,48 @@ export function resolveGrants({
   space,
   collections,
   allowMissingController,
-  requester
+  appUrl
 }: {
   zcapRequests: ICapabilityQueryDetail[]
   space: SpaceLocation
   collections: ExistingCollections
   allowMissingController?: boolean
-  requester?: { origin?: string; appUrl?: string }
+  appUrl?: string
 }): ResolvedGrant[] {
-  return zcapRequests.map(descriptor =>
-    resolveGrant({
+  const provisioned = new Map<string, { isPublic: boolean }>()
+  return zcapRequests.map(descriptor => {
+    const grant = resolveGrant({
       descriptor,
       space,
       collections,
+      provisioned,
       allowMissingController,
-      requester
+      appUrl
     })
-  )
+    const { target } = grant
+    if (
+      target.needsProvisioning &&
+      target.collectionId &&
+      !collections.has(target.collectionId) &&
+      !provisioned.has(target.collectionId)
+    ) {
+      provisioned.set(target.collectionId, {
+        isPublic: target.targetClass === 'public-collection'
+      })
+    }
+    return grant
+  })
 }
 
 /**
  * Delegates capabilities to the relying parties named in the requests, on the
- * consent-approved path. Provisions any missing RP collection first, then
- * delegates each satisfiable grant rooted at the user's Space root capability.
- * Requires a session with a remote Space. Unsatisfiable grants are skipped
- * (they never reach a delegation). Returns the delegated capabilities, in
- * request order.
+ * consent-approved path. Signs each satisfiable grant rooted at the user's
+ * Space root capability first, then awaits `beforeProvision` with the signed
+ * grants, then escrows the shares and provisions the RP collections the
+ * grants need. Both escrow the grantee into key epochs, so the caller's
+ * record of the grants must exist before they run. Requires a session with a
+ * remote Space. Unsatisfiable grants are skipped (they never reach a
+ * delegation). Returns the delegated capabilities, in request order.
  *
  * @param options {object}
  * @param options.zcapRequests {ICapabilityQueryDetail[]}
@@ -1209,14 +1350,14 @@ export function resolveGrants({
  * @param [options.shareTtlMs] {number}   share grant lifetime; defaults to
  *   SHARE_ZCAP_TTL_MS (deliberately long -- the settings panel, not expiry, is
  *   the removal mechanism for a share)
- * @param [options.appProvisioning] {boolean}   true only on the App Connect
- *   path: each newly-provisioned PRIVATE collection is set up multi-recipient
- *   (the vault KAK plus the app's identity KAK, derived from the controller
- *   DID) instead of plaintext. Public collections and non-App-Connect flows
- *   provision plaintext as before.
  * @param [options.app] {{ name: string, origin: string }}   present only on the
  *   App Connect path: recorded on each share activity so the settings panel can
- *   name the app instead of showing a bare did:key.
+ *   name the app instead of showing a bare did:key, and stamped as the
+ *   attribution of each collection this call creates.
+ * @param [options.beforeProvision] {Function}   `(zcaps) => Promise<void>`,
+ *   awaited with every signed grant once signing is done and before any
+ *   share is escrowed or collection provisioned; called only when some grant
+ *   needs one. A throw ends the request with nothing escrowed.
  * @returns {Promise<IZcap[]>}
  */
 export async function processZcaps({
@@ -1225,16 +1366,16 @@ export async function processZcaps({
   ttlMs = RP_ZCAP_TTL_MS,
   writeTtlMs = RP_ZCAP_WRITE_TTL_MS,
   shareTtlMs = SHARE_ZCAP_TTL_MS,
-  appProvisioning,
-  app
+  app,
+  beforeProvision
 }: {
   zcapRequests: ICapabilityQueryDetail[]
   session: Session
   ttlMs?: number
   writeTtlMs?: number
   shareTtlMs?: number
-  appProvisioning?: boolean
   app?: { name: string; origin: string }
+  beforeProvision?: (zcaps: IZcap[]) => Promise<void>
 }): Promise<IZcap[]> {
   if (zcapRequests.length === 0) {
     return []
@@ -1292,16 +1433,12 @@ export async function processZcaps({
   // (the consent preview resolves against its own snapshot): resolution
   // refuses a public grant that would convert an existing collection, and
   // classes any target naming an already-public collection public-collection.
-  // A failed
-  // listing fails the request rather than resolving against assumed-absent
-  // collections. The snapshot is mutable on purpose: the loop below records
-  // each collection it provisions, so a later descriptor in the SAME request
-  // resolves against what the request has already created -- a duplicate name
-  // cannot flip a just-provisioned private collection public (the
-  // create-only rule sees it as existing), and a target naming a
-  // just-provisioned public collection resolves as the idempotent re-grant.
-  const collections = new Map(
-    existingCollectionsFrom(await session.storage.listCollectionPublicStates())
+  // A failed listing fails the request rather than resolving against
+  // assumed-absent collections. The snapshot stays as fetched. The rows
+  // resolve through `resolveGrants`, the consent preview's own resolver, which
+  // tracks the collections the request itself provisions beside it.
+  const collections = existingCollectionsFrom(
+    await session.storage.listCollectionPublicStates()
   )
   const spaceRootCapability = rootCapabilityId(spaceUrl)
   const parentCapability = invocationCapability ?? spaceRootCapability
@@ -1327,10 +1464,11 @@ export async function processZcaps({
 
   /**
    * The grantee's X25519 recipient key, derived from the did:key the wallet is
-   * delegating to -- the one recipient derivation in the system, for an app and
-   * a person alike. Throws when the controller has no Ed25519 twin to derive
-   * from (`resolveGrant` already rejected a named controller that cannot; this
-   * covers the App Connect path, which fills the controller after resolution).
+   * delegating to -- the one recipient derivation in the system, for an app, an
+   * agent, and a person alike. Throws when the controller has no Ed25519 twin
+   * to derive from (`resolveGrant` already rejected a named controller that
+   * cannot; this covers the App Connect path, which fills the controller after
+   * resolution).
    *
    * @param options {object}
    * @param [options.controller] {string}
@@ -1355,12 +1493,14 @@ export async function processZcaps({
   }
 
   /**
-   * Provisions a collection a grant needs before it can be delegated against:
-   * an App Connect PRIVATE collection multi-recipient (the user's vault KAK as
-   * recipient zero plus the app's identity KAK), anything else plaintext -- a
-   * public-collection grant additionally getting the collection-level
-   * PublicCanRead policy, which the wallet (holding the Space root) sets
-   * because the RP's delegated zcap could not.
+   * Provisions a collection a grant needs before the grantee can use it,
+   * on either request path (App Connect or the interaction-URL agent path).
+   * A PRIVATE collection is always
+   * provisioned encrypted: the user's vault KAK is recipient zero and the
+   * grantee's identity KAK is escrowed beside it. A public-collection grant
+   * provisions plaintext with the collection-level PublicCanRead policy, which
+   * the wallet (holding the Space root) sets because the RP's delegated zcap
+   * could not.
    *
    * On the App Connect path a collection this call creates also carries its
    * attribution: the grantee did:key as `generator` and the requesting
@@ -1368,25 +1508,30 @@ export async function processZcaps({
    * application a collection belongs to. A collection that already stands
    * keeps whatever attribution it has, since was-client's ensure stamps the
    * pair on the guarded create only: the re-admit pass that adds a second
-   * app to an existing private collection cannot rename its creator. A
-   * request arriving without an App Connect query stamps nothing -- there is
-   * no attested origin to record.
+   * app to an existing private collection cannot rename its creator. An
+   * interaction-URL agent grant stamps nothing -- there is no attested origin
+   * to record.
    *
    * @param options {object}
    * @param options.collectionId {string}
    * @param options.isPublic {boolean}
-   * @param [options.controller] {string}   the grantee did:key, for the app
-   *   recipient derivation and the attribution
+   * @param [options.controller] {string}   the grantee did:key, for the
+   *   attribution
+   * @param [options.recipient] {ReturnType<typeof x25519RecipientFromDidKey>}
+   *   the grantee's recipient key, derived in the signing pass; required for
+   *   a private collection
    * @returns {Promise<void>}
    */
   async function provisionFor({
     collectionId,
     isPublic,
-    controller
+    controller,
+    recipient
   }: {
     collectionId: string
     isPublic: boolean
     controller?: string
+    recipient?: ReturnType<typeof x25519RecipientFromDidKey>
   }): Promise<void> {
     // `generator` is typed as a DID downstream, and the controller arrives
     // here as a plain request string. `isEd25519DidKey` is the check that
@@ -1395,16 +1540,18 @@ export async function processZcaps({
     // it stamps nothing rather than recording a non-DID as the creator.
     // was-client drops a lone `generatorOrigin` on the same terms.
     const attribution =
-      appProvisioning && isEd25519DidKey(controller)
-        ? { generator: controller as IDID, generatorOrigin: app?.origin }
+      app && isEd25519DidKey(controller)
+        ? { generator: controller as IDID, generatorOrigin: app.origin }
         : {}
-    if (appProvisioning && !isPublic) {
-      await session.storage.provisionAppCollection({
+    if (!isPublic) {
+      if (!recipient) {
+        throw new Error(
+          'Provisioning an encrypted collection requires the grantee recipient key.'
+        )
+      }
+      await session.storage.provisionEncryptedCollection({
         collectionId,
-        appRecipient: recipientFor({
-          controller,
-          requirement: 'Provisioning an encrypted app collection'
-        }),
+        recipient,
         ...attribution
       })
       return
@@ -1416,46 +1563,75 @@ export async function processZcaps({
     })
   }
 
+  // Pass 1 signs each resolved row's delegation. Signing is local and inert
+  // (the target need not exist yet), so nothing reaches the server here. A
+  // share's escrow and a target that needs provisioning are only recorded, with
+  // its recipient key derived up front so an underivable grantee refuses the
+  // request before anything is persisted. The record holds one entry per
+  // collection and grantee, so two rows naming one new collection provision
+  // it once. A second grantee on the same collection keeps its own entry,
+  // since its key needs its own escrow.
   const zcaps: IZcap[] = []
-  for (const descriptor of zcapRequests) {
-    const { target, allowedActions, write } = resolveGrant({
-      descriptor,
-      space,
-      collections
-    })
+  const pending = new Map<
+    string,
+    {
+      collectionId: string
+      isPublic: boolean
+      controller?: string
+      recipient?: ReturnType<typeof x25519RecipientFromDidKey>
+    }
+  >()
+  const pendingShares: Array<{
+    collectionId: string
+    recipient: ReturnType<typeof x25519RecipientFromDidKey>
+    zcap: IDelegatedZcap
+  }> = []
+  for (const { descriptor, target, allowedActions, write } of resolveGrants({
+    zcapRequests,
+    space,
+    collections
+  })) {
     if (!isSatisfiable(target) || !target.invocationTarget) {
       continue
     }
     if (target.targetClass === 'share' && target.collectionId) {
-      // A share leaves the plain delegation loop: `shareCollection` grants the
-      // pull axis (a read-only zcap) and the read axis (an epoch roster entry)
-      // in one call, so the two can never come apart.
+      // A share leaves the plain delegation loop. Its pull axis (a read-only
+      // zcap) is signed here, and its read axis (an epoch roster entry) is
+      // escrowed in pass 2, after the hook has recorded the signed zcap.
+      // `shareCollection` then records its own `CollectionShare` activity.
       const recipient = recipientFor({
         controller: descriptor.controller,
         requirement: 'A shared-collection grant'
       })
-      const { zcap } = await session.storage.shareCollection({
+      const zcap = await session.storage.delegateShareGrant({
         profile: session.profile,
-        user: session.user,
         collectionId: target.collectionId,
-        recipient,
         controller: descriptor.controller!,
-        expires: grantExpires(shareTtlMs),
-        app
+        expires: grantExpires(shareTtlMs)
       })
+      pendingShares.push({ collectionId: target.collectionId, recipient, zcap })
       zcaps.push(zcap as IZcap)
       continue
     }
-    if (target.needsProvisioning && target.collectionId) {
+    // Collection ids never contain a space, so the key is unambiguous.
+    const pendingKey = `${target.collectionId} ${descriptor.controller ?? ''}`
+    if (
+      target.needsProvisioning &&
+      target.collectionId &&
+      !pending.has(pendingKey)
+    ) {
       const isPublic = target.targetClass === 'public-collection'
-      await provisionFor({
+      pending.set(pendingKey, {
         collectionId: target.collectionId,
         isPublic,
-        controller: descriptor.controller
+        controller: descriptor.controller,
+        ...(!isPublic && {
+          recipient: recipientFor({
+            controller: descriptor.controller,
+            requirement: 'Provisioning an encrypted collection'
+          })
+        })
       })
-      // Record the provisioned collection so the rest of this request's
-      // descriptors resolve against it as an existing collection.
-      collections.set(target.collectionId, { isPublic })
     }
     // Write grants live for the shorter write TTL; read-only grants for the
     // longer read TTL.
@@ -1468,6 +1644,30 @@ export async function processZcaps({
       expires
     })
     zcaps.push(zcap as IZcap)
+  }
+
+  if (pending.size === 0 && pendingShares.length === 0) {
+    return zcaps
+  }
+  // Persist before escrow: a share and a private collection's provisioning
+  // both add the grantee to key epochs, and revocation finds that grantee
+  // only through a stored record of the signed grants. The hook writes that
+  // record. A hook that throws ends the request here, with nothing escrowed.
+  await beforeProvision?.(zcaps)
+
+  // Pass 2 escrows the shares, then provisions, each in request order.
+  for (const { collectionId, recipient, zcap } of pendingShares) {
+    await session.storage.shareCollection({
+      profile: session.profile,
+      user: session.user,
+      collectionId,
+      recipient,
+      zcap,
+      app
+    })
+  }
+  for (const entry of pending.values()) {
+    await provisionFor(entry)
   }
   return zcaps
 }

@@ -3,7 +3,8 @@
  *
  * The agent half of the connected-grantee model: which activity rows list as
  * a connected agent (`listConnectedAgents` -- the Login predicate, the Revoke
- * join, the all-expired drop, and the name / key-fingerprint fallback), and
+ * join, the all-expired rule (drop, or keep while a granted collection's
+ * current key epoch lists the agent), and the name / key-fingerprint fallback), and
  * the revocation `revokeAgentAccess` performs (the server revocation before
  * the recorded activity, the signer check handed through so the storage
  * layer settles the skips, and the forward-floored Revoke stamp).
@@ -31,11 +32,17 @@ const PAST = '2000-01-01T00:00:00.000Z'
 function grantEntry({
   id = 'urn:zcap:one',
   expires = FUTURE,
-  controller = AGENT_DID
-}: { id?: string; expires?: string; controller?: string } = {}) {
+  controller = AGENT_DID,
+  target = 'https://was.example/space/s/collection/notes'
+}: {
+  id?: string
+  expires?: string
+  controller?: string
+  target?: string
+} = {}) {
   return {
     id,
-    target: 'https://was.example/space/s/collection/notes',
+    target,
     allowedActions: ['read'],
     expires,
     zcap: {
@@ -43,7 +50,7 @@ function grantEntry({
       controller,
       expires,
       parentCapability: 'urn:zcap:root:x',
-      invocationTarget: 'https://was.example/space/s/collection/notes',
+      invocationTarget: target,
       proof: { verificationMethod: 'did:key:z6MkWallet#z6MkWallet' }
     }
   }
@@ -78,13 +85,31 @@ function agentLogin({
 }
 
 /**
- * A StorageManager double serving a fixed history scan.
+ * A StorageManager double serving a fixed history scan, on Space `s` of
+ * `https://was.example`, whose roster read reports `rosterCollections` as
+ * the collections still listing the grantee (or one failed read when
+ * `rosterCollections` is an Error).
  */
-function storageWith(items: unknown[]): StorageManager {
+function storageWith(
+  items: unknown[],
+  rosterCollections: string[] | Error = []
+): StorageManager {
   return {
-    listHistoryItems: vi.fn(async () => items)
+    listHistoryItems: vi.fn(async () => items),
+    spaceLocation: { serverUrl: 'https://was.example', spaceId: 's' },
+    granteeRosterCollections: vi.fn(
+      async ({ grantees }: { grantees: Array<{ controller: string }> }) =>
+        grantees.map(({ controller }) =>
+          rosterCollections instanceof Error
+            ? { controller, collectionIds: [], failed: 1 }
+            : { controller, collectionIds: rosterCollections, failed: 0 }
+        )
+    )
   } as unknown as StorageManager
 }
+
+const NOTES_COLLECTION = 'https://was.example/space/s/notes/'
+const PUBLIC_COLLECTION = 'https://was.example/space/s/public-notes/'
 
 describe('listConnectedAgents', () => {
   it('lists an agent-grant Login', async () => {
@@ -180,13 +205,139 @@ describe('listConnectedAgents', () => {
     expect(agents[0].name).toBe('Again')
   })
 
-  it('drops a row whose every recorded grant has expired', async () => {
+  it('drops an expired row whose grants name no collection of this Space', async () => {
     const expired = agentLogin({
       zcaps: [grantEntry({ expires: PAST })]
     })
     expect(
       await listConnectedAgents({ storage: storageWith([expired]) })
     ).toEqual([])
+  })
+
+  it('keeps and flags an expired row still listed in a current key epoch', async () => {
+    // The agent's key stays in the collection's key-epoch roster, so the row
+    // must stay reachable for Revoke, which rotates the epoch off it.
+    const expired = agentLogin({
+      zcaps: [
+        grantEntry({
+          id: 'urn:zcap:pub',
+          expires: PAST,
+          target: PUBLIC_COLLECTION
+        }),
+        grantEntry({
+          id: 'urn:zcap:enc',
+          expires: PAST,
+          target: NOTES_COLLECTION
+        })
+      ]
+    })
+    const storage = storageWith([expired], ['notes'])
+    const agents = await listConnectedAgents({ storage })
+    expect(agents).toHaveLength(1)
+    expect(agents[0].expired).toBe(true)
+    expect(agents[0].grants).toHaveLength(2)
+    expect(storage.granteeRosterCollections).toHaveBeenCalledWith({
+      grantees: [
+        {
+          controller: AGENT_DID,
+          targets: [PUBLIC_COLLECTION, NOTES_COLLECTION]
+        }
+      ]
+    })
+  })
+
+  it('reads the key epochs of every expired row in one roster read', async () => {
+    // One call covers all the expired rows, so the storage layer can read a
+    // collection several rows target once.
+    const other = 'did:key:z6MkOtherAgent'
+    const storage = storageWith(
+      [
+        agentLogin({
+          zcaps: [grantEntry({ expires: PAST, target: NOTES_COLLECTION })]
+        }),
+        agentLogin({
+          created: '2026-08-02T00:00:00.000Z',
+          zcaps: [
+            grantEntry({
+              id: 'urn:zcap:two',
+              expires: PAST,
+              controller: other,
+              target: NOTES_COLLECTION
+            })
+          ]
+        })
+      ],
+      ['notes']
+    )
+
+    const agents = await listConnectedAgents({ storage })
+
+    expect(agents.map(agent => agent.controller)).toEqual([other, AGENT_DID])
+    expect(storage.granteeRosterCollections).toHaveBeenCalledTimes(1)
+    expect(storage.granteeRosterCollections).toHaveBeenCalledWith({
+      grantees: [
+        { controller: AGENT_DID, targets: [NOTES_COLLECTION] },
+        { controller: other, targets: [NOTES_COLLECTION] }
+      ]
+    })
+  })
+
+  it('drops an expired row no current key epoch lists', async () => {
+    const expired = agentLogin({
+      zcaps: [grantEntry({ expires: PAST, target: NOTES_COLLECTION })]
+    })
+    expect(
+      await listConnectedAgents({ storage: storageWith([expired], []) })
+    ).toEqual([])
+  })
+
+  it('keeps an expired row when a key epoch cannot be read', async () => {
+    const expired = agentLogin({
+      zcaps: [grantEntry({ expires: PAST, target: PUBLIC_COLLECTION })]
+    })
+    const agents = await listConnectedAgents({
+      storage: storageWith([expired], new Error('offline'))
+    })
+    expect(agents).toHaveLength(1)
+    expect(agents[0].expired).toBe(true)
+  })
+
+  it('keeps an expired row when there is no remote store', async () => {
+    const expired = agentLogin({
+      zcaps: [grantEntry({ expires: PAST, target: PUBLIC_COLLECTION })]
+    })
+    // With no remote store, `granteeRosterCollections` reports one failed
+    // read per grantee, which keeps the row.
+    const storage = storageWith([expired], new Error('no remote store'))
+    ;(storage as unknown as { spaceLocation?: unknown }).spaceLocation =
+      undefined
+    const agents = await listConnectedAgents({ storage })
+    expect(agents).toHaveLength(1)
+    expect(agents[0].expired).toBe(true)
+    expect(storage.granteeRosterCollections).toHaveBeenCalledTimes(1)
+  })
+
+  it('reads no key epoch and flags nothing when a grant is live', async () => {
+    const storage = storageWith([
+      agentLogin({
+        zcaps: [
+          grantEntry({
+            id: 'urn:zcap:old',
+            expires: PAST,
+            target: NOTES_COLLECTION
+          }),
+          grantEntry({
+            id: 'urn:zcap:live',
+            expires: FUTURE,
+            target: NOTES_COLLECTION
+          })
+        ]
+      })
+    ])
+    const agents = await listConnectedAgents({ storage })
+    expect(agents).toHaveLength(1)
+    expect(agents[0].expired).toBeUndefined()
+    expect(storage.granteeRosterCollections).not.toHaveBeenCalled()
   })
 
   it('reads expiry off the recorded capability, not the summary', async () => {
@@ -311,28 +462,75 @@ describe('revokeAgentAccess', () => {
     grants: [],
     grantedAt: '2026-08-01T00:00:00.000Z'
   }
+  const items = [{ id: 'history-scan', doc: {} }]
+
+  /**
+   * A storage fake for the agent revoke: one history scan, a rotation that
+   * re-keys nothing, and the given overrides.
+   *
+   * @param overrides {object}
+   * @returns {StorageManager}
+   */
+  function agentStorage(overrides: object): StorageManager {
+    return {
+      listHistoryItems: vi.fn(async () => items),
+      revokeAgentCollectionRecipients: vi.fn(async () => ({
+        collections: 0,
+        rotated: 0,
+        failed: 0,
+        revokedIds: []
+      })),
+      ...overrides
+    } as unknown as StorageManager
+  }
 
   it('revokes on the server before recording the activity', async () => {
     const order: string[] = []
-    const storage = {
+    const storage = agentStorage({
       revokeAgentGrants: vi.fn(async () => {
         order.push('revoke')
-        return { revoked: 2, skipped: 1, revokedIds: ['urn:zcap:one'] }
+        return {
+          revoked: 2,
+          skipped: 1,
+          revokedIds: ['urn:zcap:rotated', 'urn:zcap:one']
+        }
       }),
       addHistoryAgentRevoke: vi.fn(async () => {
         order.push('activity')
+      }),
+      revokeAgentCollectionRecipients: vi.fn(async () => {
+        order.push('rotate')
+        return {
+          collections: 1,
+          rotated: 1,
+          failed: 0,
+          revokedIds: ['urn:zcap:rotated']
+        }
       })
-    } as unknown as StorageManager
+    })
 
     const outcome = await revokeAgentAccess({ storage, user, agent })
 
-    expect(outcome).toEqual({ revoked: 2, skipped: 1 })
-    expect(order).toEqual(['revoke', 'activity'])
+    expect(outcome).toEqual({ revoked: 2, skipped: 1, rotated: 1 })
+    // The epoch rotation off the agent's key runs first, over the same
+    // history scan the grant revocation reads.
+    expect(order).toEqual(['rotate', 'revoke', 'activity'])
+    expect(storage.revokeAgentCollectionRecipients).toHaveBeenCalledWith({
+      controller: AGENT_DID,
+      items
+    })
+    // The capabilities the rotation revoked are handed to the grant stage,
+    // which counts them without POSTing them again.
+    expect(storage.revokeAgentGrants).toHaveBeenCalledWith({
+      controller: AGENT_DID,
+      items,
+      revokedByRotation: ['urn:zcap:rotated']
+    })
     expect(storage.addHistoryAgentRevoke).toHaveBeenCalledWith({
       user,
       origin: EXTERNAL_REQUEST_ORIGIN,
       controller: AGENT_DID,
-      zcaps: [{ id: 'urn:zcap:one' }],
+      zcaps: [{ id: 'urn:zcap:rotated' }, { id: 'urn:zcap:one' }],
       actor: { name: 'Deploy bot' },
       revoked: 2,
       skipped: 1,
@@ -341,12 +539,12 @@ describe('revokeAgentAccess', () => {
   })
 
   it('records nothing when the server revocation throws', async () => {
-    const storage = {
+    const storage = agentStorage({
       revokeAgentGrants: vi.fn(async () => {
         throw new Error('network')
       }),
       addHistoryAgentRevoke: vi.fn()
-    } as unknown as StorageManager
+    })
 
     await expect(revokeAgentAccess({ storage, user, agent })).rejects.toThrow(
       'network'
@@ -360,14 +558,14 @@ describe('revokeAgentAccess', () => {
     // it; whether its generation still stands is the storage layer's
     // reading of the verified document it holds its own resolver for, so
     // nothing gates here.
-    const storage = {
+    const storage = agentStorage({
       revokeAgentGrants: vi.fn(async () => ({
         revoked: 0,
         skipped: 1,
         revokedIds: []
       })),
       addHistoryAgentRevoke: vi.fn()
-    } as unknown as StorageManager
+    })
     const annexSigned = {
       ...agent,
       grants: [
@@ -387,10 +585,37 @@ describe('revokeAgentAccess', () => {
       agent: annexSigned
     })
 
-    expect(outcome).toEqual({ revoked: 0, skipped: 1 })
+    expect(outcome).toEqual({ revoked: 0, skipped: 1, rotated: 0 })
     expect(storage.revokeAgentGrants).toHaveBeenCalledWith({
-      controller: AGENT_DID
+      controller: AGENT_DID,
+      items,
+      revokedByRotation: []
     })
+  })
+
+  it('records nothing, after revoking the grants, when a rotation fails', async () => {
+    // A collection that could not be re-keyed keeps the agent a recipient of
+    // its current epoch, so the row stays listed for a retry.
+    const storage = agentStorage({
+      revokeAgentCollectionRecipients: vi.fn(async () => ({
+        collections: 2,
+        rotated: 1,
+        failed: 1,
+        revokedIds: []
+      })),
+      revokeAgentGrants: vi.fn(async () => ({
+        revoked: 1,
+        skipped: 0,
+        revokedIds: ['urn:zcap:one']
+      })),
+      addHistoryAgentRevoke: vi.fn()
+    })
+
+    await expect(revokeAgentAccess({ storage, user, agent })).rejects.toThrow(
+      'Could not rotate every collection off the agent being revoked.'
+    )
+    expect(storage.revokeAgentGrants).toHaveBeenCalled()
+    expect(storage.addHistoryAgentRevoke).not.toHaveBeenCalled()
   })
 
   it('records nothing when the server refuses a revocation', async () => {
@@ -400,12 +625,12 @@ describe('revokeAgentAccess', () => {
     const refused = Object.assign(new Error('chain does not verify'), {
       name: 'ValidationError'
     })
-    const storage = {
+    const storage = agentStorage({
       revokeAgentGrants: vi.fn(async () => {
         throw refused
       }),
       addHistoryAgentRevoke: vi.fn()
-    } as unknown as StorageManager
+    })
 
     await expect(revokeAgentAccess({ storage, user, agent })).rejects.toBe(
       refused
@@ -414,14 +639,14 @@ describe('revokeAgentAccess', () => {
   })
 
   it('floors the Revoke stamp past the Login when the clock is behind', async () => {
-    const storage = {
+    const storage = agentStorage({
       revokeAgentGrants: vi.fn(async () => ({
         revoked: 1,
         skipped: 0,
         revokedIds: ['urn:zcap:one']
       })),
       addHistoryAgentRevoke: vi.fn()
-    } as unknown as StorageManager
+    })
 
     // This client's clock sits a day behind the client that granted.
     vi.spyOn(Date, 'now').mockReturnValue(
@@ -436,14 +661,14 @@ describe('revokeAgentAccess', () => {
   })
 
   it('stamps the Revoke with the clock when it is already ahead', async () => {
-    const storage = {
+    const storage = agentStorage({
       revokeAgentGrants: vi.fn(async () => ({
         revoked: 1,
         skipped: 0,
         revokedIds: ['urn:zcap:one']
       })),
       addHistoryAgentRevoke: vi.fn()
-    } as unknown as StorageManager
+    })
 
     vi.spyOn(Date, 'now').mockReturnValue(
       new Date('2026-09-01T00:00:00.000Z').getTime()
@@ -474,7 +699,12 @@ describe('revokeAppAccess', () => {
   function fakeStorage({
     rotation
   }: {
-    rotation: { collections: number; rotated: number; failed: number }
+    rotation: {
+      collections: number
+      rotated: number
+      failed: number
+      revokedIds: string[]
+    }
   }) {
     return {
       listHistoryItems: vi.fn(async () => []),
@@ -487,19 +717,31 @@ describe('revokeAppAccess', () => {
 
   it('deletes the app key and records the revoke once every rotation landed', async () => {
     const storage = fakeStorage({
-      rotation: { collections: 1, rotated: 1, failed: 0 }
+      rotation: {
+        collections: 1,
+        rotated: 1,
+        failed: 0,
+        revokedIds: ['urn:zcap:rotated']
+      }
     })
 
     const outcome = await revokeAppAccess({ storage, user, app })
 
     expect(outcome).toEqual({ revoked: 1, skipped: 0, rotated: 1 })
+    // The rotation's revoked capabilities are not POSTed a second time.
+    expect(storage.revokeAppGrants).toHaveBeenCalledWith({
+      origin: app.origin,
+      subjectDid: app.subjectDid,
+      items: [],
+      revokedByRotation: ['urn:zcap:rotated']
+    })
     expect(storage.deleteAppKey).toHaveBeenCalledWith({ cid: 'cid-app-key' })
     expect(storage.addHistoryAppRevoke).toHaveBeenCalled()
   })
 
   it('keeps the app-key row when a collection rotation failed', async () => {
     const storage = fakeStorage({
-      rotation: { collections: 2, rotated: 1, failed: 1 }
+      rotation: { collections: 2, rotated: 1, failed: 1, revokedIds: [] }
     })
 
     await expect(revokeAppAccess({ storage, user, app })).rejects.toThrow(
@@ -513,7 +755,8 @@ describe('revokeAppAccess', () => {
     expect(storage.revokeAppGrants).toHaveBeenCalledWith({
       origin: app.origin,
       subjectDid: app.subjectDid,
-      items: []
+      items: [],
+      revokedByRotation: []
     })
   })
 })

@@ -26,6 +26,7 @@ import { browserLocalSessionPersistence } from '@/session/persistence'
 import type { User } from '@/types/auth'
 import { BrowserStore } from './browserStore'
 import { PublicCopyRetractionError, StorageManager } from './storageManager'
+import { generateVaultKeys } from '@/stores/testing/vaultKeys'
 import type { WASRemoteStore } from './wasRemoteStore'
 
 const openStores: BrowserStore[] = []
@@ -110,6 +111,7 @@ async function makeStorage(
     localStore,
     ...(remoteStore && { remoteStore }),
     ciphers: {},
+    vaultKeys: await generateVaultKeys(),
     descriptors: {},
     persistence: browserLocalSessionPersistence()
   })

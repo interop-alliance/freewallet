@@ -13,11 +13,14 @@ import { browserLocalSessionPersistence } from '@/session/persistence'
 import type { User } from '@/types/auth'
 import type { BrowserStore } from './browserStore'
 import { StorageManager } from './storageManager'
+import { generateVaultKeys } from '@/stores/testing/vaultKeys'
 
 const USER: User = {
   id: 'did:key:z6MkClient',
   email: 'user@example.test'
 } as unknown as User
+
+const VAULT_KEYS = await generateVaultKeys()
 
 /**
  * A `StorageManager` over a local store stubbed down to the one method the
@@ -30,6 +33,7 @@ function makeStorage(): {
   const addHistoryItem = vi.fn(async () => undefined)
   const storage = new StorageManager({
     localStore: { addHistoryItem } as unknown as BrowserStore,
+    vaultKeys: VAULT_KEYS,
     persistence: browserLocalSessionPersistence()
   })
   return { storage, addHistoryItem }

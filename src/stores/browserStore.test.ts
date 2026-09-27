@@ -18,6 +18,7 @@ import type { ContactRevisionPayload } from '@interop/social-core'
 import { browserLocalSessionPersistence } from '@/session/persistence'
 import { PublicCopyRetractionError, StorageManager } from './storageManager'
 import { RemoteDirectStore } from './remoteDirectStore'
+import { generateVaultKeys } from './testing/vaultKeys'
 import type { WASRemoteStore } from './wasRemoteStore'
 
 /**
@@ -203,6 +204,8 @@ function encryptedCiphers(): Record<string, DocCipher> {
     walletActivity: makeFakeCipher()
   }
 }
+
+const VAULT_KEYS = await generateVaultKeys()
 
 /**
  * A minimal app-key credential body: the storage layer treats it as opaque
@@ -1279,6 +1282,7 @@ describe('StorageManager (local-first facade)', () => {
     return {
       storage: new StorageManager({
         persistence: browserLocalSessionPersistence(),
+        vaultKeys: VAULT_KEYS,
         localStore,
         remoteStore
       }),
@@ -1369,6 +1373,7 @@ describe('StorageManager (local-first facade)', () => {
     } as unknown as WASRemoteStore
     const storage = new StorageManager({
       persistence: browserLocalSessionPersistence(),
+      vaultKeys: VAULT_KEYS,
       localStore,
       remoteStore
     })
@@ -1409,6 +1414,7 @@ describe('StorageManager (local-first facade)', () => {
     } as unknown as WASRemoteStore
     const storage = new StorageManager({
       persistence: browserLocalSessionPersistence(),
+      vaultKeys: VAULT_KEYS,
       localStore,
       remoteStore
     })
@@ -1440,6 +1446,7 @@ describe('StorageManager (local-first facade)', () => {
     } as unknown as WASRemoteStore
     const storage = new StorageManager({
       persistence: browserLocalSessionPersistence(),
+      vaultKeys: VAULT_KEYS,
       localStore,
       remoteStore
     })
@@ -1472,6 +1479,7 @@ describe('StorageManager (local-first facade)', () => {
     const { localStore, user } = await initLocalStore({ ciphers })
     const storage = new StorageManager({
       persistence: browserLocalSessionPersistence(),
+      vaultKeys: VAULT_KEYS,
       localStore,
       ciphers
     })
@@ -1643,6 +1651,7 @@ describe('StorageManager (remote-direct popup mode)', () => {
     const { remoteStore, collections } = makeFakeRemoteStore()
     const storage = new StorageManager({
       persistence: browserLocalSessionPersistence(),
+      vaultKeys: VAULT_KEYS,
       localStore,
       remoteStore,
       ciphers,
@@ -1668,6 +1677,7 @@ describe('StorageManager (remote-direct popup mode)', () => {
     const { remoteStore, collections } = makeFakeRemoteStore()
     const storage = new StorageManager({
       persistence: browserLocalSessionPersistence(),
+      vaultKeys: VAULT_KEYS,
       localStore,
       remoteStore,
       ciphers,
@@ -1689,6 +1699,7 @@ describe('StorageManager (remote-direct popup mode)', () => {
     // remoteDirect requested but no remote store: effective mode is off.
     const storage = new StorageManager({
       persistence: browserLocalSessionPersistence(),
+      vaultKeys: VAULT_KEYS,
       localStore,
       ciphers,
       remoteDirect: true
@@ -1712,6 +1723,7 @@ describe('StorageManager (remote-direct popup mode)', () => {
     const { remoteStore, collections, epochs } = makeFakeRemoteStore()
     const storage = new StorageManager({
       persistence: browserLocalSessionPersistence(),
+      vaultKeys: VAULT_KEYS,
       localStore,
       remoteStore,
       ciphers,
@@ -1733,6 +1745,7 @@ describe('StorageManager (remote-direct popup mode)', () => {
     const { remoteStore, collections } = makeFakeRemoteStore()
     const storage = new StorageManager({
       persistence: browserLocalSessionPersistence(),
+      vaultKeys: VAULT_KEYS,
       localStore,
       remoteStore,
       ciphers,

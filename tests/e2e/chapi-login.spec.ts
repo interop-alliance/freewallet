@@ -7,9 +7,9 @@ import { test, expect, type Page } from '@playwright/test'
  *
  * Like the DID-Auth specs, these drive the non-production injected-event seam
  * (`window.__E2E_CHAPI_GET_EVENT__`) so the response VP is signed by the
- * wallet's real did:key. The zcap-grant assertions (which need a remote Space
- * to delegate against) live under `tests/e2e-was/`; here a zcap request is
- * expected to block cleanly, since a no-WAS wallet has nothing to delegate.
+ * wallet's real did:key. A plain request carrying a standalone capability
+ * query is refused before the login form renders: only App Connect and the
+ * interaction-URL page grant storage access.
  */
 
 type InjectedResponse = { value: unknown } | undefined
@@ -303,7 +303,7 @@ test.describe('CHAPI Login with Wallet', () => {
     await expect(page.getByRole('checkbox', { checked: true })).toHaveCount(1)
   })
 
-  test('a zcap request blocks cleanly on a no-WAS wallet', async ({
+  test('a standalone zcap request is refused before login', async ({
     page
   }, testInfo) => {
     const token = `${Date.now()}-w${testInfo.workerIndex}`
@@ -323,7 +323,8 @@ test.describe('CHAPI Login with Wallet', () => {
               referenceId: 'example-app-data',
               reason: 'Example App stores your documents.',
               allowedAction: ['GET', 'HEAD', 'PUT'],
-              controller: 'did:key:z6MkrRPexample',
+              controller:
+                'did:key:z6Mkw7S2TH3X6APb2znNczrq1qFmt53rGELjkpRRYBKR6ucp',
               invocationTarget: {
                 type: 'https://w3id.org/byoe#private-collection',
                 name: 'example-app-data'
@@ -337,10 +338,11 @@ test.describe('CHAPI Login with Wallet', () => {
     })
     await openGetPopup(page)
 
-    await loginInPopup(page, passphrase)
-
-    // Post-login, before the consent screen: the request is blocked.
-    await expect(page.getByText(/needs remote storage/i)).toBeVisible()
+    // Pre-consent, before the login form: plain CHAPI delegates nothing.
+    await expect(
+      page.getByText(/grants storage access only to apps that connect/i)
+    ).toBeVisible()
+    await expect(page.locator('input[type="password"]')).toHaveCount(0)
     await page.getByRole('button', { name: 'Cancel' }).click()
     await expect
       .poll(async () => (await readResponse(page)) !== undefined)

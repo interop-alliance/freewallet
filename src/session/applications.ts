@@ -102,14 +102,15 @@ export async function revokeApplication({
     user: session.user,
     app
   })
-  // The rotation revokes an app-provisioned collection's pull grant with the
-  // epoch, and the second stage's re-POST of that same capability comes back
-  // `AlreadyRevokedError` and counts as skipped -- so `revoked` alone reads
-  // as zero for an app whose only grant was just withdrawn.
+  // Only what this run took away counts. `withdrawn` leaves out a grant
+  // the server answered `AlreadyRevokedError`. A collection this run
+  // re-keyed counts on its own, and it covers the pull-axis grants the
+  // rotation revoked, since its grants may all have expired while the
+  // rotation still took the app off the current epoch.
   return {
     outcomeKey: revokeOutcomeKey({
       grantsState,
-      withdrew: outcome.revoked > 0 || outcome.rotated > 0
+      withdrew: outcome.withdrawn > 0 || outcome.rotated > 0
     })
   }
 }
@@ -118,19 +119,20 @@ export async function revokeApplication({
  * The i18n key of the toast an app revocation ends with. What actually
  * happened outranks the row's marker: the revocations are POSTed whatever it
  * says, so a row whose chain was still alive reads as revoked, not as access
- * that had already ended. `withdrew` spans both stages, so a single
- * app-provisioned collection -- whose pull grant the rotation revokes, leaving
- * the second stage nothing but an already-revoked POST -- still reads as
- * revoked. A revoke that left the app a recipient of some collection's current
- * epoch reaches no wording at all: `revokeAppAccess` throws on a failed
+ * that had already ended. `withdrew` spans both stages, counting only what
+ * this run took away: a grant whose POST landed, or a collection this run
+ * re-keyed. So a rotation whose grants had all expired still reads as
+ * revoked, while a grant the server had already revoked does not. A revoke
+ * that left the app a recipient of some collection's current epoch reaches
+ * no wording at all: `revokeAppAccess` throws on a failed
  * rotation, so the page shows its failure copy and keeps the row.
  * When nothing was withdrawn, an orphaned row names the disconnect
  * that ended its access; any other row reads as access that had already
  * ended, with no cause claimed, since the account document cannot name one:
- * its recorded grants were all skipped (a transient session's grant after
- * its generation delegation rotted, one past its own expiry, or one the
- * server had already revoked), or it recorded no revocable capability at
- * all.
+ * its recorded grants were all dead before this run (a transient session's
+ * grant after its generation delegation rotted, one past its own expiry, or
+ * one the server had already revoked), or it recorded no revocable
+ * capability at all.
  *
  * @param options {object}
  * @param options.grantsState {GrantSignerState}
@@ -158,12 +160,14 @@ export function revokeOutcomeKey({
  * path does: a grant the verified document already reads as dead is skipped
  * without a POST, and every other one is POSTed, a transient session's
  * included, since its annex signer derives as unknown while its generation
- * delegation may still stand.
+ * delegation may still stand. `withdrew` spans both stages, as on the app
+ * path: a grant whose POST landed on this run, or a collection this run
+ * re-keyed. A grant the server had already revoked does not count.
  *
  * @param options {object}
  * @param options.session {Session}
  * @param options.agent {ConnectedAgent}
- * @returns {Promise<{ revoked: number }>}
+ * @returns {Promise<{ withdrew: boolean }>}
  */
 export async function revokeAgent({
   session,
@@ -171,11 +175,11 @@ export async function revokeAgent({
 }: {
   session: Session
   agent: ConnectedAgent
-}): Promise<{ revoked: number }> {
+}): Promise<{ withdrew: boolean }> {
   const outcome = await revokeAgentAccess({
     storage: session.storage,
     user: session.user,
     agent
   })
-  return { revoked: outcome.revoked }
+  return { withdrew: outcome.withdrawn > 0 || outcome.rotated > 0 }
 }

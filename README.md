@@ -116,6 +116,10 @@ npm run test:e2e
 `npm run build` produces a static SPA in `dist/` that can be served by any
 static file host (Nginx, Dokku buildpack, etc.).
 
+The production image (nginx serving the build and proxying the WAS server's
+routes on the same origin) is described in
+[docs/deployment-fly.io.md](docs/deployment-fly.io.md).
+
 The build is code-split: some chunks (for example the password-strength
 dictionaries used on the signup page) are loaded on demand via dynamic
 `import()` rather than in the initial bundle. When serving behind Nginx, scope

@@ -11,7 +11,7 @@ import {
   type CollectionCreator
 } from '@/lib/connectedApps'
 import { createLogger } from '@/lib/log'
-import type { StorageManager } from '@/stores/storageManager'
+import type { HistoryItems, StorageManager } from '@/stores/storageManager'
 import { useAsyncLoad } from './useAsyncLoad'
 
 const log = createLogger('fw:ui:storage')
@@ -27,7 +27,7 @@ const NO_CREATORS: ReadonlyMap<string, CollectionCreator> = new Map()
  * @param [options.storage] {StorageManager}   the session's storage
  * @param options.generators {string[]}   the `generator` DIDs to look up; an
  *   empty list leaves the load off
- * @param [options.items] {Awaited<ReturnType<StorageManager['listHistoryItems']>>}
+ * @param [options.items] {HistoryItems}
  *   the activity history, when the caller has already read it; the load then
  *   runs no history read of its own
  * @param [options.enabled] {boolean}   false leaves the load off entirely
@@ -43,7 +43,7 @@ export function useCollectionCreators({
 }: {
   storage?: StorageManager
   generators: string[]
-  items?: Awaited<ReturnType<StorageManager['listHistoryItems']>>
+  items?: HistoryItems
   enabled?: boolean
 }): ReadonlyMap<string, CollectionCreator> {
   // A value key, so a caller rebuilding the same list each render does not

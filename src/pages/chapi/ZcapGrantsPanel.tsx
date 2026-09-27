@@ -2,9 +2,8 @@
  * The "Storage access" section of the CHAPI login consent screen: one row per
  * requested capability, showing the relying party's reason, the recipient DID
  * the capability is delegated to, a human-readable target, the actions to be
- * granted, and the expiry. Encrypted standard collections get a ciphertext
- * note; whole-Space grants get a warning banner and an explicit read-only
- * label; write grants get a warning banner, the warning border, and the
+ * granted, and the expiry. An encrypted collection the grantee joins no key
+ * roster of gets a ciphertext note; write grants get a warning banner, the warning border, and the
  * shorter write expiry; public-collection grants get a warning banner stating
  * anyone on the web can read the collection (and, being plaintext, never a
  * ciphertext note); unsatisfiable grants render greyed with a "cannot
@@ -67,9 +66,6 @@ function targetLabel(
   t: (key: string, opts?: Record<string, unknown>) => string
 ) {
   const { target } = grant
-  if (target.targetClass === 'space') {
-    return t('chapi.get.zcapTarget.space')
-  }
   if (target.collectionId) {
     return (
       <>
@@ -115,8 +111,7 @@ export function ZcapGrantsPanel({
   writeTtlDays,
   shareTtlDays,
   walletMintedRecipient = false,
-  heading,
-  revokeNote
+  heading
 }: {
   grants: ResolvedGrant[]
   ttlDays: number
@@ -130,10 +125,6 @@ export function ZcapGrantsPanel({
   // Overrides the default "Storage access" section heading (App Connect uses
   // app-centric phrasing).
   heading?: string
-  // Overrides the "(you will be able to revoke access ...)" note on an
-  // ordinary grant row: the request page's agent grants are not yet listed
-  // by any revocation surface, and the row must not promise one.
-  revokeNote?: string
 }) {
   const { t } = useTranslation()
 
@@ -148,11 +139,8 @@ export function ZcapGrantsPanel({
         const share = target.targetClass === 'share'
         const existingNote =
           target.existing && EXISTING_NOTES[target.existing.creator]
-        // Warning border for whole-Space, public-collection, and write grants.
-        const highlight =
-          target.targetClass === 'space' ||
-          target.targetClass === 'public-collection' ||
-          write
+        // Warning border for public-collection and write grants.
+        const highlight = target.targetClass === 'public-collection' || write
         return (
           <Box
             key={descriptor.referenceId ?? index}
@@ -222,17 +210,6 @@ export function ZcapGrantsPanel({
                     <Chip key={action} size="small" label={action} />
                   ))}
                 </Stack>
-
-                {target.targetClass === 'space' && (
-                  <Typography
-                    variant="caption"
-                    color="warning.main"
-                    sx={{ display: 'block', mt: 0.5 }}
-                  >
-                    {t('chapi.get.zcapSpaceWarning')}{' '}
-                    {t('chapi.get.zcapReadOnlyNote')}
-                  </Typography>
-                )}
 
                 {target.targetClass === 'public-collection' && (
                   <Typography
@@ -321,7 +298,7 @@ export function ZcapGrantsPanel({
                       })}{' '}
                   {share
                     ? t('chapi.get.zcapShareRevokeNote')
-                    : (revokeNote ?? t('chapi.get.zcapRevokeNote'))}
+                    : t('chapi.get.zcapRevokeNote')}
                 </Typography>
               </>
             ) : (

@@ -13,8 +13,14 @@ const state = vi.hoisted(() => ({
   zcaps: [] as unknown[],
   processThrows: null as Error | null,
   historyThrows: false,
+  deleteThrows: false,
   deliverThrows: false,
-  appConnectResult: undefined as { firstRun: boolean } | undefined
+  appConnectResult: undefined as { firstRun: boolean } | undefined,
+  // When set, the mocked `processRequest` stands in for a request whose
+  // grants provision a collection: it awaits the `beforeProvision` hook, then
+  // records the escrow (or throws `provisionThrows` there).
+  provisions: false,
+  provisionThrows: null as Error | null
 }))
 
 class FakeZcapUnavailableError extends Error {}
@@ -24,17 +30,36 @@ vi.mock('@/lib/walletRequest/processZcaps', () => ({
 }))
 
 vi.mock('@/lib/walletRequest/processRequest', () => ({
-  processRequest: vi.fn(async () => {
-    state.calls.push('processRequest')
-    if (state.processThrows) {
-      throw state.processThrows
+  processRequest: vi.fn(
+    async ({
+      beforeProvision
+    }: {
+      beforeProvision?: (options: {
+        zcaps: unknown[]
+        appConnect?: { firstRun: boolean }
+      }) => Promise<void>
+    }) => {
+      state.calls.push('processRequest')
+      if (state.processThrows) {
+        throw state.processThrows
+      }
+      if (state.provisions) {
+        await beforeProvision?.({
+          zcaps: state.zcaps,
+          appConnect: state.appConnectResult
+        })
+        state.calls.push('provisionEncryptedCollection')
+        if (state.provisionThrows) {
+          throw state.provisionThrows
+        }
+      }
+      return {
+        verifiablePresentation: { type: 'VerifiablePresentation' },
+        zcaps: state.zcaps,
+        appConnect: state.appConnectResult
+      }
     }
-    return {
-      verifiablePresentation: { type: 'VerifiablePresentation' },
-      zcaps: state.zcaps,
-      appConnect: state.appConnectResult
-    }
-  })
+  )
 }))
 
 vi.mock('@/lib/walletRequest/vcApiExchange', () => ({
@@ -64,6 +89,13 @@ function makeSession() {
         state.calls.push('addHistoryLogin')
         if (state.historyThrows) {
           throw new Error('history write failed')
+        }
+        return 'login-1'
+      }),
+      deleteHistoryActivity: vi.fn(async () => {
+        state.calls.push('deleteHistoryActivity')
+        if (state.deleteThrows) {
+          throw new Error('history delete failed')
         }
       })
     }
@@ -98,8 +130,11 @@ beforeEach(() => {
   state.zcaps = []
   state.processThrows = null
   state.historyThrows = false
+  state.deleteThrows = false
   state.deliverThrows = false
   state.appConnectResult = undefined
+  state.provisions = false
+  state.provisionThrows = null
 })
 
 describe('composeAndDeliverResponse', () => {
@@ -246,5 +281,134 @@ describe('composeAndDeliverResponse', () => {
         actor: { name: 'research-bot' }
       })
     )
+  })
+
+  describe('a request whose grants provision a collection', () => {
+    const agentZcap = {
+      id: 'urn:zcap:1',
+      invocationTarget: 'https://was/space/s/agent-data/',
+      parentCapability: 'urn:zcap:root:https%3A%2F%2Fwas%2Fspace%2Fs%2F',
+      controller: 'did:key:zAgent'
+    }
+    const grantProfile = {
+      didAuth: false,
+      vcQueries: [],
+      zcapRequests: [{ referenceId: 'agent-data' }],
+      appConnect: null
+    } as unknown as typeof profile
+
+    it('persists the Login before escrow, once, carrying the signed zcaps', async () => {
+      state.provisions = true
+      state.zcaps = [agentZcap]
+      const session = makeSession()
+      await respond({
+        session,
+        requestProfile: grantProfile,
+        exchangeUrl: 'https://verifier.example/exchange/1'
+      })
+      expect(state.calls).toEqual([
+        'processRequest',
+        'addHistoryLogin',
+        'provisionEncryptedCollection',
+        'deliverPresentation'
+      ])
+      expect(session.storage.addHistoryLogin).toHaveBeenCalledTimes(1)
+      expect(session.storage.addHistoryLogin).toHaveBeenCalledWith(
+        expect.objectContaining({
+          grants: [
+            expect.objectContaining({ id: 'urn:zcap:1', zcap: agentZcap })
+          ]
+        })
+      )
+    })
+
+    it('fails closed with nothing escrowed when the early persist fails', async () => {
+      state.provisions = true
+      state.zcaps = [agentZcap]
+      state.historyThrows = true
+      await expect(
+        respond({
+          requestProfile: grantProfile,
+          exchangeUrl: 'https://verifier.example/exchange/1'
+        })
+      ).rejects.toMatchObject({ reason: 'processFailed' })
+      expect(state.calls).toEqual(['processRequest', 'addHistoryLogin'])
+    })
+
+    it('removes the early Login when provisioning fails after it', async () => {
+      state.provisions = true
+      state.zcaps = [agentZcap]
+      state.provisionThrows = new Error('provisioning failed')
+      const session = makeSession()
+      await expect(
+        respond({
+          session,
+          requestProfile: grantProfile,
+          exchangeUrl: 'https://verifier.example/exchange/1'
+        })
+      ).rejects.toMatchObject({ reason: 'processFailed' })
+      // Nothing is delivered, so the Login naming the signed grant goes.
+      expect(state.calls).toEqual([
+        'processRequest',
+        'addHistoryLogin',
+        'provisionEncryptedCollection',
+        'deleteHistoryActivity'
+      ])
+      expect(session.storage.addHistoryLogin).toHaveBeenCalledTimes(1)
+      expect(session.storage.deleteHistoryActivity).toHaveBeenCalledWith({
+        id: 'login-1'
+      })
+    })
+
+    it('keeps the original failure when the Login removal fails', async () => {
+      state.provisions = true
+      state.zcaps = [agentZcap]
+      state.provisionThrows = new Error('provisioning failed')
+      state.deleteThrows = true
+      const failure = await respond({ requestProfile: grantProfile }).catch(
+        (err: unknown) => err
+      )
+      expect(failure).toMatchObject({ reason: 'processFailed' })
+      expect((failure as Error).cause).toBe(state.provisionThrows)
+      expect(state.calls.at(-1)).toBe('deleteHistoryActivity')
+    })
+
+    it('removes nothing when processing fails before any Login persist', async () => {
+      state.processThrows = new Error('boom')
+      const session = makeSession()
+      await expect(
+        respond({ session, requestProfile: grantProfile })
+      ).rejects.toMatchObject({ reason: 'processFailed' })
+      expect(session.storage.deleteHistoryActivity).not.toHaveBeenCalled()
+    })
+
+    it('records the App Connect result on the early Login', async () => {
+      state.provisions = true
+      state.zcaps = [agentZcap]
+      state.appConnectResult = { firstRun: false }
+      const session = makeSession()
+      const appConnectProfile = {
+        didAuth: true,
+        vcQueries: [],
+        zcapRequests: [],
+        appConnect: {
+          app: { name: 'Text Editor', appUrl: 'https://app.example/editor' },
+          capabilityQueries: [{ referenceId: 'agent-data' }]
+        }
+      } as unknown as typeof profile
+
+      await respond({ session, requestProfile: appConnectProfile })
+
+      expect(session.storage.addHistoryLogin).toHaveBeenCalledTimes(1)
+      expect(session.storage.addHistoryLogin).toHaveBeenCalledWith(
+        expect.objectContaining({
+          appConnect: {
+            name: 'Text Editor',
+            firstRun: false,
+            appUrl: 'https://app.example/editor'
+          }
+        })
+      )
+    })
   })
 })

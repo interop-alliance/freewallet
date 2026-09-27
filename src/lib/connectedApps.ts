@@ -36,8 +36,8 @@
  * `StorageManager#revokeZcaps`: a grant that is expired, orphaned, or chained
  * under a parent delegation whose signer has left the document (or whose
  * generation is no longer the pointed one) is dead already and is skipped
- * without a POST; every other grant is POSTed, and only the server's genuine
- * `AlreadyRevokedError` reads as a no-op there.
+ * without a POST; every other grant is POSTed, and the server's genuine
+ * `AlreadyRevokedError` reads as a confirmed revocation there.
  * `revokeAppAccess` retires an app: for each app-provisioned encrypted
  * collection it rotates the epoch to drop the app's recipient key (so the app
  * cannot decrypt future writes) and revokes those pull-axis grants
@@ -50,12 +50,19 @@
  * interaction-URL request rather than an App Connect popup, so they hold no
  * app key and no attested origin. `listConnectedAgents` joins those rows out
  * of the activity history alone -- the latest agent-grant Login per grantee
- * did:key, hidden again by a Revoke activity naming the same controller --
- * and `revokeAgentAccess` retires one: the recorded capabilities are revoked
- * and the revocation recorded, with no app key to delete and no epoch to
- * rotate.
+ * did:key, hidden again by a Revoke activity naming the same controller.
+ * It keeps a row whose grants have all expired while any of them targets
+ * an encrypted collection, since the agent's key stays in that collection's
+ * key-epoch roster. `revokeAgentAccess` retires one: each private
+ * collection the agent was granted is rotated off its recipient key, the
+ * recorded capabilities are revoked, and the revocation recorded, with no
+ * app key to delete.
  */
-import type { StorageManager } from '@/stores/storageManager'
+import type {
+  HistoryItems,
+  RecipientRotationOutcome,
+  StorageManager
+} from '@/stores/storageManager'
 import type { User } from '@/types/auth'
 import {
   deriveGrantSignerState,
@@ -73,7 +80,10 @@ import {
   presentsAsAppKey
 } from '@interop/wallet-request'
 import { subjectId } from '@/lib/vcShape'
-import { EXTERNAL_REQUEST_ORIGIN } from '@/lib/walletRequest/externalRequest'
+import {
+  EXTERNAL_REQUEST_ORIGIN,
+  isAgentActivityObject
+} from '@/lib/walletRequest/externalRequest'
 
 /**
  * One storage capability an app was granted, summarized as recorded on the
@@ -351,7 +361,7 @@ function isAppConnectLoginFor({
  *
  * @param options {object}
  * @param options.storage {StorageManager}
- * @param [options.items] {Awaited<ReturnType<StorageManager['listHistoryItems']>>}
+ * @param [options.items] {HistoryItems}
  *   the activity history, when the caller has already read it (the sibling
  *   agent listing scans the same collection)
  * @param [options.appKeys] {Awaited<ReturnType<StorageManager['listAppKeys']>>}
@@ -365,7 +375,7 @@ export async function listConnectedApps({
   appKeys
 }: {
   storage: StorageManager
-  items?: Awaited<ReturnType<StorageManager['listHistoryItems']>>
+  items?: HistoryItems
   appKeys?: Awaited<ReturnType<StorageManager['listAppKeys']>>
 }): Promise<ConnectedApp[]> {
   const [{ appKeys: credentials }, history] = await Promise.all([
@@ -446,28 +456,11 @@ export async function listConnectedApps({
 
 /**
  * Revokes a connected app's access. Order matters: the key rotation and grant
- * revocation happen on the WAS server first, and only if that succeeds is the
- * app-key credential deleted and the revocation recorded. A network failure
- * while revoking the grants therefore surfaces as an error and leaves the
- * credential in place, so the user can retry rather than being left with a
- * deleted key whose grants are still live.
- *
- * The key rotation runs first (`revokeAppCollectionRecipients`): for each
- * collection the app provisioned or was granted -- found through the
- * Collection Metadata `generator` attribution as well as the recorded grants,
- * so an app whose grants have all expired is still rotated out -- it appends a
- * fresh epoch without the app's key and revokes those collections' pull-axis
- * grants indivisibly, so the app cannot decrypt anything written afterward.
- * That rotation is best-effort per collection (a stuck collection is logged
- * and counted). Then the remaining grants are revoked (`revokeAppGrants`,
- * which tolerates the double-revocation of the already-rotated collections'
- * grants).
- *
- * A collection the rotation could not re-key keeps the app as a recipient of
- * the current epoch, so the app-key row is kept and no Revoke is recorded: the
- * call throws once the grant revocation has run, and the row stays listed for
- * the user to retry. This is the sweep's rule too (`sweepStrandedAppKeys`
- * leaves a stranded key in place on `rotation.failed > 0`).
+ * revocation happen on the WAS server first ({@link revokeAppAuthority}), and
+ * only if that succeeds is the app-key credential deleted and the revocation
+ * recorded. A network failure while revoking the grants therefore surfaces as
+ * an error and leaves the credential in place, so the user can retry rather
+ * than being left with a deleted key whose grants are still live.
  *
  * Which grants are POSTed is settled by wallet-core's `grantRevocationSkip`
  * against the same verified document the listing marked the row with: an expired
@@ -477,38 +470,33 @@ export async function listConnectedApps({
  * recorded grant is POSTed, whatever the row's
  * marker, since a grant minted in a transient session derives as unknown
  * while chaining under a generation delegation that stays alive until its
- * own TTL. Of the POSTs, only the server's genuine `AlreadyRevokedError`
- * counts as skipped. Any other refusal or failure -- a plain
- * `ValidationError` included, since a read-replica lag on a live grant
- * answers the same way as a dead chain -- propagates from `revokeAppGrants`
- * after the sibling POSTs settle, before the credential is deleted or the
- * Revoke recorded, so the row stays listed and a retry re-runs the whole
- * sequence. The verified document's reading is the storage manager's own,
- * bound at construction; without one (no verified document this session)
- * only the expiry skip applies and everything else is POSTed.
+ * own TTL. Of the POSTs, the server's genuine `AlreadyRevokedError` counts as
+ * revoked. Any other refusal or failure -- a plain `ValidationError`
+ * included, since a read-replica lag on a live grant answers the same way as
+ * a dead chain -- propagates after the sibling POSTs settle, before the
+ * credential is deleted or the Revoke recorded, so the row stays listed and a
+ * retry re-runs the whole sequence. The verified document's reading is the
+ * storage manager's own, bound at construction; without one (no verified
+ * document this session) only the expiry skip applies and everything else is
+ * POSTed.
  *
- * What a failure leaves behind: the rotation stage has already run, so the
- * collections it could re-key are rotated off the app's recipient key, while
- * the credential is kept and no Revoke is recorded. That state is safe to
- * retry from. The rotation is idempotent (a collection whose current epoch
- * carries no non-owner recipient is skipped), the grants that did land are
- * answered `AlreadyRevokedError` on the re-POST, and the run converges once
- * the refused POST succeeds.
- *
- * The rotation's own outcome rides back beside the grant counts, because the
- * two stages revoke different capabilities: an app-provisioned collection's
- * pull-axis grant is revoked indivisibly with its epoch rotation, and the
- * second stage's re-POST of that same capability is answered
- * `AlreadyRevokedError` and counted as skipped. Without `rotated` a caller
- * reading `revoked === 0` would report that nothing was withdrawn from an app
- * whose only grant this call just withdrew.
+ * What a failure leaves behind: the collections the rotation could re-key
+ * are rotated off the app's recipient key, and the grants that could be
+ * revoked are revoked, while the credential is kept and no Revoke is
+ * recorded. That state is safe to retry from. The rotation is idempotent (a
+ * collection whose current epoch no longer lists the app is skipped), the
+ * grants that did land are answered `AlreadyRevokedError` on the re-POST and
+ * count as revoked then, and the run converges once the failed stage
+ * succeeds.
  *
  * @param options {object}
  * @param options.storage {StorageManager}
  * @param options.user {User}   the session user (activity actor)
  * @param options.app {ConnectedApp}
- * @returns {Promise<{ revoked: number; skipped: number; rotated: number }>}
- *   the grant outcome, plus the collections the rotation re-keyed
+ * @returns {Promise<{ revoked: number; withdrawn: number; skipped: number;
+ *   rotated: number }>}   the grant outcome, plus the collections the
+ *   rotation re-keyed. `withdrawn` counts the grants this call's own POSTs
+ *   revoked, leaving out any already revoked
  */
 export async function revokeAppAccess({
   storage,
@@ -518,30 +506,17 @@ export async function revokeAppAccess({
   storage: StorageManager
   user: User
   app: ConnectedApp
-}): Promise<{ revoked: number; skipped: number; rotated: number }> {
-  // Both stages below look up the app's recorded grants in the activity
-  // history; scan it once here and pass it through.
-  const items = await storage.listHistoryItems()
-  // Rotate the epoch off the app for each app-provisioned encrypted collection
-  // (and revoke those collections' pull-axis grants) before anything else, so a
-  // revoked app cannot decrypt future writes.
-  const rotation = await storage.revokeAppCollectionRecipients({
+}): Promise<{
+  revoked: number
+  withdrawn: number
+  skipped: number
+  rotated: number
+}> {
+  const { outcome, rotated } = await revokeAppAuthority({
+    storage,
     origin: app.origin,
-    subjectDid: app.subjectDid,
-    items
+    subjectDid: app.subjectDid
   })
-  const outcome = await storage.revokeAppGrants({
-    origin: app.origin,
-    subjectDid: app.subjectDid,
-    items
-  })
-  if (rotation.failed > 0) {
-    // The app is still a recipient of some collection's current epoch. Keep
-    // the row (and record no Revoke), so the disconnect can be retried.
-    throw new Error(
-      'Could not rotate every collection off the app being disconnected.'
-    )
-  }
   await storage.deleteAppKey({ cid: app.cid })
   await storage.addHistoryAppRevoke({
     user,
@@ -551,7 +526,120 @@ export async function revokeAppAccess({
     revoked: outcome.revoked,
     skipped: outcome.skipped
   })
-  return { ...outcome, rotated: rotation.rotated }
+  return { ...outcome, rotated }
+}
+
+/**
+ * Retires an app's live authority on the WAS server, the sequence both the
+ * interactive revoke ({@link revokeAppAccess}) and the login-time sweep of
+ * stranded app keys run. The key rotation runs first
+ * (`revokeAppCollectionRecipients`): for each collection the app provisioned
+ * or was granted -- found through the Collection Metadata `generator`
+ * attribution as well as the recorded grants, so an app whose grants have all
+ * expired is still rotated out -- it appends a fresh epoch without the app's
+ * key and revokes those collections' pull-axis grants with it, so the app
+ * cannot decrypt anything written afterward. Then the remaining grants are
+ * revoked (`revokeAppGrants`). See {@link rotateThenRevokeGrants} for what a
+ * failure in either stage does.
+ *
+ * @param options {object}
+ * @param options.storage {StorageManager}
+ * @param options.origin {string}   the app's origin
+ * @param options.subjectDid {string}   the app-key credential's subject DID
+ * @param [options.items] {HistoryItems}   the activity history, when the
+ *   caller has already read it
+ * @param [options.collections] {Array<StorageCollection>}   the Space
+ *   collection listing, when the caller has already read it
+ * @returns {Promise<{ outcome: { revoked: number; withdrawn: number;
+ *   skipped: number }; rotated: number }>}   the grant stage's outcome, plus
+ *   the collections the rotation re-keyed
+ */
+export async function revokeAppAuthority({
+  storage,
+  origin,
+  subjectDid,
+  items,
+  collections
+}: {
+  storage: StorageManager
+  origin: string
+  subjectDid: string
+  items?: HistoryItems
+  collections?: Awaited<ReturnType<StorageManager['listCollections']>>
+}): Promise<{
+  outcome: { revoked: number; withdrawn: number; skipped: number }
+  rotated: number
+}> {
+  return await rotateThenRevokeGrants({
+    items: items ?? (await storage.listHistoryItems()),
+    rotate: history =>
+      storage.revokeAppCollectionRecipients({
+        origin,
+        subjectDid,
+        items: history,
+        ...(collections && { collections })
+      }),
+    revokeGrants: ({ items: history, revokedByRotation }) =>
+      storage.revokeAppGrants({
+        origin,
+        subjectDid,
+        items: history,
+        revokedByRotation
+      }),
+    failureMessage:
+      'Could not rotate every collection off the app being disconnected.'
+  })
+}
+
+/**
+ * The two server-side stages both revocations share, over one history scan.
+ * The key rotation runs first, so a revoked grantee cannot decrypt future
+ * writes, and the capabilities its pull axis confirmed revoked are handed to
+ * the grant stage, which counts them without a second POST. The grant stage
+ * runs even when some collection could not be re-keyed, so every grant that
+ * can be revoked is revoked now. A rotation that left the grantee a
+ * recipient of some collection's current epoch then throws, so the caller
+ * keeps its row and records no Revoke, and the revoke can be retried. A
+ * collection whose rotation landed but whose pull failed is not counted in
+ * `rotation.failed`: the grant stage POSTs the capabilities the pull missed
+ * and throws if any still fails. So this throws only when some authority
+ * remains, a recipient entry or a live grant. The
+ * grants withdrawn on the failed run reach the Revoke the retry records,
+ * since a re-POST answered `AlreadyRevokedError` counts as revoked. A
+ * Revoke recorded on the failed run would hide an agent's row, which is
+ * what the retry needs.
+ *
+ * @param options {object}
+ * @param options.items {HistoryItems}   the activity history both stages read
+ * @param options.rotate {Function}   the grantee's key-rotation stage
+ * @param options.revokeGrants {Function}   the grantee's grant stage
+ * @param options.failureMessage {string}   the error a failed rotation throws
+ * @returns {Promise<{ outcome: Outcome; rotated: number }>}   the grant
+ *   stage's outcome, plus the collections the rotation re-keyed
+ */
+async function rotateThenRevokeGrants<Outcome>({
+  items,
+  rotate,
+  revokeGrants,
+  failureMessage
+}: {
+  items: HistoryItems
+  rotate: (items: HistoryItems) => Promise<RecipientRotationOutcome>
+  revokeGrants: (options: {
+    items: HistoryItems
+    revokedByRotation: string[]
+  }) => Promise<Outcome>
+  failureMessage: string
+}): Promise<{ outcome: Outcome; rotated: number }> {
+  const rotation = await rotate(items)
+  const outcome = await revokeGrants({
+    items,
+    revokedByRotation: rotation.revokedIds
+  })
+  if (rotation.failed > 0) {
+    throw new Error(failureMessage)
+  }
+  return { outcome, rotated: rotation.rotated }
 }
 
 /**
@@ -591,7 +679,7 @@ export interface CollectionCreator {
  * @param options.storage {StorageManager}
  * @param options.generators {Iterable<string>}   the `generator` DIDs to look
  *   up
- * @param [options.items] {Awaited<ReturnType<StorageManager['listHistoryItems']>>}
+ * @param [options.items] {HistoryItems}
  *   the activity history, when the caller has already read it
  * @param [options.appKeys] {Awaited<ReturnType<StorageManager['listAppKeys']>>}
  *   an already-listed app-key collection, so a caller holding one does not
@@ -607,7 +695,7 @@ export async function lookupCollectionCreators({
 }: {
   storage: StorageManager
   generators: Iterable<string>
-  items?: Awaited<ReturnType<StorageManager['listHistoryItems']>>
+  items?: HistoryItems
   appKeys?: Awaited<ReturnType<StorageManager['listAppKeys']>>
 }): Promise<ReadonlyMap<string, CollectionCreator>> {
   const wanted = new Set(generators)
@@ -691,6 +779,12 @@ export interface ConnectedAgent {
    * When the latest matching request was granted.
    */
   grantedAt?: string
+  /**
+   * Set when every recorded grant has expired. Such a row is listed only
+   * because a grant targets an encrypted collection, whose key-epoch roster
+   * still holds the agent's key until a revocation rotates it away.
+   */
+  expired?: true
 }
 
 /**
@@ -739,9 +833,9 @@ function loginGrantController(object: unknown): string | undefined {
 }
 
 /**
- * Whether an activity is an agent-grant Login: a `Login` recorded under the
- * interaction-URL origin marker, carrying no `appConnect` member (which would
- * make it an App Connect connect) and at least one recorded full capability
+ * Whether an activity is an agent-grant Login: a `Login` whose object is an
+ * agent's (`isAgentActivityObject`: the interaction-URL origin marker and no
+ * `appConnect` member), carrying at least one recorded full capability
  * (without one there is nothing to list or revoke).
  *
  * @param options {object}
@@ -756,19 +850,21 @@ export function isAgentGrantLogin({
   return (
     Array.isArray(doc.type) &&
     doc.type.includes('Login') &&
-    loginOrigin(doc.object) === EXTERNAL_REQUEST_ORIGIN &&
-    loginAppName(doc.object) === undefined &&
+    isAgentActivityObject(doc.object) &&
     loginGrantController(doc.object) !== undefined
   )
 }
 
 /**
- * Whether every recorded grant of an agent row has already expired -- there is
- * nothing left to revoke, so the row is dropped from the listing. The expiry
- * is the grant's `expires` as {@link AppGrant} carries it (the capability's
- * own where recorded), under wallet-core's `delegationExpired`: a grant
- * with no recorded expiry (or an unparseable one) counts as still live, so a
- * row is never hidden on a missing stamp.
+ * Whether every recorded grant of an agent row has already expired. The
+ * expiry is the grant's `expires` as {@link AppGrant} carries it (the
+ * capability's own where recorded), under wallet-core's `delegationExpired`.
+ * A grant with no recorded expiry (or an unparseable one) counts as still
+ * live, so a row is never hidden on a missing stamp.
+ *
+ * An expired row is not simply dropped. It stays listed while the agent's key
+ * still sits in a granted collection's current key epoch (see
+ * {@link expiredRowsToDrop}).
  *
  * @param options {object}
  * @param options.grants {AppGrant[]}
@@ -794,6 +890,47 @@ function allGrantsExpired({
 }
 
 /**
+ * Which fully expired agent rows are dropped from the listing, by controller.
+ * A row stays while the agent's key still sits in the current key epoch of a
+ * collection its grants target, the rule the revocation rotates on
+ * (`StorageManager.granteeRosterCollections`). The grants are dead, but that
+ * roster entry does not expire, and only a revocation rotates it away. A row
+ * whose targets list the agent in no current epoch is dropped.
+ *
+ * One roster read covers every expired row, so a collection several rows
+ * target is read once. When there is no remote store, or a collection's key
+ * epochs cannot be read, the roster read reports a failure and the row is
+ * kept: hiding a row that may still be revocable is the worse failure.
+ *
+ * @param options {object}
+ * @param options.storage {StorageManager}
+ * @param options.agents {ConnectedAgent[]}   the fully expired rows
+ * @returns {Promise<Set<string>>}   the controllers whose rows are dropped
+ */
+async function expiredRowsToDrop({
+  storage,
+  agents
+}: {
+  storage: StorageManager
+  agents: ConnectedAgent[]
+}): Promise<Set<string>> {
+  const outcomes = await storage.granteeRosterCollections({
+    grantees: agents.map(({ controller, grants }) => ({
+      controller,
+      targets: grants.map(grant => grant.target)
+    }))
+  })
+  return new Set(
+    outcomes
+      .filter(
+        ({ collectionIds, failed }) =>
+          collectionIds.length === 0 && failed === 0
+      )
+      .map(({ controller }) => controller)
+  )
+}
+
+/**
  * Whether an activity is an agent-grant Revoke: the row
  * {@link revokeAgentAccess} writes. Scoped exactly like the agent Login side
  * -- the interaction-URL origin marker, no `appConnect` member -- and carrying
@@ -812,8 +949,7 @@ function isAgentRevoke({
   return (
     Array.isArray(doc.type) &&
     doc.type.includes('Revoke') &&
-    loginOrigin(doc.object) === EXTERNAL_REQUEST_ORIGIN &&
-    loginAppName(doc.object) === undefined &&
+    isAgentActivityObject(doc.object) &&
     stringField(doc.object, 'controller') !== undefined
   )
 }
@@ -856,12 +992,18 @@ function revokeHidesLogin({
  * expires, and checks signers against -- one controller can hold live grants
  * from several requests, and the revocation scans every Login too, so a
  * latest-Login-only view would under-report what is about to be revoked. A row
- * whose every recorded grant has already expired is dropped -- nothing is left
- * to revoke. A later re-grant writes a newer Login and lists again.
+ * whose every recorded grant has already expired is kept, flagged `expired`,
+ * while any grant targets an encrypted collection of this Space: the agent's
+ * key stays in that collection's key-epoch roster until a revocation rotates
+ * it away. It is dropped when every grant targets a public collection or
+ * something outside this Space. That check reads the governed descriptor of
+ * each distinct collection the expired rows' grants target, once however many
+ * rows target it, and only when some row has fully expired. A later re-grant writes a newer
+ * Login and lists again.
  *
  * @param options {object}
  * @param options.storage {StorageManager}
- * @param [options.items] {Awaited<ReturnType<StorageManager['listHistoryItems']>>}
+ * @param [options.items] {HistoryItems}
  *   the activity history, when the caller has already read it (the sibling
  *   app listing scans the same collection)
  * @returns {Promise<ConnectedAgent[]>}   sorted latest-granted first
@@ -871,7 +1013,7 @@ export async function listConnectedAgents({
   items
 }: {
   storage: StorageManager
-  items?: Awaited<ReturnType<StorageManager['listHistoryItems']>>
+  items?: HistoryItems
 }): Promise<ConnectedAgent[]> {
   const history = items ?? (await storage.listHistoryItems())
   type HistoryItem = (typeof history)[number]
@@ -934,9 +1076,7 @@ export async function listConnectedAgents({
         grants.push(grant)
       }
     }
-    if (allGrantsExpired({ grants, now })) {
-      continue
-    }
+    const expired = allGrantsExpired({ grants, now })
 
     // The newest live Login supplies the display members and the granted
     // stamp; the grants above are the union across all of them.
@@ -949,22 +1089,39 @@ export async function listConnectedAgents({
       ...(name !== undefined && { name }),
       origin: EXTERNAL_REQUEST_ORIGIN,
       grants,
-      grantedAt: latest.doc.created
+      grantedAt: latest.doc.created,
+      ...(expired && { expired: true as const })
     })
   }
 
-  return agents.sort((first, second) =>
+  let listed = agents
+  const expiredAgents = agents.filter(agent => agent.expired)
+  if (expiredAgents.length > 0) {
+    const drop = await expiredRowsToDrop({ storage, agents: expiredAgents })
+    listed = agents.filter(agent => !drop.has(agent.controller))
+  }
+  return listed.sort((first, second) =>
     (second.grantedAt ?? '').localeCompare(first.grantedAt ?? '')
   )
 }
 
 /**
- * Revokes a connected agent's storage grants: the recorded capabilities are
- * revoked on the WAS server first, and only if that succeeds is the revocation
- * recorded -- a network failure therefore leaves the row listed, so the user
- * can retry. There is no app key to delete and no epoch rotation: an agent is
- * only ever granted the collection classes the interaction-URL allowlist
- * admits, and it is never an epoch recipient.
+ * Revokes a connected agent's storage grants: the key rotation and the grant
+ * revocation run on the WAS server first, and only if both succeed is the
+ * revocation recorded -- a network failure therefore leaves the row listed,
+ * so the user can retry. There is no app key to delete.
+ *
+ * The key rotation runs first (`revokeAgentCollectionRecipients`), as on the
+ * app path: a private collection provisioned for an agent escrows the agent's
+ * identity key-agreement key into its key epochs, so each collection the
+ * agent's recorded grants target gains a fresh epoch without that key, and
+ * its pull-axis grants are revoked with it. The grant stage counts the ones
+ * the rotation confirmed revoked and names them on the recorded Revoke
+ * without POSTing them again. A collection the rotation could not re-key
+ * keeps the agent a recipient of the current epoch, so the call throws once
+ * the grant revocation has run, and records no Revoke: a Revoke would hide
+ * the row the retry needs. The retry's Revoke names the grants the failed
+ * run withdrew, since their re-POST is answered `AlreadyRevokedError`.
  *
  * Which recorded grants are POSTed follows the app path exactly
  * (wallet-core's `grantRevocationSkip` over the storage manager's own
@@ -974,8 +1131,8 @@ export async function listConnectedAgents({
  * grant is POSTed whatever the row's marker, since a grant delegated from a
  * transient session is signed by an annex key the account document never
  * lists and keeps verifying under the generation delegation until that
- * delegation's own TTL. Only the server's `AlreadyRevokedError` counts as
- * skipped there; any other refusal or failure propagates from
+ * delegation's own TTL. The server's `AlreadyRevokedError` counts as
+ * revoked there; any other refusal or failure propagates from
  * `revokeAgentGrants` before the Revoke is recorded, so the row stays listed.
  *
  * The recorded Revoke is stamped with a forward floor -- one millisecond past
@@ -987,7 +1144,10 @@ export async function listConnectedAgents({
  * @param options.storage {StorageManager}
  * @param options.user {User}   the session user (activity actor)
  * @param options.agent {ConnectedAgent}
- * @returns {Promise<{ revoked: number; skipped: number }>}   the grant outcome
+ * @returns {Promise<{ revoked: number; withdrawn: number; skipped: number;
+ *   rotated: number }>}   the grant outcome, plus the collections the
+ *   rotation re-keyed. `withdrawn` counts the grants this call's own POSTs
+ *   revoked, leaving out any already revoked
  */
 export async function revokeAgentAccess({
   storage,
@@ -997,9 +1157,27 @@ export async function revokeAgentAccess({
   storage: StorageManager
   user: User
   agent: ConnectedAgent
-}): Promise<{ revoked: number; skipped: number }> {
-  const outcome = await storage.revokeAgentGrants({
-    controller: agent.controller
+}): Promise<{
+  revoked: number
+  withdrawn: number
+  skipped: number
+  rotated: number
+}> {
+  const { outcome, rotated } = await rotateThenRevokeGrants({
+    items: await storage.listHistoryItems(),
+    rotate: items =>
+      storage.revokeAgentCollectionRecipients({
+        controller: agent.controller,
+        items
+      }),
+    revokeGrants: ({ items, revokedByRotation }) =>
+      storage.revokeAgentGrants({
+        controller: agent.controller,
+        items,
+        revokedByRotation
+      }),
+    failureMessage:
+      'Could not rotate every collection off the agent being revoked.'
   })
   await storage.addHistoryAgentRevoke({
     user,
@@ -1011,7 +1189,12 @@ export async function revokeAgentAccess({
     skipped: outcome.skipped,
     created: revokeStampAfter({ grantedAt: agent.grantedAt })
   })
-  return { revoked: outcome.revoked, skipped: outcome.skipped }
+  return {
+    revoked: outcome.revoked,
+    withdrawn: outcome.withdrawn,
+    skipped: outcome.skipped,
+    rotated
+  }
 }
 
 /**

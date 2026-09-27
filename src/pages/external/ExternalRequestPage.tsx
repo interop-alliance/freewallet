@@ -293,7 +293,9 @@ export function ExternalRequestPage() {
         // listing keys agent rows on.
         requestOrigin: EXTERNAL_REQUEST_ORIGIN,
         selectedVCs: [],
-        exchangeUrl
+        exchangeUrl,
+        // The one entry point that grants a standalone capability query.
+        delegateStandaloneZcaps: true
       })
       // An empty compose (every grant turned unsatisfiable at delegation
       // time -- a collection created by another client since consent, say)
@@ -461,7 +463,6 @@ export function ExternalRequestPage() {
               ttlDays={grantDays.ttlDays}
               writeTtlDays={grantDays.writeTtlDays}
               shareTtlDays={grantDays.shareTtlDays}
-              revokeNote={t('externalRequest.noRevokeNote')}
             />
             <Typography variant="caption" color="text.secondary">
               {t('externalRequest.exchangeVisibility')}

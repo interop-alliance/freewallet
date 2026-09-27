@@ -318,16 +318,14 @@ describe('barredGrants', () => {
     ).toEqual([])
   })
 
-  it('bars shares, whole-Space, and protected-collection targets', () => {
+  it('bars shares and protected-collection targets', () => {
     const barred = barredGrants([
       grant('public-collection'),
       grant('share'),
-      grant('space'),
       grant('protected-collection')
     ])
     expect(barred.map(({ target }) => target.targetClass)).toEqual([
       'share',
-      'space',
       'protected-collection'
     ])
   })

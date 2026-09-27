@@ -70,8 +70,10 @@ structurally separate. The credential-wide surfaces are scoped to
 `private-credentials`, so they cannot reach a seed and need no filtering
 code. The collection is not shareable (`shareable: false` on its roster
 spec), and a capability descriptor or URL naming it is unsatisfiable rather
-than merely read-only. A whole-Space read grant covers its ciphertext, but
-the grantee is not an epoch recipient and decrypts nothing. An idempotent
+than merely read-only. So are `key-map` and `unlock-methods`. `key-map`'s
+user key roster carries a passphrase-derived key beside a wrap of the user
+key, so a read of it would be an offline guessing oracle, and
+`unlock-methods` is the account's credential registry. An idempotent
 login-time sweep deletes app-key rows stranded in `private-credentials` and
 retracts app-key public copies left with no private row behind them; the
 affected app reconnects as a first run.
@@ -119,18 +121,20 @@ minted, so the request names no controller DID. That is what makes the flow
 single-round. Delegation reuses `resolveGrants` / `processZcaps` verbatim.
 Requested actions are normalized against the closed WAS action vocabulary and
 intersected with the limitation for the target's class: read-only for a
-whole Space, a protected collection, and a share, the full vocabulary for
-public collections and app-provisioned private collections. The consent
-screen shows exactly what `resolveGrants` resolved. A grant left with no
-permitted action is unsatisfiable rather than delegated empty. A whole-Space
-read resolves the same on every session kind. A transient session's
-generation delegation targets the Space's canonical container URL, the
-string a whole-Space target resolves to. What bounds the grant is the
-wallet-side GET/HEAD limitation. The server adds one thing on top of it,
-that writing the Space Metadata object is controller-only. Resolution
+protected collection and a share, the full vocabulary for public
+collections and app-provisioned private collections. The consent screen
+shows exactly what `resolveGrants` resolved. A grant left with no permitted
+action is unsatisfiable rather than delegated empty. No grant reaches the
+whole Space. The `https://w3id.org/byoe#space` type is reserved, and a
+string target naming the Space itself is unsatisfiable, as the App Connect
+spec requires. A string target never provisions either. It resolves only
+onto a collection that already exists, so a grantee cannot create one
+through its first write. Resolution
 consults a snapshot of the existing collections' state, kept current as the
 delegation loop provisions, so duplicate names in one request resolve
-against what the request itself created.
+against what the request itself created. A string target is the exception.
+It sees only the collections that stood before the request, as the consent
+preview does, so approval never grants a row the preview refused.
 
 The response VP embeds the credential, the `zcap` array, and a
 wallet-provided `appConnect: { firstRun }` member (a JSON-literal term in
@@ -146,20 +150,33 @@ enrolled client's key on a remembered session, and the visit key's bare
 did:key on a transient one. An app's own `acceptedMethods` does not steer it
 (`decisions/0016-didauth-holder-dispatches-on-accepted-methods.md`).
 
-**App-provisioned collection encryption (day-one policy).** A private
-(non-public) collection provisioned by an App Connect `capabilityQuery` is
-declared EDV-encrypted. Its key-epoch roster holds the user's vault KAK as
-recipient zero alongside the app's identity KAK, the X25519 (Montgomery)
-twin of the `did:key` being delegated to, derived with the same
-`x25519RecipientFromDidKey` a share uses. One recipient-derivation rule
-covers app and person alike, and the app seed stays out of the grant path.
+**Provisioned collection encryption (day-one policy).** A private
+(non-public) collection a grant provisions is declared EDV-encrypted,
+whichever path the request took: an App Connect `capabilityQuery` or the
+interaction-URL request page. Those are the only two paths that grant
+capabilities at all. The Applications page lists each one's grantees and can
+revoke them: an App Connect grant under its app's row, keyed by the app key,
+and an interaction-URL grant under its agent's row, keyed by the grantee
+`controller`. A plain CHAPI `get` carrying a standalone
+`AuthorizationCapabilityQuery` would have no row to land on, so the get
+popup refuses it before consent (`standaloneZcapRequest` in
+`precheckGetRequest`, see "CHAPI integration"). A provisioned
+collection's key-epoch roster holds the user's vault KAK as recipient zero alongside
+the grantee's identity KAK, the X25519 (Montgomery) twin of the `did:key`
+being delegated to, derived with the same `x25519RecipientFromDidKey` a
+share uses (`StorageManager.provisionEncryptedCollection`). One
+recipient-derivation rule covers app, agent, and person alike, and the app
+seed stays out of the grant path. A controller that is not an Ed25519
+did:key has no twin to derive, so resolution classes its private-collection
+grant unsatisfiable and the consent screen shows it as one that cannot be
+fulfilled.
 
 Provisioning is idempotent. The collection is created bare, and epoch[0]
 wrapped to the owner lands as its governing log's genesis, create-if-absent
 (`ensureIndexedFirstEpoch` from `@interop/wallet-core/keys`, which adopts an
-existing roster rather than overwriting it). A first connect or a reconnect
-after revoke then escrows the app into every epoch (`addRecipient(app)`, one
-signed append); an app already present is a no-op. Epoch[0] is minted
+existing roster rather than overwriting it). A first grant or a re-grant
+after revoke then escrows the grantee into every epoch (`addRecipient`, one
+signed append); a grantee already present is a no-op. Epoch[0] is minted
 together with the collection's blinded-index HMAC key, wrapped to the same
 roster, so the app can declare searchable attributes and query the
 collection. That key is installed at provisioning, so a collection
@@ -175,14 +192,14 @@ The wallet ensures the collection exists without writing a descriptor of its
 own, so an established epoch roster is never dropped.
 
 Public (`https://w3id.org/byoe#public-collection`) grants stay plaintext and
-world-readable; only private app collections are encrypted. A public grant
+world-readable; only provisioned private collections are encrypted. A public grant
 can only ever CREATE its collection, and one naming an existing non-public
 collection is unsatisfiable, so no consent approval can turn an established
 collection world-readable. An idempotent re-grant on an already-public
 collection delegates without re-provisioning, and any target naming one is
 classed public-collection and skips provisioning, whether it arrives as a
 `#public-collection` descriptor, a `#private-collection` descriptor, or a
-plain URL string. The user is always a recipient of an encrypted collection
+string target. The user is always a recipient of an encrypted collection
 in their own Space, and any future exception needs its own explicit consent
 surface.
 
@@ -225,21 +242,28 @@ second pass rather than listing the collection again. The
 same-application test compares app URLs rather than origins, because the
 wallet tells apps apart by `appUrl` and two may share one origin. An App
 Connect requester whose creator app URL the wallet cannot recover reads
-`other`, the cautious side. A plain zcap request carries no app URL, and its
-attested origin decides. The reading carries the creator's display name from
+`other`, the cautious side. An interaction-URL agent carries no app URL, so
+it reads `other` unless the collection is its own (`this-app`). The reading carries the creator's display name from
 the same join (`creatorName`), and the row names the creator by it, or by
 its origin otherwise. A public collection carries no roster and reports no
-reading.
+reading. The same metadata read says whether the collection carries an
+`encryption` descriptor. A string target admits the grantee to no roster,
+so on an encrypted collection the row gets the ciphertext note once the
+second pass lands.
 
 Because the user is recipient zero, the wallet decrypts these collections in
 the storage browser as an ordinary recipient with its vault KAK,
 descriptor-driven from the collection's governing log. Revoking a connected
 app rotates the epoch off the app's key for each such collection
 (`removeRecipient`, which rotates then revokes the pull-axis grants
-indivisibly), so a revoked app cannot decrypt future writes. The retiring
+indivisibly), so a revoked app cannot decrypt future writes. The pull
+revokes each grant under the grant stage's per-grant policy, so a refusal
+it cannot explain fails that collection. The retiring
 entry is the app's own, derived from its subject DID the way provisioning
 wrote it, so another app admitted to the same collection keeps its access.
-Ciphertext it already fetched stays readable to it.
+Ciphertext it already fetched stays readable to it. Revoking a connected
+agent runs the same rotation over the collections its recorded grants
+target (see "The interaction-URL request page" in external-request.md).
 
 Which collections that rotation covers is the union of two sources. The
 first is the Space's collection listing: every collection whose Collection
@@ -251,11 +275,31 @@ entry does not, so the listing is what keeps the rotation working for an app
 whose grants all lapsed before the user disconnected it. The unexpired
 grants still supply the capabilities the rotation revokes on its pull axis.
 
+The recorded grants are written before any grantee is escrowed. Approval
+signs every delegation first, which is local and needs no target to exist.
+When some grant shares or provisions a collection, the Login activity is
+then persisted with the signed grants and the connect's `firstRun`. Only
+after that is each share escrowed and each collection provisioned
+(`beforeProvision` in `processZcaps`, wired in
+`composeAndDeliverResponse`). This matters for an existing private
+collection, whose `generator` still names its first creator: the recorded
+grants are the only source that names it for the second app. A failed
+persist fails the request with nothing escrowed. A share or provisioning
+step that fails after the persist fails the request too, and the Login is
+removed again, since nothing was delivered. If that removal fails, the
+Login stays, naming a grant whose collection may not list the app.
+Revocation tolerates that: it
+skips a collection whose current key epoch does not list the grantee, and a
+collection that was never created reads as having no epochs. A request with
+nothing to provision persists its Login after compose, as before. Either way
+one request writes one Login.
+
 A collection the rotation could not re-key, or a collection listing that
 could not be read, keeps the disconnect incomplete: the app-key row stays
 listed, no Revoke activity is recorded, and the page reports the failure so
-the user can retry. The retry converges, since each stage detects its own
-completion. The blinded-index key is not rotated
+the user can retry. The remaining grants are still revoked first. The retry
+converges, since each stage detects its own completion. The login-time sweep
+of stranded app keys runs the same sequence (`revokeAppAuthority`). The blinded-index key is not rotated
 on revoke (see "Client revocation and the epoch cascade" in client-revocation.md), so the revoked
 app keeps the ability to compute blinded terms while the query endpoint
 stays behind the revoked pull grant.
@@ -281,11 +325,12 @@ Two security properties of App Connect:
   app.
 
   This holds on the App Connect path, where the wallet mints the key and
-  fills `controller` itself. A standalone `AuthorizationCapabilityQuery`
-  names its own `controller`, so an app taking that route could supply one
-  static DID for every user. The wallet cannot detect this, so it is an
-  ecosystem expectation of app authors rather than an enforced invariant:
-  **a grantee DID SHOULD NOT be shared across users.** Either way the
+  fills `controller` itself. A standalone `AuthorizationCapabilityQuery` on
+  the interaction-URL page names its own `controller`, so an agent could
+  supply one static DID for every user. The wallet cannot detect this, so it
+  is an ecosystem expectation of agent authors rather than an enforced
+  invariant: **a grantee DID SHOULD NOT be shared across users.** Either way
+  the
   recipient key derives from the named controller, so a request cannot pair
   controller DID A with recipient key B.
 
@@ -294,19 +339,20 @@ Two security properties of App Connect:
 **Sharing** lets a grantee read and decrypt one of the wallet's own
 encrypted collections. It is asked for with a distinct invocation-target
 descriptor, `{ type: 'https://w3id.org/byoe#shared-wallet-collection', name
-}`, in either channel (a standalone `AuthorizationCapabilityQuery`, or an
-`AppConnectQuery.capabilityQuery`). A distinct `type` rather than a flag is
+}`, in an `AppConnectQuery.capabilityQuery`. The interaction-URL page bars
+the share class, and a plain CHAPI `get` grants nothing. A distinct `type` rather than a flag is
 load-bearing: an unknown `type` already resolves to unsatisfiable, so a
 wallet predating the feature refuses visibly instead of degrading to a
 ciphertext-only read.
 
 **The two axes stay fused.** Pull (a read-only Collection zcap) and read (an
 epoch-key recipient entry, one signed append on the collection's governing
-log) are granted together, by one call to `StorageManager.shareCollection`,
-which returns the delegated zcap alongside the refreshed descriptor so it
-rides back in the response VP's `zcap` array. A share grant therefore
-bypasses the ordinary delegation loop in `processZcaps`; no code path grants
-one axis without the other.
+log) are granted together. `StorageManager.delegateShareGrant` signs the
+zcap with the request's other grants, and it rides back in the response
+VP's `zcap` array. Once the Login records it,
+`StorageManager.shareCollection` escrows the reader and records the share.
+It refuses a zcap that is not read-only on that collection, so no code path
+grants one axis without the other.
 
 **The recipient key is derived, not transmitted.** `name` must be one of the
 shareable standard collections: every `WALLET_STANDARD_COLLECTIONS` entry

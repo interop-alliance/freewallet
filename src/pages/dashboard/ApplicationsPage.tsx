@@ -13,7 +13,9 @@
  * carried (or by the grantee key when it named none), and it is not clickable
  * -- there is no app key and no detail page behind it. Revoking one revokes
  * its recorded storage grants and records the revocation, which is what takes
- * the row out of the listing.
+ * the row out of the listing. A row whose grants have all expired but that
+ * still holds a key in an encrypted collection's key-epoch roster carries an
+ * Access expired chip and a note that it can still decrypt new writes.
  */
 import { useCallback, useState } from 'react'
 import { Link as RouterLink, useNavigate } from 'react-router'
@@ -196,16 +198,15 @@ export function ApplicationsPage() {
     setRevoking(true)
     setRevokeError(false)
     try {
-      const { revoked } = await revokeAgent({
+      const { withdrew } = await revokeAgent({
         session,
         agent: revokeAgentTarget
       })
       setRevokeAgentTarget(null)
       showToast({
-        message:
-          revoked > 0
-            ? t('applications.revokeAgentSuccess')
-            : t('applications.revokeAgentSuccessLegacy')
+        message: withdrew
+          ? t('applications.revokeAgentSuccess')
+          : t('applications.revokeAgentSuccessLegacy')
       })
       await reload()
     } catch (err) {
@@ -374,6 +375,13 @@ export function ApplicationsPage() {
                           size="small"
                           label={t('applications.agentChip')}
                         />
+                        {agent.expired && (
+                          <Chip
+                            size="small"
+                            color="warning"
+                            label={t('applications.agentExpiredChip')}
+                          />
+                        )}
                         {orphaned && (
                           <Chip
                             size="small"
@@ -408,6 +416,11 @@ export function ApplicationsPage() {
                             })}`
                           : ''}
                       </Typography>
+                      {agent.expired && (
+                        <Typography variant="body2" color="text.secondary">
+                          {t('applications.agentExpiredNote')}
+                        </Typography>
+                      )}
                     </Stack>
                     <Stack sx={dashboardStyles.applicationsAppMeta}>
                       <Typography variant="body2" color="text.secondary">

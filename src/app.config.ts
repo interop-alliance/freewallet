@@ -295,6 +295,26 @@ export const SYSTEM_COLLECTIONS: Array<{ id: string; name: string }> =
     name
   }))
 
+/**
+ * Whether a collection id names a protected wallet collection: a standard
+ * collection (`WALLET_STANDARD_COLLECTIONS`) or one of the account's system
+ * collections (`SYSTEM_COLLECTIONS`). A grantee may read one but not write
+ * it, and none is ever provisioned for a grantee, so revocation's recipient
+ * rotation skips them.
+ *
+ * @param collectionId {string | undefined}
+ * @returns {boolean}
+ */
+export function isProtectedCollection(
+  collectionId: string | undefined
+): boolean {
+  return (
+    !!collectionId &&
+    (SYSTEM_COLLECTIONS.some(entry => entry.id === collectionId) ||
+      WALLET_STANDARD_COLLECTIONS.some(entry => entry.id === collectionId))
+  )
+}
+
 // Lifetime of the management zcap an unlock identity delegates to the data
 // identity at bind time (`src/session/keyring.ts`): one year, following NIST
 // SP 800-57's one-to-two-year cryptoperiod guidance for signature keys (the

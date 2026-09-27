@@ -159,6 +159,41 @@ describe('precheckGetRequest', () => {
     })
   })
 
+  it('refuses a standalone capability query', () => {
+    // A plain CHAPI request delegates nothing: only App Connect and the
+    // interaction-URL page grant storage access.
+    const zcapQuery = {
+      type: 'ZcapQuery',
+      capabilityQuery: {
+        reason: 'Store your notes',
+        allowedAction: ['GET'],
+        controller: 'did:key:z6MkRequester',
+        invocationTarget: {
+          type: 'https://w3id.org/byoe#private-collection',
+          name: 'notes'
+        }
+      }
+    }
+    expect(
+      refusalOf(() =>
+        precheck({
+          request: request({
+            query: [QUERY_BY_EXAMPLE, zcapQuery]
+          } as unknown as Partial<IVPRDetails>)
+        })
+      )
+    ).toBe('standaloneZcapRequest')
+    expect(
+      refusalOf(() =>
+        precheck({
+          request: request({
+            query: [zcapQuery]
+          } as unknown as Partial<IVPRDetails>)
+        })
+      )
+    ).toBe('standaloneZcapRequest')
+  })
+
   it('refuses DID Auth constrained to methods the deployment cannot present', () => {
     const didAuth = (acceptedMethods: Array<{ method: string }>) =>
       request({
@@ -188,5 +223,10 @@ describe('the refusal copy', () => {
   it('has an en and an es cell for the unattributable origin', () => {
     expect(en.chapi.get.unattributedOrigin).toBeTruthy()
     expect(es.chapi.get.unattributedOrigin).toBeTruthy()
+  })
+
+  it('has an en and an es cell for a standalone capability query', () => {
+    expect(en.chapi.get.standaloneZcapRequest).toBeTruthy()
+    expect(es.chapi.get.standaloneZcapRequest).toBeTruthy()
   })
 })

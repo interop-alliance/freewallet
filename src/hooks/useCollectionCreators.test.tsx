@@ -135,15 +135,12 @@ describe('a disconnected creator across the attribution surfaces', () => {
             type: 'https://w3id.org/byoe#private-collection',
             name: 'notes'
           },
-          controller: 'did:key:zRequester'
+          controller: 'did:key:z6MkqEPctyQs9MofPZCw2XdeFi2dTMoMqHKhfoWsfitrnprw'
         }
       ],
       space: { serverUrl: 'https://was.example/', spaceId: 's' },
       collections: existingCollectionsFrom([{ id: 'notes' }]),
-      requester: {
-        origin: 'https://other.example',
-        appUrl: 'https://other.example/'
-      }
+      appUrl: 'https://other.example/'
     }
     const attributed = await attributeExistingCollections({
       resolution,

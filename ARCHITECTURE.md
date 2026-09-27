@@ -48,7 +48,8 @@ src/lib/            Pure business logic (no React)
     getRequest.ts   The CHAPI get popup's pre-consent refusal matrix,
                     the attested requesting origin included
     respond.ts      Compose, persist the Login activity, then deliver (the
-                    CHAPI `get` approval sequence)
+                    CHAPI `get` approval sequence); the persist runs before
+                    any grant's collection is provisioned
     externalRequest.ts  The interaction-URL entry point's pure half: the
                     deep-link parser, exchange opening, and pre-consent
                     refusal matrix
@@ -330,7 +331,11 @@ so a denied or unsupported handle finds no record and routes transient. The
 store popup refuses a DID-Auth request whose `domain` is absent or does not
 match the requesting origin before its login form renders. The get popup
 refuses, before its own login form renders, a request whose attested origin
-does not parse, so the consent screen always names a requester.
+does not parse, so the consent screen always names a requester. It also
+refuses a standalone capability query outside an `AppConnectQuery`: a plain
+CHAPI `get` delegates no capabilities. Only App Connect and the
+interaction-URL page grant storage access, and the Applications page lists
+and revokes both kinds of grantee.
 
 App Connect is a CHAPI `get` whose VPR carries one `AppConnectQuery`,
 answered in one signed presentation with an app-key credential plus
@@ -350,9 +355,10 @@ link.
 
 Sharing is the other direction, granting a third party read and decrypt
 access to one of the wallet's own encrypted collections through a
-`https://w3id.org/byoe#shared-wallet-collection` descriptor. One
-`shareCollection` call grants both axes together, the read-only Collection
-zcap and the epoch-key recipient entry.
+`https://w3id.org/byoe#shared-wallet-collection` descriptor. A share grants
+both axes together, the read-only Collection zcap
+(`delegateShareGrant`) and the epoch-key recipient entry
+(`shareCollection`, which refuses any zcap but that one).
 
 The three flows are in ["CHAPI integration"](docs/architecture/chapi.md),
 ["App Connect (one-popup app login)"](docs/architecture/app-connect.md), and
@@ -861,8 +867,8 @@ Containment hierarchy (remote mode): **Space > Collection > Resource**.
 - **Share** -- granting a third party read AND decrypt access to one of the
   wallet's own encrypted collections, asked for with a
   `https://w3id.org/byoe#shared-wallet-collection` invocation-target
-  descriptor. One `shareCollection` call grants both axes. See "Sharing a
-  wallet collection".
+  descriptor. A share grants both axes together. See "Sharing a wallet
+  collection".
 - **WAS (Wallet Attached Storage)** -- an HTTP protocol for storing
   arbitrary resources in user-owned Spaces, authorized via ZCap. See [the
   spec](https://w3c-ccg.github.io/wallet-attached-storage-spec/).
@@ -1017,8 +1023,8 @@ base64url(SHA-256(unlock did:key))` (a discovery convention).
 - **Generation delegation** -- the one Space-scoped zcap per annex
   generation, delegated to the annex DID by the enrolled client that mints
   the generation, or by the ladder VM on a credential-anchored account. Its
-  `invocationTarget` is the Space's canonical container URL, so a
-  whole-Space read grant chains under it, and every grant's `expires` is
+  `invocationTarget` is the Space's canonical container URL, so every
+  collection-scoped grant chains under it, and every grant's `expires` is
   limited to its own.
 - **CapabilityAgent** -- from `@interop/capability-agent`. Wraps the Ed25519
   key pair derived from the passphrase and exposes `getSigner()`.

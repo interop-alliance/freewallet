@@ -11,6 +11,12 @@
  * opaque origin, is no attestation at all: the consent screen would name
  * nobody and an approval would record a Login activity attributed to nobody,
  * so it is refused here rather than rendered as a blank label.
+ *
+ * A plain `get` request delegates no capabilities. Storage grants go only to
+ * App Connect (capability queries inside an `AppConnectQuery`) and to agents
+ * on the interaction-URL page, since each lists its grantees and can revoke
+ * them. A standalone capability query here would be a grant nothing lists or
+ * removes, so the request is refused before consent.
  */
 import { didAuthMethodSupported } from '@interop/wallet-request'
 import type { IVPRQuery as ISpecVPRQuery } from '@interop/wallet-request'
@@ -23,7 +29,11 @@ import type { IVPRDetails, WalletRequestProfile } from './types'
  * already has a `chapi.get.*` copy cell for.
  */
 export type GetRequestRefusal =
-  'unattributedOrigin' | 'malformedRequest' | 'unsupported' | 'domainMismatch'
+  | 'unattributedOrigin'
+  | 'malformedRequest'
+  | 'standaloneZcapRequest'
+  | 'unsupported'
+  | 'domainMismatch'
 
 /**
  * A `get` request the popup refuses before consent renders.
@@ -63,7 +73,8 @@ export function attestedRequestOrigin(
  * The pre-consent check over the VPR body, run once the request is in hand
  * (off the CHAPI event, or off the exchange the event named). Refuses, in
  * this order: an origin this wallet cannot attribute, a body carrying no
- * readable query, a body the classifier rejects, a `DIDAuthentication`
+ * readable query, a body the classifier rejects, a standalone capability
+ * query (outside an `AppConnectQuery`), a `DIDAuthentication`
  * constrained to DID methods no session on this deployment could present,
  * and a `domain` that does not match the attested origin.
  *
@@ -109,6 +120,9 @@ export function precheckGetRequest({
   } catch (err) {
     // A malformed App Connect query or `agent` member: nothing to consent to.
     throw new GetRequestRefusedError('malformedRequest', { cause: err })
+  }
+  if (profile.zcapRequests.length > 0) {
+    throw new GetRequestRefusedError('standaloneZcapRequest')
   }
   if (profile.didAuth && !didAuthMethodSupported(queries, didMethods)) {
     throw new GetRequestRefusedError('unsupported')

@@ -86,7 +86,12 @@ function storageDouble({
     revokeAppCollectionRecipients: vi.fn(
       async ({ subjectDid }: { subjectDid: string }) => {
         calls.push(`rotate:${subjectDid}`)
-        return { collections: 0, rotated: 0, failed: 0 }
+        return {
+          collections: 1,
+          rotated: 1,
+          failed: 0,
+          revokedIds: [`z-rotated:${subjectDid}`]
+        }
       }
     ),
     revokeAppGrants: vi.fn(async ({ subjectDid }: { subjectDid: string }) => {
@@ -139,7 +144,8 @@ describe('sweepStrandedAppKeys', () => {
     expect(storage.revokeAppGrants).toHaveBeenCalledWith({
       origin: 'https://app.example',
       subjectDid: 'did:key:z6MkfakeAppSubject',
-      items: []
+      items: [],
+      revokedByRotation: ['z-rotated:did:key:z6MkfakeAppSubject']
     })
   })
 
@@ -218,12 +224,14 @@ describe('sweepStrandedAppKeys', () => {
     expect(storage.revokeAppGrants).toHaveBeenCalledWith({
       origin: 'https://app.example',
       subjectDid: 'did:key:z6MkfakeAppSubject',
-      items: []
+      items: [],
+      revokedByRotation: ['z-rotated:did:key:z6MkfakeAppSubject']
     })
     expect(storage.revokeAppGrants).toHaveBeenCalledWith({
       origin: 'https://app.example',
       subjectDid: 'did:key:zOrphan',
-      items: []
+      items: [],
+      revokedByRotation: ['z-rotated:did:key:zOrphan']
     })
   })
 
@@ -236,7 +244,7 @@ describe('sweepStrandedAppKeys', () => {
     })
     storage.revokeAppCollectionRecipients.mockImplementationOnce(async () => {
       calls.push('rotate:did:key:zFirst')
-      return { collections: 2, rotated: 1, failed: 1 }
+      return { collections: 2, rotated: 1, failed: 1, revokedIds: [] }
     })
 
     const { deleted } = await sweepStrandedAppKeys({
@@ -244,7 +252,10 @@ describe('sweepStrandedAppKeys', () => {
     })
 
     expect(deleted).toBe(1)
-    expect(storage.revokeAppGrants).toHaveBeenCalledTimes(1)
+    // The interactive revoke's sequence: the grant stage still runs for the
+    // key whose rotation failed, so every revocable grant is revoked now.
+    expect(calls).toContain('revoke:did:key:zFirst')
+    expect(storage.revokeAppGrants).toHaveBeenCalledTimes(2)
     expect(calls).not.toContain('delete:cid-1')
     expect(calls).toContain('delete:cid-2')
   })

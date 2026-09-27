@@ -52,9 +52,11 @@ module `src/lib/walletRequest/externalRequest.ts`, each with its own copy:
 - any grant class outside the allowlist.
 
 Only `#public-collection` and `#private-collection` targets are granted from
-a link, plain collection URLs resolving to those classes included. A share
-would hand the grantee decryption of the user's own encrypted collections,
-and a whole-Space or protected-collection read covers the plaintext
+a link, string targets resolving to those classes included. A string target
+names only a collection that already exists, since it never provisions.
+One the same request provisions does not count. A
+share would hand the grantee decryption of the user's own encrypted
+collections, and a protected-collection read covers the plaintext
 `public-credentials`. `barredGrants` runs once the grants are resolved, the
 first point a target's class is known. Widening the allowlist is a
 documented decision rather than a code change. A failed POST-back leaves the
@@ -68,18 +70,51 @@ key's fingerprint when no name was sent. A row's grants are the union over
 every agent Login for that controller newer than the latest matching Revoke
 activity (same origin marker, no `appConnect`, the controller in
 `object.controller`), since a later request can add a grant without retiring
-an earlier one. A row whose grants have all expired is dropped. Revoking a
+an earlier one. A row whose grants have all expired stays listed while the
+agent's key still sits in the current key epoch of a collection its grants
+target, since that roster entry stays until a revocation rotates it away.
+The check is the revocation's own rule (`granteeRosterCollections` on
+`StorageManager`): a target counts when it names an unprotected collection
+of this Space whose governed descriptor lists the agent. The row then
+carries an Access expired chip. The descriptors are read only when some row
+has fully expired, each collection once for all such rows, and a failed read
+keeps the row. A row no current epoch
+lists the agent in is dropped. Revoking a
 row POSTs each recorded capability through wallet-core's
 `revokeRecordedGrant` (only a grant expired beyond the clock-skew margin is
 skipped locally), the orphaned marker gating nothing on its own; a plain
 refusal the verified document can explain (expired, orphaned, or chained
 under a parent delegation whose signer has left the document or whose
-generation is no longer the pointed one) counts as skipped, and any other
-refusal is thrown before any Revoke is recorded. The Revoke's
+generation is no longer the pointed one) counts as skipped, the server's
+`AlreadyRevokedError` counts as revoked, and any other refusal is thrown
+before any Revoke is recorded. The Revoke's
 `created` is stamped at least one millisecond past the latest Login, so a
 fast-clocked terminal cannot leave the row standing.
-There is no app key to delete and no collection epoch to rotate, an agent
-never being a key-epoch recipient.
+
+A `#private-collection` grant provisions its collection encrypted, as on
+the App Connect path: the user is recipient zero and the agent's identity
+KAK, derived from its `did:key` controller, is escrowed beside it. So the
+agent reads and writes EDV envelopes with its own key. A controller no KAK
+derives from makes the grant unsatisfiable. Consent still renders, and the
+row shows it as one that cannot be fulfilled. This page and App Connect are
+the only paths that provision a collection, since both list their grantees
+and can revoke them. Revoking the row
+rotates each collection the agent's recorded grants target off that key
+first (`revokeAgentCollectionRecipients`, expired grants included), then
+POSTs the remaining grants. The rotation's pull revokes under the same
+per-grant policy. A collection the rotation could not re-key keeps the row
+listed with no Revoke recorded, since a Revoke would hide the row. The grant
+stage still runs, and the retry's Revoke names what it withdrew. There is no app key to
+delete. Such a collection carries no `generator` attribution, so the
+recorded grants are the rotation's only source. So the Login activity is
+persisted before any collection is provisioned. Approval signs every grant
+first, persists the Login with the signed grants, and only then provisions,
+which is the step that escrows the agent into a key epoch. A failed persist
+fails the request with nothing escrowed. A provisioning failure after the
+persist fails the request and leaves a Login naming a grant the collection
+may not list. The rotation skips such a collection, since its current epoch
+does not list the agent. A history row lost later still leaves the agent a
+recipient with nothing to find it by.
 
 A grant delegated from a transient session chains under the session's
 generation delegation (`profile.invocationCapability`) rather than the Space

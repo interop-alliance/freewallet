@@ -19,7 +19,7 @@ import { queriesOf } from './classify'
 import { presentationSignerFor } from './composeVP'
 import { processAppConnect } from './appConnect'
 import { processZcaps } from './processZcaps'
-import type { IVerifiableCredential, IVPRDetails } from './types'
+import type { IVerifiableCredential, IVPRDetails, IZcap } from './types'
 
 export { domainMatchesOrigin } from '@interop/wallet-request'
 
@@ -38,6 +38,15 @@ export { domainMatchesOrigin } from '@interop/wallet-request'
  * @param [options.expectedAppKeyDid] {string} - App Connect: the app-key
  *   subject DID the consent screen displayed; approval fails closed when the
  *   authoritative re-match resolves a different DID.
+ * @param [options.delegateStandaloneZcaps] {boolean} - Whether a standalone
+ *   capability query (one outside an `AppConnectQuery`) is delegated. Only the
+ *   interaction-URL page opts in. Without it the pipeline delegates no
+ *   standalone grant.
+ * @param [options.beforeProvision] {Function}   awaited with the signed
+ *   grants (and, on App Connect, the connect's `appConnect` result) once
+ *   every delegation is signed and before any collection is provisioned.
+ *   Called only when some grant needs provisioning. A throw ends the request
+ *   with nothing provisioned.
  * @returns {Promise<WalletResponse>} The response VP, or `{}` when there is
  *   nothing to send.
  */
@@ -46,13 +55,20 @@ export async function processRequest({
   session,
   credentialRequestOrigin,
   selectedVCs = [],
-  expectedAppKeyDid
+  expectedAppKeyDid,
+  delegateStandaloneZcaps = false,
+  beforeProvision
 }: {
   request: IVPRDetails
   session: Session
   credentialRequestOrigin?: string
   selectedVCs?: IVerifiableCredential[]
   expectedAppKeyDid?: string
+  delegateStandaloneZcaps?: boolean
+  beforeProvision?: (options: {
+    zcaps: IZcap[]
+    appConnect?: WalletResponse['appConnect']
+  }) => Promise<void>
 }): Promise<WalletResponse> {
   const queries = queriesOf(request)
   const didAuth = isDIDAuthRequested({ queries })
@@ -83,8 +99,18 @@ export async function processRequest({
     selectedVCs,
     credentialRequestOrigin,
     processors: {
-      processZcaps: ({ zcapRequests }) =>
-        processZcaps({ zcapRequests, session }),
+      // The shared pipeline delegates no standalone capability query when
+      // this processor is absent.
+      ...(delegateStandaloneZcaps && {
+        processZcaps: ({ zcapRequests }) =>
+          processZcaps({
+            zcapRequests,
+            session,
+            ...(beforeProvision && {
+              beforeProvision: zcaps => beforeProvision({ zcaps })
+            })
+          })
+      }),
       // The shared layer validates the `AppConnectQuery` (its `app.appUrl`
       // against the attested origin) and hands the validated request in, so
       // nothing is re-parsed here.
@@ -104,7 +130,8 @@ export async function processRequest({
           domain,
           didAuthRequested,
           cryptosuite,
-          expectedSubjectDid: expectedAppKeyDid
+          expectedSubjectDid: expectedAppKeyDid,
+          beforeProvision
         })
     }
   })

@@ -738,10 +738,12 @@ describe('replica-less remote-direct StorageManager', () => {
     }
   })
 
-  it('refuses a replica-less construction with no remote store', () => {
+  it('refuses a replica-less construction with no remote store', async () => {
+    const vaultKeys = await generateKey()
     expect(
       () =>
         new StorageManager({
+          vaultKeys,
           persistence: inMemorySessionPersistence({
             stores: transientSessionStores(),
             clientAnnex: {

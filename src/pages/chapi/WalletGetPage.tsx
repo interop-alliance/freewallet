@@ -64,7 +64,6 @@ import {
   hasTypedExample,
   hasZcapStorage,
   isDidAuthOnly,
-  isSatisfiable,
   precheckGetRequest,
   queriesOf,
   requestsCredentialType,
@@ -118,6 +117,7 @@ type BlockReason =
 
 const BLOCK_MESSAGE_KEY: Record<BlockReason, string> = {
   unattributedOrigin: 'chapi.get.unattributedOrigin',
+  standaloneZcapRequest: 'chapi.get.standaloneZcapRequest',
   unsupported: 'chapi.get.didAuthUnsupported',
   unpresentableDidMethod: 'chapi.get.didAuthUnpresentable',
   domainMismatch: 'chapi.get.domainMismatch',
@@ -400,14 +400,15 @@ export function WalletGetPage() {
         profile.appConnect ? [] : loggedIn.storage.listCredentials()
       ])
 
-      // A zcap request needs a remote Space to delegate against; a guest or a
-      // no-WAS wallet cannot fulfill it. Surface it before the consent screen
-      // via the same predicate `processZcaps` guards on (which the eventual
-      // delegation would otherwise raise as `ZcapUnavailableError`), so the
-      // block does not appear only after the user clicks Continue. An App
-      // Connect request's capability queries delegate the same way.
+      // An App Connect request's capability queries need a remote Space to
+      // delegate against; a guest or a no-WAS wallet cannot fulfill them.
+      // Surface it before the consent screen via the same predicate
+      // `processZcaps` guards on (which the eventual delegation would
+      // otherwise raise as `ZcapUnavailableError`), so the block does not
+      // appear only after the user clicks Continue. A plain request carrying
+      // a capability query never gets here: the pre-consent matrix refuses
+      // it.
       const wantsGrants =
-        profile.zcapRequests.length > 0 ||
         (profile.appConnect?.capabilityQueries.length ?? 0) > 0
       if (wantsGrants && !hasZcapStorage(loggedIn)) {
         setSession(loggedIn)
@@ -415,30 +416,6 @@ export function WalletGetPage() {
         setPageState('blocked')
         return
       }
-
-      // The existing collections' public state, consulted by grant
-      // resolution: a public grant that would convert an existing collection
-      // resolves unsatisfiable, and a target naming an already-public
-      // collection is classed public-collection. Fetched once for the
-      // preview; the approve-time delegation re-fetches its own authoritative
-      // snapshot. The creator of a private collection that already stands
-      // is read afterwards, off each collection's own metadata, without
-      // holding the consent screen (`attributeExistingCollections`).
-      const existingCollections = wantsGrants
-        ? existingCollectionsFrom(
-            await loggedIn.storage.listCollectionPublicStates()
-          )
-        : existingCollectionsFrom([])
-      const resolveAndAttribute = (
-        resolution: Parameters<typeof resolveGrants>[0],
-        appKeys?: Awaited<ReturnType<typeof loggedIn.storage.listAppKeys>>
-      ) =>
-        attributeGrants({
-          resolution,
-          grants: resolveGrants(resolution),
-          storage: loggedIn.storage,
-          appKeys
-        })
 
       const space = loggedIn.storage.spaceLocation
 
@@ -472,29 +449,41 @@ export function WalletGetPage() {
         const existingDid = existing ? (appKeySubjectDid(existing) ?? '') : ''
         setAppKeyFirstRun(!existing)
         setPreviewedAppKeyDid(existingDid || null)
-        if (profile.appConnect.capabilityQueries.length > 0 && space) {
-          resolveAndAttribute(
-            {
-              zcapRequests: appConnectZcapRequests({
-                capabilityQueries: profile.appConnect.capabilityQueries,
-                // On first run the app-key DID does not exist yet, so the
-                // controller is empty here. Resolution reads it only to
-                // validate a share's recipient derivation and to class an
-                // existing collection's creator, and the opt-out below
-                // suspends the no-recipient refusal for exactly this case; the
-                // approved path re-derives with the real subject DID.
-                controller: existingDid
-              }),
-              space,
-              collections: existingCollections,
-              allowMissingController: true,
-              requester: {
-                origin: requestOrigin,
-                appUrl: profile.appConnect.app.appUrl
-              }
-            },
-            listedAppKeys
+        if (wantsGrants && space) {
+          // The existing collections' public state, consulted by grant
+          // resolution: a public grant that would convert an existing
+          // collection resolves unsatisfiable, and a target naming an
+          // already-public collection is classed public-collection. Fetched
+          // once for the preview; the approve-time delegation re-fetches its
+          // own authoritative snapshot. The creator of a private collection
+          // that already stands is read afterwards, off each collection's own
+          // metadata, without holding the consent screen
+          // (`attributeExistingCollections`).
+          const collections = existingCollectionsFrom(
+            await loggedIn.storage.listCollectionPublicStates()
           )
+          const resolution = {
+            zcapRequests: appConnectZcapRequests({
+              capabilityQueries: profile.appConnect.capabilityQueries,
+              // On first run the app-key DID does not exist yet, so the
+              // controller is empty here. Resolution reads it only to
+              // validate a share's recipient derivation and to class an
+              // existing collection's creator, and the opt-out below
+              // suspends the no-recipient refusal for exactly this case; the
+              // approved path re-derives with the real subject DID.
+              controller: existingDid
+            }),
+            space,
+            collections,
+            allowMissingController: true,
+            appUrl: profile.appConnect.app.appUrl
+          }
+          attributeGrants({
+            resolution,
+            grants: resolveGrants(resolution),
+            storage: loggedIn.storage,
+            appKeys: listedAppKeys
+          })
         }
         setSession(loggedIn)
         setPageState('selecting')
@@ -517,15 +506,6 @@ export function WalletGetPage() {
         ? findLoginCredential({ credentials: displayed })
         : null
       setSelectedCids(new Set(loginMatch ? [loginMatch.cid] : []))
-
-      if (profile.zcapRequests.length > 0 && space) {
-        resolveAndAttribute({
-          zcapRequests: profile.zcapRequests,
-          space,
-          collections: existingCollections,
-          requester: { origin: requestOrigin }
-        })
-      }
 
       setSession(loggedIn)
       setPageState('selecting')
@@ -619,23 +599,19 @@ export function WalletGetPage() {
   // The requester-supplied display name, bounded once for every place that
   // renders or interpolates it.
   const appName = appConnect ? clampAppName(appConnect.app.name) : ''
-  // With no DID Auth to sign, no credentials picked, and no satisfiable grant,
-  // Continue would compose nothing (processRequest returns `{}`) -- keep it
-  // disabled so the only way out of an empty consent screen is Cancel, which
-  // answers both CHAPI and any open exchange. An App Connect response always
-  // carries the app-key credential, so it always has something to send.
+  // With no DID Auth to sign and no credentials picked, Continue would compose
+  // nothing (processRequest returns `{}`) -- keep it disabled so the only way
+  // out of an empty consent screen is Cancel, which answers both CHAPI and any
+  // open exchange. An App Connect response always carries the app-key
+  // credential, so it always has something to send.
   const nothingToShare =
-    !appConnect &&
-    !profile.didAuth &&
-    selectedCids.size === 0 &&
-    !resolvedGrants.some(({ target }) => isSatisfiable(target))
-  const title = appConnect
-    ? t('chapi.get.appConnect.title', { appName })
-    : profile.zcapRequests.length > 0
-      ? t('chapi.get.loginTitle')
-      : didAuthOnly
-        ? t('chapi.get.didAuthTitle')
-        : t('chapi.get.title')
+    !appConnect && !profile.didAuth && selectedCids.size === 0
+  let title = t('chapi.get.title')
+  if (appConnect) {
+    title = t('chapi.get.appConnect.title', { appName })
+  } else if (didAuthOnly) {
+    title = t('chapi.get.didAuthTitle')
+  }
 
   return (
     <Box className="fw-page" sx={chapiStyles.page}>
@@ -841,15 +817,6 @@ export function WalletGetPage() {
                   </List>
                 )}
               </Stack>
-            )}
-
-            {profile.zcapRequests.length > 0 && (
-              <ZcapGrantsPanel
-                grants={resolvedGrants}
-                ttlDays={grantDays.ttlDays}
-                writeTtlDays={grantDays.writeTtlDays}
-                shareTtlDays={grantDays.shareTtlDays}
-              />
             )}
 
             <Stack direction="row" spacing={2}>

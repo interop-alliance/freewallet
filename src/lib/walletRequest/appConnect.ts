@@ -156,6 +156,9 @@ export function appConnectZcapRequests({
  * @param [options.expectedSubjectDid] {string}   the app-key subject DID the
  *   consent screen displayed; approval fails closed when the authoritative
  *   re-match resolves a different DID
+ * @param [options.beforeProvision] {Function}   awaited with the signed
+ *   grants and this connect's `appConnect` result before any collection is
+ *   provisioned (see `processZcaps`)
  * @returns {Promise<WalletResponse>}
  */
 export async function processAppConnect({
@@ -166,7 +169,8 @@ export async function processAppConnect({
   domain,
   didAuthRequested,
   cryptosuite,
-  expectedSubjectDid
+  expectedSubjectDid,
+  beforeProvision
 }: {
   appConnect: IAppConnectRequest
   session: Session
@@ -176,6 +180,10 @@ export async function processAppConnect({
   didAuthRequested: boolean
   cryptosuite?: string
   expectedSubjectDid?: string
+  beforeProvision?: (options: {
+    zcaps: IZcap[]
+    appConnect: { firstRun: boolean; subjectDid: string }
+  }) => Promise<void>
 }): Promise<WalletResponse> {
   const { app, capabilityQueries } = appConnect
   const { appKeys, skipped } = await session.storage.listAppKeys()
@@ -246,11 +254,12 @@ export async function processAppConnect({
           // Names the app on any share activity this request records, so the
           // settings panel reads "Text Editor (app.example)" and not a did:key.
           app: { name: app.name, origin },
-          // A newly provisioned private collection is set up multi-recipient:
-          // the app's identity KAK (the X25519 twin of `subjectDid`, derived
-          // in `processZcaps`) alongside the user's vault KAK. The seed stays
-          // out of the grant path -- the subject DID is all that is needed.
-          appProvisioning: true
+          // `firstRun` is settled by now, so the caller's early record of
+          // this connect carries the same shape as a post-compose one.
+          ...(beforeProvision && {
+            beforeProvision: zcaps =>
+              beforeProvision({ zcaps, appConnect: { firstRun, subjectDid } })
+          })
         })
       : []
 

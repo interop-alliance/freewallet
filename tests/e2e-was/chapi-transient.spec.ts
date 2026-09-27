@@ -102,10 +102,10 @@ function appKeySubject(response: PopupResponse): { id: string; seed: string } {
 /**
  * The App Connect VPR: DID Authentication plus one `AppConnectQuery` asking
  * for a read/write grant over a private collection the wallet provisions.
+ * With `extraRows`, it also asks for a whole-Space read (refused) and a read
+ * of the standard `public-credentials` collection (granted).
  */
-function appConnectQuery({
-  wholeSpace = false
-}: { wholeSpace?: boolean } = {}) {
+function appConnectQuery({ extraRows = false }: { extraRows?: boolean } = {}) {
   return [
     { type: 'DIDAuthentication', acceptedMethods: [{ method: 'key' }] },
     {
@@ -120,15 +120,23 @@ function appConnectQuery({
             name: APP_COLLECTION
           }
         },
-        // A whole-Space read: granted under the generation delegation like
-        // every other class, since that delegation targets the Space's
-        // canonical container URL.
-        ...(wholeSpace
+        // The reserved whole-Space type, which the wallet refuses, and a
+        // standard-collection read, granted under the generation delegation
+        // like every other class.
+        ...(extraRows
           ? [
               {
                 referenceId: 'space-read',
                 allowedAction: ['GET', 'HEAD'],
                 invocationTarget: { type: 'https://w3id.org/byoe#space' }
+              },
+              {
+                referenceId: 'public-credentials-read',
+                allowedAction: ['GET', 'HEAD', 'PUT'],
+                invocationTarget: {
+                  type: 'https://w3id.org/byoe#private-collection',
+                  name: 'public-credentials'
+                }
               }
             ]
           : [])
@@ -299,7 +307,7 @@ test.describe.serial('the CHAPI popup on a transient session', () => {
     }
   })
 
-  test('grants a whole-Space read the app can invoke, and nothing past it', async ({
+  test('refuses a whole-Space read, and grants a collection read the app can invoke', async ({
     browser
   }) => {
     const { context, page } = await coldTerminal(browser, WALLET_ORIGIN)
@@ -307,100 +315,92 @@ test.describe.serial('the CHAPI popup on a transient session', () => {
       const { frame } = await popupToConsent(page, {
         passphrase,
         challenge: `chal-popup-space-${Date.now()}`,
-        query: appConnectQuery({ wholeSpace: true })
+        query: appConnectQuery({ extraRows: true })
       })
 
       /**
-       * The row renders as a grant, not a refusal: the generation delegation
-       * targets the Space's canonical container URL, which is exactly the
-       * string a whole-Space target resolves to. So the consent screen shows
-       * the whole-Space warning banner with its read-only label, names the
-       * target in the panel's own words, and nowhere falls back to the
-       * generic "cannot fulfill" note.
+       * The whole-Space row is a refusal: the type is reserved, so the row
+       * renders the generic "cannot fulfill" note. The standard-collection
+       * read renders as a grant, named by its collection id.
        */
-      await expect(
-        frame.getByText('This grants access to your entire storage Space.', {
-          exact: false
-        })
-      ).toBeVisible()
-      await expect(frame.getByText('Read-only', { exact: false })).toBeVisible()
-      await expect(
-        frame.getByText('your whole storage Space', { exact: false })
-      ).toBeVisible()
       await expect(
         frame.getByText('This wallet cannot fulfill this request.', {
           exact: false
         })
-      ).toHaveCount(0)
+      ).toHaveCount(1)
+      await expect(
+        frame.getByText('public-credentials', { exact: true })
+      ).toBeVisible()
 
       await frame.getByRole('button', { name: 'Connect' }).click()
       const response = (await awaitPopupResponse({ frame })) as PopupResponse
 
       expect(response.data.zcap).toHaveLength(2)
-      const spaceGrant = response.data.zcap.find(
-        zcap => !zcap.invocationTarget.endsWith(`/${APP_COLLECTION}/`)
+      const readGrant = response.data.zcap.find(zcap =>
+        zcap.invocationTarget.endsWith('/public-credentials/')
       )
-      expect(spaceGrant, 'the whole-Space grant').toBeDefined()
-      expect(spaceGrant!.invocationTarget).toMatch(/\/space\/[^/]+\/$/)
-      expect(spaceGrant!.allowedAction).toEqual(['GET', 'HEAD'])
-      expect(spaceGrant!.parentCapability).not.toMatch(/^urn:zcap:root:/)
+      expect(readGrant, 'the public-credentials grant').toBeDefined()
+      expect(readGrant!.allowedAction).toEqual(['GET', 'HEAD'])
+      expect(readGrant!.parentCapability).not.toMatch(/^urn:zcap:root:/)
+      expect(
+        response.data.zcap.some(zcap =>
+          /\/space\/[^/]+\/$/.test(zcap.invocationTarget)
+        ),
+        'no grant names the Space itself'
+      ).toBe(false)
 
-      // The grant verifies end to end at the reference server: the Space
-      // listing and a Collection beneath it both read as the app.
+      // The grant verifies end to end at the reference server: the
+      // collection reads as the app.
       const app = await appZcapClient(appKeySeed(response))
-      const spaceUrl = spaceGrant!.invocationTarget
+      const collectionUrl = readGrant!.invocationTarget
       const listed = await app.request({
-        url: spaceUrl,
-        capability: spaceGrant,
+        url: collectionUrl,
+        capability: readGrant,
         method: 'GET',
         action: 'GET'
       })
       expect(listed.status).toBe(200)
-      const collectionMeta = await app.request({
-        url: new URL(`${APP_COLLECTION}/meta`, spaceUrl).toString(),
-        capability: spaceGrant,
+
+      const metaUrl = new URL('meta', collectionUrl).toString()
+      const metaRead = await app.request({
+        url: metaUrl,
+        capability: readGrant,
         method: 'GET',
         action: 'GET'
       })
-      expect(collectionMeta.status).toBe(200)
+      expect(metaRead.status).toBe(200)
 
       /**
        * And the limitation holds where it matters. This is the probe that
-       * measures the grant's `allowedAction`: `PUT /space/<S>/<C>/meta`
-       * carries NO container rule on the server, so the only thing that can
-       * refuse it is the grant not covering PUT. The URL is the one the GET
-       * above just read with a 200, so the refusal is authorization and not
-       * a missing route, and the body is a well-formed Collection Metadata
-       * object so the pre-auth shape check (a 400) cannot stand in for it.
-       * WAS masks the denial as a 404 and the client throws on it; a
-       * post-authorization refusal would carry some other status, so the
-       * status is asserted exactly.
+       * measures the grant's `allowedAction`. `PUT /space/<S>/<C>/meta`
+       * carries no container rule on the server, and a Collection-scoped
+       * grant covering PUT writes it. So the only thing that can refuse this
+       * PUT is the grant not covering PUT. The URL is the one the GET above
+       * just read with a 200, so the refusal is authorization and not a
+       * missing route. The body is a well-formed Collection Metadata object,
+       * so the pre-auth shape check (a 400) cannot stand in for it. WAS masks
+       * the denial as a 404 and the client throws on it. A post-authorization
+       * refusal would carry some other status, so the status is asserted
+       * exactly.
        */
       await expect(
         app.request({
-          url: new URL(`${APP_COLLECTION}/meta`, spaceUrl).toString(),
-          capability: spaceGrant,
+          url: metaUrl,
+          capability: readGrant,
           method: 'PUT',
           action: 'PUT',
-          json: { id: APP_COLLECTION, name: 'takeover-attempt' }
+          json: { id: 'public-credentials', name: 'takeover-attempt' }
         })
       ).rejects.toMatchObject({ status: 404 })
 
-      /**
-       * The Space Metadata write (the takeover shape: the app naming itself
-       * the Space's controller) is refused too, but by the server's
-       * `controller-only` container rule on that route rather than by the
-       * grant's action set -- any delegated capability is refused there
-       * before the chain or its `allowedAction` is read. Kept as the
-       * route-level statement, not as evidence about the grant.
-       */
+      // The grant reaches nothing above its collection: the Space listing
+      // is refused the same way.
       await expect(
         app.request({
-          url: new URL('meta', spaceUrl).toString(),
-          capability: spaceGrant,
-          method: 'PUT',
-          action: 'PUT',
-          json: { controller: appKeySubject(response).id }
+          url: new URL('..', collectionUrl).toString(),
+          capability: readGrant,
+          method: 'GET',
+          action: 'GET'
         })
       ).rejects.toMatchObject({ status: 404 })
     } finally {

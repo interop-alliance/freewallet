@@ -48,16 +48,34 @@ export const EXTERNAL_REQUEST_URL_PARAM = 'url'
 export const EXTERNAL_REQUEST_ORIGIN = 'n/a (API request)'
 
 /**
+ * Whether an activity's `object` was recorded for an agent: it carries the
+ * {@link EXTERNAL_REQUEST_ORIGIN} marker and no `appConnect` member (which
+ * would make it an App Connect record). The one scope every agent reader
+ * shares: the Applications listing, the agent grant revocation, and the
+ * agent key rotation.
+ *
+ * @param object {unknown}   the activity's `object` member
+ * @returns {boolean}
+ */
+export function isAgentActivityObject(object: unknown): boolean {
+  if (!object || typeof object !== 'object') {
+    return false
+  }
+  const { origin, appConnect } = object as {
+    origin?: unknown
+    appConnect?: unknown
+  }
+  return origin === EXTERNAL_REQUEST_ORIGIN && !appConnect
+}
+
+/**
  * The grant classes this entry point delegates. Everything else the grant
  * engine supports is refused before consent: a share hands the grantee
- * decryption of the user's own encrypted collections, and a whole-Space or
+ * decryption of the user's own encrypted collections, and a
  * protected-collection read covers plaintext `public-credentials`. Widening
  * the list is a documented decision, not a code change.
  */
 const ALLOWED_TARGET_CLASSES: readonly string[] = [
-  // `'space'` must stay out. This entry point attests no requesting origin,
-  // and `barredGrants` bars only satisfiable targets, so leaving the class
-  // out here is what refuses a whole-Space read grant outright.
   'public-collection',
   'collection'
 ]

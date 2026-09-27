@@ -205,7 +205,7 @@ generation delegation's revocation follows. A grant expired beyond the
 revocation clock-skew margin is skipped without a POST. Every other grant
 is POSTed, whatever the document says about its signer, since the document
 a login read is a snapshot. The server's `AlreadyRevokedError` counts as
-skipped. A plain `ValidationError` is read against the same document
+revoked, since the grant is dead on the server. A plain `ValidationError` is read against the same document
 (`classifyGrantRevocationRefusal`): a grant at or past its own `expires`,
 an orphaned one (delegated under the Space root, signer gone), or one
 chained under an embedded parent delegation that has rotted (the parent's
@@ -221,7 +221,10 @@ re-runs. A failure leaves the app-provisioned collections already
 rotated off the app's recipient key (the rotation stage runs first) with
 the credential kept and no Revoke recorded; the rotation is idempotent and
 the landed revocations answer `AlreadyRevokedError`, so the retry converges
-once the refused POST succeeds. The check is best-effort, so
+once the refused POST succeeds, and the Revoke it records counts them. The
+rotation's pull axis runs this same per-grant policy, in place of
+was-client's default revoke, which reads every `ValidationError` as already
+revoked. The grant stage skips only the grants the pull confirmed revoked. The check is best-effort, so
 with no verified document this session the page lists without the marker
 rather than failing, and the revocation skips on expiry alone. Agent rows
 run the identical check over the recorded grant's `controller` instead of an

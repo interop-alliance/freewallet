@@ -1,20 +1,18 @@
 import { test, expect, type Page } from '@playwright/test'
-import {
-  fillSettled,
-  signupViaWizard,
-  goToHistory,
-  expectHistoryEntry
-} from './helpers'
+import { signupViaWizard } from './helpers'
 
 /**
- * WAS-backed E2E for "Login with Wallet" grants: a login VPR that requests
- * DID Authentication plus two WAS capabilities (a new RP collection and a
- * whole-Space read). Unlike the no-WAS `tests/e2e/chapi-login.spec.ts`, this
- * runs against the local WAS teaching server, so the wallet actually
- * provisions the collection and delegates real, Space-rooted zcaps.
+ * WAS-backed E2E for a plain CHAPI `get` carrying a standalone capability
+ * query (no App Connect query). Plain CHAPI delegates no capabilities: only
+ * App Connect and the interaction-URL page grant storage access, since each
+ * lists its grantees and can revoke them. So the popup refuses the request
+ * before its login form renders, even on a wallet with a remote Space to
+ * delegate against. The grant mechanics themselves are covered on the App
+ * Connect path (`chapi-app-connect.spec.ts`) and the agent path
+ * (`agent-grant.spec.ts`).
  */
 
-const RP_DID = 'did:key:z6MkrRPexampleRelyingPartyForE2ELoginTests'
+const RP_DID = 'did:key:z6MkkxrCpdyM52QkhCaGrGRMdps26M8JQ8TmapYHPwc7n8MJ'
 
 async function injectGetEvent(
   page: Page,
@@ -67,10 +65,10 @@ function readResponse(page: Page) {
   )
 }
 
-test('login VPR provisions a collection and returns Space-rooted grants', async ({
+test('a login VPR carrying a capability query is refused before login', async ({
   page
 }, testInfo) => {
-  const { passphrase } = await signupViaWizard(page, testInfo)
+  await signupViaWizard(page, testInfo)
   const challenge = `chal-${Date.now()}-w${testInfo.workerIndex}`
 
   await injectGetEvent(page, {
@@ -83,7 +81,7 @@ test('login VPR provisions a collection and returns Space-rooted grants', async 
           {
             referenceId: 'example-app-data',
             reason: 'Example App stores your documents.',
-            allowedAction: ['GET', 'HEAD', 'PUT', 'POST', 'DELETE'],
+            allowedAction: ['GET', 'HEAD', 'PUT'],
             controller: RP_DID,
             invocationTarget: {
               type: 'https://w3id.org/byoe#private-collection',
@@ -91,105 +89,13 @@ test('login VPR provisions a collection and returns Space-rooted grants', async 
             }
           },
           {
-            referenceId: 'space-read',
-            reason: 'Example App reads your wallet Space.',
-            allowedAction: ['GET', 'HEAD', 'PUT'],
-            controller: RP_DID,
-            invocationTarget: { type: 'https://w3id.org/byoe#space' }
-          }
-        ]
-      }
-    ],
-    challenge,
-    domain: 'app.example'
-  })
-
-  await page.goto('/#/wallet/get')
-  await page.reload()
-
-  await fillSettled(page.locator('input[type="password"]'), passphrase)
-  await page.getByRole('button', { name: 'Continue' }).click()
-
-  // Consent screen lists the grants; approve.
-  await expect(page.getByText('Storage access')).toBeVisible()
-  await expect(
-    page.getByText('example-app-data', { exact: true })
-  ).toBeVisible()
-  await page.getByRole('button', { name: 'Continue' }).click()
-
-  await expect
-    .poll(async () => (await readResponse(page)) !== undefined, {
-      timeout: 20000
-    })
-    .toBe(true)
-
-  const response = (await readResponse(page)) as { value: unknown }
-  const payload = response.value as {
-    data: {
-      proof: { proofPurpose: string }
-      zcap: Array<{
-        invocationTarget: string
-        controller: string
-        allowedAction: string[]
-        expires: string
-      }>
-    }
-  }
-
-  expect(payload.data.proof.proofPurpose).toBe('authentication')
-  expect(payload.data.zcap).toHaveLength(2)
-
-  const collectionGrant = payload.data.zcap.find(zcap =>
-    zcap.invocationTarget.endsWith('/example-app-data/')
-  )!
-  expect(collectionGrant.controller).toBe(RP_DID)
-  expect(collectionGrant.allowedAction).toContain('PUT')
-  expect(new Date(collectionGrant.expires).getTime()).toBeGreaterThan(
-    Date.now()
-  )
-
-  // The whole-Space grant is stripped to read-only.
-  const spaceGrant = payload.data.zcap.find(
-    zcap => !zcap.invocationTarget.endsWith('/example-app-data/')
-  )!
-  expect(spaceGrant.allowedAction).toEqual(['GET', 'HEAD'])
-
-  // The login is recorded in history. The popup page itself has no navigation
-  // (after respondWith it stays on its terminal sharing screen; in a real
-  // CHAPI flow the mediator closes it), so log in to the main app shell: it
-  // opens the same per-user local replica the popup wrote the entry to, with
-  // the vault unlocked. Login pays the keyring's deliberately slow Argon2id
-  // unlock derivation, so it can run past the default 5s assertion timeout.
-  await page.goto('/#/login')
-  await fillSettled(page.locator('input[type="password"]'), passphrase)
-  await page.getByRole('button', { name: 'Log in', exact: true }).click()
-  await expect(page).toHaveURL(/#\/dashboard/, { timeout: 30_000 })
-  await goToHistory(page)
-  await expectHistoryEntry(page, /Logged in to https:\/\/app\.example/)
-})
-
-test('public-collection VPR provisions a world-readable collection', async ({
-  page,
-  request
-}, testInfo) => {
-  const { passphrase } = await signupViaWizard(page, testInfo)
-  const challenge = `chal-pub-${Date.now()}-w${testInfo.workerIndex}`
-
-  await injectGetEvent(page, {
-    origin: 'https://app.example',
-    query: [
-      { type: 'DIDAuthentication', acceptedMethods: [{ method: 'key' }] },
-      {
-        type: 'AuthorizationCapabilityQuery',
-        capabilityQuery: [
-          {
-            referenceId: 'example-app-public',
-            reason: 'Example App publishes your posts for anyone to read.',
-            allowedAction: ['GET', 'HEAD', 'PUT', 'POST', 'DELETE'],
+            referenceId: 'public-credentials-read',
+            reason: 'Example App reads your published credentials.',
+            allowedAction: ['GET', 'HEAD'],
             controller: RP_DID,
             invocationTarget: {
-              type: 'https://w3id.org/byoe#public-collection',
-              name: 'example-app-public'
+              type: 'https://w3id.org/byoe#private-collection',
+              name: 'public-credentials'
             }
           }
         ]
@@ -202,46 +108,18 @@ test('public-collection VPR provisions a world-readable collection', async ({
   await page.goto('/#/wallet/get')
   await page.reload()
 
-  await fillSettled(page.locator('input[type="password"]'), passphrase)
-  await page.getByRole('button', { name: 'Continue' }).click()
-
-  // Consent screen shows the world-readable warning for the public grant.
-  await expect(page.getByText('Storage access')).toBeVisible()
+  // Refused pre-consent: no login form, no consent screen.
   await expect(
-    page.getByText('example-app-public', { exact: true })
+    page.getByText(/grants storage access only to apps that connect/i)
   ).toBeVisible()
-  await expect(
-    page.getByText(/anyone on the web will be able to read it/i)
-  ).toBeVisible()
-  // Public implies plaintext, so the ciphertext note never applies.
-  await expect(
-    page.getByText(/this site will only see ciphertext/i)
-  ).toHaveCount(0)
-  await page.getByRole('button', { name: 'Continue' }).click()
+  await expect(page.locator('input[type="password"]')).toHaveCount(0)
+  await expect(page.getByText('Storage access', { exact: true })).toHaveCount(0)
 
+  // Cancel answers the channel with null: nothing is delegated.
+  await page.getByRole('button', { name: 'Cancel' }).click()
   await expect
-    .poll(async () => (await readResponse(page)) !== undefined, {
-      timeout: 20000
-    })
+    .poll(async () => (await readResponse(page)) !== undefined)
     .toBe(true)
-
   const response = (await readResponse(page)) as { value: unknown }
-  const payload = response.value as {
-    data: {
-      zcap: Array<{ invocationTarget: string; allowedAction: string[] }>
-    }
-  }
-
-  // The delegated zcap carries the full action vocabulary, in ceiling order:
-  // published content is still the app's own data, so the requested `PUT` and
-  // `DELETE` survive alongside `POST` and the reads.
-  expect(payload.data.zcap).toHaveLength(1)
-  const grant = payload.data.zcap[0]
-  expect(grant.invocationTarget.endsWith('/example-app-public/')).toBe(true)
-  expect(grant.allowedAction).toEqual(['GET', 'HEAD', 'POST', 'PUT', 'DELETE'])
-
-  // The collection itself is world-readable: an unauthenticated (no zcap,
-  // no cookies) GET on the collection URL lists it instead of being denied.
-  const anonymousList = await request.get(grant.invocationTarget)
-  expect(anonymousList.status()).toBe(200)
+  expect(response.value).toBeNull()
 })

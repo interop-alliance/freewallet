@@ -7,6 +7,11 @@ import type { Session } from '@/types/auth'
 import type { ICapabilityQueryDetail, IZcap } from '@/lib/walletRequest'
 import { x25519RecipientFromDidKey } from '@interop/was-client/edv'
 import {
+  APP_CONNECTIONS_COLLECTION,
+  KEY_MAP_COLLECTION,
+  UNLOCK_METHODS_COLLECTION
+} from '@interop/wallet-core/space'
+import {
   existingCollectionsFrom,
   isSatisfiable,
   resolveInvocationTarget,
@@ -23,7 +28,9 @@ const documentLoader = securityLoader({ fetchRemoteContexts: true }).build()
 // (what every expected target below is written against).
 const SPACE = { serverUrl: 'https://was.example.com/', spaceId: 'L8qcqABC' }
 const SPACE_URL = 'https://was.example.com/space/L8qcqABC/'
-const RP_DID = 'did:key:z6MkrRPexampleRelyingParty'
+// A real Ed25519 did:key (the did:key spec's example): a provisioned private
+// collection escrows the grantee's X25519 twin, so the controller must derive.
+const RP_DID = 'did:key:z6MkhaXgBZDvotDkL5257faiztiGiC2QtKLGpbnnEGta2doK'
 const CHALLENGE = '99612b24-63d9-11ea-b99f-4f66f3e4f81a'
 
 // The existing-collections snapshot resolution consults; the empty default is
@@ -31,6 +38,18 @@ const CHALLENGE = '99612b24-63d9-11ea-b99f-4f66f3e4f81a'
 // session stub's `listCollectionPublicStates`, so processZcaps tests can stage
 // existing collections per test.
 const NO_COLLECTIONS = existingCollectionsFrom([])
+// A Space holding the collections the string-target tests name. A string
+// target never provisions, so it only resolves onto a collection that exists.
+const STANDING_COLLECTIONS = existingCollectionsFrom(
+  [
+    'example-app-data',
+    'private-credentials',
+    'public-credentials',
+    'id',
+    KEY_MAP_COLLECTION.id,
+    UNLOCK_METHODS_COLLECTION.id
+  ].map(id => ({ id }))
+)
 let collectionListing: Array<{ id: string; isPublic?: boolean }> = []
 
 const collectionDetail: ICapabilityQueryDetail = {
@@ -44,11 +63,24 @@ const collectionDetail: ICapabilityQueryDetail = {
   }
 }
 
+// A reserved-type whole-Space request: always unsatisfiable.
 const spaceDetail: ICapabilityQueryDetail = {
   referenceId: 'space-read',
   allowedAction: ['GET', 'HEAD', 'PUT'],
   controller: RP_DID,
   invocationTarget: { type: 'https://w3id.org/byoe#space' }
+}
+
+// A read of a standard wallet collection, by descriptor: satisfiable on every
+// request path, since it provisions nothing.
+const standardReadDetail: ICapabilityQueryDetail = {
+  referenceId: 'public-credentials-read',
+  allowedAction: ['GET', 'HEAD'],
+  controller: RP_DID,
+  invocationTarget: {
+    type: 'https://w3id.org/byoe#private-collection',
+    name: 'public-credentials'
+  }
 }
 
 // A write request on a standard wallet collection (via descriptor object).
@@ -96,7 +128,7 @@ const keyMapCollectionDetail: ICapabilityQueryDetail = {
   controller: RP_DID,
   invocationTarget: {
     type: 'https://w3id.org/byoe#private-collection',
-    name: 'key-map'
+    name: KEY_MAP_COLLECTION.id
   }
 }
 
@@ -108,7 +140,7 @@ const unlockMethodsCollectionDetail: ICapabilityQueryDetail = {
   controller: RP_DID,
   invocationTarget: {
     type: 'https://w3id.org/byoe#private-collection',
-    name: 'unlock-methods'
+    name: UNLOCK_METHODS_COLLECTION.id
   }
 }
 
@@ -117,7 +149,7 @@ const unlockMethodsCollectionUrlDetail: ICapabilityQueryDetail = {
   referenceId: 'unlock-methods-write-url',
   allowedAction: ['GET', 'HEAD', 'PUT', 'DELETE'],
   controller: RP_DID,
-  invocationTarget: `${SPACE_URL}unlock-methods`
+  invocationTarget: `${SPACE_URL}${UNLOCK_METHODS_COLLECTION.id}`
 }
 
 // A write request on the DID document resource itself (plain URL).
@@ -165,7 +197,11 @@ const shareDetail: ICapabilityQueryDetail = {
 let session: Session
 let delegated: Array<Record<string, unknown>>
 let ensureCalls: Array<{ id: string; isPublic?: boolean }>
-let provisionCalls: Array<{ collectionId: string; recipientId: string }>
+let provisionCalls: Array<{
+  collectionId: string
+  recipientId: string
+  generator?: string
+}>
 let shareCalls: Array<{
   collectionId: string
   recipientId: string
@@ -257,36 +293,31 @@ beforeAll(async () => {
     }) {
       ensureCalls.push({ id, isPublic })
     },
-    async provisionAppCollection({
-      collectionId,
-      appRecipient
-    }: {
-      collectionId: string
-      appRecipient: { id: string }
-    }) {
-      provisionCalls.push({ collectionId, recipientId: appRecipient.id })
-      return { scheme: 'edv' }
-    },
-    async shareCollection({
+    async provisionEncryptedCollection({
       collectionId,
       recipient,
-      controller,
-      expires,
-      app
+      generator
     }: {
       collectionId: string
       recipient: { id: string }
-      controller: string
-      expires?: Date
-      app?: { name: string; origin: string }
+      generator?: string
     }) {
-      shareCalls.push({
+      provisionCalls.push({
         collectionId,
         recipientId: recipient.id,
-        controller,
-        expires,
-        app
+        ...(generator && { generator })
       })
+      return { scheme: 'edv' }
+    },
+    async delegateShareGrant({
+      collectionId,
+      controller,
+      expires
+    }: {
+      collectionId: string
+      controller: string
+      expires?: Date
+    }) {
       const zcap = {
         id: `urn:zcap:delegated:share:${collectionId}`,
         invocationTarget: `${SPACE_URL}${collectionId}`,
@@ -295,7 +326,27 @@ beforeAll(async () => {
         expires: expires?.toISOString()
       }
       delegated.push(zcap)
-      return { descriptor: { scheme: 'edv' }, zcap }
+      return zcap
+    },
+    async shareCollection({
+      collectionId,
+      recipient,
+      zcap,
+      app
+    }: {
+      collectionId: string
+      recipient: { id: string }
+      zcap: { controller: string; expires?: string }
+      app?: { name: string; origin: string }
+    }) {
+      shareCalls.push({
+        collectionId,
+        recipientId: recipient.id,
+        controller: zcap.controller,
+        expires: zcap.expires ? new Date(zcap.expires) : undefined,
+        app
+      })
+      return { descriptor: { scheme: 'edv' } }
     }
   }
 
@@ -313,46 +364,49 @@ beforeEach(() => {
 })
 
 describe('resolveInvocationTarget', () => {
-  it('accepts a plain URL under the Space, verbatim', () => {
+  it('accepts a plain URL under an existing collection, verbatim', () => {
     const target = resolveInvocationTarget({
       descriptor: `${SPACE_URL}example-app-data/doc1`,
       space: SPACE,
-      collections: NO_COLLECTIONS,
+      collections: STANDING_COLLECTIONS,
       requester: {}
     })
+    // A string target never provisions.
     expect(target).toMatchObject({
       invocationTarget: `${SPACE_URL}example-app-data/doc1`,
+      collectionId: 'example-app-data',
       needsProvisioning: false,
       targetClass: 'collection'
     })
   })
 
-  it('treats an exact Space URL string as a whole-Space grant', () => {
-    const target = resolveInvocationTarget({
-      descriptor: SPACE_URL,
-      space: SPACE,
-      collections: NO_COLLECTIONS,
-      requester: {}
-    })
-    expect(target).toMatchObject({
-      targetClass: 'space'
-    })
-    expect(target.collectionId).toBeUndefined()
+  it('refuses a plain URL under a collection that does not exist', () => {
+    for (const descriptor of [
+      `${SPACE_URL}example-app-data/`,
+      `${SPACE_URL}example-app-data/doc1`
+    ]) {
+      const target = resolveInvocationTarget({
+        descriptor,
+        space: SPACE,
+        collections: NO_COLLECTIONS,
+        requester: {}
+      })
+      expect(target.targetClass).toBeUndefined()
+      expect(target.invocationTarget).toBeUndefined()
+    }
   })
 
-  it('treats the Space URL with a trailing slash as a whole-Space grant', () => {
-    const target = resolveInvocationTarget({
-      descriptor: `${SPACE_URL}`,
-      space: SPACE,
-      collections: NO_COLLECTIONS,
-      requester: {}
-    })
-    // The trailing slash is normalized off the delegated target.
-    expect(target).toMatchObject({
-      invocationTarget: SPACE_URL,
-      targetClass: 'space'
-    })
-    expect(target.collectionId).toBeUndefined()
+  it('refuses the Space URL string, with or without a trailing slash', () => {
+    for (const descriptor of [SPACE_URL, SPACE_URL.slice(0, -1)]) {
+      const target = resolveInvocationTarget({
+        descriptor,
+        space: SPACE,
+        collections: STANDING_COLLECTIONS,
+        requester: {}
+      })
+      expect(target.targetClass).toBeUndefined()
+      expect(target.invocationTarget).toBeUndefined()
+    }
   })
 
   it('refuses a foreign URL', () => {
@@ -509,13 +563,13 @@ describe('resolveInvocationTarget', () => {
     const withSlash = resolveInvocationTarget({
       descriptor: `${SPACE_URL}example-app-data/`,
       space: SPACE,
-      collections: NO_COLLECTIONS,
+      collections: STANDING_COLLECTIONS,
       requester: {}
     })
     const without = resolveInvocationTarget({
       descriptor: `${SPACE_URL}example-app-data`,
       space: SPACE,
-      collections: NO_COLLECTIONS,
+      collections: STANDING_COLLECTIONS,
       requester: {}
     })
     expect(withSlash).toMatchObject({
@@ -532,7 +586,7 @@ describe('resolveInvocationTarget', () => {
       resolveInvocationTarget({
         descriptor: url,
         space: SPACE,
-        collections: NO_COLLECTIONS,
+        collections: STANDING_COLLECTIONS,
         requester: {}
       })
     ).toMatchObject({
@@ -616,23 +670,48 @@ describe('resolveInvocationTarget', () => {
     })
   })
 
-  it('treats the system collections as protected and present', () => {
-    for (const name of ['id', 'key-map', 'unlock-methods']) {
-      expect(
-        resolveInvocationTarget({
-          descriptor: {
-            type: 'https://w3id.org/byoe#private-collection',
-            name
-          },
-          space: SPACE,
-          collections: NO_COLLECTIONS,
-          requester: {}
-        })
-      ).toMatchObject({
-        needsProvisioning: false,
-        encrypted: false,
-        targetClass: 'protected-collection'
+  it('treats the id system collection as protected and present', () => {
+    expect(
+      resolveInvocationTarget({
+        descriptor: {
+          type: 'https://w3id.org/byoe#private-collection',
+          name: 'id'
+        },
+        space: SPACE,
+        collections: NO_COLLECTIONS,
+        requester: {}
       })
+    ).toMatchObject({
+      needsProvisioning: false,
+      encrypted: false,
+      targetClass: 'protected-collection'
+    })
+  })
+
+  it('refuses key-map and unlock-methods under every descriptor type and as URLs', () => {
+    const descriptors: Array<string | { type: string; name: string }> = []
+    for (const name of [KEY_MAP_COLLECTION.id, UNLOCK_METHODS_COLLECTION.id]) {
+      for (const type of [
+        'https://w3id.org/byoe#private-collection',
+        'https://w3id.org/byoe#public-collection',
+        'https://w3id.org/byoe#shared-wallet-collection'
+      ]) {
+        descriptors.push({ type, name })
+      }
+      descriptors.push(
+        `${SPACE_URL}${name}`,
+        `${SPACE_URL}${name}/`,
+        `${SPACE_URL}${name}/some-resource`
+      )
+    }
+    for (const descriptor of descriptors) {
+      const target = resolveInvocationTarget({
+        descriptor,
+        space: SPACE,
+        collections: STANDING_COLLECTIONS,
+        requester: {}
+      })
+      expect(target.targetClass, JSON.stringify(descriptor)).toBeUndefined()
     }
   })
 
@@ -650,18 +729,15 @@ describe('resolveInvocationTarget', () => {
     ).toBeUndefined()
   })
 
-  it('resolves the whole Space', () => {
-    expect(
-      resolveInvocationTarget({
-        descriptor: { type: 'https://w3id.org/byoe#space' },
-        space: SPACE,
-        collections: NO_COLLECTIONS,
-        requester: {}
-      })
-    ).toMatchObject({
-      invocationTarget: SPACE_URL,
-      targetClass: 'space'
+  it('refuses the reserved whole-Space descriptor type', () => {
+    const target = resolveInvocationTarget({
+      descriptor: { type: 'https://w3id.org/byoe#space' },
+      space: SPACE,
+      collections: STANDING_COLLECTIONS,
+      requester: {}
     })
+    expect(target.targetClass).toBeUndefined()
+    expect(target.invocationTarget).toBeUndefined()
   })
 
   it('refuses an unknown descriptor type', () => {
@@ -727,8 +803,8 @@ describe('resolveInvocationTarget', () => {
       'public-credentials',
       'wallet-activity',
       'id',
-      'key-map',
-      'unlock-methods'
+      KEY_MAP_COLLECTION.id,
+      UNLOCK_METHODS_COLLECTION.id
     ]) {
       expect(
         resolveInvocationTarget({
@@ -785,10 +861,10 @@ describe('resolveInvocationTarget', () => {
     // are the connected apps' private seeds.
     for (const name of [
       'public-credentials',
-      'app-connections',
+      APP_CONNECTIONS_COLLECTION,
       'id',
-      'key-map',
-      'unlock-methods',
+      KEY_MAP_COLLECTION.id,
+      UNLOCK_METHODS_COLLECTION.id,
       'example-app-data',
       'not-a-collection',
       undefined
@@ -813,28 +889,30 @@ describe('resolveInvocationTarget', () => {
     // rather than merely read-only -- whichever spelling it arrives in, and
     // whether it names the collection or a resource inside it.
     for (const descriptor of [
-      `${SPACE_URL}app-connections`,
-      `${SPACE_URL}app-connections/some-resource`,
+      `${SPACE_URL}${APP_CONNECTIONS_COLLECTION}`,
+      `${SPACE_URL}${APP_CONNECTIONS_COLLECTION}/some-resource`,
       {
         type: 'https://w3id.org/byoe#private-collection',
-        name: 'app-connections'
+        name: APP_CONNECTIONS_COLLECTION
       },
       {
         type: 'https://w3id.org/byoe#public-collection',
-        name: 'app-connections'
+        name: APP_CONNECTIONS_COLLECTION
       },
       {
         type: 'https://w3id.org/byoe#shared-wallet-collection',
-        name: 'app-connections'
+        name: APP_CONNECTIONS_COLLECTION
       }
     ]) {
       const target = resolveInvocationTarget({
         descriptor,
         space: SPACE,
-        collections: NO_COLLECTIONS,
+        // Listed, so a string target is refused for what it names.
+        collections: existingCollectionsFrom([
+          { id: APP_CONNECTIONS_COLLECTION }
+        ]),
         requester: {}
       })
-      expect(target.targetClass).toBeUndefined()
       expect(target.targetClass).toBeUndefined()
     }
   })
@@ -1032,13 +1110,14 @@ describe('resolveGrant action handling', () => {
     expect(grant.allowedActions).toEqual(['GET', 'HEAD'])
   })
 
-  it('strips whole-Space grants to read-only', () => {
+  it('refuses a whole-Space grant, whatever it asks for', () => {
     const grant = resolveGrant({
       descriptor: spaceDetail,
       space: SPACE,
-      collections: NO_COLLECTIONS
+      collections: STANDING_COLLECTIONS
     })
-    expect(grant.allowedActions).toEqual(['GET', 'HEAD'])
+    expect(grant.target.targetClass).toBeUndefined()
+    expect(grant.allowedActions).toEqual([])
   })
 
   it('passes through explicit RP-collection actions and flags write', () => {
@@ -1072,7 +1151,7 @@ describe('resolveGrant action handling', () => {
     const grant = resolveGrant({
       descriptor: standardCollectionUrlDetail,
       space: SPACE,
-      collections: NO_COLLECTIONS
+      collections: STANDING_COLLECTIONS
     })
     expect(grant.target.collectionId).toBe('private-credentials')
     expect(grant.allowedActions).toEqual(['GET', 'HEAD'])
@@ -1083,7 +1162,7 @@ describe('resolveGrant action handling', () => {
     const grant = resolveGrant({
       descriptor: standardResourceUrlDetail,
       space: SPACE,
-      collections: NO_COLLECTIONS
+      collections: STANDING_COLLECTIONS
     })
     expect(grant.target.collectionId).toBe('private-credentials')
     expect(grant.allowedActions).toEqual(['GET', 'HEAD'])
@@ -1103,42 +1182,20 @@ describe('resolveGrant action handling', () => {
     expect(grant.write).toBe(false)
   })
 
-  it('caps a key-map-collection write to read-only (descriptor form)', () => {
-    const grant = resolveGrant({
-      descriptor: keyMapCollectionDetail,
-      space: SPACE,
-      collections: NO_COLLECTIONS
-    })
-    expect(grant.target.collectionId).toBe('key-map')
-    // Provisioned at login, like the standard and `id` collections.
-    expect(grant.target.needsProvisioning).toBe(false)
-    expect(grant.allowedActions).toEqual(['GET', 'HEAD'])
-    expect(grant.write).toBe(false)
-  })
-
-  it('caps an unlock-methods-collection write to read-only (descriptor form)', () => {
-    const grant = resolveGrant({
-      descriptor: unlockMethodsCollectionDetail,
-      space: SPACE,
-      collections: NO_COLLECTIONS
-    })
-    expect(grant.target.collectionId).toBe('unlock-methods')
-    // A system collection, provisioned by the wallet itself.
-    expect(grant.target.needsProvisioning).toBe(false)
-    expect(grant.allowedActions).toEqual(['GET', 'HEAD'])
-    expect(grant.write).toBe(false)
-  })
-
-  it('caps an unlock-methods-collection write to read-only (string URL)', () => {
-    const grant = resolveGrant({
-      descriptor: unlockMethodsCollectionUrlDetail,
-      space: SPACE,
-      collections: NO_COLLECTIONS
-    })
-    expect(grant.target.collectionId).toBe('unlock-methods')
-    expect(grant.target.needsProvisioning).toBe(false)
-    expect(grant.allowedActions).toEqual(['GET', 'HEAD'])
-    expect(grant.write).toBe(false)
+  it('refuses key-map and unlock-methods grants outright', () => {
+    for (const descriptor of [
+      keyMapCollectionDetail,
+      unlockMethodsCollectionDetail,
+      unlockMethodsCollectionUrlDetail
+    ]) {
+      const grant = resolveGrant({
+        descriptor,
+        space: SPACE,
+        collections: STANDING_COLLECTIONS
+      })
+      expect(grant.target.targetClass, descriptor.referenceId).toBeUndefined()
+      expect(grant.allowedActions).toEqual([])
+    }
   })
 
   it('refuses a PUT-only grant on the DID document resource', () => {
@@ -1149,7 +1206,7 @@ describe('resolveGrant action handling', () => {
     const grant = resolveGrant({
       descriptor: didDocumentUrlDetail,
       space: SPACE,
-      collections: NO_COLLECTIONS
+      collections: STANDING_COLLECTIONS
     })
     expect(grant.target.targetClass).toBeUndefined()
     expect(grant.allowedActions).toEqual([])
@@ -1158,7 +1215,7 @@ describe('resolveGrant action handling', () => {
 
   it('marks a read-only grant as not a write', () => {
     const grant = resolveGrant({
-      descriptor: spaceDetail,
+      descriptor: standardReadDetail,
       space: SPACE,
       collections: NO_COLLECTIONS
     })
@@ -1257,7 +1314,10 @@ describe('resolveGrant action vocabulary', () => {
       descriptor: {
         controller: RP_DID,
         allowedAction: ['PUT', 'DELETE'],
-        invocationTarget: { type: 'https://w3id.org/byoe#space' }
+        invocationTarget: {
+          type: 'https://w3id.org/byoe#private-collection',
+          name: 'public-credentials'
+        }
       },
       space: SPACE,
       collections: NO_COLLECTIONS
@@ -1301,25 +1361,18 @@ describe('resolveGrant action vocabulary', () => {
   })
 })
 
-describe('whole-Space grants', () => {
-  it('resolves the class read-only, on every session kind', () => {
-    // A transient session's grants chain under the generation delegation,
-    // whose `invocationTarget` is the Space's canonical container URL: the
-    // same string a whole-Space target resolves to, so the pair verifies.
-    // Resolution takes no session flag; the GET/HEAD limitation and the
-    // server's container rule bound what the grant reaches.
+describe('whole-Space targets', () => {
+  it('refuses the reserved #space descriptor type', () => {
     const grant = resolveGrant({
       descriptor: spaceDetail,
       space: SPACE,
-      collections: NO_COLLECTIONS
+      collections: STANDING_COLLECTIONS
     })
-    expect(isSatisfiable(grant.target)).toBe(true)
-    expect(grant.target.targetClass).toBe('space')
-    expect(grant.target.invocationTarget).toBe(SPACE_URL)
-    expect(grant.allowedActions).toEqual(['GET', 'HEAD'])
+    expect(isSatisfiable(grant.target)).toBe(false)
+    expect(grant.allowedActions).toEqual([])
   })
 
-  it('resolves the bare Space URL form the same way', () => {
+  it('refuses the bare Space URL form the same way', () => {
     const grant = resolveGrant({
       descriptor: {
         controller: RP_DID,
@@ -1327,10 +1380,10 @@ describe('whole-Space grants', () => {
         invocationTarget: SPACE_URL
       },
       space: SPACE,
-      collections: NO_COLLECTIONS
+      collections: STANDING_COLLECTIONS
     })
-    expect(grant.target.targetClass).toBe('space')
-    expect(grant.allowedActions).toEqual(['GET'])
+    expect(isSatisfiable(grant.target)).toBe(false)
+    expect(grant.allowedActions).toEqual([])
   })
 
   it('keeps the generic refusal for a foreign target', () => {
@@ -1347,20 +1400,33 @@ describe('processZcaps', () => {
   const READ_TTL_MS = 720 * 60 * 60 * 1000
   const WRITE_TTL_MS = 168 * 60 * 60 * 1000
 
-  it('delegates satisfiable grants, provisions, and skips foreign targets', async () => {
+  it('delegates satisfiable grants, provisions, and skips unsatisfiable ones', async () => {
     delegated.length = 0
     ensureCalls.length = 0
+    provisionCalls.length = 0
     const before = Date.now()
     const zcaps = await processZcaps({
-      zcapRequests: [collectionDetail, spaceDetail, foreignDetail],
+      zcapRequests: [
+        collectionDetail,
+        standardReadDetail,
+        spaceDetail,
+        foreignDetail
+      ],
       session,
       ttlMs: READ_TTL_MS,
       writeTtlMs: WRITE_TTL_MS
     })
 
     expect(zcaps).toHaveLength(2)
-    // Only the un-provisioned RP collection is created (and not made public).
-    expect(ensureCalls).toEqual([{ id: 'example-app-data', isPublic: false }])
+    // Only the un-provisioned RP collection is created, encrypted, with the
+    // grantee escrowed beside the user.
+    expect(ensureCalls).toEqual([])
+    expect(provisionCalls).toEqual([
+      {
+        collectionId: 'example-app-data',
+        recipientId: x25519RecipientFromDidKey({ did: RP_DID }).id
+      }
+    ])
 
     const collectionZcap = zcaps[0] as unknown as {
       invocationTarget: string
@@ -1381,12 +1447,13 @@ describe('processZcaps', () => {
       'DELETE'
     ])
 
-    const spaceZcap = zcaps[1] as unknown as {
+    // The whole-Space and foreign rows are skipped.
+    const readZcap = zcaps[1] as unknown as {
       invocationTarget: string
       allowedAction: string[]
     }
-    expect(spaceZcap.invocationTarget).toBe(SPACE_URL)
-    expect(spaceZcap.allowedAction).toEqual(['GET', 'HEAD'])
+    expect(readZcap.invocationTarget).toBe(`${SPACE_URL}public-credentials/`)
+    expect(readZcap.allowedAction).toEqual(['GET', 'HEAD'])
 
     // The RP collection grant is a write, so it uses the shorter write TTL.
     const expiresMs = new Date(collectionZcap.expires).getTime()
@@ -1394,7 +1461,7 @@ describe('processZcaps', () => {
     expect(Math.abs(expiresMs - expected)).toBeLessThan(60 * 1000)
   })
 
-  it('under a generation delegation, chains every row to it, the whole-Space one included', async () => {
+  it('under a generation delegation, chains every row to it', async () => {
     delegated.length = 0
     ensureCalls.length = 0
     const now = Date.now()
@@ -1414,16 +1481,20 @@ describe('processZcaps', () => {
     } as unknown as Session
 
     const zcaps = await processZcaps({
-      zcapRequests: [collectionDetail, spaceDetail, foreignDetail],
+      zcapRequests: [
+        collectionDetail,
+        standardReadDetail,
+        spaceDetail,
+        foreignDetail
+      ],
       session: transient,
       ttlMs: READ_TTL_MS,
       writeTtlMs: WRITE_TTL_MS
     })
 
-    // Only the foreign row is refused. The whole-Space row resolves to the
-    // delegation's own target, which is the Space's canonical container URL.
+    // The whole-Space and foreign rows are refused.
     expect(zcaps).toHaveLength(2)
-    const [collectionZcap, spaceZcap] = zcaps as unknown as {
+    const [collectionZcap, readZcap] = zcaps as unknown as {
       invocationTarget: string
       parentCapability: string
       allowedAction: string[]
@@ -1432,11 +1503,11 @@ describe('processZcaps', () => {
     expect(collectionZcap.invocationTarget).toBe(
       `${SPACE_URL}example-app-data/`
     )
-    expect(spaceZcap.invocationTarget).toBe(SPACE_URL)
-    expect(spaceZcap.allowedAction).toEqual(['GET', 'HEAD'])
+    expect(readZcap.invocationTarget).toBe(`${SPACE_URL}public-credentials/`)
+    expect(readZcap.allowedAction).toEqual(['GET', 'HEAD'])
     // Chained under the generation delegation rather than the Space root, so
     // the annex key that signs it is one the annex document lists.
-    for (const zcap of [collectionZcap, spaceZcap]) {
+    for (const zcap of [collectionZcap, readZcap]) {
       expect(zcap.parentCapability).toBe(generationDelegation.id)
       // And clamped: a child never outlives its parent.
       expect(Date.parse(zcap.expires)).toBeLessThanOrEqual(
@@ -1459,47 +1530,174 @@ describe('processZcaps', () => {
         publicCollectionDetail
       ],
       session,
-      appProvisioning: true
+      app: { name: 'Example App', origin: 'https://app.example' }
     })
 
-    // The private collection routed through provisionAppCollection (with the
-    // identity-KAK recipient kid); the public one stayed plaintext via
-    // ensureCollection.
+    // The private collection routed through provisionEncryptedCollection (with
+    // the identity-KAK recipient kid and the app's attribution); the public one
+    // stayed plaintext via ensureCollection.
     expect(provisionCalls).toHaveLength(1)
     expect(provisionCalls[0].collectionId).toBe('example-app-data')
     expect(provisionCalls[0].recipientId).toBe(
       x25519RecipientFromDidKey({ did: granteeDid }).id
     )
+    expect(provisionCalls[0].generator).toBe(granteeDid)
     expect(ensureCalls).toEqual([{ id: 'example-app-public', isPublic: true }])
   })
 
-  it('App Connect: refuses to provision for an underivable controller', async () => {
+  it('awaits beforeProvision with every signed grant before any collection is provisioned', async () => {
+    delegated.length = 0
+    ensureCalls.length = 0
     provisionCalls.length = 0
-    // Right prefix, undecodable body: there is no X25519 twin to admit the app
-    // with, so the collection is never created half-encrypted.
-    await expect(
-      processZcaps({
-        zcapRequests: [{ ...collectionDetail, controller: 'did:key:z6MkZZZZ' }],
-        session,
-        appProvisioning: true
-      })
-    ).rejects.toThrow()
-    expect(provisionCalls).toHaveLength(0)
+    const order: string[] = []
+    let hookZcaps: IZcap[] = []
+    const zcaps = await processZcaps({
+      zcapRequests: [
+        { ...collectionDetail, controller: granteeDid },
+        standardReadDetail,
+        publicCollectionDetail
+      ],
+      session,
+      beforeProvision: async signed => {
+        // Every delegation is already signed; nothing is provisioned yet.
+        order.push(
+          `hook:${signed.length}:${provisionCalls.length}:${ensureCalls.length}`
+        )
+        hookZcaps = [...signed]
+      }
+    })
+    expect(order).toEqual(['hook:3:0:0'])
+    expect(provisionCalls).toHaveLength(1)
+    expect(ensureCalls).toEqual([{ id: 'example-app-public', isPublic: true }])
+    // The hook saw the same signed grants the call returns, each carrying
+    // what revocation reads back: the parent and the controller.
+    expect(hookZcaps).toEqual(zcaps)
+    for (const zcap of hookZcaps) {
+      expect(zcap).toHaveProperty('parentCapability')
+    }
+    expect((hookZcaps[0] as { controller: string }).controller).toBe(granteeDid)
   })
 
-  it('without appProvisioning, a private collection provisions plaintext', async () => {
+  it('provisions nothing when beforeProvision throws', async () => {
+    delegated.length = 0
+    ensureCalls.length = 0
+    provisionCalls.length = 0
+    await expect(
+      processZcaps({
+        zcapRequests: [
+          { ...collectionDetail, controller: granteeDid },
+          publicCollectionDetail
+        ],
+        session,
+        beforeProvision: async () => {
+          throw new Error('history write failed')
+        }
+      })
+    ).rejects.toThrow('history write failed')
+    expect(provisionCalls).toHaveLength(0)
+    expect(ensureCalls).toHaveLength(0)
+  })
+
+  it('does not call beforeProvision when no grant provisions', async () => {
+    provisionCalls.length = 0
+    let called = false
+    const zcaps = await processZcaps({
+      zcapRequests: [standardReadDetail],
+      session,
+      beforeProvision: async () => {
+        called = true
+      }
+    })
+    expect(zcaps).toHaveLength(1)
+    expect(called).toBe(false)
+  })
+
+  it('admits a grantee to an existing private collection only after beforeProvision', async () => {
+    provisionCalls.length = 0
+    collectionListing = [{ id: 'example-app-data' }]
+    const order: string[] = []
+    await processZcaps({
+      zcapRequests: [{ ...collectionDetail, controller: granteeDid }],
+      session,
+      beforeProvision: async () => {
+        order.push(`hook:${provisionCalls.length}`)
+      }
+    })
+    expect(order).toEqual(['hook:0'])
+    expect(provisionCalls.map(call => call.collectionId)).toEqual([
+      'example-app-data'
+    ])
+  })
+
+  it('refuses a private-collection grant to an underivable controller at resolution', async () => {
+    provisionCalls.length = 0
+    ensureCalls.length = 0
+    // Right prefix, undecodable body: there is no X25519 twin to escrow, so
+    // the grant previews as "cannot fulfill" and the collection is never
+    // created, rather than throwing part-way through the response.
+    const descriptor = { ...collectionDetail, controller: 'did:key:z6MkZZZZ' }
+    expect(
+      resolveGrant({
+        descriptor,
+        space: SPACE,
+        collections: NO_COLLECTIONS
+      }).target.targetClass
+    ).toBeUndefined()
+    const zcaps = await processZcaps({
+      zcapRequests: [descriptor],
+      session
+    })
+    expect(zcaps).toHaveLength(0)
+    expect(provisionCalls).toHaveLength(0)
+    expect(ensureCalls).toHaveLength(0)
+  })
+
+  it('refuses a private-collection grant to a non-did:key controller', () => {
+    expect(
+      resolveGrant({
+        descriptor: {
+          ...collectionDetail,
+          controller: 'did:web:agent.example'
+        },
+        space: SPACE,
+        collections: NO_COLLECTIONS
+      }).target.targetClass
+    ).toBeUndefined()
+  })
+
+  it('still grants a public collection to a non-did:key controller', () => {
+    expect(
+      resolveGrant({
+        descriptor: {
+          ...publicCollectionDetail,
+          controller: 'did:web:agent.example'
+        },
+        space: SPACE,
+        collections: NO_COLLECTIONS
+      }).target.targetClass
+    ).toBe('public-collection')
+  })
+
+  it('an interaction-URL agent grant provisions encrypted and unattributed', async () => {
     delegated.length = 0
     ensureCalls.length = 0
     provisionCalls.length = 0
     await processZcaps({
-      zcapRequests: [collectionDetail],
+      zcapRequests: [{ ...collectionDetail, controller: granteeDid }],
       session
     })
-    expect(provisionCalls).toHaveLength(0)
-    expect(ensureCalls).toEqual([{ id: 'example-app-data', isPublic: false }])
+    expect(ensureCalls).toEqual([])
+    expect(provisionCalls).toEqual([
+      {
+        collectionId: 'example-app-data',
+        recipientId: x25519RecipientFromDidKey({ did: granteeDid }).id
+      }
+    ])
   })
 
   it('caps a standard-collection write to read-only when delegating', async () => {
+    // The string target resolves only onto a collection the Space lists.
+    collectionListing = [{ id: 'private-credentials' }]
     delegated.length = 0
     ensureCalls.length = 0
     const zcaps = await processZcaps({
@@ -1614,8 +1812,7 @@ describe('processZcaps', () => {
           }
         }
       ],
-      session,
-      appProvisioning: true
+      session
     })
     expect(zcaps).toHaveLength(0)
     expect(ensureCalls).toEqual([])
@@ -1677,12 +1874,11 @@ describe('processZcaps', () => {
           }
         }
       ],
-      session,
-      appProvisioning: true
+      session
     })
     // The `#collection` spelling of an existing public collection is the
     // idempotent public re-grant: nothing provisioned -- so the
-    // public policy is not re-applied, and on App Connect no recipient
+    // public policy is not re-applied, and no recipient
     // roster is set up on a world-readable plaintext collection.
     expect(zcaps).toHaveLength(1)
     expect(ensureCalls).toEqual([])
@@ -1694,7 +1890,7 @@ describe('processZcaps', () => {
 
   it('refuses a same-request public grant on a just-provisioned private collection', async () => {
     // One request, two descriptors naming the same collection: the first
-    // provisions it private (on App Connect: encrypted, multi-recipient), the
+    // provisions it private (encrypted, multi-recipient), the
     // second asks for it public. The snapshot records the in-request
     // provisioning, so the create-only rule sees an existing non-public
     // collection and refuses -- one consent approval must not flip the
@@ -1715,8 +1911,7 @@ describe('processZcaps', () => {
           }
         }
       ],
-      session,
-      appProvisioning: true
+      session
     })
     expect(zcaps).toHaveLength(1)
     expect(provisionCalls).toHaveLength(1)
@@ -1725,11 +1920,12 @@ describe('processZcaps', () => {
     expect(ensureCalls).toEqual([])
   })
 
-  it('classes a same-request string target on a just-provisioned public collection', async () => {
+  it('refuses a same-request string target on a just-provisioned public collection', async () => {
     // The mirror order: the first descriptor provisions a public collection,
     // the second reaches the same collection as a plain URL asking for the
-    // full vocabulary. The live snapshot classes it public-collection, so the
-    // grant lands without re-provisioning the world-readable target.
+    // full vocabulary. A string target sees only the collections that stood
+    // before the request, as the consent preview did, so the second grant is
+    // skipped and the first is not re-provisioned.
     delegated.length = 0
     ensureCalls.length = 0
     const zcaps = await processZcaps({
@@ -1744,11 +1940,8 @@ describe('processZcaps', () => {
       ],
       session
     })
-    expect(zcaps).toHaveLength(2)
+    expect(zcaps).toHaveLength(1)
     expect(ensureCalls).toEqual([{ id: 'example-app-public', isPublic: true }])
-    expect(
-      (zcaps[1] as unknown as { allowedAction: string[] }).allowedAction
-    ).toEqual(['GET', 'HEAD', 'POST', 'PUT', 'DELETE'])
   })
 
   it('routes a share grant to shareCollection, not the delegation loop', async () => {
@@ -1778,6 +1971,37 @@ describe('processZcaps', () => {
     expect(
       (zcaps[0] as unknown as { allowedAction: string[] }).allowedAction
     ).toEqual(['GET', 'HEAD'])
+  })
+
+  it('escrows a share only after beforeProvision records its signed zcap', async () => {
+    shareCalls.length = 0
+    let sharesAtHook = -1
+    let signedAtHook: unknown[] = []
+    const zcaps = await processZcaps({
+      zcapRequests: [shareDetail],
+      session,
+      beforeProvision: async signed => {
+        sharesAtHook = shareCalls.length
+        signedAtHook = signed
+      }
+    })
+    expect(sharesAtHook).toBe(0)
+    expect(signedAtHook).toEqual(zcaps)
+    expect(shareCalls).toHaveLength(1)
+  })
+
+  it('escrows no share when beforeProvision throws', async () => {
+    shareCalls.length = 0
+    await expect(
+      processZcaps({
+        zcapRequests: [shareDetail],
+        session,
+        beforeProvision: async () => {
+          throw new Error('history write failed')
+        }
+      })
+    ).rejects.toThrow('history write failed')
+    expect(shareCalls).toHaveLength(0)
   })
 
   it('records the app name and origin on an App Connect share', async () => {
@@ -1880,14 +2104,15 @@ describe('processRequest with zcaps', () => {
           { type: 'DIDAuthentication', acceptedMethods: [{ method: 'key' }] },
           {
             type: 'AuthorizationCapabilityQuery',
-            capabilityQuery: [collectionDetail, spaceDetail]
+            capabilityQuery: [collectionDetail, standardReadDetail]
           }
         ],
         challenge: CHALLENGE,
         domain: 'verifier.example'
       },
       session,
-      credentialRequestOrigin: 'https://verifier.example'
+      credentialRequestOrigin: 'https://verifier.example',
+      delegateStandaloneZcaps: true
     })
 
     const vp = verifiablePresentation as unknown as {
@@ -1921,7 +2146,8 @@ describe('processRequest with zcaps', () => {
         ]
       },
       session,
-      credentialRequestOrigin: 'https://verifier.example'
+      credentialRequestOrigin: 'https://verifier.example',
+      delegateStandaloneZcaps: true
     })
     const vp = verifiablePresentation as unknown as {
       zcap?: IZcap[]
@@ -1929,6 +2155,22 @@ describe('processRequest with zcaps', () => {
     }
     expect(vp.proof).toBeUndefined()
     expect(vp.zcap).toHaveLength(1)
+  })
+
+  it('delegates no standalone grant without the opt-in', async () => {
+    const response = await processRequest({
+      request: {
+        query: [
+          {
+            type: 'ZcapQuery',
+            capabilityQuery: collectionDetail
+          }
+        ]
+      },
+      session,
+      credentialRequestOrigin: 'https://verifier.example'
+    })
+    expect(response).toEqual({})
   })
 
   it('enforces domain binding before delegating on a zcap request', async () => {
@@ -1944,7 +2186,8 @@ describe('processRequest with zcaps', () => {
           domain: 'attacker.example'
         },
         session,
-        credentialRequestOrigin: 'https://verifier.example'
+        credentialRequestOrigin: 'https://verifier.example',
+        delegateStandaloneZcaps: true
       })
     ).rejects.toThrow(/does not match request origin/)
   })

@@ -14,7 +14,6 @@ import type {
   IKeyAgreementKey,
   IKeyResolver
 } from '@interop/data-integrity-core'
-import { X25519KeyAgreementKey2020 } from '@interop/x25519-key-agreement-key'
 import { createEdvDocCipher, type DocCipher } from '@interop/was-client/edv'
 import { getRxStorageMemory } from 'rxdb/plugins/storage-memory'
 import { mintRecordEncryption } from '@/session/recordEnvelope'
@@ -22,6 +21,7 @@ import { browserLocalSessionPersistence } from '@/session/persistence'
 import type { Session, User } from '@/types/auth'
 import { BrowserStore } from '@/stores/browserStore'
 import { StorageManager } from '@/stores/storageManager'
+import { generateVaultKeys } from '@/stores/testing/vaultKeys'
 
 /**
  * A logical cipher key paired with the WAS collection id it seals for.
@@ -85,12 +85,8 @@ export async function memoryStorageManager({
   controller?: string
   userIdPrefix?: string
 } = {}): Promise<MemoryStorageHarness> {
-  const generated = await X25519KeyAgreementKey2020.generate({ controller })
-  const key = generated as IKeyAgreementKey
-  const keyResolver: IKeyResolver = async () => ({
-    id: generated.id!,
-    type: generated.type,
-    publicKeyMultibase: generated.publicKeyMultibase
+  const { keyAgreementKey: key, keyResolver } = await generateVaultKeys({
+    controller
   })
   const ciphers: Record<string, DocCipher> = {}
   for (const [logicalKey, collectionId] of collections) {

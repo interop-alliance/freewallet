@@ -4,6 +4,32 @@
 
 ### Fixed
 
+- The consent preview and the approval resolve a request's grants through
+  one resolver (`resolveGrants`), against one unchanged pre-request
+  snapshot. A request naming one new collection first public, then private,
+  now previews the private row as the public collection it delegates on. The
+  reverse order refuses the public row in both places. Two rows naming one
+  new private collection provision it once per grantee.
+- A torn collection unshare stays listed on the shares panel, and so
+  retryable, until its share grant expires.
+- An app or agent revocation whose rotation landed but whose pull failed
+  completes once the grant stage revokes the missed grants.
+- An agent revocation that cannot read the collection listing fails and
+  keeps the row.
+- Provisioning an encrypted collection refuses an existing unencrypted
+  collection that holds resources.
+- The revoke toast counts only the grants the run itself revoked.
+- An App Connect or interaction-URL approval that shares or provisions a
+  collection now persists its Login activity, with the signed grants, before
+  it escrows the grantee into any key epoch (`processZcaps`'s
+  `beforeProvision`). A failed persist fails the request with nothing
+  escrowed, so no grantee holds epoch keys that revocation cannot find. A
+  share's zcap is signed by the new `StorageManager.delegateShareGrant`, and
+  `shareCollection` takes it and refuses one that is not read-only on the
+  shared collection.
+- An approval that fails after that early persist removes the Login again
+  (`StorageManager.deleteHistoryActivity`), so the Applications page lists no
+  grants that were never delivered and a retry leaves one Login.
 - The backup export's pre-flight now also refuses, read-only, a session whose
   rung the pointed client-annex generation neither reveals nor commits
   (wallet-core's `clientAnnexRungAdmitted`), beside the no-ladder-seed case.
@@ -26,9 +52,61 @@
 - The CHAPI get popup hands its already-listed app keys to the consent
   row's attribution pass, which no longer lists `app-connections` a second
   time.
+- An agent row whose grants have all expired stays on the Applications page
+  while a granted collection's current key epoch still lists the agent,
+  flagged Access expired. That roster entry does not expire, so Revoke must
+  stay reachable to rotate it away. The check is the revocation's own rule
+  (`StorageManager.granteeRosterCollections`), and reads each targeted
+  collection once for all the expired rows.
+- `StorageManager` now requires its vault keys at construction. An app or
+  agent revocation can no longer report success with nothing rotated on a
+  session that has a remote store but no vault keys.
 
 ### Changed
 
+- An interaction-URL agent grant now provisions its private collection
+  encrypted, escrowing the agent's key-agreement key beside the user's, as
+  App Connect does. A grant there to a controller that is not an Ed25519
+  did:key is now unsatisfiable at consent. The `appProvisioning` option on
+  `processZcaps` is gone, and `StorageManager.provisionAppCollection` is
+  renamed `provisionEncryptedCollection`.
+- A plain CHAPI `get` no longer delegates capabilities. A request carrying
+  a standalone capability query outside an `AppConnectQuery` is refused
+  before the login form renders (`standaloneZcapRequest`). Only App Connect
+  and the interaction-URL page grant storage access, and the Applications
+  page lists and revokes both. The consent panel's default revoke note now
+  names the Applications page.
+- Revoking an app or an agent no longer POSTs a second revocation for the
+  grants the key rotation already revoked. They count as revoked, and an
+  agent's recorded Revoke names them. The rotation revokes each grant under
+  the grant stage's policy, so a refusal it cannot explain fails the
+  collection and keeps the row.
+- A revocation now counts a grant the server answers `AlreadyRevokedError`
+  as revoked, so the Revoke a retry records names the grants an earlier,
+  failed attempt withdrew.
+- The login-time sweep of stranded app keys runs the same revocation
+  sequence as the Applications page (`revokeAppAuthority`), so the grant
+  stage also runs when a collection could not be re-keyed.
+- A string target naming an existing encrypted collection now shows the
+  consent row's ciphertext note, read off the collection's own metadata,
+  unless the collection's current key epoch already lists the grantee.
+- A string target never provisions. One naming a collection that does not
+  exist, or a Resource inside one, is now unsatisfiable, so a grantee cannot
+  create a collection through its first write. A collection an earlier
+  descriptor in the same request provisions does not count, matching the
+  consent preview.
+- The `key-map` and `unlock-methods` collections are never grantable, under
+  any descriptor type or as a string target. A read of `key-map`'s user key
+  roster was an offline passphrase-guessing oracle.
+- Whole-Space grants are no longer made, per the App Connect spec: the
+  `https://w3id.org/byoe#space` descriptor type and a string target naming
+  the Space itself are unsatisfiable. The `space` target class and its
+  consent-row warning are removed.
+- Revoking a connected agent now rotates each private collection its
+  recorded grants target off the agent's key
+  (`StorageManager.revokeAgentCollectionRecipients`) before revoking the
+  remaining grants. A collection that cannot be re-keyed keeps the row
+  listed with no Revoke recorded, as on the app path.
 - The menders account-shape value `client-less` is now `ladder-anchored`,
   following wallet-core's `ACCOUNT_SHAPES`, and the word is retired from
   ARCHITECTURE.md, `docs/architecture/`, and code comments: a transient client
@@ -58,6 +136,15 @@
 
 ### Added
 
+- A production `Dockerfile` and the nginx config it serves the build with
+  (`deploy/nginx.conf.template`), which also proxies the WAS server's routes on
+  the same origin. It passes through the server's sandbox header on Resource
+  responses and adds one to the CORS proxy's responses, so a hosted HTML page
+  cannot read the wallet's storage.
+  An example Fly.io `fly.toml` and a deploy workflow come
+  with it. The workflow runs when a GitHub release is published and takes the
+  app name, domain and upstream from its GitHub environment's variables. See
+  `docs/deployment-fly.io.md`.
 - A WAS signup refuses a storage server whose service description does not
   claim the client annex profile, before the key derivation and before any
   passkey is registered. The signup publishes a ladder verification method,

@@ -56,7 +56,8 @@ raises `GetRequestRefusedError` carrying a `GetRequestRefusal`, which the page
 sets as its `BlockReason` and renders from the matching `chapi.get.*` copy
 cell. The order is: an origin this wallet cannot attribute
 (`unattributedOrigin`), a body carrying no readable query and a body the
-classifier rejects (both `malformedRequest`), a `DIDAuthentication`
+classifier rejects (both `malformedRequest`), a standalone capability query
+outside an `AppConnectQuery` (`standaloneZcapRequest`), a `DIDAuthentication`
 constrained to DID methods no session on this deployment could present
 (`unsupported`), and a `domain` that does not match the attested origin
 (`domainMismatch`). The origin cell is read ahead of the request body, so an
@@ -69,6 +70,19 @@ serialize their origin as the string `null`). Consent therefore renders with a
 requester to name rather than with a blank chip. A path that has no attested
 origin at all states that fact instead, on the model of the interaction-URL
 page's `EXTERNAL_REQUEST_ORIGIN` marker.
+
+**A plain CHAPI `get` grants nothing.** Only two paths delegate
+capabilities: App Connect (the capability queries inside an
+`AppConnectQuery`) and the interaction-URL page's agent requests. The
+Applications page lists each one's grantees and can revoke them, as an app
+row or an agent row. A get request carrying a standalone
+`AuthorizationCapabilityQuery` (or `ZcapQuery`) with no `AppConnectQuery`
+would leave a grantee no listing covers, so the pre-consent matrix refuses it
+(`standaloneZcapRequest`) before the login form renders. The refusal stays
+in the popup: Cancel answers the channel with `null`, as for every other
+block. The consent panel's default revoke note names the Applications page,
+which is true on the App Connect path, the only popup path that still
+renders it.
 
 **The store popup refuses a DID-Auth request before login.** A
 `navigator.credentials.store()` may name a VC API exchange that opens with a

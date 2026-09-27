@@ -21,6 +21,7 @@ import {
 import type { IZcap } from '@interop/was-client'
 import type { ControllerProfile } from '@/types/auth'
 import { StorageManager } from './storageManager'
+import { generateVaultKeys } from '@/stores/testing/vaultKeys'
 import type { WASRemoteStore } from './wasRemoteStore'
 
 const ACCOUNT_DID = 'did:webvh:QmScid:was.example:space:s-space'
@@ -60,6 +61,8 @@ function fakeRemote({
   }
 }
 
+const VAULT_KEYS = await generateVaultKeys()
+
 /**
  * A StorageManager over that fake, plus the profile the promotion reads: a
  * signer-shaped key agent (`didKeyZcapClient` only calls `getSigner()`) and
@@ -71,6 +74,7 @@ function managerFor(remoteStore: WASRemoteStore): {
 } {
   const manager = new StorageManager({
     remoteStore,
+    vaultKeys: VAULT_KEYS,
     persistence: inMemorySessionPersistence({
       stores: transientSessionStores(),
       clientAnnex: {

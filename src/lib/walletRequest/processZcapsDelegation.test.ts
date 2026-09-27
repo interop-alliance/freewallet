@@ -10,15 +10,22 @@ import { renewTransientGenerationDelegation } from '@/session/annexReach'
 import { ZCAP_RENEWAL_WINDOW_MS } from '@interop/wallet-core/webvh'
 import { RP_ZCAP_WRITE_TTL_MS } from '@/app.config'
 import { requestingOriginOf } from './classify'
-import { GenerationDelegationStaleError, processZcaps } from './processZcaps'
+import {
+  existingCollectionsFrom,
+  GenerationDelegationStaleError,
+  isSatisfiable,
+  processZcaps,
+  resolveGrants
+} from './processZcaps'
 import type { ICapabilityQueryDetail, IZcap } from './types'
 
 const SPACE = { serverUrl: 'https://was.example/', spaceId: 'abc' }
 const SPACE_URL = 'https://was.example/space/abc/'
 const NOW = Date.parse('2026-08-22T12:00:00Z')
 const DAY_MS = 24 * 60 * 60 * 1000
-// A real Ed25519 did:key: the App Connect path derives the app's recipient
-// key-agreement key from it, which a placeholder string cannot satisfy.
+// Real Ed25519 did:keys: a provisioned private collection escrows the
+// grantee's recipient key-agreement key, derived from its controller, which
+// a placeholder string cannot satisfy.
 const APP_DID = 'did:key:z6MkqojacRDqmQgDi4ESKKhGDqnZx4C6cChAbQZXvnUFX7D7'
 const APP = { name: 'Docs App', origin: 'https://app.example' }
 const WRITE_DESCRIPTOR: ICapabilityQueryDetail = {
@@ -28,7 +35,7 @@ const WRITE_DESCRIPTOR: ICapabilityQueryDetail = {
     type: 'https://w3id.org/byoe#private-collection',
     name: 'docs'
   },
-  controller: 'did:key:z6MkTest'
+  controller: 'did:key:z6MkhaXgBZDvotDkL5257faiztiGiC2QtKLGpbnnEGta2doK'
 }
 const APP_WRITE_DESCRIPTOR: ICapabilityQueryDetail = {
   ...WRITE_DESCRIPTOR,
@@ -145,7 +152,7 @@ function fakeSession({
       spaceLocation: SPACE,
       listCollectionPublicStates,
       ensureCollection: vi.fn(async () => {}),
-      provisionAppCollection: vi.fn(async () => {})
+      provisionEncryptedCollection: vi.fn(async () => {})
     },
     profile: {
       zcapClient: { delegate },
@@ -207,7 +214,10 @@ describe('processZcaps delegation parent', () => {
       invocationCapability: delegationExpiringIn(-1)
     })
     await expect(
-      processZcaps({ zcapRequests: [WRITE_DESCRIPTOR], session })
+      processZcaps({
+        zcapRequests: [WRITE_DESCRIPTOR],
+        session
+      })
     ).rejects.toBeInstanceOf(GenerationDelegationStaleError)
     expect(delegate).not.toHaveBeenCalled()
   })
@@ -235,7 +245,10 @@ describe('processZcaps delegation parent', () => {
     const { session, delegate } = fakeSession({
       invocationCapability: delegationExpiringIn(2)
     })
-    await processZcaps({ zcapRequests: [WRITE_DESCRIPTOR], session })
+    await processZcaps({
+      zcapRequests: [WRITE_DESCRIPTOR],
+      session
+    })
     expect(renewTransientGenerationDelegation).toHaveBeenCalledWith({ session })
     const args = delegate.mock.calls[0][0]
     expect(args.capability).toBe(renewed)
@@ -251,7 +264,10 @@ describe('processZcaps delegation parent', () => {
       invocationCapability: delegationExpiringIn(-1)
     })
     await expect(
-      processZcaps({ zcapRequests: [WRITE_DESCRIPTOR], session })
+      processZcaps({
+        zcapRequests: [WRITE_DESCRIPTOR],
+        session
+      })
     ).rejects.toBeInstanceOf(GenerationDelegationStaleError)
     expect(delegate).not.toHaveBeenCalled()
   })
@@ -267,7 +283,10 @@ describe('processZcaps delegation parent', () => {
     const { session, listCollectionPublicStates } = fakeSession({
       invocationCapability: delegationExpiringIn(-1)
     })
-    await processZcaps({ zcapRequests: [WRITE_DESCRIPTOR], session })
+    await processZcaps({
+      zcapRequests: [WRITE_DESCRIPTOR],
+      session
+    })
     expect(
       vi.mocked(renewTransientGenerationDelegation).mock.invocationCallOrder[0]!
     ).toBeLessThan(listCollectionPublicStates.mock.invocationCallOrder[0]!)
@@ -290,7 +309,10 @@ describe('processZcaps delegation parent', () => {
       }),
       verifiedLog: memoListing([OTHER_VM])
     })
-    await processZcaps({ zcapRequests: [WRITE_DESCRIPTOR], session })
+    await processZcaps({
+      zcapRequests: [WRITE_DESCRIPTOR],
+      session
+    })
     expect(renewTransientGenerationDelegation).toHaveBeenCalledWith({ session })
     expect(delegate.mock.calls[0][0].capability).toBe(renewed)
   })
@@ -305,7 +327,10 @@ describe('processZcaps delegation parent', () => {
       invocationCapability,
       verifiedLog: memoListing([LADDER_VM, OTHER_VM])
     })
-    await processZcaps({ zcapRequests: [WRITE_DESCRIPTOR], session })
+    await processZcaps({
+      zcapRequests: [WRITE_DESCRIPTOR],
+      session
+    })
     expect(renewTransientGenerationDelegation).not.toHaveBeenCalled()
     expect(delegate.mock.calls[0][0].capability).toBe(invocationCapability)
   })
@@ -323,7 +348,10 @@ describe('processZcaps delegation parent', () => {
       verifiedLog: memoListing([OTHER_VM])
     })
     await expect(
-      processZcaps({ zcapRequests: [WRITE_DESCRIPTOR], session })
+      processZcaps({
+        zcapRequests: [WRITE_DESCRIPTOR],
+        session
+      })
     ).rejects.toBeInstanceOf(GenerationDelegationStaleError)
     expect(delegate).not.toHaveBeenCalled()
   })
@@ -331,7 +359,10 @@ describe('processZcaps delegation parent', () => {
   it('delegates off the Space root with the unclamped TTL for a remembered session', async () => {
     vi.useFakeTimers({ now: NOW })
     const { session, delegate } = fakeSession()
-    await processZcaps({ zcapRequests: [WRITE_DESCRIPTOR], session })
+    await processZcaps({
+      zcapRequests: [WRITE_DESCRIPTOR],
+      session
+    })
     const args = delegate.mock.calls[0][0]
     expect(args.capability).toBe(
       `urn:zcap:root:${encodeURIComponent(SPACE_URL)}`
@@ -346,10 +377,9 @@ describe('processZcaps collection attribution', () => {
     await processZcaps({
       zcapRequests: [APP_WRITE_DESCRIPTOR],
       session,
-      appProvisioning: true,
       app: APP
     })
-    expect(session.storage.provisionAppCollection).toHaveBeenCalledWith(
+    expect(session.storage.provisionEncryptedCollection).toHaveBeenCalledWith(
       expect.objectContaining({
         collectionId: 'docs',
         generator: APP_DID,
@@ -363,7 +393,6 @@ describe('processZcaps collection attribution', () => {
     await processZcaps({
       zcapRequests: [APP_PUBLIC_DESCRIPTOR],
       session,
-      appProvisioning: true,
       app: APP
     })
     expect(session.storage.ensureCollection).toHaveBeenCalledWith({
@@ -379,7 +408,6 @@ describe('processZcaps collection attribution', () => {
     await processZcaps({
       zcapRequests: [APP_PUBLIC_DESCRIPTOR],
       session,
-      appProvisioning: true,
       app: { ...APP, origin: requestingOriginOf('https://App.example:443/')! }
     })
     expect(session.storage.ensureCollection).toHaveBeenCalledWith(
@@ -395,11 +423,12 @@ describe('processZcaps collection attribution', () => {
     await processZcaps({
       zcapRequests: [APP_WRITE_DESCRIPTOR],
       session,
-      appProvisioning: true,
       app: APP
     })
-    expect(session.storage.provisionAppCollection).toHaveBeenCalledTimes(1)
-    const [args] = vi.mocked(session.storage.provisionAppCollection).mock
+    expect(session.storage.provisionEncryptedCollection).toHaveBeenCalledTimes(
+      1
+    )
+    const [args] = vi.mocked(session.storage.provisionEncryptedCollection).mock
       .calls[0]
     expect(args).toMatchObject({
       collectionId: 'docs',
@@ -408,12 +437,238 @@ describe('processZcaps collection attribution', () => {
     })
   })
 
-  it('stamps nothing when the request is not an App Connect one', async () => {
+  it('stamps nothing on an interaction-URL agent grant', async () => {
     const { session } = fakeSession()
-    await processZcaps({ zcapRequests: [WRITE_DESCRIPTOR], session })
-    expect(session.storage.ensureCollection).toHaveBeenCalledWith({
-      id: 'docs',
-      isPublic: false
+    await processZcaps({
+      zcapRequests: [WRITE_DESCRIPTOR],
+      session
     })
+    expect(session.storage.ensureCollection).not.toHaveBeenCalled()
+    const [args] = vi.mocked(session.storage.provisionEncryptedCollection).mock
+      .calls[0]
+    expect(args.collectionId).toBe('docs')
+    expect(args).not.toHaveProperty('generator')
+    expect(args).not.toHaveProperty('generatorOrigin')
+  })
+})
+
+describe('processZcaps string target on a collection the request provisions', () => {
+  // Descriptor 1 provisions `x` for the agent; descriptor 2 names the same
+  // collection by URL for a different controller, asking for write and
+  // delete. The consent preview judges row 2 against the pre-request
+  // snapshot, where `x` does not exist, so approval must not delegate it.
+  const OTHER_DID = 'did:key:z6MkhaXgBZDvotDkL5257faiztiGiC2QtKLGpbnnEGta2doK'
+  const REQUESTS: ICapabilityQueryDetail[] = [
+    {
+      referenceId: 'x',
+      allowedAction: ['GET', 'PUT'],
+      invocationTarget: {
+        type: 'https://w3id.org/byoe#private-collection',
+        name: 'x'
+      },
+      controller: APP_DID
+    },
+    {
+      referenceId: 'x-by-url',
+      allowedAction: ['GET', 'PUT', 'DELETE'],
+      invocationTarget: `${SPACE_URL}x/`,
+      controller: OTHER_DID
+    }
+  ]
+
+  it('previews the string row as unsatisfiable', () => {
+    const [first, second] = resolveGrants({
+      zcapRequests: REQUESTS,
+      space: SPACE,
+      collections: existingCollectionsFrom([])
+    })
+    expect(isSatisfiable(first!.target)).toBe(true)
+    expect(isSatisfiable(second!.target)).toBe(false)
+  })
+
+  it('does not delegate the string row on approval', async () => {
+    const { session, delegate } = fakeSession()
+    const zcaps = await processZcaps({ zcapRequests: REQUESTS, session })
+    expect(session.storage.provisionEncryptedCollection).toHaveBeenCalledTimes(
+      1
+    )
+    expect(zcaps).toHaveLength(1)
+    expect(delegate).toHaveBeenCalledTimes(1)
+    expect(delegate.mock.calls[0]![0].controller).toBe(APP_DID)
+    expect(
+      delegate.mock.calls.some(([args]) => args.controller === OTHER_DID)
+    ).toBe(false)
+  })
+})
+
+describe('processZcaps string target on an existing collection a descriptor re-provisions', () => {
+  // `notes` stood before the request. Descriptor 1 names it by the
+  // private-collection form, which re-runs the idempotent provisioning step;
+  // descriptor 2 names it by URL. The preview resolves both against the
+  // pre-request snapshot, where `notes` exists, so approval must delegate
+  // both.
+  const OTHER_DID = 'did:key:z6MkhaXgBZDvotDkL5257faiztiGiC2QtKLGpbnnEGta2doK'
+  const REQUESTS: ICapabilityQueryDetail[] = [
+    {
+      referenceId: 'notes',
+      allowedAction: ['GET', 'PUT'],
+      invocationTarget: {
+        type: 'https://w3id.org/byoe#private-collection',
+        name: 'notes'
+      },
+      controller: APP_DID
+    },
+    {
+      referenceId: 'notes-by-url',
+      allowedAction: ['GET'],
+      invocationTarget: `${SPACE_URL}notes/`,
+      controller: OTHER_DID
+    }
+  ]
+
+  it('previews both rows as satisfiable', () => {
+    const [first, second] = resolveGrants({
+      zcapRequests: REQUESTS,
+      space: SPACE,
+      collections: existingCollectionsFrom([{ id: 'notes' }])
+    })
+    expect(first!.target.needsProvisioning).toBe(true)
+    expect(isSatisfiable(first!.target)).toBe(true)
+    expect(isSatisfiable(second!.target)).toBe(true)
+  })
+
+  it('delegates the string row on approval', async () => {
+    const { session, delegate } = fakeSession({
+      collections: [{ id: 'notes' }]
+    })
+    const zcaps = await processZcaps({ zcapRequests: REQUESTS, session })
+    expect(session.storage.provisionEncryptedCollection).toHaveBeenCalledTimes(
+      1
+    )
+    expect(zcaps).toHaveLength(2)
+    expect(delegate).toHaveBeenCalledTimes(2)
+    expect(delegate.mock.calls[1]![0]).toMatchObject({
+      controller: OTHER_DID,
+      invocationTarget: `${SPACE_URL}notes/`
+    })
+  })
+})
+
+describe('processZcaps one new collection named public, then private', () => {
+  // Descriptor 1 asks for `x` world-readable, descriptor 2 for `x` private.
+  // The preview and the approval resolve through the same resolver, so both
+  // class row 2 onto the public collection row 1 creates.
+  const REQUESTS: ICapabilityQueryDetail[] = [
+    {
+      referenceId: 'x-public',
+      allowedAction: ['GET', 'PUT'],
+      invocationTarget: {
+        type: 'https://w3id.org/byoe#public-collection',
+        name: 'x'
+      },
+      controller: APP_DID
+    },
+    {
+      referenceId: 'x-private',
+      allowedAction: ['GET', 'PUT'],
+      invocationTarget: {
+        type: 'https://w3id.org/byoe#private-collection',
+        name: 'x'
+      },
+      controller: APP_DID
+    }
+  ]
+
+  it('previews the private row as the public collection, provisioning nothing', () => {
+    const [first, second] = resolveGrants({
+      zcapRequests: REQUESTS,
+      space: SPACE,
+      collections: existingCollectionsFrom([])
+    })
+    expect(first!.target).toMatchObject({
+      targetClass: 'public-collection',
+      needsProvisioning: true
+    })
+    expect(second!.target).toMatchObject({
+      targetClass: 'public-collection',
+      needsProvisioning: false
+    })
+  })
+
+  it('provisions one public collection on approval and delegates both rows on it', async () => {
+    const { session, delegate } = fakeSession()
+    const zcaps = await processZcaps({ zcapRequests: REQUESTS, session })
+    expect(session.storage.ensureCollection).toHaveBeenCalledTimes(1)
+    expect(session.storage.ensureCollection).toHaveBeenCalledWith(
+      expect.objectContaining({ id: 'x', isPublic: true })
+    )
+    expect(session.storage.provisionEncryptedCollection).not.toHaveBeenCalled()
+    expect(zcaps).toHaveLength(2)
+    expect(delegate).toHaveBeenCalledTimes(2)
+  })
+
+  it('refuses the public row in both places when the private row comes first', async () => {
+    const reversed = [REQUESTS[1]!, REQUESTS[0]!]
+    const [first, second] = resolveGrants({
+      zcapRequests: reversed,
+      space: SPACE,
+      collections: existingCollectionsFrom([])
+    })
+    expect(first!.target.targetClass).toBe('collection')
+    expect(isSatisfiable(second!.target)).toBe(false)
+
+    const { session, delegate } = fakeSession()
+    const zcaps = await processZcaps({ zcapRequests: reversed, session })
+    expect(session.storage.ensureCollection).not.toHaveBeenCalled()
+    expect(session.storage.provisionEncryptedCollection).toHaveBeenCalledTimes(
+      1
+    )
+    expect(zcaps).toHaveLength(1)
+    expect(delegate).toHaveBeenCalledTimes(1)
+  })
+})
+
+describe('processZcaps two rows naming one new private collection', () => {
+  const ROW: ICapabilityQueryDetail = {
+    referenceId: 'x-read',
+    allowedAction: ['GET'],
+    invocationTarget: {
+      type: 'https://w3id.org/byoe#private-collection',
+      name: 'x'
+    },
+    controller: APP_DID
+  }
+
+  it('provisions the collection once for one grantee', async () => {
+    const { session, delegate } = fakeSession()
+    const zcaps = await processZcaps({
+      zcapRequests: [
+        ROW,
+        { ...ROW, referenceId: 'x-write', allowedAction: ['GET', 'PUT'] }
+      ],
+      session
+    })
+    expect(session.storage.provisionEncryptedCollection).toHaveBeenCalledTimes(
+      1
+    )
+    expect(zcaps).toHaveLength(2)
+    expect(delegate).toHaveBeenCalledTimes(2)
+  })
+
+  it('escrows each distinct grantee once', async () => {
+    const { session } = fakeSession()
+    await processZcaps({
+      zcapRequests: [
+        ROW,
+        ROW,
+        { ...ROW, controller: WRITE_DESCRIPTOR.controller }
+      ],
+      session
+    })
+    const provision = vi.mocked(session.storage.provisionEncryptedCollection)
+    expect(provision).toHaveBeenCalledTimes(2)
+    expect(
+      new Set(provision.mock.calls.map(([args]) => args.recipient.id)).size
+    ).toBe(2)
   })
 })
