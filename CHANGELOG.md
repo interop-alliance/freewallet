@@ -17,6 +17,15 @@
   the same rule the Settings last-method refusal applies.
 - The failed-establishment cleanup reads and verifies the account log once
   instead of twice.
+- The Storage page and the collection contents page now name a collection
+  created by a since-disconnected app by the display name its App Connect
+  Login recorded, as the consent row does, rather than by its origin alone.
+  All three read one resolver, `lookupCollectionCreators`, which returns the
+  app-key cid while the app is connected so the caption can link to it. The
+  `useConnectedApps` hook is replaced by `useCollectionCreators`.
+- The CHAPI get popup hands its already-listed app keys to the consent
+  row's attribution pass, which no longer lists `app-connections` a second
+  time.
 
 ### Changed
 

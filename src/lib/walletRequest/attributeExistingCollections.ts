@@ -8,7 +8,10 @@
  */
 
 import type { Session } from '@/types/auth'
-import { lookupCollectionCreators } from '@/lib/connectedApps'
+import {
+  lookupCollectionCreators,
+  type CollectionCreator
+} from '@/lib/connectedApps'
 import { createLogger } from '@/lib/log'
 import {
   existingCollectionsFrom,
@@ -27,24 +30,30 @@ const log = createLogger('fw:request:attribution')
  * and resolves again. Every read is best-effort: a failed metadata read
  * leaves that collection unattributed, and a failed records lookup leaves
  * every creator unresolved, so a collection this app did not create reads
- * as another application's and names its origin.
+ * as another application's and names its origin. A caller that has already
+ * listed the app keys (the CHAPI get popup's App Connect match) hands the
+ * listing in, so the lookup does not read `app-connections` a second time.
  *
  * @param options {object}
  * @param options.resolution {Parameters<typeof resolveGrants>[0]}   the
  *   first pass's inputs
  * @param options.grants {ResolvedGrant[]}   the first pass's result
  * @param options.storage {Session['storage']}
+ * @param [options.appKeys] {Awaited<ReturnType<Session['storage']['listAppKeys']>>}
+ *   the app-key listing, when the caller already holds one
  * @returns {Promise<ResolvedGrant[] | undefined>}   undefined when no grant
  *   names an existing private collection, so nothing changes
  */
 export async function attributeExistingCollections({
   resolution,
   grants,
-  storage
+  storage,
+  appKeys
 }: {
   resolution: Parameters<typeof resolveGrants>[0]
   grants: ResolvedGrant[]
   storage: Session['storage']
+  appKeys?: Awaited<ReturnType<Session['storage']['listAppKeys']>>
 }): Promise<ResolvedGrant[] | undefined> {
   const collectionIds = new Set(
     grants.flatMap(({ target }) =>
@@ -80,10 +89,9 @@ export async function attributeExistingCollections({
   const generators = [...attributions.values()].flatMap(({ generator }) =>
     generator ? [generator] : []
   )
-  let creators: ReadonlyMap<string, { name: string; appUrl: string }> =
-    new Map()
+  let creators: ReadonlyMap<string, CollectionCreator> = new Map()
   try {
-    creators = await lookupCollectionCreators({ storage, generators })
+    creators = await lookupCollectionCreators({ storage, generators, appKeys })
   } catch (err) {
     log.warn("Could not look up the existing collections' creators", { err })
   }

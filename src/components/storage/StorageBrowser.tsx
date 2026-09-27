@@ -16,7 +16,7 @@ import {
   MdSettings,
   MdShare
 } from 'react-icons/md'
-import type { ConnectedApp } from '@/lib/connectedApps'
+import type { CollectionCreator } from '@/lib/connectedApps'
 import type { StorageCollection } from '@/lib/storage'
 import type { CollectionShare } from '@/session/shares'
 import type { SyncStatus } from '@/stores/syncStatusStore'
@@ -42,7 +42,7 @@ export function CollectionsOverview({
   usageByCollection,
   syncStatuses,
   sharesByCollection,
-  appsByCollection,
+  creatorsByCollection,
   onShowShares
 }: {
   collections: StorageCollection[]
@@ -50,10 +50,10 @@ export function CollectionsOverview({
   syncStatuses?: Record<string, SyncStatus>
   sharesByCollection?: Record<string, CollectionShare[]>
   /**
-   * The connected application each app-provisioned collection belongs to,
-   * keyed by collection id (`attributeCollectionsToApps`).
+   * The application that created each app-provisioned collection, keyed by
+   * collection id (`attributeCollectionsToApps`).
    */
-  appsByCollection?: Map<string, ConnectedApp>
+  creatorsByCollection?: Map<string, CollectionCreator>
   onShowShares?: (collectionId: string) => void
 }) {
   const { t } = useTranslation()
@@ -78,7 +78,7 @@ export function CollectionsOverview({
         usageByCollection={usageByCollection}
         syncStatuses={syncStatuses}
         sharesByCollection={sharesByCollection}
-        appsByCollection={appsByCollection}
+        creatorsByCollection={creatorsByCollection}
         onShowShares={onShowShares}
       />
       {app.length > 0 && (
@@ -89,7 +89,7 @@ export function CollectionsOverview({
           usageByCollection={usageByCollection}
           syncStatuses={syncStatuses}
           sharesByCollection={sharesByCollection}
-          appsByCollection={appsByCollection}
+          creatorsByCollection={creatorsByCollection}
           onShowShares={onShowShares}
         />
       )}
@@ -99,7 +99,7 @@ export function CollectionsOverview({
         usageByCollection={usageByCollection}
         syncStatuses={syncStatuses}
         sharesByCollection={sharesByCollection}
-        appsByCollection={appsByCollection}
+        creatorsByCollection={creatorsByCollection}
         onShowShares={onShowShares}
         muted
       />
@@ -119,7 +119,7 @@ function CollectionGroup({
   usageByCollection,
   syncStatuses,
   sharesByCollection,
-  appsByCollection,
+  creatorsByCollection,
   onShowShares,
   muted = false
 }: {
@@ -129,7 +129,7 @@ function CollectionGroup({
   usageByCollection?: Map<string, number>
   syncStatuses?: Record<string, SyncStatus>
   sharesByCollection?: Record<string, CollectionShare[]>
-  appsByCollection?: Map<string, ConnectedApp>
+  creatorsByCollection?: Map<string, CollectionCreator>
   onShowShares?: (collectionId: string) => void
   muted?: boolean
 }) {
@@ -161,7 +161,7 @@ function CollectionGroup({
             usageBytes={usageByCollection?.get(collection.id)}
             syncStatus={syncStatuses?.[collection.id]}
             shareCount={sharesByCollection?.[collection.id]?.length}
-            app={appsByCollection?.get(collection.id)}
+            creator={creatorsByCollection?.get(collection.id)}
             onShowShares={onShowShares}
             muted={muted}
           />
@@ -176,7 +176,7 @@ function CollectionFolderCard({
   usageBytes,
   syncStatus,
   shareCount,
-  app,
+  creator,
   onShowShares,
   muted = false
 }: {
@@ -184,7 +184,7 @@ function CollectionFolderCard({
   usageBytes?: number
   syncStatus?: SyncStatus
   shareCount?: number
-  app?: ConnectedApp
+  creator?: CollectionCreator
   onShowShares?: (collectionId: string) => void
   muted?: boolean
 }) {
@@ -251,7 +251,7 @@ function CollectionFolderCard({
             )}
             <CollectionAttribution
               collection={collection}
-              app={app}
+              creator={creator}
               linkToApp={false}
             />
           </Stack>

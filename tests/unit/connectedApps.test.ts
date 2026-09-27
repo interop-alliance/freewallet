@@ -469,7 +469,78 @@ describe('lookupCollectionCreators', () => {
       generators: [APP_DID]
     })
 
-    expect(creators.get(APP_DID)).toEqual({ name: 'Editor', appUrl: APP_URL })
+    expect(creators.get(APP_DID)).toEqual({
+      name: 'Editor',
+      appUrl: APP_URL,
+      cid: 'k1'
+    })
+  })
+
+  it('takes the newest connect when several app keys share a subject DID', async () => {
+    const storage = fakeStorage({
+      appKeys: [
+        appKeyCredential({
+          cid: 'k-old',
+          origin: 'https://app.example',
+          appUrl: APP_URL,
+          issuanceDate: '2026-07-01T00:00:00Z'
+        }),
+        appKeyCredential({
+          cid: 'k-new',
+          origin: 'https://app.example',
+          appUrl: APP_URL,
+          issuanceDate: '2026-07-05T00:00:00Z'
+        })
+      ],
+      history: []
+    })
+
+    const creators = await lookupCollectionCreators({
+      storage,
+      generators: [APP_DID]
+    })
+
+    expect(creators.get(APP_DID)?.cid).toBe('k-new')
+  })
+
+  it('reads a caller-supplied app-key listing and history rather than listing them again', async () => {
+    // The CHAPI get popup has just listed `app-connections` for its app-key
+    // match; the attribution pass reuses that listing.
+    const storage = fakeStorage({ appKeys: [], history: [] })
+    const appKeys = {
+      appKeys: [
+        appKeyCredential({
+          cid: 'k1',
+          origin: 'https://app.example',
+          appUrl: APP_URL
+        })
+      ],
+      skipped: {
+        unknownEpoch: 0,
+        noEpochKey: 0,
+        undecryptable: 0,
+        integrity: 0
+      }
+    }
+    const items = [
+      loginActivity({
+        origin: 'https://app.example',
+        appUrl: APP_URL,
+        name: 'Editor',
+        created: '2026-07-02T00:00:00Z'
+      })
+    ] as Awaited<ReturnType<StorageManager['listHistoryItems']>>
+
+    const creators = await lookupCollectionCreators({
+      storage,
+      generators: [APP_DID],
+      appKeys,
+      items
+    })
+
+    expect(creators.get(APP_DID)?.name).toBe('Editor')
+    expect(storage.listAppKeys).not.toHaveBeenCalled()
+    expect(storage.listHistoryItems).not.toHaveBeenCalled()
   })
 
   it('answers a disconnected app from the Login that recorded grants to its DID', async () => {

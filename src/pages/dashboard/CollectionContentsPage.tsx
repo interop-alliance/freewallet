@@ -59,7 +59,7 @@ import {
   getResourceDisplayName
 } from '@/components/storage/displayUtils'
 import { CollectionAttribution } from '@/components/storage/CollectionAttribution'
-import { useConnectedApps } from '@/hooks/useConnectedApps'
+import { useCollectionCreators } from '@/hooks/useCollectionCreators'
 import { createLogger } from '@/lib/log'
 
 const log = createLogger('fw:ui:storage')
@@ -176,17 +176,17 @@ export function CollectionContentsPage() {
     }
   )
 
-  // The connected application this collection belongs to, for the header's
-  // "Created by" line: the newest connect for its `generator` DID, the apps
-  // listing latest-connected first. A collection stamped with no generator
+  // The application that created this collection, for the header's
+  // "Created by" line, by its `generator` DID: the same reader the Storage
+  // page and the consent row use. A collection stamped with no generator
   // names no app, so the load is off there rather than decrypting the
   // activity log for nothing.
   const generator = collection?.generator
-  const apps = useConnectedApps({
+  const creators = useCollectionCreators({
     storage,
-    enabled: generator !== undefined
+    generators: generator ? [generator] : []
   })
-  const attributedApp = apps.find(app => app.subjectDid === generator)
+  const creator = generator ? creators.get(generator) : undefined
 
   const resources = contentsError ? [] : (contents?.resources ?? [])
   const errorKey = contentsError
@@ -394,7 +394,7 @@ export function CollectionContentsPage() {
             {collection && (
               <CollectionAttribution
                 collection={collection}
-                app={attributedApp}
+                creator={creator}
               />
             )}
           </Stack>

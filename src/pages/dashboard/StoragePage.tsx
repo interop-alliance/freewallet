@@ -146,17 +146,17 @@ export const StoragePage = () => {
     : null
 
   // The reader rosters behind each collection row's "Shared" chip and the
-  // connected applications behind its "Created by" line, over one read of the
+  // creating applications behind its "Created by" line, over one read of the
   // activity history.
   const {
     sharesByCollection,
-    apps,
+    creators,
     reload: reloadShares
   } = useStorageListings({ session, collections })
 
-  const appsByCollection = useMemo(
-    () => attributeCollectionsToApps({ collections, apps }),
-    [apps, collections]
+  const creatorsByCollection = useMemo(
+    () => attributeCollectionsToApps({ collections, creators }),
+    [creators, collections]
   )
 
   const handleImportFile = async (
@@ -325,7 +325,7 @@ export const StoragePage = () => {
               ])
             )}
             sharesByCollection={sharesByCollection}
-            appsByCollection={appsByCollection}
+            creatorsByCollection={creatorsByCollection}
             onShowShares={setSharesDialogCollectionId}
           />
         )}

@@ -442,10 +442,12 @@ on the Collection Metadata object: `generator`, the app's did:key, and
 `generatorOrigin`, the Web origin that DID was bound to. Both are stamped
 when App Connect provisioning creates the collection, and a collection that
 already stands keeps its attribution, so a second app admitted to it does not
-rename the creator. The storage browser reads them through
-`attributeCollectionsToApps` (`src/lib/collectionAttribution.ts`), which
-names a collection's app by matching `generator` against the connected apps'
-subject DIDs.
+rename the creator. One reader, `lookupCollectionCreators`
+(`src/lib/connectedApps.ts`), names the app behind a `generator`, for the
+consent row, the Storage page's listing, and the collection contents page.
+A connected app answers from its app key. A disconnected one answers from
+the App Connect Login activities that recorded grants to its DID. A creator
+no record names is shown by its `generatorOrigin`.
 
 Content migration brings another account's backup bundle into this one. The
 Storage page's "Import from another wallet" action

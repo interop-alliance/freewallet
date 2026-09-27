@@ -1,6 +1,6 @@
 /**
  * The two listings behind the Storage page's collection rows -- the reader
- * rosters behind each row's "Shared" chip and the connected apps behind its
+ * rosters behind each row's "Shared" chip and the creating apps behind its
  * "Created by" line -- fed by one read of the activity history. Both join
  * over `wallet-activity`, and a read of it decrypts every envelope in the
  * collection, so the page reads it once here and hands the scan to both
@@ -13,11 +13,11 @@
 import { useMemo } from 'react'
 import { createLogger } from '@/lib/log'
 import { listSharedCollections, type CollectionShare } from '@/session/shares'
-import type { ConnectedApp } from '@/lib/connectedApps'
+import type { CollectionCreator } from '@/lib/connectedApps'
 import type { StorageCollection } from '@/lib/storage'
 import type { Session } from '@/types/auth'
 import { useAsyncLoad } from './useAsyncLoad'
-import { useConnectedApps } from './useConnectedApps'
+import { useCollectionCreators } from './useCollectionCreators'
 
 const log = createLogger('fw:ui:storage')
 
@@ -32,10 +32,11 @@ const NO_SHARES: Record<string, CollectionShare[]> = {}
  * @param options.session {Session | null}   the live session; both listings
  *   stay off without one, and without remote storage
  * @param options.collections {StorageCollection[]}   the listed collections;
- *   the apps listing runs only once one of them carries a `generator`
+ *   the creators lookup runs only once one of them carries a `generator`
  * @returns {{ sharesByCollection: Record<string, CollectionShare[]>,
- *   apps: ConnectedApp[], reload: () => Promise<void> }}   the two listings,
- *   and a reload that re-reads the history and re-runs both
+ *   creators: ReadonlyMap<string, CollectionCreator>, reload: () =>
+ *   Promise<void> }}   the two listings, the creators keyed by `generator`
+ *   DID, and a reload that re-reads the history and re-runs both
  */
 export function useStorageListings({
   session,
@@ -45,7 +46,7 @@ export function useStorageListings({
   collections: StorageCollection[]
 }): {
   sharesByCollection: Record<string, CollectionShare[]>
-  apps: ConnectedApp[]
+  creators: ReadonlyMap<string, CollectionCreator>
   reload: () => Promise<void>
 } {
   const hasRemoteStorage = Boolean(session?.storage?.hasRemoteStorage)
@@ -90,13 +91,14 @@ export function useStorageListings({
     [loadedShares, sharesError]
   )
 
-  const apps = useConnectedApps({
+  const creators = useCollectionCreators({
     storage: session?.storage,
+    generators: collections.flatMap(({ generator }) =>
+      generator ? [generator] : []
+    ),
     items,
-    enabled:
-      items !== undefined &&
-      collections.some(({ generator }) => generator !== undefined)
+    enabled: items !== undefined
   })
 
-  return { sharesByCollection, apps, reload }
+  return { sharesByCollection, creators, reload }
 }

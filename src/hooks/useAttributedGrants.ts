@@ -21,9 +21,11 @@ const log = createLogger('fw:request:attribution')
 /**
  * @returns {{ grants: ResolvedGrant[], attributeGrants: (options: {
  *   resolution: Parameters<typeof resolveGrants>[0], grants:
- *   ResolvedGrant[], storage: Session['storage'] }) => void }}   the grants
- *   to render, and the call that shows a first pass's grants and starts the
- *   attribution pass behind them
+ *   ResolvedGrant[], storage: Session['storage'], appKeys?:
+ *   Awaited<ReturnType<Session['storage']['listAppKeys']>> }) => void }}
+ *   the grants to render, and the call that shows a first pass's grants and
+ *   starts the attribution pass behind them, handed the caller's app-key
+ *   listing when it already holds one
  */
 export function useAttributedGrants(): {
   grants: ResolvedGrant[]
@@ -31,6 +33,7 @@ export function useAttributedGrants(): {
     resolution: Parameters<typeof resolveGrants>[0]
     grants: ResolvedGrant[]
     storage: Session['storage']
+    appKeys?: Awaited<ReturnType<Session['storage']['listAppKeys']>>
   }) => void
 } {
   const [grants, setGrants] = useState<ResolvedGrant[]>([])
@@ -40,15 +43,22 @@ export function useAttributedGrants(): {
     ({
       resolution,
       grants: firstPass,
-      storage
+      storage,
+      appKeys
     }: {
       resolution: Parameters<typeof resolveGrants>[0]
       grants: ResolvedGrant[]
       storage: Session['storage']
+      appKeys?: Awaited<ReturnType<Session['storage']['listAppKeys']>>
     }) => {
       const run = ++runRef.current
       setGrants(firstPass)
-      attributeExistingCollections({ resolution, grants: firstPass, storage })
+      attributeExistingCollections({
+        resolution,
+        grants: firstPass,
+        storage,
+        appKeys
+      })
         .then(attributed => {
           if (attributed && runRef.current === run) {
             setGrants(attributed)

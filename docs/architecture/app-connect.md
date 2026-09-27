@@ -218,6 +218,10 @@ wallet's own records (`lookupCollectionCreators` in
 `src/lib/connectedApps.ts`). The app key answers while the creator is
 connected. Once it is not, the App Connect Login activities that recorded
 grants to its DID answer, since a disconnect deletes the app key. The
+storage browser's "Created by" line reads the same join, so a creator is
+named the same way on both. The CHAPI get popup has already listed
+`app-connections` for its app-key match, and hands that listing to the
+second pass rather than listing the collection again. The
 same-application test compares app URLs rather than origins, because the
 wallet tells apps apart by `appUrl` and two may share one origin. An App
 Connect requester whose creator app URL the wallet cannot recover reads

@@ -317,7 +317,8 @@ describe('resolveInvocationTarget', () => {
     const target = resolveInvocationTarget({
       descriptor: `${SPACE_URL}example-app-data/doc1`,
       space: SPACE,
-      collections: NO_COLLECTIONS
+      collections: NO_COLLECTIONS,
+      requester: {}
     })
     expect(target).toMatchObject({
       invocationTarget: `${SPACE_URL}example-app-data/doc1`,
@@ -330,7 +331,8 @@ describe('resolveInvocationTarget', () => {
     const target = resolveInvocationTarget({
       descriptor: SPACE_URL,
       space: SPACE,
-      collections: NO_COLLECTIONS
+      collections: NO_COLLECTIONS,
+      requester: {}
     })
     expect(target).toMatchObject({
       targetClass: 'space'
@@ -342,7 +344,8 @@ describe('resolveInvocationTarget', () => {
     const target = resolveInvocationTarget({
       descriptor: `${SPACE_URL}`,
       space: SPACE,
-      collections: NO_COLLECTIONS
+      collections: NO_COLLECTIONS,
+      requester: {}
     })
     // The trailing slash is normalized off the delegated target.
     expect(target).toMatchObject({
@@ -356,7 +359,8 @@ describe('resolveInvocationTarget', () => {
     const target = resolveInvocationTarget({
       descriptor: 'https://someone-else.example/space/OTHER',
       space: SPACE,
-      collections: NO_COLLECTIONS
+      collections: NO_COLLECTIONS,
+      requester: {}
     })
     expect(target.targetClass).toBeUndefined()
     expect(target.targetClass).toBeUndefined()
@@ -377,7 +381,8 @@ describe('resolveInvocationTarget', () => {
       const target = resolveInvocationTarget({
         descriptor,
         space: SPACE,
-        collections: NO_COLLECTIONS
+        collections: NO_COLLECTIONS,
+        requester: {}
       })
       expect(target.targetClass).toBeUndefined()
       expect(target.targetClass).toBeUndefined()
@@ -393,7 +398,8 @@ describe('resolveInvocationTarget', () => {
       const target = resolveInvocationTarget({
         descriptor,
         space: SPACE,
-        collections: NO_COLLECTIONS
+        collections: NO_COLLECTIONS,
+        requester: {}
       })
       expect(target.targetClass).toBeUndefined()
       expect(target.targetClass).toBeUndefined()
@@ -410,7 +416,8 @@ describe('resolveInvocationTarget', () => {
       const target = resolveInvocationTarget({
         descriptor: `${SPACE_URL}${segment}/doc1`,
         space: SPACE,
-        collections: NO_COLLECTIONS
+        collections: NO_COLLECTIONS,
+        requester: {}
       })
       expect(target.targetClass).toBeUndefined()
       expect(target.targetClass).toBeUndefined()
@@ -432,7 +439,8 @@ describe('resolveInvocationTarget', () => {
         const target = resolveInvocationTarget({
           descriptor,
           space: SPACE,
-          collections: NO_COLLECTIONS
+          collections: NO_COLLECTIONS,
+          requester: {}
         })
         expect(target.targetClass).toBeUndefined()
         expect(target.invocationTarget).toBeUndefined()
@@ -471,7 +479,8 @@ describe('resolveInvocationTarget', () => {
       const target = resolveInvocationTarget({
         descriptor: `${origin}${space.pathname}/example-app-data`,
         space: SPACE,
-        collections: NO_COLLECTIONS
+        collections: NO_COLLECTIONS,
+        requester: {}
       })
       expect(target.targetClass).toBeUndefined()
       expect(target.targetClass).toBeUndefined()
@@ -487,7 +496,8 @@ describe('resolveInvocationTarget', () => {
           name: 'example-app-data'
         },
         space: { serverUrl: 'https://host.example/was/', spaceId: 'L8qcqABC' },
-        collections: NO_COLLECTIONS
+        collections: NO_COLLECTIONS,
+        requester: {}
       })
     ).toMatchObject({
       invocationTarget: `${subPathSpace}example-app-data/`,
@@ -499,12 +509,14 @@ describe('resolveInvocationTarget', () => {
     const withSlash = resolveInvocationTarget({
       descriptor: `${SPACE_URL}example-app-data/`,
       space: SPACE,
-      collections: NO_COLLECTIONS
+      collections: NO_COLLECTIONS,
+      requester: {}
     })
     const without = resolveInvocationTarget({
       descriptor: `${SPACE_URL}example-app-data`,
       space: SPACE,
-      collections: NO_COLLECTIONS
+      collections: NO_COLLECTIONS,
+      requester: {}
     })
     expect(withSlash).toMatchObject({
       invocationTarget: `${SPACE_URL}example-app-data/`,
@@ -520,7 +532,8 @@ describe('resolveInvocationTarget', () => {
       resolveInvocationTarget({
         descriptor: url,
         space: SPACE,
-        collections: NO_COLLECTIONS
+        collections: NO_COLLECTIONS,
+        requester: {}
       })
     ).toMatchObject({
       invocationTarget: url,
@@ -542,7 +555,8 @@ describe('resolveInvocationTarget', () => {
       const resolved = resolveInvocationTarget({
         descriptor: target,
         space: SPACE,
-        collections: NO_COLLECTIONS
+        collections: NO_COLLECTIONS,
+        requester: {}
       })
       expect(resolved.targetClass).toBeUndefined()
       expect(resolved.invocationTarget).toBeUndefined()
@@ -556,7 +570,8 @@ describe('resolveInvocationTarget', () => {
         name: 'example-app-data'
       },
       space: SPACE,
-      collections: NO_COLLECTIONS
+      collections: NO_COLLECTIONS,
+      requester: {}
     })
     expect(target).toMatchObject({
       invocationTarget: `${SPACE_URL}example-app-data/`,
@@ -574,7 +589,8 @@ describe('resolveInvocationTarget', () => {
         name: 'public-credentials'
       },
       space: SPACE,
-      collections: NO_COLLECTIONS
+      collections: NO_COLLECTIONS,
+      requester: {}
     })
     expect(target).toMatchObject({
       needsProvisioning: false,
@@ -590,7 +606,8 @@ describe('resolveInvocationTarget', () => {
         name: 'private-credentials'
       },
       space: SPACE,
-      collections: NO_COLLECTIONS
+      collections: NO_COLLECTIONS,
+      requester: {}
     })
     expect(target).toMatchObject({
       needsProvisioning: false,
@@ -608,7 +625,8 @@ describe('resolveInvocationTarget', () => {
             name
           },
           space: SPACE,
-          collections: NO_COLLECTIONS
+          collections: NO_COLLECTIONS,
+          requester: {}
         })
       ).toMatchObject({
         needsProvisioning: false,
@@ -626,7 +644,8 @@ describe('resolveInvocationTarget', () => {
           name: 'Bad_Name!'
         },
         space: SPACE,
-        collections: NO_COLLECTIONS
+        collections: NO_COLLECTIONS,
+        requester: {}
       }).targetClass
     ).toBeUndefined()
   })
@@ -636,7 +655,8 @@ describe('resolveInvocationTarget', () => {
       resolveInvocationTarget({
         descriptor: { type: 'https://w3id.org/byoe#space' },
         space: SPACE,
-        collections: NO_COLLECTIONS
+        collections: NO_COLLECTIONS,
+        requester: {}
       })
     ).toMatchObject({
       invocationTarget: SPACE_URL,
@@ -648,7 +668,8 @@ describe('resolveInvocationTarget', () => {
     const target = resolveInvocationTarget({
       descriptor: { type: 'https://w3id.org/byoe#unknown' },
       space: SPACE,
-      collections: NO_COLLECTIONS
+      collections: NO_COLLECTIONS,
+      requester: {}
     })
     expect(target.targetClass).toBeUndefined()
     expect(target.targetClass).toBeUndefined()
@@ -661,7 +682,8 @@ describe('resolveInvocationTarget', () => {
         name: 'example-app-public'
       },
       space: SPACE,
-      collections: NO_COLLECTIONS
+      collections: NO_COLLECTIONS,
+      requester: {}
     })
     expect(target).toMatchObject({
       invocationTarget: `${SPACE_URL}example-app-public/`,
@@ -684,7 +706,8 @@ describe('resolveInvocationTarget', () => {
         resolveInvocationTarget({
           descriptor,
           space: SPACE,
-          collections: NO_COLLECTIONS
+          collections: NO_COLLECTIONS,
+          requester: {}
         }).targetClass
       ).not.toBe('public-collection')
     }
@@ -692,7 +715,8 @@ describe('resolveInvocationTarget', () => {
       resolveInvocationTarget({
         descriptor: `${SPACE_URL}example-app-data`,
         space: SPACE,
-        collections: NO_COLLECTIONS
+        collections: NO_COLLECTIONS,
+        requester: {}
       }).targetClass
     ).not.toBe('public-collection')
   })
@@ -710,7 +734,8 @@ describe('resolveInvocationTarget', () => {
         resolveInvocationTarget({
           descriptor: { type: 'https://w3id.org/byoe#public-collection', name },
           space: SPACE,
-          collections: NO_COLLECTIONS
+          collections: NO_COLLECTIONS,
+          requester: {}
         }).targetClass
       ).toBeUndefined()
     }
@@ -723,7 +748,8 @@ describe('resolveInvocationTarget', () => {
         name: 'private-credentials'
       },
       space: SPACE,
-      collections: NO_COLLECTIONS
+      collections: NO_COLLECTIONS,
+      requester: {}
     })
     expect(target).toMatchObject({
       invocationTarget: `${SPACE_URL}private-credentials/`,
@@ -745,7 +771,8 @@ describe('resolveInvocationTarget', () => {
             name
           },
           space: SPACE,
-          collections: NO_COLLECTIONS
+          collections: NO_COLLECTIONS,
+          requester: {}
         })
       ).toMatchObject({ targetClass: 'share', encrypted: true })
     }
@@ -773,7 +800,8 @@ describe('resolveInvocationTarget', () => {
             name
           },
           space: SPACE,
-          collections: NO_COLLECTIONS
+          collections: NO_COLLECTIONS,
+          requester: {}
         }).targetClass
       ).toBeUndefined()
     }
@@ -803,7 +831,8 @@ describe('resolveInvocationTarget', () => {
       const target = resolveInvocationTarget({
         descriptor,
         space: SPACE,
-        collections: NO_COLLECTIONS
+        collections: NO_COLLECTIONS,
+        requester: {}
       })
       expect(target.targetClass).toBeUndefined()
       expect(target.targetClass).toBeUndefined()
@@ -826,7 +855,8 @@ describe('resolveInvocationTarget', () => {
         resolveInvocationTarget({
           descriptor,
           space: SPACE,
-          collections: NO_COLLECTIONS
+          collections: NO_COLLECTIONS,
+          requester: {}
         }).targetClass
       ).not.toBe('share')
     }
@@ -834,7 +864,8 @@ describe('resolveInvocationTarget', () => {
       resolveInvocationTarget({
         descriptor: `${SPACE_URL}private-credentials`,
         space: SPACE,
-        collections: NO_COLLECTIONS
+        collections: NO_COLLECTIONS,
+        requester: {}
       }).targetClass
     ).not.toBe('share')
   })
@@ -847,14 +878,16 @@ describe('resolveInvocationTarget', () => {
           name: 'Bad_Name!'
         },
         space: SPACE,
-        collections: NO_COLLECTIONS
+        collections: NO_COLLECTIONS,
+        requester: {}
       }).targetClass
     ).toBeUndefined()
     expect(
       resolveInvocationTarget({
         descriptor: { type: 'https://w3id.org/byoe#public-collection' },
         space: SPACE,
-        collections: NO_COLLECTIONS
+        collections: NO_COLLECTIONS,
+        requester: {}
       }).targetClass
     ).toBeUndefined()
   })
@@ -879,7 +912,8 @@ describe('existing-collection state (create-only public collections)', () => {
         name: 'example-app-data'
       },
       space: SPACE,
-      collections: EXISTING
+      collections: EXISTING,
+      requester: {}
     })
     expect(target.targetClass).toBeUndefined()
     expect(target.targetClass).toBeUndefined()
@@ -892,7 +926,8 @@ describe('existing-collection state (create-only public collections)', () => {
         name: 'example-app-public'
       },
       space: SPACE,
-      collections: EXISTING
+      collections: EXISTING,
+      requester: {}
     })
     // Satisfiable, but with nothing to provision: the policy is never
     // re-applied to an existing collection.

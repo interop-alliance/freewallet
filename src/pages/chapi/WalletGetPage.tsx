@@ -430,12 +430,14 @@ export function WalletGetPage() {
           )
         : existingCollectionsFrom([])
       const resolveAndAttribute = (
-        resolution: Parameters<typeof resolveGrants>[0]
+        resolution: Parameters<typeof resolveGrants>[0],
+        appKeys?: Awaited<ReturnType<typeof loggedIn.storage.listAppKeys>>
       ) =>
         attributeGrants({
           resolution,
           grants: resolveGrants(resolution),
-          storage: loggedIn.storage
+          storage: loggedIn.storage,
+          appKeys
         })
 
       const space = loggedIn.storage.spaceLocation
@@ -446,8 +448,10 @@ export function WalletGetPage() {
       if (profile.appConnect) {
         // Over the dedicated `app-connections` collection, exactly as the
         // approve-time processing matches: app keys never sit among the
-        // ordinary credentials listed above.
-        const { appKeys, skipped } = await loggedIn.storage.listAppKeys()
+        // ordinary credentials listed above. The attribution pass below reads
+        // this same listing rather than listing the collection again.
+        const listedAppKeys = await loggedIn.storage.listAppKeys()
+        const { appKeys, skipped } = listedAppKeys
         const credentials = appKeys.map(({ vc }) => vc)
         const existing = await findAppKeyCredential({
           credentials,
@@ -469,25 +473,28 @@ export function WalletGetPage() {
         setAppKeyFirstRun(!existing)
         setPreviewedAppKeyDid(existingDid || null)
         if (profile.appConnect.capabilityQueries.length > 0 && space) {
-          resolveAndAttribute({
-            zcapRequests: appConnectZcapRequests({
-              capabilityQueries: profile.appConnect.capabilityQueries,
-              // On first run the app-key DID does not exist yet, so the
-              // controller is empty here. Resolution reads it only to
-              // validate a share's recipient derivation and to class an
-              // existing collection's creator, and the opt-out below
-              // suspends the no-recipient refusal for exactly this case; the
-              // approved path re-derives with the real subject DID.
-              controller: existingDid
-            }),
-            space,
-            collections: existingCollections,
-            allowMissingController: true,
-            requester: {
-              origin: requestOrigin,
-              appUrl: profile.appConnect.app.appUrl
-            }
-          })
+          resolveAndAttribute(
+            {
+              zcapRequests: appConnectZcapRequests({
+                capabilityQueries: profile.appConnect.capabilityQueries,
+                // On first run the app-key DID does not exist yet, so the
+                // controller is empty here. Resolution reads it only to
+                // validate a share's recipient derivation and to class an
+                // existing collection's creator, and the opt-out below
+                // suspends the no-recipient refusal for exactly this case; the
+                // approved path re-derives with the real subject DID.
+                controller: existingDid
+              }),
+              space,
+              collections: existingCollections,
+              allowMissingController: true,
+              requester: {
+                origin: requestOrigin,
+                appUrl: profile.appConnect.app.appUrl
+              }
+            },
+            listedAppKeys
+          )
         }
         setSession(loggedIn)
         setPageState('selecting')

@@ -27,8 +27,10 @@
  * given the `generator` DIDs stamped on existing collections, it answers each
  * with the creating app's display name and canonical `appUrl`, from the app
  * key where the app is still connected and from its App Connect Login
- * activities where it is not, for the consent row's existing-collection
- * reading.
+ * activities where it is not. It is the one reader behind every surface that
+ * names a collection's creator: the consent row's existing-collection
+ * reading, the Storage page's collection listing, and the collection
+ * contents page.
  * Wallet-core's `grantRevocationSkip` (`/clientAnnex`) is the revocation-time
  * reading of the same document, applied per grant by
  * `StorageManager#revokeZcaps`: a grant that is expired, orphaned, or chained
@@ -350,11 +352,11 @@ function isAppConnectLoginFor({
  * @param options {object}
  * @param options.storage {StorageManager}
  * @param [options.items] {Awaited<ReturnType<StorageManager['listHistoryItems']>>}
+ *   the activity history, when the caller has already read it (the sibling
+ *   agent listing scans the same collection)
  * @param [options.appKeys] {Awaited<ReturnType<StorageManager['listAppKeys']>>}
  *   an already-listed app-key collection, so a caller holding one does not
  *   list it again
- *   the activity history, when the caller has already read it (the sibling
- *   agent listing scans the same collection)
  * @returns {Promise<ConnectedApp[]>}   sorted latest-connected first
  */
 export async function listConnectedApps({
@@ -553,46 +555,82 @@ export async function revokeAppAccess({
 }
 
 /**
+ * The application that created a collection, as the wallet's own records
+ * name it: what every surface showing a collection's creator reads, by the
+ * `generator` did:key stamped on the collection.
+ */
+export interface CollectionCreator {
+  /**
+   * The display name the app's latest App Connect Login recorded.
+   */
+  name: string
+  /**
+   * The canonical application URL, which tells apps sharing an origin apart.
+   */
+  appUrl: string
+  /**
+   * The app-key credential's cid while the app is still connected, for a link
+   * to its Applications row. A disconnected creator has no row, so it carries
+   * none.
+   */
+  cid?: string
+}
+
+/**
  * What the wallet's own records say about the applications that created a
  * set of collections, by the `generator` did:key stamped on each: the display
- * name and the canonical `appUrl`, for the consent row's existing-collection
- * reading. A connected app answers from its app key and latest Login
- * ({@link listConnectedApps}). A disconnected one has no app key left, since
- * removing it is what a disconnect does, so its App Connect Login activities
- * answer instead: the latest one whose recorded grants were delegated to
- * that DID supplies both members. A creator neither source knows is absent
- * from the result, and the row names its origin.
+ * name and the canonical `appUrl`. A connected app answers from its app key
+ * and latest Login ({@link listConnectedApps}), with its app-key cid. A
+ * disconnected one has no app key left, since removing it is what a
+ * disconnect does, so its App Connect Login activities answer instead: the
+ * latest one whose recorded grants were delegated to that DID supplies both
+ * members. A creator neither source knows is absent from the result, and the
+ * surface names its origin.
  *
  * @param options {object}
  * @param options.storage {StorageManager}
  * @param options.generators {Iterable<string>}   the `generator` DIDs to look
  *   up
- * @returns {Promise<ReadonlyMap<string, { name: string; appUrl: string }>>}
+ * @param [options.items] {Awaited<ReturnType<StorageManager['listHistoryItems']>>}
+ *   the activity history, when the caller has already read it
+ * @param [options.appKeys] {Awaited<ReturnType<StorageManager['listAppKeys']>>}
+ *   an already-listed app-key collection, so a caller holding one does not
+ *   list it again
+ * @returns {Promise<ReadonlyMap<string, CollectionCreator>>}   keyed by
+ *   `generator` DID
  */
 export async function lookupCollectionCreators({
   storage,
-  generators
+  generators,
+  items,
+  appKeys
 }: {
   storage: StorageManager
   generators: Iterable<string>
-}): Promise<ReadonlyMap<string, { name: string; appUrl: string }>> {
+  items?: Awaited<ReturnType<StorageManager['listHistoryItems']>>
+  appKeys?: Awaited<ReturnType<StorageManager['listAppKeys']>>
+}): Promise<ReadonlyMap<string, CollectionCreator>> {
   const wanted = new Set(generators)
-  const creators = new Map<string, { name: string; appUrl: string }>()
+  const creators = new Map<string, CollectionCreator>()
   if (wanted.size === 0) {
     return creators
   }
-  const [history, appKeys] = await Promise.all([
-    storage.listHistoryItems(),
-    storage.listAppKeys()
+  const [history, listedAppKeys] = await Promise.all([
+    items ?? storage.listHistoryItems(),
+    appKeys ?? storage.listAppKeys()
   ])
   // Latest connect first, so the first entry for a subject DID stays.
   for (const app of await listConnectedApps({
     storage,
     items: history,
-    appKeys
+    appKeys: listedAppKeys
   })) {
     if (wanted.has(app.subjectDid) && !creators.has(app.subjectDid)) {
-      creators.set(app.subjectDid, { name: app.name, appUrl: app.appUrl })
+      creators.set(app.subjectDid, {
+        name: app.name,
+        appUrl: app.appUrl,
+        cid: app.cid
+      })
     }
   }
   // The rest are disconnected: the latest App Connect Login that recorded
