@@ -1,0 +1,83 @@
+# Freewallet's nginx server block. It serves the SPA from dist/ and proxies
+# the WAS server's routes on the same origin, so the wallet's signed requests
+# need no CORS preflight. The nginx image renders this template at startup,
+# substituting WAS_UPSTREAM (host:port of the WAS server) and nothing else.
+# See docs/deployment-fly.io.md.
+
+upstream was {
+  server ${WAS_UPSTREAM};
+  # Reuse upstream connections instead of opening one per request.
+  keepalive 16;
+}
+
+# Headers the WAS server does not send yet. /api/cors relays third-party
+# responses with their own content type, so it gets a strict sandbox and no
+# sniffing. An empty value sends no header. Resources and chunks need no entry:
+# the server sends its own sandbox header on them, which passes through
+# unchanged. Drop these once the server sets them on /api/cors too.
+map $uri $was_csp {
+  ~^/api/cors  "default-src 'none'; sandbox";
+  default      "";
+}
+
+map $uri $was_nosniff {
+  ~^/api/cors  nosniff;
+  default      "";
+}
+
+server {
+  listen 8080;
+  listen [::]:8080;
+  server_tokens off;
+  root /usr/share/nginx/html;
+
+  gzip on;
+  gzip_static on;
+  gzip_types text/css application/javascript application/json image/svg+xml
+    application/manifest+json application/wasm;
+
+  # The WAS server's top-level routes. Keep this list in step with the
+  # server's routes when it adds one.
+  location ~ ^/((spaces|space|kms|workflows|api|common)(/.*)?|service|health)$ {
+    proxy_pass http://was;
+    proxy_http_version 1.1;
+    proxy_set_header Connection "";
+
+    # HTTP Signatures cover the Host header, so it must reach the server
+    # exactly as the browser sent it.
+    proxy_set_header Host $http_host;
+
+    # Compressing here would turn the server's strong ETags into weak ones,
+    # and conditional writes (If-Match) need the strong ones.
+    gzip off;
+
+    # See the map blocks above. The header has no effect on the wallet's own
+    # fetch() calls, so it can cover the JSON routes under /space/ too.
+    add_header Content-Security-Policy $was_csp always;
+    add_header X-Content-Type-Options $was_nosniff always;
+
+    # The server enforces its own upload limit (MAX_UPLOAD_BYTES), so stream
+    # request bodies through with no nginx limit.
+    client_max_body_size 0;
+    proxy_request_buffering off;
+
+    # Space exports and imports can run long.
+    proxy_read_timeout 300s;
+    proxy_send_timeout 300s;
+  }
+
+  # Hashed build assets: serve the file or 404, and cache for a year. No
+  # fallback to index.html, so a stale tab asking for a removed chunk gets a
+  # real 404.
+  location /assets/ {
+    try_files $uri =404;
+    add_header Cache-Control "public, max-age=31536000, immutable";
+  }
+
+  # Everything else: a public/ file if one matches, otherwise the SPA entry
+  # point. Revalidated on every load, so a deploy takes effect at once.
+  location / {
+    try_files $uri /index.html;
+    add_header Cache-Control "no-cache";
+  }
+}

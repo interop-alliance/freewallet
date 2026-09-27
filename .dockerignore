@@ -1,0 +1,16 @@
+.git
+.github
+.idea
+.vscode
+.claude
+_spec
+node_modules
+dist
+coverage
+test-results
+playwright-report
+.dev-logs
+.was-e2e-data
+.env
+.env.*
+*.log
