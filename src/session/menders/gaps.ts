@@ -31,16 +31,9 @@ export const MENDER_GAPS: ReadonlyArray<InvariantGap> = [
     item: 'FW-276',
     kind: 'none'
   },
-  // 2. Lapsed on the 2026-09-09 trigger correction; stands until a review
-  // confirms the residue mended.
-  {
-    invariant: 'collection-epochs-name-the-current-user-key',
-    tornState:
-      'A user-key rotation torn mid-fan-out on a credential-anchored account.',
-    standsOn: ['ladder-anchored'],
-    item: 'FW-219',
-    kind: 'unreachable'
-  },
+  // 2. Retired: the transient chain's collection fan-out completes a user-key
+  // rotation torn mid-fan-out on a credential-anchored account. The number
+  // stays, so the rows below keep theirs.
   // 3
   {
     invariant: 'keystore-controller-is-the-account-did',
@@ -105,15 +98,19 @@ export const MENDER_GAPS: ReadonlyArray<InvariantGap> = [
     item: 'FW-469',
     kind: 'none'
   },
-  // 10. Lapsed on the 2026-09-09 trigger correction; stands until a review
-  // confirms the residue mended.
+  // 10. Retired: the transient chain's collection fan-out seals the
+  // collection descriptor logs behind a forget ceremony's removal entry, on
+  // both grades. The number stays, so the rows below keep theirs.
+  // 21. The roster half row 10 never named, listed in row 10's place so the
+  // ARCHITECTURE.md order holds. Its only seal is the remembered sweep's
+  // roster convergence, which no credential-only visit fires.
   {
     invariant: 'governed-log-heads-anchor-past-the-membership-change',
     tornState:
-      "The collection descriptor logs behind a forget ceremony's removal entry.",
-    standsOn: ['ladder-anchored'],
+      "The user key roster log behind an ordinary forget ceremony's removal entry.",
+    standsOn: ['enrolled'],
     item: 'FW-450',
-    kind: 'none'
+    kind: 'unreachable'
   },
   // 11
   {

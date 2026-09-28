@@ -89,6 +89,26 @@ collection's current epoch names a retired user key generation. The roster
 stage writes through the store instance the login read came through, so it
 acquires the roster log no second time.
 
+A transient login runs the fan-out stage alone, first on its own chain, so
+`session.registryReady` settles behind it. It starts from the roster the
+login read, and the credential's ladder VM signs each collection append,
+which a collection descriptor log admits on `assertionMethod` membership.
+So a cascade torn mid-fan-out after its roster rotation landed is completed
+by the next visit, on an account that runs no remembered login too. Until
+then a stranded collection is not opened with the retired key. A collection
+is stranded when no key epoch on it names the current user key. Its cipher
+is built refusing, so the session serves every other collection and writes
+nothing under the epoch being retired. The refusal is a `KeyUnwrapError`,
+so a list read skips the collection's rows and never offers them for
+removal. The fan-out rebuilds the ciphers whenever the session holds a
+stranded one, even when it rotated nothing itself, and the dashboard
+re-reads its credentials once `registryReady` settles. The post-rotation
+adoption installs no refusing cipher. A collection it cannot key makes it
+throw, and the session stays on its previous ciphers. The fan-out also
+seals each collection descriptor log whose head anchors before the latest
+assertion-key removal, which closes the collection half of a forget
+ceremony's removal entry.
+
 Recovery-code spend and revocation drive stages 2 and 3 of the same cascade.
 Their document edits are their own, and a spent code's replacement
 delegation is minted by its own ceremony.

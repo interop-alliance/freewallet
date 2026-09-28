@@ -15,7 +15,12 @@
  * - A rotated user key reaches the remote-direct backend's ciphers: the
  *   in-band step holds the key material while the collections still carry the
  *   retiring epoch, and the post-fan-out adoption rebuilds the ciphers, so
- *   the next write seals under the fresh epoch.
+ *   the next write seals under the fresh epoch. An adoption the fan-out has
+ *   not reached throws.
+ * - A session built on collections no key epoch of which names its vault KAK
+ *   gets refusing ciphers there, reported as stranded, and a refresh past the
+ *   fan-out clears them. A named reader whose entry does not unwrap still
+ *   fails the build.
  *
  * The WAS layer is faked at two seams matching the two subjects: a recording
  * fake `WasClient` under a real `WASRemoteStore` (so the store's own
@@ -275,6 +280,7 @@ function makeFakeRemote(): {
     from: { keyAgreementKey: IKeyAgreementKey }
     to: { keyAgreementKey: IKeyAgreementKey }
   }): Promise<void>
+  seed(collectionId: string, descriptor: CollectionEncryption): void
   epochStamps: Map<string, string[]>
 } {
   const spaceId = 's-space'
@@ -469,6 +475,12 @@ function makeFakeRemote(): {
     descriptorLogs: descriptorLogsFrom(descriptorStores),
     provision,
     rotate,
+    // Replaces a collection's governed descriptor outright, as a host
+    // serving a hand-built one would.
+    seed(collectionId: string, descriptor: CollectionEncryption) {
+      descriptors[collectionId] = descriptor
+      descriptorStores.seed(collectionId, descriptor)
+    },
     epochStamps
   }
 }
@@ -698,7 +710,7 @@ describe('replica-less remote-direct StorageManager', () => {
     }
   })
 
-  it('refuses to rebuild the ciphers before the fan-out has run', async () => {
+  it('refuses to adopt a rotated key before the fan-out has run', async () => {
     const owner = await generateKey()
     const { remoteStore, descriptorLogs, provision } = makeFakeRemote()
     await provision(owner)
@@ -731,10 +743,131 @@ describe('replica-less remote-direct StorageManager', () => {
       // Why the in-band step holds the keys rather than adopting them: the
       // collections still carry the epoch the rotation is about to retire, so
       // a full adoption there asks the rotated key to open an epoch it is not
-      // yet a recipient of.
+      // yet a recipient of. The adoption throws rather than installing
+      // refusing ciphers, so its caller learns it did not land.
       const rotated = await generateKey()
       await expect(storage.adoptRotatedVaultKeys(rotated)).rejects.toThrow(
         expect.objectContaining({ name: 'KeyUnwrapError' })
+      )
+      expect(storage.strandedCollectionIds).toEqual([])
+    } finally {
+      initClientSpy.mockRestore()
+    }
+  })
+
+  it('builds the session with refusing ciphers on stranded collections, and a refresh past the fan-out clears them', async () => {
+    const retired = await generateKey()
+    const { remoteStore, descriptorLogs, provision, rotate } = makeFakeRemote()
+    // A rotation torn before its fan-out: every collection still names only
+    // the retired key, and the session unlocks the current one.
+    await provision(retired)
+    const current = await generateKey()
+
+    const persistence = inMemorySessionPersistence({
+      stores: transientSessionStores(),
+      clientAnnex: {
+        clientAnnexDid: 'did:webvh:example:annex',
+        invocationCapability: {} as IZcap
+      }
+    })
+    const user: User = { id: 'did:key:z6MkTestClient' }
+    const profile = {
+      zcapClient: {} as ZcapClient,
+      keyAgreementKey: current.keyAgreementKey,
+      keyResolver: current.keyResolver
+    } as ControllerProfile
+
+    const initClientSpy = vi
+      .spyOn(WASRemoteStore, 'initClient')
+      .mockResolvedValue({ remoteStore })
+    try {
+      const { storage } = await StorageManager.initStorageClients({
+        user,
+        session: { profile, persistence },
+        descriptorLogs
+      })
+      await storage.ready()
+      expect([...storage.strandedCollectionIds].sort()).toEqual(
+        [...ENCRYPTED_COLLECTION_IDS].sort()
+      )
+      // A stranded refusal is a not-a-recipient failure, never a purgeable
+      // undecryptable one.
+      await expect(
+        storage.addCredential({ credential: makeCredential('Stranded'), user })
+      ).rejects.toThrow(
+        expect.objectContaining({
+          name: 'KeyUnwrapError',
+          message: expect.stringMatching(
+            /no key epoch naming the current user key/
+          )
+        })
+      )
+
+      // The fan-out re-epochs every collection onto the current key; the
+      // refresh behind it rebuilds the ciphers and clears the stranded set.
+      await rotate({ from: retired, to: current })
+      await storage.refreshEncryptedDescriptors()
+      expect(storage.strandedCollectionIds).toEqual([])
+      const credential = makeCredential('After')
+      await storage.addCredential({ credential, user })
+      const listed = await storage.listCredentials()
+      expect(listed.map(({ vc }) => vc)).toEqual([credential])
+    } finally {
+      initClientSpy.mockRestore()
+    }
+  })
+
+  it('fails the session build on a recipient entry that does not unwrap', async () => {
+    const owner = await generateKey()
+    const { remoteStore, descriptorLogs, descriptors, provision, seed } =
+      makeFakeRemote()
+    await provision(owner)
+    // The reader IS named in the current epoch, but its entry is corrupt.
+    // The build throws `KeyUnwrapError` just as a stranded collection's
+    // would, and fails loudly since this is not the stranded shape.
+    const corrupt = structuredClone(descriptors['private-credentials'])
+    const epoch = corrupt.epochs!.find(
+      entry => entry.id === corrupt.currentEpoch
+    )!
+    const entry = epoch.recipients.find(
+      recipient => recipient.header.kid === owner.keyAgreementKey.id
+    )! as { encrypted_key: string }
+    entry.encrypted_key = entry.encrypted_key.startsWith('A')
+      ? `B${entry.encrypted_key.slice(1)}`
+      : `A${entry.encrypted_key.slice(1)}`
+    seed('private-credentials', corrupt)
+
+    const persistence = inMemorySessionPersistence({
+      stores: transientSessionStores(),
+      clientAnnex: {
+        clientAnnexDid: 'did:webvh:example:annex',
+        invocationCapability: {} as IZcap
+      }
+    })
+    const user: User = { id: 'did:key:z6MkTestClient' }
+    const profile = {
+      zcapClient: {} as ZcapClient,
+      keyAgreementKey: owner.keyAgreementKey,
+      keyResolver: owner.keyResolver
+    } as ControllerProfile
+
+    const initClientSpy = vi
+      .spyOn(WASRemoteStore, 'initClient')
+      .mockResolvedValue({ remoteStore })
+    try {
+      await expect(
+        StorageManager.initStorageClients({
+          user,
+          session: { profile, persistence },
+          descriptorLogs
+        })
+      ).rejects.toThrow(
+        expect.objectContaining({
+          name: 'KeyUnwrapError',
+          cause: expect.objectContaining({
+            message: expect.stringMatching(/corrupt entry/)
+          })
+        })
       )
     } finally {
       initClientSpy.mockRestore()

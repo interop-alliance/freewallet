@@ -226,7 +226,10 @@ async function sweepEntries(session: Session) {
  * ordering ("the sweep waits for the block's provisioning seed") is
  * observable.
  */
-function makeFakeStorage({ withRemote = true } = {}) {
+function makeFakeStorage({
+  withRemote = true,
+  strandedCollectionIds = [] as string[]
+} = {}) {
   let resolveProvisioning!: () => void
   let rejectProvisioning!: (err: Error) => void
   const provisioning = new Promise<void>((resolve, reject) => {
@@ -242,6 +245,7 @@ function makeFakeStorage({ withRemote = true } = {}) {
     refreshEncryptedDescriptors,
     adoptRotatedVaultKeys,
     holdRotatedVaultKeys,
+    strandedCollectionIds,
     get remoteStore() {
       return withRemote ? remoteStore : undefined
     }
@@ -576,6 +580,45 @@ describe('the login-time cascade-completion sweep', () => {
       read: read!
     })
     expect(fake.refreshEncryptedDescriptors).not.toHaveBeenCalled()
+  })
+
+  it('refreshes the ciphers on a no-op sweep when the session built a stranded one', async () => {
+    const fake = makeFakeStorage({
+      strandedCollectionIds: ['private-credentials']
+    })
+    vi.mocked(StorageManager.initStorageClients).mockResolvedValue({
+      storage: fake.storage,
+      userExists: true
+    })
+    vi.mocked(checkUserKeyRosterAtLogin).mockResolvedValue(
+      rosterRead() as never
+    )
+    // Another client re-epoched the collection after this session's
+    // cipher was built stranded; the sweep itself moves nothing.
+    vi.mocked(cascadeCollectionsToUserKey).mockResolvedValue({
+      outcomes: {
+        'private-credentials': 'noop',
+        'wallet-activity': 'escrowed'
+      },
+      failed: []
+    } as never)
+
+    const {
+      session,
+      rosterRead: read,
+      rosterStore
+    } = await initSessionFromSeed({
+      seed: randomSeed(),
+      userKey: OLD_USER_KEY,
+      accountPointer: POINTER
+    })
+    await sweepUserKeyToDocument({
+      session,
+      store: rosterStore!,
+      userKey: session.profile.userKey!,
+      read: read!
+    })
+    expect(fake.refreshEncryptedDescriptors).toHaveBeenCalledOnce()
   })
 
   it('reports both invariants failed when the sweep itself throws', async () => {

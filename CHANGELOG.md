@@ -4,6 +4,17 @@
 
 ### Fixed
 
+- A transient login re-epochs every encrypted collection whose current epoch
+  still names a retired user key generation. A recovery spend or other
+  rotation torn mid-fan-out on a credential-anchored account no longer
+  leaves collections keyed to the spent code until a remembered login.
+- A login no longer fails on a collection whose key epochs name no current
+  user key generation. That collection refuses reads and writes until it is
+  re-epoched, and the rest of the session is built.
+- A transient login seals each collection descriptor log whose head is
+  anchored before the account document's latest assertion-key removal, so
+  a forgotten client's key can no longer append there after the next visit.
+
 - The contacts cipher's primed descriptor source carries the wrapped
   source's `verifiesHistory` declaration, so a log-governed contacts
   descriptor is not refused as unverified under `@interop/was-client`

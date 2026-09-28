@@ -1778,8 +1778,9 @@ describe('transientSessionFromKeyringHit -- the login-time registry chain', () =
     vi.clearAllMocks()
     primeHappyPath()
     primeChainSession({ invocationCapability: LIVE_CAPABILITY })
-    // The CHAPI popup runs no registration of the block: each declares
-    // itself off that route, so both promises settle with nothing done.
+    // The CHAPI popup runs no registry pass of the block: each declares
+    // itself off that route. The collection fan-out alone still runs, as
+    // the remembered sweep does in a remembered popup.
     const popup = await transientSessionFromKeyringHit({
       found: makeFound({ manageCapability: MANAGE_CAPABILITY } as never),
       type: 'passphrase',
@@ -1789,13 +1790,19 @@ describe('transientSessionFromKeyringHit -- the login-time registry chain', () =
     await popup.session.registryReady
     // The routing entries the composition itself ran still report, and so
     // does the did:web projection mend, which the popup fires and the
-    // block's settle point waits for; no registration of the block does.
-    expect((await popup.session.mends)!.map(entry => entry.invariant)).toEqual([
-      'annex-generation-is-reachable',
-      'standing-delegations-verify-under-the-current-document',
-      'generation-delegation-is-current',
-      'did-web-projection-matches-the-log'
-    ])
+    // block's settle point waits for; of the block, only the fan-out does.
+    expect(
+      (await popup.session.mends)!.map(entry => entry.invariant).sort()
+    ).toEqual(
+      [
+        'annex-generation-is-reachable',
+        'standing-delegations-verify-under-the-current-document',
+        'generation-delegation-is-current',
+        'did-web-projection-matches-the-log',
+        'collection-epochs-name-the-current-user-key',
+        'governed-log-heads-anchor-past-the-membership-change'
+      ].sort()
+    )
     expect(backfillPassphraseUnlockMethod).not.toHaveBeenCalled()
     expect(refreshTransientManageCapability).not.toHaveBeenCalled()
   })

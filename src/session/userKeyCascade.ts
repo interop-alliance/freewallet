@@ -99,6 +99,17 @@ export function cascadeCollections({
   remoteStore: WASRemoteStore
   storeFor: CollectionStoreFor
 }): CascadeCollections & { collectionIds: () => Promise<string[]> } {
+  // One store per collection for the whole fan-out, so the encryption check
+  // and the rotation share one verified log read.
+  const stores = new Map<string, ReturnType<CollectionStoreFor>>()
+  const storeOnce: CollectionStoreFor = collectionId => {
+    let store = stores.get(collectionId)
+    if (!store) {
+      store = storeFor(collectionId)
+      stores.set(collectionId, store)
+    }
+    return store
+  }
   return {
     collectionIds: async () => {
       const ids = new Set<string>(
@@ -109,7 +120,7 @@ export function cascadeCollections({
       }
       return [...ids]
     },
-    storeFor,
+    storeFor: storeOnce,
     // Skip a candidate that carries no governing log (a plaintext one, or a
     // standard collection on an account that never provisioned it).
     // Answered from the collection's own verified log rather than the
@@ -117,7 +128,7 @@ export function cascadeCollections({
     // listed candidate: a host omitting the member for one collection
     // cannot keep it out of a rotation.
     isEncrypted: async collectionId =>
-      (await storeFor(collectionId).read()) !== null
+      (await storeOnce(collectionId).read()) !== null
   }
 }
 

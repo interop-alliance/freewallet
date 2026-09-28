@@ -10,6 +10,7 @@ import {
 import { generateParallelDidWeb } from '@interop/did-method-webvh'
 import { CapabilityAgent } from '@interop/capability-agent'
 import { didKeyZcapClient } from '@interop/wallet-core/webvh'
+import { readCollectionSealState } from './storedLogs'
 
 /**
  * Fills a form field and verifies the value survived, retrying until it
@@ -251,6 +252,23 @@ export async function forceRememberBrowser(page: Page): Promise<void> {
 }
 
 /**
+ * The account Space id of the live session, through the E2E storage seam the
+ * auth store publishes in non-production builds.
+ *
+ * @param page {Page}   a page holding a logged-in session
+ * @returns {Promise<string>}
+ */
+export async function sessionSpaceId(page: Page): Promise<string> {
+  const spaceId = await page.evaluate(
+    () =>
+      (window as unknown as { __E2E_STORAGE__?: { spaceId?: string } })
+        .__E2E_STORAGE__?.spaceId
+  )
+  expect(spaceId, 'the session must name an account Space').toBeTruthy()
+  return spaceId!
+}
+
+/**
  * A public-terminal browser: a fresh context holding nothing.
  *
  * @param browser {Browser}
@@ -437,4 +455,100 @@ export async function savedFileBytes(
     return { name: saved.name, base64: btoa(binary) }
   })
   return { name, bytes: new Uint8Array(Buffer.from(base64, 'base64')) }
+}
+
+/**
+ * Asserts the residue a forget ceremony leaves: the account log's latest
+ * `assertionMethod` removal (the forget's removal entry) exists, and at least
+ * one encrypted collection's descriptor log head still anchors at an account
+ * version before it. Both forget grades run the collection fan-out before
+ * the removal entry, so every append they make anchors at a version that
+ * still lists the forgotten client's key. Returns the removal's index, for
+ * the post-login check.
+ *
+ * @param options {object}
+ * @param options.spaceId {string}   the account Space id
+ * @returns {Promise<number>}
+ */
+export async function expectUnsealedCollectionLogs({
+  spaceId
+}: {
+  spaceId: string
+}): Promise<number> {
+  const state = await readCollectionSealState({ spaceId })
+  console.log(
+    `after forget: removal at account version ${state.removalIndex + 1} ` +
+      `(${state.removalVersionId}); head anchors: ` +
+      JSON.stringify(
+        Object.fromEntries(
+          Object.entries(state.heads).map(([id, head]) => [
+            id,
+            head === undefined ? null : head.anchorIndex + 1
+          ])
+        )
+      )
+  )
+  expect(
+    state.removalIndex,
+    'the forget published a removal entry'
+  ).toBeGreaterThan(0)
+  const unsealed = Object.entries(state.heads).filter(
+    ([, head]) => head !== undefined && head.anchorIndex < state.removalIndex
+  )
+  expect(
+    unsealed.length,
+    'some collection log head anchors before the removal entry'
+  ).toBeGreaterThan(0)
+  return state.removalIndex
+}
+
+/**
+ * Asserts every encrypted collection's descriptor log head anchors at or
+ * past the account log's removal entry, and that each head is signed by the
+ * standing credential's ladder VM: a key the latest account document lists
+ * under `assertionMethod` and not under `capabilityInvocation`. The latest removal must still be the
+ * one the forget published, so the login that sealed struck no key itself.
+ *
+ * @param options {object}
+ * @param options.spaceId {string}   the account Space id
+ * @param options.removalIndex {number}   from `expectUnsealedCollectionLogs`
+ * @returns {Promise<void>}
+ */
+export async function expectSealedCollectionLogs({
+  spaceId,
+  removalIndex
+}: {
+  spaceId: string
+  removalIndex: number
+}): Promise<void> {
+  const state = await readCollectionSealState({ spaceId })
+  console.log(
+    'after the transient login: head anchors: ' +
+      JSON.stringify(
+        Object.fromEntries(
+          Object.entries(state.heads).map(([id, head]) => [
+            id,
+            head === undefined ? null : head.anchorIndex + 1
+          ])
+        )
+      )
+  )
+  expect(state.removalIndex, 'no later assertion removal').toBe(removalIndex)
+  for (const [collectionId, head] of Object.entries(state.heads)) {
+    expect(head, `${collectionId} has a descriptor log`).toBeDefined()
+    expect(
+      head!.anchorIndex,
+      `${collectionId}'s head anchors at or past the removal entry`
+    ).toBeGreaterThanOrEqual(removalIndex)
+    expect(
+      state.latestAssertionKeys.has(head!.signerKey ?? ''),
+      `${collectionId}'s head is signed by a key the document still lists`
+    ).toBe(true)
+    // The ladder VM publishes under `assertionMethod` with no invocation
+    // relation, which tells it apart from an enrolled client's key.
+    expect(
+      state.latestInvocationKeys.has(head!.signerKey ?? ''),
+      `${collectionId}'s head is signed by the ladder VM, not a client key`
+    ).toBe(false)
+  }
 }

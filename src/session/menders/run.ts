@@ -93,9 +93,9 @@ function heldFor({ session }: { session: Session }): ReadonlyArray<Authority> {
  * registry-writing prefix, and the seed from the chain the deps name. The
  * remembered chain runs the provisioning seed, the six registry-writing
  * registrations, then the app-key sweep, the annex GC, and the keystore
- * report; the transient chain runs the shared registry passes, then the
- * acting credential's management-zcap refresh, and has no seed, a transient
- * session provisioning nothing.
+ * report; the transient chain runs the collection fan-out, the shared
+ * registry passes, then the acting credential's management-zcap refresh,
+ * and has no seed, a transient session provisioning nothing.
  *
  * Both of the session's promises are stamped before anything is awaited, so
  * a caller that returns the session at once finds them. The two settle
@@ -118,9 +118,9 @@ function heldFor({ session }: { session: Session }): ReadonlyArray<Authority> {
  * @param [options.pendingReports] {ReadonlyArray<Promise<unknown>>}   the
  *   reports the composition fired beside the block -- the transient
  *   composition's did:web projection mend -- awaited before `session.mends`
- *   settles. In the CHAPI popup the block itself runs empty and settles in
- *   the same tick, so without this the projection's entry would land after
- *   the report was assembled. `registryReady` does not wait on them
+ *   settles. In the CHAPI popup the block runs the collection fan-out alone
+ *   and can settle first, so without this the projection's entry would land
+ *   after the report was assembled. `registryReady` does not wait on them
  * @returns {void}   the block runs on `session.registryReady` and
  *   `session.mends`, both stamped before this returns
  */

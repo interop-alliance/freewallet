@@ -244,7 +244,10 @@ export async function sweepUserKeyToDocument({
   const rotated = convergenceRotated || sweepUserKey.id !== userKey.id
   if (
     rotated ||
-    Object.values(cascade.outcomes).some(outcome => outcome === 'rotated')
+    Object.values(cascade.outcomes).some(outcome => outcome === 'rotated') ||
+    // A collection built stranded is rebuilt even when this run rotated
+    // nothing: another client may have re-epoched it since.
+    storage.strandedCollectionIds.length > 0
   ) {
     await storage.refreshEncryptedDescriptors()
   }

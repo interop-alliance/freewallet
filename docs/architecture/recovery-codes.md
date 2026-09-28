@@ -153,7 +153,8 @@ leaves the spent code dead (a re-run refuses it as spent) and the current
 epoch wrapped to the removed code alone; the mender would be a repair
 holding both the spent code and the new passphrase, and it is not built. A
 rotation torn mid-fan-out strands a collection keyed to the spent code until
-the next remembered login or a spend re-run. A tail torn between the
+the next login, transient or remembered, whose collection fan-out re-epochs
+it onto the current user key. A tail torn between the
 registry drop and the deletes leaves the retired credentials' unlock Spaces
 standing with nothing naming them, and a failed registry write leaves their
 entries standing with no pass here to drop them. Both of the last are inert,

@@ -3002,8 +3002,7 @@ async function recoverAccountTransient({
   // The epoch cascade under the generation delegation: every encrypted
   // collection takes a fresh epoch naming the rotated user key. Best-effort
   // per collection; a stranded collection stays keyed to the spent code
-  // until the next remembered login or a spend re-run (the documented
-  // residue -- the transient completion is its own follow-up).
+  // until the next login's collection fan-out, transient or remembered.
   const remoteStore = new WASRemoteStore({
     serviceDescription,
     storageServerUrl: host,

@@ -171,18 +171,18 @@ It runs as the LAST stage of the registry chain below, since it
 compare-and-swaps the same entry those passes rewrite. A CHAPI popup visit
 skips it.
 
-**The login-time mender block.** The visit runs four of the login-time
-registry passes as its own block after navigation, in registration order:
+**The login-time mender block.** The visit runs the user key sweep's
+collection fan-out and four of the login-time registry passes as its own
+block after navigation, in registration order: the fan-out, then
 the stale-seal repair, the torn-retirement repair, the bare-passkey rebuild,
 and the registry backfill, with the management-zcap refresh above as the
 last registration (the ordering is under "Session & auth flow" in session-and-auth.md). Each rides
 the visit's generation delegation and unwraps with the credential's standing
 key, each failure is logged and reported, and the block is not awaited.
 `session.registryReady` and `session.mends` settle together here, every
-registration being registry-writing. In a CHAPI popup every one of them
-declares itself off the route, so the block runs empty and both promises
-settle at once. The user key sweep and the annex generation GC do not run
-here. Nothing in the registry's write protocol turns on the session tier.
+registration settling the first. In a CHAPI popup the registry passes
+declare themselves off the route, so the fan-out runs alone. The sweep's
+roster convergence and the annex generation GC do not run here. Nothing in the registry's write protocol turns on the session tier.
 
 The tears a torn credential-anchored signup can leave are mended by
 wallet-core's `mendCredentialAnchoredAccount`; the app binding sits beside

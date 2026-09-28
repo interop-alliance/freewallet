@@ -173,6 +173,38 @@ export function DashboardPage() {
     }
   )
 
+  // A `private-credentials` collection a torn user key rotation left on a
+  // retired generation reads empty until the login's collection fan-out
+  // re-epochs it and rebuilds its cipher, which lands before
+  // `registryReady` settles. Read at mount, so a later rebuild that clears
+  // the stranded set does not cancel the re-read.
+  const [strandedAtMount] = useState(
+    () =>
+      session?.storage?.strandedCollectionIds.includes(
+        PRIVATE_CREDENTIALS_COLLECTION
+      ) ?? false
+  )
+  const registryReady = session?.registryReady
+  useAsyncLoad(
+    async ({ isCancelled }) => {
+      await registryReady
+      if (isCancelled()) {
+        return
+      }
+      await loadCredentials(isCancelled)
+    },
+    [registryReady, loadCredentials],
+    {
+      enabled: strandedAtMount && Boolean(registryReady),
+      // The initial load's error handling owns the loadError banner.
+      onError: err => {
+        log.error('Could not reload credentials after the collection fan-out', {
+          err
+        })
+      }
+    }
+  )
+
   // The passkey-only safety notice: present when this wallet was created with a
   // single passkey and no second unlock method has been added yet. Drives a
   // recurring "add a second login method" prompt.

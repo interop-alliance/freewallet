@@ -19,6 +19,13 @@
  * stage), so the code's authority did not rot with the client that issued
  * it.
  *
+ * The transition's collection fan-out runs before its removal entry, so the
+ * collection descriptor log heads it leaves anchor at an account version
+ * that still lists the forgotten client's key. The account runs no
+ * remembered login afterwards, so the third terminal's transient login is
+ * what seals them: its heads must anchor at or past the removal entry,
+ * signed by a key the post-removal document lists.
+ *
  * Every stage pays the deliberately slow unlock KDF on top of several WAS
  * ceremonies, hence `test.slow()` and the generous timeouts.
  */
@@ -26,10 +33,14 @@ import { test, expect, type Page } from '@playwright/test'
 import { readLogFromString, resolveDIDFromLog } from '@interop/did-method-webvh'
 import {
   addCredentialViaPaste,
+  awaitLoginChain,
   coldTerminal,
   expectDidWebProjectionMatches,
+  expectSealedCollectionLogs,
+  expectUnsealedCollectionLogs,
   fillSettled,
   forceRememberBrowser,
+  sessionSpaceId,
   signupViaWizard
 } from './helpers'
 import {
@@ -155,6 +166,7 @@ test.describe('The last-enrolled-client forget transition', () => {
     const first = await coldTerminal(browser, APP_URL)
     let passphrase: string
     let recoveryCode: string
+    let spaceId: string
     // Captured inside terminal B, read again from terminal C: Settings is
     // gone once the browser is forgotten.
     let projectionLogUrl: string
@@ -164,6 +176,7 @@ test.describe('The last-enrolled-client forget transition', () => {
         rememberBrowser: false
       })
       passphrase = user.passphrase
+      spaceId = await sessionSpaceId(first.page)
       // Something to decrypt from a later terminal: the transient session
       // stores it over the replica-less remote-direct variant.
       await addCredentialViaPaste(first.page)
@@ -317,6 +330,13 @@ test.describe('The last-enrolled-client forget transition', () => {
       await second.context.close()
     }
 
+    // The transition's collection fan-out ran before its removal entry, so
+    // the collection descriptor log heads it left anchor at an account
+    // version that still lists the forgotten client's key.
+    const removalIndex = await expectUnsealedCollectionLogs({
+      spaceId: spaceId!
+    })
+
     // --- Terminal C: the passphrase alone still opens the account. ---
     const third = await coldTerminal(browser, APP_URL)
     try {
@@ -339,6 +359,12 @@ test.describe('The last-enrolled-client forget transition', () => {
       await expect(
         third.page.getByRole('link', { name: 'E2E Test Credential' })
       ).toBeVisible({ timeout: 30_000 })
+
+      // The transient login's collection cascade seals every collection log
+      // past the removal entry, signed by the ladder VM: the account runs no
+      // remembered login that could do it.
+      await awaitLoginChain(third.page)
+      await expectSealedCollectionLogs({ spaceId: spaceId!, removalIndex })
 
       // A following transient login leaves the projection matching the
       // log's document: its own `ensureDidWebProjection` found nothing to

@@ -22,7 +22,10 @@ import type {
   Registration,
   RegistrationSite
 } from '@interop/wallet-core/menders'
-import type { UserKeyRosterReadResult } from '@interop/wallet-core/keys'
+import type {
+  UserKeyCascadeResult,
+  UserKeyRosterReadResult
+} from '@interop/wallet-core/keys'
 import type { SealableEncryptionDescriptorStore } from '@interop/wallet-core/keys'
 import type { IZcap } from '@interop/data-integrity-core'
 import type { PublishedKeyDocument } from '@interop/wallet-core/webvh'
@@ -46,6 +49,7 @@ import {
 } from '@/session/registryPasses'
 import { verifiedAccountLog } from '@/session/verifiedLog'
 import { sweepUserKeyToDocument } from '@/session/userKeySweep'
+import { cascadeCollectionsToUserKey } from '@/session/userKeyCascade'
 import {
   refreshCommittedLadderRung,
   refreshStandingDelegations
@@ -263,23 +267,48 @@ const USER_KEY_SWEEP: Registration<LoginMenderDeps, FreewalletCeremonyId> = {
           ? { detail: rosterDetail }
           : {})
       },
-      {
-        invariant: 'collection-epochs-name-the-current-user-key',
-        ...(cascade.failed.length > 0
-          ? {
-              outcome: 'partial' as const,
-              // The ids and their errors ride the sweep's own logger; a
-              // report carries the count alone.
-              detail: { failedCollections: cascade.failed.length }
-            }
-          : Object.values(cascade.outcomes).some(
-                outcome => outcome === 'rotated'
-              )
-            ? { outcome: 'clean' as const }
-            : { outcome: 'noop' as const })
-      }
+      collectionEpochsEntry({ cascade })
     ]
   }
+}
+
+/**
+ * The report entry a collection fan-out grades to, on either chain: `partial`
+ * when a collection failed, `clean` when one rotated, `noop` otherwise.
+ *
+ * @param options {object}
+ * @param options.cascade {UserKeyCascadeResult}
+ * @returns {object}   the `collection-epochs-name-the-current-user-key` entry
+ */
+function collectionEpochsEntry({ cascade }: { cascade: UserKeyCascadeResult }) {
+  return {
+    invariant: 'collection-epochs-name-the-current-user-key' as const,
+    ...(cascade.failed.length > 0
+      ? {
+          outcome: 'partial' as const,
+          // The ids and their errors ride the fan-out's own logger; a
+          // report carries the count alone.
+          detail: { failedCollections: cascade.failed.length }
+        }
+      : anyCollectionRotated({ cascade })
+        ? { outcome: 'clean' as const }
+        : { outcome: 'noop' as const })
+  }
+}
+
+/**
+ * Whether the fan-out moved any collection onto a fresh epoch.
+ *
+ * @param options {object}
+ * @param options.cascade {UserKeyCascadeResult}
+ * @returns {boolean}
+ */
+function anyCollectionRotated({
+  cascade
+}: {
+  cascade: UserKeyCascadeResult
+}): boolean {
+  return Object.values(cascade.outcomes).some(outcome => outcome === 'rotated')
 }
 
 /**
@@ -708,6 +737,101 @@ const TRANSIENT_MANAGE_ZCAP_REFRESH: Registration<
 }
 
 /**
+ * The transient chain's collection fan-out: every encrypted collection whose
+ * current epoch still names a retired user key generation is re-epoch'd onto
+ * the roster's current one. It completes a rotation torn mid-fan-out on a
+ * credential-anchored account, which runs no remembered login and so no
+ * cascade-completion sweep. Staleness is read from server-held state alone,
+ * so a healthy account reads every collection's log and writes nothing.
+ *
+ * The same fan-out seals each collection's descriptor log: a collection
+ * already on the current key whose log head is anchored before the account
+ * document's latest `assertionMethod` removal takes a verbatim re-append
+ * anchored past it. That is the collection half of the governed-log
+ * invariant, which a forget ceremony leaves open since its fan-out runs
+ * before its removal entry. The roster log's half stays with the remembered
+ * sweep.
+ *
+ * It starts from the roster this visit read and converges no roster itself,
+ * so a rotation torn before its roster append is not this registration's.
+ * Each append is signed by the credential's ladder VM, which a collection
+ * descriptor log admits on `assertionMethod` membership alone, and invoked
+ * under the generation delegation the visit holds at call time. Also runs in
+ * the remote-direct CHAPI popup, as the remembered sweep does.
+ *
+ * It runs first, as the remembered sweep does, for two reasons. The roster
+ * read it rotates onto is current only until a registration behind it
+ * rotates the key (the torn-retirement repair can), and a Settings ceremony
+ * that rotates the key awaits `session.registryReady`, which this
+ * registration therefore settles before, so the two never race one
+ * collection's epochs.
+ */
+const TRANSIENT_COLLECTION_CASCADE: Registration<
+  LoginMenderDeps,
+  FreewalletCeremonyId
+> = {
+  trigger: 'transient-login-chain',
+  reports: [
+    'collection-epochs-name-the-current-user-key',
+    'governed-log-heads-anchor-past-the-membership-change'
+  ],
+  async converge(deps) {
+    const { session, context, rosterRead } = transient(deps)
+    const resolved = await context()
+    if (resolved?.kind !== 'ladder') {
+      const detail = { reason: 'no-ladder-context' }
+      return [
+        {
+          invariant: 'collection-epochs-name-the-current-user-key',
+          outcome: 'noop',
+          detail
+        },
+        {
+          invariant: 'governed-log-heads-anchor-past-the-membership-change',
+          outcome: 'noop',
+          detail
+        }
+      ]
+    }
+    const cascade = await cascadeCollectionsToUserKey({
+      remoteStore: resolved.remoteStore,
+      storeFor: resolved.collectionStore,
+      rosterDescriptor: rosterRead.descriptor,
+      clientKeyAgreementKey: resolved.standingKeyAgreementKey,
+      userKey: rosterRead.userKey
+    })
+    if (
+      anyCollectionRotated({ cascade }) ||
+      session.storage.strandedCollectionIds.length > 0
+    ) {
+      // The rotated descriptors are refetched and the ciphers rebuilt on
+      // them, so this visit's next writes seal under the fresh epochs. A
+      // collection built stranded is rebuilt even when this run rotated
+      // nothing: another client may have re-epoched it since.
+      await session.storage.refreshEncryptedDescriptors()
+    }
+    return [
+      collectionEpochsEntry({ cascade }),
+      {
+        invariant: 'governed-log-heads-anchor-past-the-membership-change',
+        // The collection half alone: this registration seals no roster log.
+        // A collection that failed may be the one left unsealed.
+        ...(cascade.failed.length > 0
+          ? {
+              outcome: 'partial' as const,
+              detail: { failedCollections: cascade.failed.length }
+            }
+          : Object.values(cascade.outcomes).some(
+                outcome => outcome === 'sealed'
+              )
+            ? { outcome: 'clean' as const }
+            : { outcome: 'noop' as const })
+      }
+    ]
+  }
+}
+
+/**
  * The remembered block's registry-writing registrations, in execution order.
  * `session.registryReady` settles when the last of these has reported, which
  * is the meaning its awaiters have always had.
@@ -740,11 +864,13 @@ export const REMEMBERED_REGISTRATIONS: ReadonlyArray<
 > = [...REMEMBERED_REGISTRY_REGISTRATIONS, ...REMEMBERED_TAIL_REGISTRATIONS]
 
 /**
- * The transient block, every entry of which is registry-writing.
+ * The transient block, every entry of which settles `session.registryReady`:
+ * the collection fan-out first, then the registry-writing passes.
  */
 export const TRANSIENT_REGISTRATIONS: ReadonlyArray<
   Registration<LoginMenderDeps, FreewalletCeremonyId>
 > = [
+  TRANSIENT_COLLECTION_CASCADE,
   ...sharedRegistryPasses('transient-login-chain'),
   TRANSIENT_MANAGE_ZCAP_REFRESH
 ]

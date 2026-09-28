@@ -490,8 +490,9 @@ export async function ensureClientAnnexGenerationReady({
  *   credential-anchored-signup heal (the establishment re-run needs the unlock
  *   identity, not just the record)
  * @param [options.popup] {boolean}   this visit runs in the CHAPI popup's
- *   partitioned iframe. Every registration of the block below declares
- *   itself off that route, so the block runs empty there
+ *   partitioned iframe. Every registry-writing registration of the block
+ *   below declares itself off that route, so only the collection fan-out
+ *   runs there
  * @param [options.healAttempted] {boolean}   internal: the re-entry marker of
  *   the unpromoted-account heal, so a heal that did not converge refuses
  *   instead of looping
@@ -1133,7 +1134,7 @@ export async function transientSessionFromKeyringHit({
   // stale.
   // The projection mend's report, awaited by the block's settle point alone
   // (below), so `session.mends` carries its entry even in the popup, where
-  // the block itself runs empty and settles in the same tick.
+  // the block may settle before it.
   let projectionReported: Promise<void> | undefined
   if (mendReport === undefined) {
     primeVerifiedAccountLog({
@@ -1201,15 +1202,20 @@ export async function transientSessionFromKeyringHit({
       : {})
   }
   // The login-time mender block, on a transient session too: one ordered
-  // run that never rejects, started after the login page has navigated. Five
-  // passes ride it -- the stale-seal repair first (every writer below reads
+  // run that never rejects, started after the login page has navigated. It
+  // opens with the collection fan-out, which re-epochs any collection a torn
+  // rotation left on a retired user key generation. It runs first because the
+  // roster read it rotates onto is current only until a pass below rotates
+  // the key, and because a Settings ceremony that rotates the key awaits
+  // `session.registryReady`, so the two never race one collection. Five
+  // passes follow -- the stale-seal repair first (every writer below reads
   // the record, and a stale seal would make each warn and skip on a registry
   // this same visit can mend), then the torn-retirement repair, the bare
   // passkey rebuild, the registry backfill, and last the acting credential's
   // management-zcap refresh. Each rides the visit's generation delegation and
   // unwraps with the credential's standing key. A CHAPI popup runs none of
-  // them: each declares itself off that route, so the block runs empty and
-  // both of its promises settle at once.
+  // the five: each declares itself off that route. The fan-out runs there
+  // too, as the remembered sweep does in a remembered popup.
   //
   // The refresh is last rather than parallel: it compare-and-swaps the same
   // registry entry the passes above rewrite, and two writers racing one entry
@@ -1219,8 +1225,8 @@ export async function transientSessionFromKeyringHit({
   // It touches only the acting credential's entry, creates nothing, and warns
   // and skips on a read that throws.
   //
-  // The user key sweep and the annex GC stay remembered-only: neither has a
-  // ladder-anchored branch yet.
+  // The sweep's roster convergence and the annex GC stay remembered-only:
+  // neither has a ladder-anchored branch yet.
   const { context } = blockCeremonyContext({ session })
   startLoginMenderBlock({
     accumulator: mends,

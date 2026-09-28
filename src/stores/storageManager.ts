@@ -44,12 +44,13 @@ import {
   type ContactRevisionPayload
 } from '@interop/social-core'
 import type { RxCollection, RxStorage } from 'rxdb/plugins/core'
-import type {
-  CollectionEncryption,
-  CollectionGenerator,
-  IDelegatedZcap,
-  ServiceDescription,
-  SpaceMetadata
+import {
+  KeyUnwrapError,
+  type CollectionEncryption,
+  type CollectionGenerator,
+  type IDelegatedZcap,
+  type ServiceDescription,
+  type SpaceMetadata
 } from '@interop/was-client'
 import {
   acquireDescriptor,
@@ -234,6 +235,36 @@ function currentEpochRecipientKids({
   return (epoch?.recipients ?? [])
     .map(entry => entry.header.kid)
     .filter(kid => kid !== ownerKid)
+}
+
+/**
+ * Whether a descriptor strands this reader: it carries key epochs, and no
+ * recipient entry in any of them names the reader's key-agreement key. That
+ * is what a user key rotation torn mid-fan-out leaves on a collection it had
+ * not reached yet. A reader named in some epoch is not stranded, even when
+ * its entry there fails to unwrap.
+ *
+ * @param options {object}
+ * @param options.descriptor {CollectionEncryption}
+ * @param options.keyAgreementKey {IKeyAgreementKey}   the reader's own KAK
+ * @returns {boolean}
+ */
+function strandsReader({
+  descriptor,
+  keyAgreementKey
+}: {
+  descriptor: CollectionEncryption
+  keyAgreementKey: IKeyAgreementKey
+}): boolean {
+  const epochs = descriptor.epochs ?? []
+  return (
+    epochs.length > 0 &&
+    !epochs.some(epoch =>
+      epoch.recipients.some(
+        recipient => recipient.header.kid === keyAgreementKey.id
+      )
+    )
+  )
 }
 
 /**
@@ -572,6 +603,10 @@ export class StorageManager {
   // decrypt at the WAS seam (`decryptCollectionResource`) and rebuilt on a
   // descriptor refresh.
   #ciphers?: Record<string, DocCipher>
+  // The WAS ids of the encrypted collections whose current cipher refuses
+  // because no key epoch names the vault KAK (see `strandsReader`). Rewritten
+  // at every cipher (re)build, so it always describes the installed ciphers.
+  #strandedCollectionIds: string[]
   // The provisioning promise from `ensureUserCollections` (fired at session
   // creation), awaited by the read-readiness contract in non-remote-direct mode.
   #provisioning?: Promise<void>
@@ -628,7 +663,7 @@ export class StorageManager {
   #refreshPolicy = new DescriptorRefreshPolicy({
     refresh: async ({ collectionId }) => {
       if (ENCRYPTED_COLLECTION_IDS.includes(collectionId)) {
-        await this.#refreshDescriptors()
+        await this.#refreshDescriptors({ refuseStranded: true })
       } else {
         // An app-provisioned collection: drop the cached descriptor and cipher so
         // the re-read rebuilds them from a fresh Description fetch.
@@ -655,6 +690,7 @@ export class StorageManager {
     localStore,
     remoteStore,
     ciphers,
+    strandedCollectionIds,
     remoteDirect = false,
     vaultKeys,
     descriptors,
@@ -667,6 +703,7 @@ export class StorageManager {
     localStore?: BrowserStore
     remoteStore?: WASRemoteStore
     ciphers?: Record<string, DocCipher>
+    strandedCollectionIds?: string[]
     remoteDirect?: boolean
     vaultKeys: {
       keyAgreementKey: IKeyAgreementKey
@@ -682,6 +719,7 @@ export class StorageManager {
     this.#localStore = localStore
     this.#remoteStore = remoteStore
     this.#ciphers = ciphers
+    this.#strandedCollectionIds = strandedCollectionIds ?? []
     this.#vaultKeys = vaultKeys
     this.#descriptors = descriptors ?? {}
     this.#metas = metas ?? {}
@@ -730,6 +768,18 @@ export class StorageManager {
    */
   get hasLocalReplica(): boolean {
     return this.#localStore !== undefined
+  }
+
+  /**
+   * The WAS ids of the encrypted collections whose installed cipher refuses
+   * because no key epoch names the current user key: collections a torn user
+   * key rotation left on a retired generation. The login's collection fan-out
+   * reads it to decide whether the ciphers need a rebuild once it has run.
+   *
+   * @returns {string[]}
+   */
+  get strandedCollectionIds(): string[] {
+    return [...this.#strandedCollectionIds]
   }
 
   /**
@@ -921,14 +971,19 @@ export class StorageManager {
    * @param [options.refresh] {object}   the descriptor source and cache the
    *   contacts cipher's own unknown-epoch refresh re-reads through; absent
    *   when the session has no remote Space
-   * @returns {Promise<Record<string, DocCipher>>}
+   * @param options.refuseStranded {boolean}   see
+   *   {@link StorageManager.#buildCipher}
+   * @returns {Promise<{ ciphers: Record<string, DocCipher>,
+   *   strandedCollectionIds: string[] }>}   the cipher map, keyed by logical
+   *   key, and the WAS ids of the collections given a stranded refusing cipher
    */
   static async #buildCiphers({
     keyAgreementKey,
     keyResolver,
     descriptors,
     metas,
-    refresh
+    refresh,
+    refuseStranded
   }: {
     keyAgreementKey: IKeyAgreementKey
     keyResolver: IKeyResolver
@@ -938,8 +993,12 @@ export class StorageManager {
       source?: EncryptionDescriptorSource
       cache: EncryptionDescriptorCache
     }
-  }) {
-    const cipherEntries = await Promise.all(
+    refuseStranded: boolean
+  }): Promise<{
+    ciphers: Record<string, DocCipher>
+    strandedCollectionIds: string[]
+  }> {
+    const built = await Promise.all(
       ENCRYPTED_STANDARD_COLLECTIONS.map(collection =>
         StorageManager.#buildCipher({
           collection,
@@ -947,11 +1006,19 @@ export class StorageManager {
           keyResolver,
           descriptor: descriptors?.[collection.id],
           meta: metas?.[collection.id],
-          refresh
+          refresh,
+          refuseStranded
         })
       )
     )
-    return Object.fromEntries(cipherEntries)
+    return {
+      ciphers: Object.fromEntries(
+        built.map(({ key, cipher }) => [key, cipher])
+      ),
+      strandedCollectionIds: ENCRYPTED_STANDARD_COLLECTIONS.filter(
+        (_collection, index) => built[index].stranded
+      ).map(({ id }) => id)
+    }
   }
 
   /**
@@ -971,7 +1038,11 @@ export class StorageManager {
    * @param [options.meta] {object}   the collection's stored `/meta` value
    * @param [options.refresh] {object}   the descriptor source and cache the
    *   contacts cipher's own unknown-epoch refresh re-reads through
-   * @returns {Promise<[string, DocCipher]>}
+   * @param options.refuseStranded {boolean}   true gives a collection whose
+   *   epochs name no vault KAK (see `strandsReader`) a refusing cipher; false
+   *   lets its build throw `KeyUnwrapError`, as the post-rotation adoption
+   *   needs
+   * @returns {Promise<{ key: string, cipher: DocCipher, stranded: boolean }>}
    */
   static async #buildCipher({
     collection: { key, id, idDerivation },
@@ -979,7 +1050,8 @@ export class StorageManager {
     keyResolver,
     descriptor,
     meta,
-    refresh
+    refresh,
+    refuseStranded
   }: {
     collection: (typeof ENCRYPTED_STANDARD_COLLECTIONS)[number]
     keyAgreementKey: IKeyAgreementKey
@@ -990,7 +1062,8 @@ export class StorageManager {
       source?: EncryptionDescriptorSource
       cache: EncryptionDescriptorCache
     }
-  }): Promise<[string, DocCipher]> {
+    refuseStranded: boolean
+  }): Promise<{ key: string; cipher: DocCipher; stranded: boolean }> {
     // Every encrypted collection carries its key epochs from
     // provisioning, so a missing (or epoch-less) descriptor -- an
     // unprovisioned or torn collection, or an offline session with
@@ -1000,7 +1073,33 @@ export class StorageManager {
     // encrypted collection, and an epoch-less descriptor would make the
     // whole rebuild throw, taking the healthy collections down with it.
     if (!descriptor?.epochs?.length) {
-      return [key, StorageManager.#refusingCipher({ collectionId: id })]
+      return {
+        key,
+        cipher: StorageManager.#refusingCipher({ collectionId: id }),
+        stranded: false
+      }
+    }
+    if (refuseStranded && strandsReader({ descriptor, keyAgreementKey })) {
+      // No epoch names the current user key: a user key rotation torn
+      // mid-fan-out left this collection on a retired generation. It gets a
+      // refusing cipher rather than one built from the retired key, so this
+      // session writes nothing under an epoch the retired party can open,
+      // and the rest of the session is built. The login's collection
+      // fan-out re-epochs it and the descriptor refresh behind that rebuilds
+      // this cipher.
+      log.warn(
+        'No key epoch of this collection names the current user key; ' +
+          'refusing its reads and writes until the collection is re-epoched',
+        { collectionId: id }
+      )
+      return {
+        key,
+        cipher: StorageManager.#refusingCipher({
+          collectionId: id,
+          reason: 'stranded'
+        }),
+        stranded: true
+      }
     }
     // The contacts head is decrypted inside the sync driver's conflict
     // handler, out of reach of the session's read-level refresh guard, so
@@ -1017,7 +1116,7 @@ export class StorageManager {
         ...refresh,
         onFetchError: warnDescriptorFetchError
       })
-      return [key, cipher]
+      return { key, cipher, stranded: false }
     }
     const cipher = await createEdvDocCipher({
       keyAgreementKey,
@@ -1035,7 +1134,7 @@ export class StorageManager {
       collectionId: id,
       meta
     })
-    return [key, cipher]
+    return { key, cipher, stranded: false }
   }
 
   /**
@@ -1079,19 +1178,33 @@ export class StorageManager {
 
   /**
    * A {@link DocCipher} that refuses every operation: the stand-in for an
-   * encrypted collection whose descriptor could not be acquired. The refusal
-   * clears when a descriptor refresh rebuilds the ciphers.
+   * encrypted collection whose descriptor could not be acquired, or whose
+   * epochs name no current user key generation (`stranded`). The refusal
+   * clears when a descriptor refresh rebuilds the ciphers. A stranded
+   * refusal is a `KeyUnwrapError`, so a list read skips the collection's rows
+   * as not-a-recipient rather than collecting them for the undecryptable
+   * purge, which would delete them from the server.
    *
    * @param options {object}
    * @param options.collectionId {string}
+   * @param [options.reason] {'stranded'}   omitted for a missing descriptor
    * @returns {DocCipher}
    */
   static #refusingCipher({
-    collectionId
+    collectionId,
+    reason
   }: {
     collectionId: string
+    reason?: 'stranded'
   }): DocCipher {
     const refuse = (): never => {
+      if (reason === 'stranded') {
+        throw new KeyUnwrapError(
+          `Collection "${collectionId}" has no key epoch naming the ` +
+            'current user key; refusing to read or write until it is ' +
+            're-epoched onto it.'
+        )
+      }
       throw new Error(
         `Collection "${collectionId}" has no encryption descriptor available ` +
           '(fetched or cached). Every encrypted collection carries its key ' +
@@ -1126,17 +1239,27 @@ export class StorageManager {
    * Rebuilds the per-collection ciphers from the current descriptors and the held
    * vault keys, then swaps them into the local store (and this facade).
    *
+   * @param options {object}
+   * @param options.refuseStranded {boolean}   see
+   *   {@link StorageManager.#buildCipher}
    * @returns {Promise<void>}
    */
-  async #rebuildCiphers(): Promise<void> {
-    const ciphers = await StorageManager.#buildCiphers({
-      keyAgreementKey: this.#vaultKeys.keyAgreementKey,
-      keyResolver: this.#vaultKeys.keyResolver,
-      descriptors: this.#descriptors,
-      metas: this.#metas,
-      refresh: this.#cipherRefresh()
-    })
+  async #rebuildCiphers({
+    refuseStranded
+  }: {
+    refuseStranded: boolean
+  }): Promise<void> {
+    const { ciphers, strandedCollectionIds } =
+      await StorageManager.#buildCiphers({
+        keyAgreementKey: this.#vaultKeys.keyAgreementKey,
+        keyResolver: this.#vaultKeys.keyResolver,
+        descriptors: this.#descriptors,
+        metas: this.#metas,
+        refresh: this.#cipherRefresh(),
+        refuseStranded
+      })
     this.#ciphers = ciphers
+    this.#strandedCollectionIds = strandedCollectionIds
     // Swap into the active backend (the local store in the normal case, the
     // remote-direct backend in the popup); both honor `setCiphers` for the
     // descriptor-refresh path.
@@ -1167,15 +1290,20 @@ export class StorageManager {
     if (!collection) {
       return
     }
-    const [key, cipher] = await StorageManager.#buildCipher({
+    const { key, cipher, stranded } = await StorageManager.#buildCipher({
       collection,
       keyAgreementKey: this.#vaultKeys.keyAgreementKey,
       keyResolver: this.#vaultKeys.keyResolver,
       descriptor: this.#descriptors[collectionId],
       meta: this.#metas[collectionId],
-      refresh: this.#cipherRefresh()
+      refresh: this.#cipherRefresh(),
+      refuseStranded: true
     })
     this.#ciphers = { ...this.#ciphers, [key]: cipher }
+    this.#strandedCollectionIds = [
+      ...this.#strandedCollectionIds.filter(id => id !== collectionId),
+      ...(stranded ? [collectionId] : [])
+    ]
     this.#store.setCiphers(this.#ciphers)
   }
 
@@ -1187,9 +1315,16 @@ export class StorageManager {
    * emits no change-feed entry, so the local cipher may be built from a stale
    * descriptor. No-op without a remote store.
    *
+   * @param options {object}
+   * @param options.refuseStranded {boolean}   see
+   *   {@link StorageManager.#buildCipher}
    * @returns {Promise<void>}
    */
-  async #refreshDescriptors(): Promise<void> {
+  async #refreshDescriptors({
+    refuseStranded
+  }: {
+    refuseStranded: boolean
+  }): Promise<void> {
     if (!this.#remoteStore || !this.#descriptorCache) {
       return
     }
@@ -1207,7 +1342,7 @@ export class StorageManager {
         collectionIds: ENCRYPTED_COLLECTION_IDS
       })
     ])
-    await this.#rebuildCiphers()
+    await this.#rebuildCiphers({ refuseStranded })
   }
 
   /**
@@ -1246,7 +1381,9 @@ export class StorageManager {
    * Its one ordering rule: the collection fan-out must already have run, or
    * the refetched descriptors still name epochs the fresh key cannot open.
    * The in-band step that precedes the fan-out takes
-   * {@link holdRotatedVaultKeys} instead.
+   * {@link holdRotatedVaultKeys} instead. A collection the fan-out did not
+   * reach throws `KeyUnwrapError` here rather than getting a refusing
+   * cipher, so the caller learns the adoption did not land.
    *
    * @param options {object}
    * @param options.keyAgreementKey {IKeyAgreementKey}   the fresh user key's KAK
@@ -1261,7 +1398,7 @@ export class StorageManager {
     keyResolver: IKeyResolver
   }): Promise<void> {
     this.holdRotatedVaultKeys({ keyAgreementKey, keyResolver })
-    await this.refreshEncryptedDescriptors()
+    await this.#refreshEncrypted({ refuseStranded: false })
   }
 
   /**
@@ -1272,17 +1409,36 @@ export class StorageManager {
    * session's ciphers were built at login: without the refresh, every later
    * write would stay sealed under the retired epoch the revoked party can
    * still decrypt. The app-collection cipher caches are dropped too and
-   * rebuild lazily on next decrypt.
+   * rebuild lazily on next decrypt. A collection still stranded (see
+   * {@link strandedCollectionIds}) keeps a refusing cipher.
    *
    * @returns {Promise<void>}
    */
   async refreshEncryptedDescriptors(): Promise<void> {
+    await this.#refreshEncrypted({ refuseStranded: true })
+  }
+
+  /**
+   * The shared body of {@link refreshEncryptedDescriptors} and
+   * {@link adoptRotatedVaultKeys}, which differ only in how a stranded
+   * collection is treated.
+   *
+   * @param options {object}
+   * @param options.refuseStranded {boolean}   see
+   *   {@link StorageManager.#buildCipher}
+   * @returns {Promise<void>}
+   */
+  async #refreshEncrypted({
+    refuseStranded
+  }: {
+    refuseStranded: boolean
+  }): Promise<void> {
     this.#appCiphers = {}
     this.#appDescriptors = {}
     if (this.#remoteStore && this.#descriptorCache) {
-      await this.#refreshDescriptors()
+      await this.#refreshDescriptors({ refuseStranded })
     } else {
-      await this.#rebuildCiphers()
+      await this.#rebuildCiphers({ refuseStranded })
     }
     this.#refreshPolicy.reset()
   }
@@ -1457,20 +1613,24 @@ export class StorageManager {
     // rest of a guest session) plus any multi-recipient descriptor. The local store
     // holds EDV envelopes for these collections and replication ships them
     // verbatim.
-    const ciphers = await StorageManager.#buildCiphers({
-      keyAgreementKey,
-      keyResolver,
-      descriptors,
-      metas,
-      ...(descriptorCache
-        ? {
-            refresh: {
-              ...(descriptorLogs ? { source: descriptorLogs.source } : {}),
-              cache: descriptorCache
+    const { ciphers, strandedCollectionIds } =
+      await StorageManager.#buildCiphers({
+        keyAgreementKey,
+        keyResolver,
+        descriptors,
+        metas,
+        // A collection a torn rotation left behind gets a refusing cipher, so
+        // the session is built and the login's fan-out can re-epoch it.
+        refuseStranded: true,
+        ...(descriptorCache
+          ? {
+              refresh: {
+                ...(descriptorLogs ? { source: descriptorLogs.source } : {}),
+                cache: descriptorCache
+              }
             }
-          }
-        : {})
-    })
+          : {})
+      })
 
     // The local store is the active replica -- for a session on the
     // browser-local strategy. A transient session is replica-less:
@@ -1511,6 +1671,7 @@ export class StorageManager {
       localStore,
       remoteStore,
       ciphers,
+      strandedCollectionIds,
       remoteDirect,
       vaultKeys: { keyAgreementKey, keyResolver },
       descriptors,

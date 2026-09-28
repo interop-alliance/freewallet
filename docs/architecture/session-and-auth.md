@@ -377,7 +377,14 @@ sweeps do not queue behind the KMS round trip. A transient login runs
 four of those passes on an ordered chain of its own: the re-seal repair, the
 torn-retirement repair, the bare-passkey rebuild, and the registry backfill.
 Each rides the visit's generation delegation and unwraps with the
-credential's standing key. The user key sweep and the annex GC stay
+credential's standing key, and the management-zcap refresh follows them.
+Ahead of all of them runs the user key sweep's collection fan-out: every
+encrypted collection whose current epoch names a retired user key
+generation takes a fresh epoch on the roster's current key, the appends
+signed by the credential's ladder VM. It runs first for the reason the
+remembered sweep does, so no pass behind it rotates the key it rotates onto
+and no Settings ceremony awaiting `session.registryReady` races it. The
+sweep's roster convergence and the annex GC stay
 remembered-only, neither having a ladder-anchored branch yet. The re-seal
 repair runs first, since every registry writer downstream reads the record
 and a stale seal would make each warn and skip. The backfill carries the

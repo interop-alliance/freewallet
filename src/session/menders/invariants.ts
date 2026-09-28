@@ -61,14 +61,21 @@ const DECLARATIONS: ReadonlyArray<
   // 2
   // converger: none of its own -- the roster half is the `seal()` backstop
   // inside invariant 1's converger, the collection half sits inside
-  // invariant 3's (`cascadeCollectionsToUserKey`).
+  // invariant 3's (`cascadeCollectionsToUserKey`). The transient chain's
+  // collection fan-out reports the collection half; the roster half has no
+  // transient converger (gap row 21). Also runs in the remote-direct CHAPI
+  // popup.
   {
     id: 'governed-log-heads-anchor-past-the-membership-change',
     statement:
       "A governed log's verified head (the roster's, and each encrypted collection's `meta/log`) is anchored at a controller version no earlier than the controller's latest assertion-key removal.",
     standsOn: ['ladder-anchored', 'enrolled'],
     authority: 'account',
-    triggers: ['remembered-login-chain', 'ceremony-tail'],
+    triggers: [
+      'remembered-login-chain',
+      'transient-login-chain',
+      'ceremony-tail'
+    ],
     ceremonies: [
       'client-revocation',
       'forget-client',
@@ -82,14 +89,20 @@ const DECLARATIONS: ReadonlyArray<
   },
   // 3
   // converger: wallet-core's driver (`keys/userKeyCascade.ts`), called by
-  // `cascadeCollectionsToUserKey` (`src/session/userKeyCascade.ts`).
+  // `cascadeCollectionsToUserKey` (`src/session/userKeyCascade.ts`), from the
+  // remembered chain's sweep and the transient chain's collection fan-out.
+  // Also runs in the remote-direct CHAPI popup.
   {
     id: 'collection-epochs-name-the-current-user-key',
     statement:
       "Every encrypted collection's current key epoch names the current user key generation.",
     standsOn: ['ladder-anchored', 'enrolled'],
     authority: 'account',
-    triggers: ['remembered-login-chain', 'ceremony-tail'],
+    triggers: [
+      'remembered-login-chain',
+      'transient-login-chain',
+      'ceremony-tail'
+    ],
     ceremonies: [
       'client-revocation',
       'recovery-code-spend',
