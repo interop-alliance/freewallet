@@ -76,6 +76,11 @@
 
 ### Changed
 
+- `wallet-activity` is no longer shareable (wallet-core's
+  `WALLET_ACTIVITY_COLLECTION_SPEC`). A `shared-wallet-collection` request
+  naming it is unsatisfiable on both the App Connect and the standalone
+  capability query path, since its rows carry every delegated capability.
+  A reader already escrowed into it stays in its key-epoch roster.
 - BREAKING: a collection's app attribution is one `generator` object on
   the Collection Metadata object, `{ id, origin, url, name }`, replacing the
   flat `generator` DID and `generatorOrigin`. App Connect provisioning stamps

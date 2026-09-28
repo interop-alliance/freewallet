@@ -1104,7 +1104,8 @@ function resolveTargetForm({
     // escrows the reader into a key-epoch roster, and there is no roster
     // where nothing is encrypted -- but not sufficient: `app-connections`
     // carries epochs and is never shareable, since its rows are the connected
-    // apps' private seeds. Everything else -- a plaintext collection, an RP
+    // apps' private seeds, and so does `wallet-activity`, whose rows carry the
+    // account's delegated capabilities verbatim. Everything else -- a plaintext collection, an RP
     // collection, a made-up name -- has no roster to escrow a reader into.
     const shared = standardCollection(name)
     if (!shared?.encryption || !shared.shareable) {

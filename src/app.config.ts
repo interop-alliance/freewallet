@@ -155,7 +155,8 @@ export const WALLET_STANDARD_COLLECTIONS: Array<{
   // storage page's share dialog). Projected verbatim from the spec: it is a
   // narrower predicate than `encryption`, since a collection can carry a key
   // epoch roster and still never be shareable (`app-connections`, whose rows
-  // are the connected apps' private seeds).
+  // are the connected apps' private seeds, and `wallet-activity`, whose rows
+  // are the account's grant history).
   shareable: boolean
   // How the collection's cipher mints a document id, from the collection spec:
   // 'content' (content-addressed, immutable) or 'random' (the mutable

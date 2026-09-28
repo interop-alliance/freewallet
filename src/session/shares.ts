@@ -25,10 +25,11 @@ export interface CollectionShare {
  * The standard collections that may be shared, straight off the roster's
  * `shareable` flag. Encryption is a necessary condition -- a share adds the
  * reader to a key-epoch roster, and there is no roster where nothing is
- * encrypted -- but not a sufficient one: `app-connections` is encrypted and
+ * encrypted -- but not a sufficient one. `app-connections` is encrypted and
  * deliberately never shareable, since its rows carry the connected apps'
- * private seeds. The encrypted set itself lives in `src/app.config.ts` as
- * `ENCRYPTED_STANDARD_COLLECTIONS`.
+ * private seeds. Nor is `wallet-activity`, since its rows carry every
+ * delegated capability verbatim. The encrypted set itself lives in
+ * `src/app.config.ts` as `ENCRYPTED_STANDARD_COLLECTIONS`.
  */
 export const SHAREABLE_COLLECTIONS = WALLET_STANDARD_COLLECTIONS.filter(
   ({ shareable }) => shareable

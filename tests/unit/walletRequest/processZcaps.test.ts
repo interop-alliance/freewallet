@@ -840,7 +840,7 @@ describe('resolveInvocationTarget', () => {
   it('resolves a share of every shareable standard collection', () => {
     // The rule is the roster's `shareable` flag, so the contacts collections
     // are shareable on the same terms as credentials.
-    for (const name of ['wallet-activity', 'contacts', 'contacts-history']) {
+    for (const name of ['contacts', 'contacts-history']) {
       expect(
         resolveInvocationTarget({
           descriptor: {
@@ -858,11 +858,13 @@ describe('resolveInvocationTarget', () => {
   it('refuses a share of anything but a shareable standard collection', () => {
     // Plaintext standard collection, the `id` / `key-map` collections, an RP
     // collection, a made-up name, a missing name -- none has an epoch roster.
-    // `app-connections` does have one and is refused all the same: its rows
-    // are the connected apps' private seeds.
+    // `app-connections` and `wallet-activity` do have one and are refused all
+    // the same: their rows are the connected apps' private seeds and the
+    // account's grant history.
     for (const name of [
       'public-credentials',
       APP_CONNECTIONS_COLLECTION,
+      'wallet-activity',
       'id',
       KEY_MAP_COLLECTION.id,
       UNLOCK_METHODS_COLLECTION.id,
@@ -2099,6 +2101,33 @@ describe('processZcaps', () => {
     expect(delegated).toHaveLength(0)
   })
 
+  it('skips a share of wallet-activity on the App Connect path', async () => {
+    // The activity rows carry every delegated zcap verbatim, so a share of the
+    // collection would hand one reader the account's whole grant history.
+    delegated.length = 0
+    shareCalls.length = 0
+    const zcaps = await processZcaps({
+      zcapRequests: [
+        {
+          ...shareDetail,
+          invocationTarget: {
+            type: 'https://w3id.org/byoe#shared-wallet-collection',
+            name: 'wallet-activity'
+          }
+        }
+      ],
+      session,
+      app: {
+        name: 'Text Editor',
+        origin: 'https://app.example',
+        appUrl: 'https://app.example/editor'
+      }
+    })
+    expect(zcaps).toHaveLength(0)
+    expect(shareCalls).toHaveLength(0)
+    expect(delegated).toHaveLength(0)
+  })
+
   it('throws when the session has no remote storage', async () => {
     const guest = {
       ...session,
@@ -2169,6 +2198,37 @@ describe('processRequest with zcaps', () => {
     }
     expect(vp.proof).toBeUndefined()
     expect(vp.zcap).toHaveLength(1)
+  })
+
+  it('delegates no share of wallet-activity from a standalone query', async () => {
+    delegated.length = 0
+    shareCalls.length = 0
+    const response = await processRequest({
+      request: {
+        query: [
+          {
+            type: 'AuthorizationCapabilityQuery',
+            capabilityQuery: [
+              {
+                ...shareDetail,
+                invocationTarget: {
+                  type: 'https://w3id.org/byoe#shared-wallet-collection',
+                  name: 'wallet-activity'
+                }
+              }
+            ]
+          }
+        ]
+      },
+      session,
+      credentialRequestOrigin: 'https://verifier.example',
+      delegateStandaloneZcaps: true
+    })
+    const vp = response.verifiablePresentation as unknown as
+      { zcap?: IZcap[] } | undefined
+    expect(vp?.zcap ?? []).toHaveLength(0)
+    expect(shareCalls).toHaveLength(0)
+    expect(delegated).toHaveLength(0)
   })
 
   it('delegates no standalone grant without the opt-in', async () => {

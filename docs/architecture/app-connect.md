@@ -363,8 +363,15 @@ grants one axis without the other.
 **The recipient key is derived, not transmitted.** `name` must be one of the
 shareable standard collections: every `WALLET_STANDARD_COLLECTIONS` entry
 whose roster spec carries `shareable: true`, so today `private-credentials`,
-`wallet-activity`, `contacts`, and `contacts-history`. `app-connections` is
-encrypted but never shareable, its rows carrying app seeds. The grantee's
+`contacts`, and `contacts-history`. `app-connections` is encrypted but never
+shareable, its rows carrying app seeds. Neither is `wallet-activity`. Its
+Login and collection-share rows carry each delegated capability verbatim,
+proof and capability chain included, so one reader of it would learn every
+connected app and agent, with its targets, verbs, and expiry, and would hold
+the capability documents themselves. The flag gates new shares only. A
+reader escrowed into `wallet-activity` before it was narrowed stays in that
+collection's key-epoch roster, and the shares dialog, which lists only the
+shareable set, does not show it. No migration removes it. The grantee's
 X25519 key is derived from the `did:key` the request already names as
 `controller` (`x25519RecipientFromDidKey` from `@interop/was-client/edv`),
 so a request can never pair controller DID A with recipient key B. A

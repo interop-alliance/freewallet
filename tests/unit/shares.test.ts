@@ -3,9 +3,9 @@
  * `src/session/shares.ts`): which of the wallet's own collections may be
  * offered to a reader, straight off the collection roster's `shareable` flag.
  * The one property worth pinning is that the allowlist is narrower than the
- * encrypted set -- `app-connections` carries a key-epoch roster and is
- * deliberately never shareable, since its rows are the connected apps' private
- * seeds.
+ * encrypted set -- `app-connections` and `wallet-activity` carry key-epoch
+ * rosters and are deliberately never shareable, since their rows are the
+ * connected apps' private seeds and the account's grant history.
  */
 import { describe, expect, it } from 'vitest'
 import {
@@ -19,8 +19,7 @@ describe('SHAREABLE_COLLECTIONS', () => {
     expect(SHAREABLE_COLLECTIONS.map(({ id }) => id).sort()).toEqual([
       'contacts',
       'contacts-history',
-      'private-credentials',
-      'wallet-activity'
+      'private-credentials'
     ])
   })
 
@@ -29,6 +28,13 @@ describe('SHAREABLE_COLLECTIONS', () => {
       collections.map(({ id }) => id)
     expect(ids(ENCRYPTED_STANDARD_COLLECTIONS)).toContain('app-connections')
     expect(ids(SHAREABLE_COLLECTIONS)).not.toContain('app-connections')
+  })
+
+  it('excludes wallet-activity, whose rows carry the delegated zcaps', () => {
+    const ids = (collections: Array<{ id: string }>) =>
+      collections.map(({ id }) => id)
+    expect(ids(ENCRYPTED_STANDARD_COLLECTIONS)).toContain('wallet-activity')
+    expect(ids(SHAREABLE_COLLECTIONS)).not.toContain('wallet-activity')
   })
 
   it('admits only encrypted collections (a share needs an epoch roster)', () => {
