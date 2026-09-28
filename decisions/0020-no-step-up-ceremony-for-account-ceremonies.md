@@ -63,7 +63,7 @@ added:
   branch. It writes three world-readable entries per ceremony where the
   ladder branch writes one. It puts a root-tier invoking key in tab
   memory. A run torn after its enroll entry leaves an orphan client that
-  is authorization-live until someone removes it, and a client-less
+  is authorization-live until someone removes it, and a credential-anchored
   account has no actor to remove it. Every rotating ceremony inherits
   the recipient self-exclusion problem, since the ceremony's own
   in-memory client stands in the document the recipient resolver reads.

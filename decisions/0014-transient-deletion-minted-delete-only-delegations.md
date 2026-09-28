@@ -127,7 +127,7 @@ narrowing that record said such a grant falls outside.
   accepted and bounded: the population is the ladder VMs rather than
   every `capabilityDelegation` member on the deployment, and the
   retirement gate (wallet-core's record) closes the retired-credential
-  population. On a client-less account the standing VMs are bounded
+  population. On a credential-anchored account the standing VMs are bounded
   only by their credentials' entropy.
 - The capabilities are grant authority exercised with no log entry, so
   `decisions/0002` (loudness) carries an amendment with this stated

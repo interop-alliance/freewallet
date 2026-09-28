@@ -20,7 +20,7 @@
 
 The transient, credential-anchored session is the default entry on a
 non-remembered browser, and the credential-anchored establishment is
-every WAS signup. The account shape that produces is client-less and
+every WAS signup. The account shape that produces is
 ladder-anchored. Remembering a browser is a deliberate opt-in, not a
 stage an account passes through.
 
@@ -76,7 +76,7 @@ case applies rather than leaving it to the reader.
 
 ## Rejected Alternatives
 
-- Keep the remembered login as a mender and note the client-less
+- Keep the remembered login as a mender and note the credential-anchored
   account as a per-design exception. This is what the audited docs did.
   The exception is the majority case, so the reading inverts: the stated
   bound holds for the minority and fails silently for everyone else.

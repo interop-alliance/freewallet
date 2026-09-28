@@ -133,7 +133,7 @@ ceremony is such a ceremony.
 The bullet saying that producers of the pending state may only run where
 that mender is reachable is widened rather than dropped. The
 ladder-branch passphrase change produces the pending state on a
-client-less account, which may never see a remembered login. So the
+credential-anchored account, which may never see a remembered login. So the
 torn-retirement repair, the bare-passkey rebuild, and the registry
 backfill now run from a transient login too. They run on the same
 ordered chain after navigation, invoking under the generation

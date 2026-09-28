@@ -149,7 +149,7 @@ than to every `capabilityDelegation` member on the deployment, and the
 credential-retirement gate (wallet-core's decision) closes the one part
 of that population loudness had no other answer for: a retired
 credential's ladder VM left standing by an unattributed strike. It does
-not reach a client-less account's other standing ladder VMs, each a
+not reach a credential-anchored account's other standing ladder VMs, each a
 whole-account kill switch bounded only by its own credential's entropy.
 
 ## Amendment (2026-09-03)
