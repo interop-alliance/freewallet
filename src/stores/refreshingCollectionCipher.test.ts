@@ -87,6 +87,48 @@ describe('refreshingCollectionCipher', () => {
     expect(writes).toContain(rotated.currentEpoch)
   })
 
+  it("carries the source's verifiesHistory, so a governed descriptor is adopted", async () => {
+    const { keyAgreementKey, keyResolver, held, rotated, id, envelope } =
+      await fixture()
+    const history = { method: 'webvh', resource: 'meta/log' }
+    const source: EncryptionDescriptorSource = {
+      verifiesHistory: true,
+      collectionEncryption: vi.fn(async () => ({ ...rotated, history }))
+    }
+    const cipher = await refreshingCollectionCipher({
+      collectionId: COLLECTION_ID,
+      idDerivation: 'random',
+      descriptor: { ...held, history },
+      keyAgreementKey,
+      keyResolver,
+      source
+    })
+    await expect(cipher.decrypt({ id, envelope })).resolves.toEqual({
+      displayName: 'Ada'
+    })
+    expect(source.collectionEncryption).toHaveBeenCalledTimes(1)
+  })
+
+  it('refuses a governed descriptor from a source that does not verify history', async () => {
+    const { keyAgreementKey, keyResolver, held } = await fixture()
+    const source: EncryptionDescriptorSource = {
+      collectionEncryption: vi.fn(async () => held)
+    }
+    await expect(
+      refreshingCollectionCipher({
+        collectionId: COLLECTION_ID,
+        idDerivation: 'random',
+        descriptor: {
+          ...held,
+          history: { method: 'webvh', resource: 'meta/log' }
+        },
+        keyAgreementKey,
+        keyResolver,
+        source
+      })
+    ).rejects.toMatchObject({ name: 'UnverifiedDescriptorError' })
+  })
+
   it('propagates the unknown epoch when there is no source to refresh from', async () => {
     const { keyAgreementKey, keyResolver, held, id, envelope } = await fixture()
     const cipher = await refreshingCollectionCipher({

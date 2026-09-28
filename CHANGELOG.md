@@ -4,6 +4,10 @@
 
 ### Fixed
 
+- The contacts cipher's primed descriptor source carries the wrapped
+  source's `verifiesHistory` declaration, so a log-governed contacts
+  descriptor is not refused as unverified under `@interop/was-client`
+  `^0.75.0`.
 - The user key cascade walks every collection the Space listing names,
   rather than only those whose host-served metadata carries `encryption`.
   Each collection's own governing log decides whether it rotates, so a host

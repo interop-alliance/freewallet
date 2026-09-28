@@ -65,7 +65,10 @@ export async function refreshingCollectionCipher({
   onFetchError?: (err: unknown, info: { collectionId: string }) => void
 }): Promise<DocCipher> {
   let primed = false
+  // The wrapper carries the wrapped source's `verifiesHistory` declaration,
+  // so a log-governed descriptor it answers with is not refused as unverified.
   const primedSource: EncryptionDescriptorSource | undefined = source && {
+    ...(source.verifiesHistory ? { verifiesHistory: true as const } : {}),
     async collectionEncryption(options) {
       if (!primed) {
         primed = true
