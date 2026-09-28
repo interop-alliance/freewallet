@@ -29,7 +29,11 @@ import type { LookupResult } from '@digitalcredentials/issuer-registry-client'
 import type { EntityIdentityRegistry } from '@interop/verifier-core'
 import { base64urlnopad } from '@scure/base'
 import { KNOWN_REGISTRIES_URL, KnownDidRegistries } from '@/app.config'
-import { corsProxyFetch } from './corsProxy'
+import {
+  clearDirectFetchFailures,
+  corsProxyFetch,
+  fetchWithProxyFallback
+} from './corsProxy'
 import { createLogger } from '@/lib/log'
 
 const log = createLogger('fw:registries')
@@ -307,6 +311,9 @@ async function cachedBodyResponse({
  * the already-failing path.
  *
  * A deadline abort is not retried -- this hop's budget is already spent.
+ * The fallback is the shared one in `corsProxy.ts`, so an origin found
+ * blocked goes straight to the proxy for a while before it is tried direct
+ * again.
  *
  * @param options {object}
  * @param options.url {string}
@@ -320,18 +327,11 @@ async function fetchDirectWithProxyFallback({
   url: string
   signal: AbortSignal
 }): Promise<Response> {
-  try {
-    return await fetch(url, { signal })
-  } catch (err) {
-    if (signal.aborted) {
-      throw err
-    }
-    log.warn('Direct registry fetch failed, retrying through the CORS proxy', {
-      url,
-      err
-    })
-    return corsProxyFetch({ url, signal })
-  }
+  return fetchWithProxyFallback({
+    url,
+    signal,
+    request: target => fetch(target, { signal })
+  })
 }
 
 /**
@@ -345,7 +345,8 @@ export function __resetRegistryCacheForTests(): void {
 }
 
 /**
- * Drops every memoized lookup and cached registry body. Run at logout, so a
+ * Drops every memoized lookup and cached registry body, and the remembered
+ * set of origins whose direct fetch was blocked. Run at logout, so a
  * session's issuer answers do not carry into the next account's; the
  * registries list itself is account-independent and stays.
  *
@@ -354,6 +355,7 @@ export function __resetRegistryCacheForTests(): void {
 export function clearRegistryLookupCaches(): void {
   cachedBodies.clear()
   cachedLookups.clear()
+  clearDirectFetchFailures()
 }
 
 /**

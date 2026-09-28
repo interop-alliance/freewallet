@@ -71,7 +71,7 @@ write `test-results/dev-logs/app.ndjson` instead.
 ceremonies, sweeps -- e.g. `fw:session:sweep`, `fw:session:forget`),
 `fw:storage:*`, `fw:sync:controller`, `fw:chapi:*`, `fw:request:*`,
 `fw:ui:*` (pages/components), `fw:enrollment`, `fw:registries`,
-`fw:verify`. Wallet-core events arrive under `wc`; the WAS replication
+`fw:verify`, `fw:cors-proxy`. Wallet-core events arrive under `wc`; the WAS replication
 driver's (was-sync: the controller core, conflict handling, push and pull)
 under `sync`.
 

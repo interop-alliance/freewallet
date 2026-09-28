@@ -37,8 +37,10 @@ src/lib/            Pure business logic (no React)
   storageAccess.ts  Storage Access API handle for the CHAPI popup
   corsProxy.ts      The one CORS-proxy path (`VITE_CORS_PROXY_URL`): the
                     pasted-URL credential fetch, the `oidf` issuer-registry
-                    lookups, and the retry behind a blocked direct registry
-                    fetch
+                    lookups, and the direct-first fallback that retries a
+                    blocked fetch through the proxy, shared by the registry
+                    client and credential verification (DID documents,
+                    contexts, status lists)
   writerId.ts, prefsStorage.ts, log.ts   The writerId binding over the
                     package's mint, the global UI prefs seam, the
                     @interop/logger wiring

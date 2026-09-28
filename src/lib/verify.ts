@@ -1,6 +1,8 @@
 /**
  * Adapter from @interop/verifier-core to the legacy `log[]` payload consumed by
- * the verification UI. Issuer recognition uses `issuerDetailsSuite` +
+ * the verification UI. Every remote fetch verification makes (DID documents,
+ * JSON-LD contexts, status lists) goes direct first and retries through the
+ * CORS proxy on a rejected fetch. Issuer recognition uses `issuerDetailsSuite` +
  * `registryManager` (which routes each registry request direct or through the
  * CORS proxy by what a browser can reach); the
  * built-in registry suite is disabled (`registries: []`).
@@ -20,10 +22,15 @@ import type {
 } from '@interop/verifier-core'
 import type { IVerifiableCredential } from '@interop/data-integrity-core'
 import { registryManager } from '@/lib/registryManager'
+import { proxyFallbackHttpGetService } from '@/lib/corsProxy'
 import type { VerifyCredentialPayload } from '@/types/credential'
 import { createLogger } from '@/lib/log'
 
 const log = createLogger('fw:verify')
+
+// One instance for the module's life: verifier-core memoizes its document
+// loader per service instance, so a fresh one per call would defeat it.
+const httpGetService = proxyFallbackHttpGetService()
 
 const issuerDetailsSuite = createIssuerDetailsSuite({
   lookupDid: (did: string) => registryManager.lookupDid(did)
@@ -54,7 +61,8 @@ export async function verifyCredential(
       credential: credential as never,
       registries: [],
       additionalSuites: [expirationSuite, issuerDetailsSuite],
-      verbose: true
+      verbose: true,
+      httpGetService
     })) as CredentialVerificationResult
 
     const parseFailure = core.results.find(

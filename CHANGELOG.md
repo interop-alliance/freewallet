@@ -4,6 +4,12 @@
 
 ### Fixed
 
+- Credential verification retries a blocked fetch (a DID document, a
+  JSON-LD context, a status list) once through the CORS proxy, so a
+  did:web issuer whose host sends no `Access-Control-Allow-Origin` header
+  verifies. An origin found blocked goes straight to the proxy for five
+  minutes, and is tried direct again if the proxy itself fails. The
+  issuer-registry client shares the same fallback.
 - A transient login re-epochs every encrypted collection whose current epoch
   still names a retired user key generation. A recovery spend or other
   rotation torn mid-fan-out on a credential-anchored account no longer
