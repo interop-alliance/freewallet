@@ -695,3 +695,54 @@ describe('processZcaps two rows naming one new private collection', () => {
     ).toBe(2)
   })
 })
+
+describe('processZcaps string target on a reserved Space segment', () => {
+  // `policy` and `quotas` pass the collection naming rule but address server
+  // facets, so was-client's grammar classes them `sub-resource`. The
+  // snapshot lists both as if they were collections, so existence is not
+  // what refuses them.
+  const collections = [{ id: 'policy' }, { id: 'quotas' }]
+  const requestsFor = (segment: string): ICapabilityQueryDetail[] => [
+    {
+      referenceId: segment,
+      allowedAction: ['GET', 'HEAD', 'POST', 'PUT', 'DELETE'],
+      invocationTarget: `${SPACE_URL}${segment}`,
+      controller: APP_DID
+    }
+  ]
+  // App Connect (the CHAPI get popup) carries the app; the interaction-URL
+  // agent path carries none.
+  const paths = [
+    { label: 'App Connect', app: APP },
+    { label: 'interaction-URL', app: undefined }
+  ]
+
+  for (const segment of ['policy', 'quotas']) {
+    for (const { label, app } of paths) {
+      it(`previews ${segment} as unsatisfiable on the ${label} path`, () => {
+        const [grant] = resolveGrants({
+          zcapRequests: requestsFor(segment),
+          space: SPACE,
+          collections: existingCollectionsFrom(collections),
+          ...(app && { appUrl: app.appUrl })
+        })
+        expect(isSatisfiable(grant!.target)).toBe(false)
+      })
+
+      it(`delegates nothing for ${segment} on the ${label} path`, async () => {
+        const { session, delegate } = fakeSession({ collections })
+        const zcaps = await processZcaps({
+          zcapRequests: requestsFor(segment),
+          session,
+          ...(app && { app })
+        })
+        expect(zcaps).toHaveLength(0)
+        expect(delegate).not.toHaveBeenCalled()
+        expect(session.storage.ensureCollection).not.toHaveBeenCalled()
+        expect(
+          session.storage.provisionEncryptedCollection
+        ).not.toHaveBeenCalled()
+      })
+    }
+  }
+})

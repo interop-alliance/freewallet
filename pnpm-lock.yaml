@@ -57,7 +57,7 @@ importers:
         specifier: ^0.8.1
         version: 0.8.1
       '@interop/space-archive':
-        specifier: ^0.2.0
+        specifier: ^0.2.1
         version: 0.2.1
       '@interop/storage-core':
         specifier: ^0.20.0
@@ -81,8 +81,8 @@ importers:
         specifier: ^0.80.1
         version: 0.80.1(@interop/jsonld-signatures@11.8.6)(@interop/was-client@0.73.0(@interop/jsonld-signatures@11.8.6))
       '@interop/wallet-request':
-        specifier: ^0.3.2
-        version: 0.3.2(@interop/jsonld-signatures@11.8.6)
+        specifier: link:../wallet-request
+        version: link:../wallet-request
       '@interop/was-client':
         specifier: ^0.73.0
         version: 0.73.0(@interop/jsonld-signatures@11.8.6)
@@ -716,10 +716,6 @@ packages:
     engines: {node: '>=24.0'}
     peerDependencies:
       '@interop/was-client': '>=0.71.0 <1.0.0'
-
-  '@interop/wallet-request@0.3.2':
-    resolution: {integrity: sha512-KYS9Yv0lRv9oN8Lgps5ntd5WRK92KDvysGgXBSm9Dk4T/IS2NfKoYBSG2JtwK7HiRwdaDJuU3CM43YjmzTL8Lw==}
-    engines: {node: '>=24.0'}
 
   '@interop/was-client@0.73.0':
     resolution: {integrity: sha512-g5RQuUU7vvlaVhPfuJUnvvLPvNoXKpI6q20zoUDRtMkQk+4aqo5V2y2vRP4Kpfu3nA+UmDFN53XElBlFt03yBw==}
@@ -4264,20 +4260,6 @@ snapshots:
     transitivePeerDependencies:
       - '@interop/jsonld-signatures'
       - expo-crypto
-      - react-native-get-random-values
-
-  '@interop/wallet-request@0.3.2(@interop/jsonld-signatures@11.8.6)':
-    dependencies:
-      '@interop/capability-agent': 0.2.1
-      '@interop/data-integrity-core': 8.8.0
-      '@interop/data-integrity-proof': 3.4.6
-      '@interop/ed25519-signature': 7.2.3(@interop/jsonld-signatures@11.8.6)
-      '@interop/security-document-loader': 10.1.3
-      '@interop/vc': 11.0.9
-      '@scure/base': 2.4.0
-      byoe-context: 0.5.0
-    transitivePeerDependencies:
-      - '@interop/jsonld-signatures'
       - react-native-get-random-values
 
   '@interop/was-client@0.73.0(@interop/jsonld-signatures@11.8.6)':

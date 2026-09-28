@@ -247,7 +247,10 @@ function isNeverGrantableCollection(collectionId: string | undefined): boolean {
 
 /**
  * Collection id naming rule (D2): lowercase alphanumerics and hyphens, not
- * starting with a hyphen, up to 64 characters.
+ * starting with a hyphen, up to 64 characters. This is the one part of
+ * {@link isCollectionName} was-client does not decide. The reserved segments
+ * are its registry's, and a plain-URL target's shape is its
+ * `parseSpaceTarget` grammar's.
  */
 const COLLECTION_NAME_RE = /^[a-z0-9][a-z0-9-]{0,63}$/
 
