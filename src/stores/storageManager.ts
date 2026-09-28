@@ -81,6 +81,7 @@ import {
 } from '@/session/collectionLogStore'
 import type { ControllerProfile, SessionCore, User } from '@/types/auth'
 import { cidFrom, contentCid } from '@interop/was-client/sync'
+import { equalBytes } from '@noble/ciphers/utils.js'
 import { classifyDecryptFailure } from '@/lib/decryptFailure'
 import { refreshingCollectionCipher } from '@/stores/refreshingCollectionCipher'
 import {
@@ -336,20 +337,6 @@ async function decryptEnvelope({
 }
 
 /**
- * Whether two byte arrays hold the same bytes.
- *
- * @param left {Uint8Array}
- * @param right {Uint8Array}
- * @returns {boolean}
- */
-function sameBytes(left: Uint8Array, right: Uint8Array): boolean {
-  if (left.byteLength !== right.byteLength) {
-    return false
-  }
-  return left.every((byte, index) => byte === right[index])
-}
-
-/**
  * A standing app collection's metadata as the content migration checks it:
  * its `encryption` member, its `custom` value, and its attribution.
  */
@@ -377,15 +364,17 @@ function clientWrittenDescriptorMessage(collectionId: string): string {
  * or else the payload's content cid. The two kinds are prefixed apart, so an
  * `id` value can never match a cid.
  *
- * @param row {Json}   the decrypted payload
+ * @param options {object}
+ * @param options.row {Json}   the decrypted payload
+ * @param options.cid {string}   the payload's content cid
  * @returns {string}
  */
-function appRowIdentity(row: Json): string {
+function appRowIdentity({ row, cid }: { row: Json; cid: string }): string {
   const id =
     typeof row === 'object' && row !== null && !Array.isArray(row)
       ? (row as Record<string, unknown>).id
       : undefined
-  return typeof id === 'string' ? `id:${id}` : `cid:${contentCid(row)}`
+  return typeof id === 'string' ? `id:${id}` : `cid:${cid}`
 }
 
 // The `wallet-activity` builder each single-credential activity verb records
@@ -6168,10 +6157,20 @@ export class StorageManager {
       contentCid(generator as unknown as Json) ===
         contentCid(standing.generator as unknown as Json)
     // Rows matter for the torn-create test, and for the kind checks on a
-    // collection with no `encryption` member.
-    const listing =
-      sameGenerator || !standsEncrypted ? await handle.list() : undefined
-    const holdsRows = (listing?.items ?? []).length > 0
+    // collection with no `encryption` member. The listing stops at the first
+    // page holding a row.
+    const holdsAnyRow = async (): Promise<boolean> => {
+      for await (const page of handle.listPages()) {
+        if (page.items.length > 0) {
+          return true
+        }
+      }
+      return false
+    }
+    const [holdsRows, standsPublic] = await Promise.all([
+      sameGenerator || !standsEncrypted ? holdsAnyRow() : false,
+      encrypted ? false : handle.isPublic()
+    ])
     const resumesOwnCreate = sameGenerator && !holdsRows
     if (encrypted) {
       if (!standsEncrypted && holdsRows) {
@@ -6183,7 +6182,6 @@ export class StorageManager {
       }
       return { resumesOwnCreate, standsPublic: false }
     }
-    const standsPublic = await handle.isPublic()
     const missedGrant = resumesOwnCreate && isPublic && !standsPublic
     if (standsPublic !== isPublic && !missedGrant) {
       refuse(
@@ -6211,7 +6209,7 @@ export class StorageManager {
    * @param options {object}
    * @param options.collectionId {string}
    * @param options.descriptor {CollectionEncryption}
-   * @returns {Promise<DocCipher>}
+   * @returns {Promise<{ cipher: DocCipher; descriptor: CollectionEncryption }>}
    */
   async #installImportCipher({
     collectionId,
@@ -6219,7 +6217,7 @@ export class StorageManager {
   }: {
     collectionId: string
     descriptor: CollectionEncryption
-  }): Promise<DocCipher> {
+  }): Promise<{ cipher: DocCipher; descriptor: CollectionEncryption }> {
     const { keyAgreementKey, keyResolver } = this.#vaultKeys
     // Read back rather than built from the archived schema: a standing
     // collection keeps its own declarations, and its rows must carry them.
@@ -6233,8 +6231,9 @@ export class StorageManager {
       encryption: descriptor,
       ...(meta !== undefined && { meta })
     })
-    this.#importCiphers.set(collectionId, { cipher, descriptor })
-    return cipher
+    const entry = { cipher, descriptor }
+    this.#importCiphers.set(collectionId, entry)
+    return entry
   }
 
   /**
@@ -6265,8 +6264,7 @@ export class StorageManager {
         `The app collection "${collectionId}" has no encryption descriptor.`
       )
     }
-    const cipher = await this.#installImportCipher({ collectionId, descriptor })
-    return { cipher, descriptor }
+    return await this.#installImportCipher({ collectionId, descriptor })
   }
 
   /**
@@ -6307,10 +6305,11 @@ export class StorageManager {
         currentEpoch: verified.currentEpoch
       }
     )
-    return await this.#installImportCipher({
+    const { cipher } = await this.#installImportCipher({
       collectionId,
       descriptor: verified
     })
+    return cipher
   }
 
   /**
@@ -6364,7 +6363,8 @@ export class StorageManager {
         const held: HeldAppRows = new Map()
         for (const { value } of rows) {
           if (value !== undefined) {
-            held.set(appRowIdentity(value), contentCid(value))
+            const cid = contentCid(value)
+            held.set(appRowIdentity({ row: value, cid }), cid)
           }
         }
         return {
@@ -6442,14 +6442,14 @@ export class StorageManager {
             collectionId,
             resourceId
           })
-          return stored !== undefined && sameBytes(stored, content.bytes)
+          return stored !== undefined && equalBytes(stored, content.bytes)
             ? 'skipped'
             : 'conflicting'
         }
 
         const { row } = content
-        const identity = encrypted ? appRowIdentity(row) : resourceId
         const cid = contentCid(row)
+        const identity = encrypted ? appRowIdentity({ row, cid }) : resourceId
         const stored = held.get(identity)
         if (stored !== undefined) {
           return stored === cid ? 'skipped' : 'conflicting'

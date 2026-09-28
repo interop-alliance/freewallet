@@ -4,11 +4,7 @@ import { TEST_SERVICE_DESCRIPTION } from '../shared/wasServiceFixture'
 
 import { memoryResourceLogPinStore } from '@interop/vh-resource-log'
 import type { ZcapClient } from '@interop/ezcap'
-import type {
-  IKeyAgreementKey,
-  IKeyResolver,
-  IZcap
-} from '@interop/data-integrity-core'
+import type { IZcap } from '@interop/data-integrity-core'
 import type { SpaceMetadata, WasClient } from '@interop/was-client'
 
 vi.mock('@interop/wallet-core/keys', async importOriginal => ({
@@ -26,9 +22,9 @@ import {
   ensureIndexedFirstEpoch,
   wasClientLabelsStore
 } from '@interop/wallet-core/keys'
-import { X25519KeyAgreementKey2020 } from '@interop/x25519-key-agreement-key'
 import { createEdvDocCipher, ownerRecipient } from '@interop/was-client/edv'
 import { memoryDescriptorStores } from './fakeDescriptorStores'
+import { generateVaultKeys } from '../../src/stores/testing/vaultKeys'
 import { mintSpaceId, WASRemoteStore } from '../../src/stores/wasRemoteStore'
 import { deriveSpaceId } from '@interop/was-client/sync'
 import type { ControllerProfile, User } from '../../src/types/auth'
@@ -1084,14 +1080,8 @@ describe('WASRemoteStore.clientLabelsStore', () => {
 
 describe('WASRemoteStore.declareCollectionIndexes', () => {
   it('seals the schema through its keystore-less client with the handle override', async () => {
-    const key = await X25519KeyAgreementKey2020.generate({
+    const { keyAgreementKey, keyResolver } = await generateVaultKeys({
       controller: 'did:key:z6MkOwner'
-    })
-    const keyAgreementKey = key as unknown as IKeyAgreementKey
-    const keyResolver: IKeyResolver = async () => ({
-      id: key.id!,
-      type: key.type,
-      publicKeyMultibase: key.publicKeyMultibase
     })
     const stores = memoryDescriptorStores()
     const { descriptor: encryption } = await ensureIndexedFirstEpoch({

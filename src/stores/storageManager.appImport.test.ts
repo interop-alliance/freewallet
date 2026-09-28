@@ -20,7 +20,6 @@ import type {
   IKeyAgreementKey,
   IKeyResolver
 } from '@interop/data-integrity-core'
-import { X25519KeyAgreementKey2020 } from '@interop/x25519-key-agreement-key'
 import {
   QuotaExceededError,
   type CollectionEncryption,
@@ -46,6 +45,7 @@ import {
   transientSessionStores
 } from '@/session/persistence'
 import { StorageManager } from './storageManager'
+import { generateVaultKeys } from './testing/vaultKeys'
 import type { WASRemoteStore } from './wasRemoteStore'
 
 type Keys = { keyAgreementKey: IKeyAgreementKey; keyResolver: IKeyResolver }
@@ -67,23 +67,6 @@ const OTHER_GENERATOR: CollectionGenerator = {
 const INDEX_SCHEMA: IndexSchema = {
   revision: 1,
   indexes: [{ attribute: 'content.type', addedIn: 1 }]
-}
-
-/**
- * A generated X25519 key pair plus its single-key resolver.
- *
- * @returns {Promise<Keys>}
- */
-async function generateKey(): Promise<Keys> {
-  const key = await X25519KeyAgreementKey2020.generate({
-    controller: 'did:key:z6MkTestController'
-  })
-  const keyResolver: IKeyResolver = async () => ({
-    id: key.id!,
-    type: key.type,
-    publicKeyMultibase: key.publicKeyMultibase
-  })
-  return { keyAgreementKey: key as IKeyAgreementKey, keyResolver }
 }
 
 /**
@@ -228,6 +211,9 @@ function makeFakeRemote(stores: MemoryDescriptorStores) {
         },
         async list() {
           return { items: [...rowsOf(collectionId).keys()].map(id => ({ id })) }
+        },
+        async *listPages() {
+          yield { items: [...rowsOf(collectionId).keys()].map(id => ({ id })) }
         }
       }
     },
@@ -460,7 +446,7 @@ function makeFakeRemote(stores: MemoryDescriptorStores) {
  * @returns {Promise<object>}
  */
 async function setup() {
-  const owner = await generateKey()
+  const owner = await generateVaultKeys()
   const stores = memoryDescriptorStores()
   const fake = makeFakeRemote(stores)
   const storage = new StorageManager({
@@ -518,7 +504,7 @@ describe('StorageManager.provisionEncryptedCollection with no grantee', () => {
 
   it('still escrows a grantee when one is given', async () => {
     const { owner, storage } = await setup()
-    const app = await generateKey()
+    const app = await generateVaultKeys()
 
     const descriptor = await storage.provisionEncryptedCollection({
       collectionId: 'app-notes',
@@ -931,7 +917,7 @@ describe('StorageManager app-collection import into a standing collection', () =
 
   it('refreshes a rotated epoch for the snapshot and seals later rows under it', async () => {
     const { owner, stores, storage, rowsOf, putEpochs } = await setup()
-    const extra = await generateKey()
+    const extra = await generateVaultKeys()
     await storage.provisionEncryptedCollection({
       collectionId: 'app-notes',
       recipient: ownerRecipient({ keyAgreementKey: extra.keyAgreementKey })
@@ -1237,7 +1223,7 @@ describe('StorageManager app-collection import re-runs and races', () => {
 
   it('seals a row after a mid-run epoch rotation under the new epoch', async () => {
     const { owner, stores, storage, putEpochs } = await setup()
-    const extra = await generateKey()
+    const extra = await generateVaultKeys()
     await storage.provisionEncryptedCollection({
       collectionId: 'app-notes',
       recipient: ownerRecipient({ keyAgreementKey: extra.keyAgreementKey })
