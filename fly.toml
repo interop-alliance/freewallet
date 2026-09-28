@@ -5,7 +5,7 @@
 # WAS_UPSTREAM variables of its GitHub environment. See
 # docs/deployment-fly.io.md.
 
-app = "freewallet"
+app = "freewallet-staging"
 primary_region = "iad"
 
 [build]

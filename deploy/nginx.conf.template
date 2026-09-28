@@ -72,6 +72,7 @@ server {
   location /assets/ {
     try_files $uri =404;
     add_header Cache-Control "public, max-age=31536000, immutable";
+    add_header Access-Control-Allow-Origin "*";
   }
 
   # Everything else: a public/ file if one matches, otherwise the SPA entry
@@ -79,5 +80,6 @@ server {
   location / {
     try_files $uri /index.html;
     add_header Cache-Control "no-cache";
+    add_header Access-Control-Allow-Origin "*";
   }
 }
