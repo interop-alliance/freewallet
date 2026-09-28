@@ -1,7 +1,7 @@
 import { act } from 'react'
 import { createRoot, type Root } from 'react-dom/client'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { SHAREABLE_COLLECTIONS } from '@/session/shares'
+import { ENCRYPTED_STANDARD_COLLECTIONS } from '@/app.config'
 import type { StorageCollection } from '@/lib/storage'
 import type { Session } from '@/types/auth'
 import { useStorageListings } from './useStorageListings'
@@ -79,7 +79,7 @@ describe('useStorageListings', () => {
     expect(storage.listHistoryItems).toHaveBeenCalledTimes(1)
     // Both listings ran off that one read.
     expect(storage.listCollectionShares).toHaveBeenCalledTimes(
-      SHAREABLE_COLLECTIONS.length
+      ENCRYPTED_STANDARD_COLLECTIONS.length
     )
     expect(storage.listAppKeys).toHaveBeenCalledTimes(1)
     await probe.unmount()
@@ -99,7 +99,7 @@ describe('useStorageListings', () => {
     })
     expect(storage.listHistoryItems).toHaveBeenCalledTimes(1)
     expect(storage.listCollectionShares).toHaveBeenCalledTimes(
-      SHAREABLE_COLLECTIONS.length
+      ENCRYPTED_STANDARD_COLLECTIONS.length
     )
     expect(storage.listAppKeys).not.toHaveBeenCalled()
     await probe.unmount()

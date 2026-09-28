@@ -4760,7 +4760,7 @@ export class StorageManager {
    * @param options.collectionId {string}
    * @param [options.items] {HistoryItems}   a
    *   pre-fetched history scan, when the caller already holds one (the
-   *   settings panel lists every shareable collection off one read)
+   *   settings panel lists every encrypted collection off one read)
    * @returns {Promise<Array<{ recipientId: string; controller?: string;
    *   expires?: string; appName?: string; appOrigin?: string }>>}
    */

@@ -5,7 +5,7 @@
  * reader. The dialog renders and confirms; the reads and the removal live
  * here.
  */
-import { WALLET_STANDARD_COLLECTIONS } from '@/app.config'
+import { ENCRYPTED_STANDARD_COLLECTIONS } from '@/app.config'
 import type { HistoryItems } from '@/stores/storageManager'
 import type { Session } from '@/types/auth'
 
@@ -22,22 +22,11 @@ export interface CollectionShare {
 }
 
 /**
- * The standard collections that may be shared, straight off the roster's
- * `shareable` flag. Encryption is a necessary condition -- a share adds the
- * reader to a key-epoch roster, and there is no roster where nothing is
- * encrypted -- but not a sufficient one. `app-connections` is encrypted and
- * deliberately never shareable, since its rows carry the connected apps'
- * private seeds. Nor is `wallet-activity`, since its rows carry every
- * delegated capability verbatim. The encrypted set itself lives in
- * `src/app.config.ts` as `ENCRYPTED_STANDARD_COLLECTIONS`.
- */
-export const SHAREABLE_COLLECTIONS = WALLET_STANDARD_COLLECTIONS.filter(
-  ({ shareable }) => shareable
-)
-
-/**
- * Fetches every shareable collection's current reader roster, keyed by WAS
- * collection id.
+ * Fetches every encrypted standard collection's current reader roster, keyed
+ * by WAS collection id. The listing covers every collection with a key-epoch
+ * roster, not only the ones a new share may name (the roster's `shareable`
+ * flag), so a reader escrowed into a collection that is no longer shareable
+ * stays visible and removable.
  *
  * @param options {object}
  * @param options.session {Session}
@@ -53,11 +42,11 @@ export async function listSharedCollections({
   session: Session
   items?: HistoryItems
 }): Promise<Record<string, CollectionShare[]>> {
-  // One history scan for the whole listing: every shareable collection's reader
-  // labels come out of the same activity list.
+  // One history scan for the whole listing: every encrypted collection's
+  // reader labels come out of the same activity list.
   const items = providedItems ?? (await session.storage.listHistoryItems())
   const entries = await Promise.all(
-    SHAREABLE_COLLECTIONS.map(
+    ENCRYPTED_STANDARD_COLLECTIONS.map(
       async ({ id }) =>
         [
           id,

@@ -81,6 +81,10 @@
   naming it is unsatisfiable on both the App Connect and the standalone
   capability query path, since its rows carry every delegated capability.
   A reader already escrowed into it stays in its key-epoch roster.
+- The Storage page's shares listing reads every encrypted standard
+  collection, not only the shareable ones, so a reader of a collection that
+  is no longer shareable still shows under its "Shared" chip and can be
+  removed.
 - BREAKING: a collection's app attribution is one `generator` object on
   the Collection Metadata object, `{ id, origin, url, name }`, replacing the
   flat `generator` DID and `generatorOrigin`. App Connect provisioning stamps

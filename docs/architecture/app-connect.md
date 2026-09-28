@@ -370,8 +370,9 @@ proof and capability chain included, so one reader of it would learn every
 connected app and agent, with its targets, verbs, and expiry, and would hold
 the capability documents themselves. The flag gates new shares only. A
 reader escrowed into `wallet-activity` before it was narrowed stays in that
-collection's key-epoch roster, and the shares dialog, which lists only the
-shareable set, does not show it. No migration removes it. The grantee's
+collection's key-epoch roster. The shares listing reads every encrypted
+standard collection rather than only the shareable ones, so such a reader
+still shows on the collection's "Shared" chip and is removed there. The grantee's
 X25519 key is derived from the `did:key` the request already names as
 `controller` (`x25519RecipientFromDidKey` from `@interop/was-client/edv`),
 so a request can never pair controller DID A with recipient key B. A
