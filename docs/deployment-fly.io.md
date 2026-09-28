@@ -116,6 +116,10 @@ domain, and changing a setting takes a rebuild. The `Dockerfile` declares an
 `ARG` for each one (all but `VITE_ALLOWED_HOST`, which only affects the dev
 server). Pass them with `docker build --build-arg`.
 
+The build also needs `APP_VERSION`, the version shown in Settings. The
+build context carries no `.git`, so pass the host's
+`git describe --tags --always --dirty` output. Without it the build fails.
+
 A same-origin deployment sets one:
 `VITE_WAS_SERVER_URL=https://wallet.example.com/spaces/`. The CORS proxy
 (`/api/cors`) and the KMS (`/kms`) default to that same server, so they are
@@ -143,7 +147,8 @@ SERVER_URL=http://localhost:8080 PORT=3002 pnpm start
 
 # Here:
 docker build -t freewallet \
-  --build-arg VITE_WAS_SERVER_URL=http://localhost:8080/spaces/ .
+  --build-arg VITE_WAS_SERVER_URL=http://localhost:8080/spaces/ \
+  --build-arg APP_VERSION="$(git describe --tags --always --dirty)" .
 docker run --rm -p 8080:8080 \
   --add-host=host.docker.internal:host-gateway \
   -e WAS_UPSTREAM=host.docker.internal:3002 \
@@ -173,6 +178,7 @@ Set up the server app first (see the was-teaching-server repo's
 fly apps create <app>
 fly deploy --app <app> \
   --build-arg VITE_WAS_SERVER_URL=https://<domain>/spaces/ \
+  --build-arg APP_VERSION="$(git describe --tags --always --dirty)" \
   --env WAS_UPSTREAM=<server-app>.flycast:80
 fly scale count 2 --app <app>
 fly certs add <domain> --app <app>

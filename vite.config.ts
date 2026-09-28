@@ -4,9 +4,11 @@ import path from 'node:path'
 import { execSync } from 'node:child_process'
 import { interopLoggerPlugin } from '@interop/logger/vite'
 
-const appVersion = execSync('git describe --tags --always --dirty')
-  .toString()
-  .trim()
+// A Docker build has no .git in its context, so it passes the version in as
+// the APP_VERSION build arg instead.
+const appVersion =
+  process.env.APP_VERSION ||
+  execSync('git describe --tags --always --dirty').toString().trim()
 
 // https://vite.dev/config/
 export default defineConfig({

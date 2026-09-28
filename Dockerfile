@@ -27,6 +27,9 @@ ARG VITE_SHARE_ZCAP_TTL_HOURS
 ARG VITE_WAS_SYNC_BATCH_SIZE
 ARG VITE_WAS_SYNC_POLL_MS
 ARG VITE_WAS_SYNC_RETRY_MS
+# The version shown in Settings. The build context carries no .git, so the
+# host passes the output of `git describe --tags --always --dirty`.
+ARG APP_VERSION
 
 COPY . .
 RUN pnpm run build
