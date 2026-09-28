@@ -20,6 +20,9 @@
  * afterwards, which is the check that the migrated rows did not poison the
  * grant and share harvesters.
  *
+ * A's app collection is re-created in the importing account's Space, and
+ * no collection's walk ends early.
+ *
  * The guest cell stands for the no-WAS deployment. A guest session holds no
  * remote Space (`hasRemoteStorage` is false, the same branch a deployment
  * with no `VITE_WAS_SERVER_URL` takes), and it is the only local-only session
@@ -265,6 +268,10 @@ async function importBundleViaDialog({
   await expect(page.getByText('Import complete.')).toBeVisible({
     timeout: 30_000
   })
+  // No collection, an app collection included, ended early.
+  await expect(
+    dialog.getByText(/Stopped early|The import stopped/)
+  ).toHaveCount(0)
   await dialog.getByRole('button', { name: 'Close' }).click()
 }
 
@@ -536,6 +543,11 @@ test.describe.serial('Content migration from a backup bundle', () => {
       ).toBeVisible({ timeout: 60_000 })
       await page.goto('/#/contacts')
       await expect(page.getByText(CONTACT_NAME).first()).toBeVisible({
+        timeout: 60_000
+      })
+      // A's app collection was re-created in B's Space.
+      await page.goto('/#/storage')
+      await expect(page.getByText(APP_A.collection).first()).toBeVisible({
         timeout: 60_000
       })
     } finally {

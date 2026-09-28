@@ -115,21 +115,25 @@ function jsonFile({
  * @param options {object}
  * @param options.collectionId {string}
  * @param options.files {ArchiveFile[]}
+ * @param [options.metadata] {unknown}   the Collection Metadata file's body;
+ *   `{ id }` by default
  * @returns {ArchiveEntry}
  */
 function collectionDir({
   collectionId,
-  files
+  files,
+  metadata
 }: {
   collectionId: string
   files: ArchiveFile[]
+  metadata?: unknown
 }): ArchiveEntry {
   return {
     name: collectionId,
     files: [
       jsonFile({
         name: `.collection.${collectionId}.json`,
-        document: { id: collectionId }
+        document: metadata ?? { id: collectionId }
       }),
       ...files
     ]
@@ -156,6 +160,7 @@ function logBody(descriptor: CollectionEncryption): string {
 interface FixtureCollection {
   collectionId: string
   rows: unknown[]
+  metadata?: unknown
 }
 
 /**
@@ -208,7 +213,7 @@ async function makeBundle(
       ]
     })
   ]
-  for (const { collectionId, rows } of collections) {
+  for (const { collectionId, rows, metadata } of collections) {
     const { epochId, secret } = await mintEpoch()
     const encryption: CollectionEncryption = {
       scheme: 'edv',
@@ -254,7 +259,7 @@ async function makeBundle(
         })
       )
     }
-    entries.push(collectionDir({ collectionId, files }))
+    entries.push(collectionDir({ collectionId, files, metadata }))
   }
   const archive = await collectBytes(
     (await packSpaceArchive({
@@ -578,6 +583,82 @@ describe('migrateContent', () => {
     ).toBeUndefined()
     expect((await session.storage.listAppKeys()).appKeys).toHaveLength(0)
     expect(await session.storage.listCredentials()).toHaveLength(1)
+  })
+
+  it('leaves an app collection in the backup on a session that cannot create it', async () => {
+    const session = await memorySession()
+    expect(session.storage.canProvisionAppCollections).toBe(false)
+    const { bundle, secret } = await makeBundle([
+      { collectionId: 'app-notes', rows: [{ id: 'a' }, { id: 'b' }] }
+    ])
+
+    const result = await migrateContent({ session, bundle, secret })
+    expect(result.report.notMigrated['app-notes']).toBe(2)
+    expect(result.report.collections['app-notes']).toBeUndefined()
+  })
+
+  it('re-creates an app collection with its attribution, reading the held rows once', async () => {
+    const session = await memorySession()
+    const { storage } = session
+    vi.spyOn(storage, 'canProvisionAppCollections', 'get').mockReturnValue(true)
+    const generator = {
+      id: 'did:key:z6MkApp',
+      origin: 'https://app.example',
+      url: 'https://app.example/',
+      name: 'Example App'
+    }
+    const ensure = vi
+      .spyOn(storage, 'ensureImportedAppCollection')
+      .mockResolvedValue(undefined)
+    const held = new Map([['id:a', 'zHeldCid']])
+    const snapshot = vi
+      .spyOn(storage, 'snapshotAppCollection')
+      .mockResolvedValue(held)
+    const importRow = vi
+      .spyOn(storage, 'importAppCollectionRow')
+      .mockResolvedValue('accepted')
+    const { bundle, secret } = await makeBundle([
+      {
+        collectionId: 'app-notes',
+        rows: [{ id: 'a' }, { id: 'b' }],
+        metadata: { id: 'app-notes', generator }
+      }
+    ])
+
+    const result = await migrateContent({ session, bundle, secret })
+
+    expect(ensure).toHaveBeenCalledExactlyOnceWith({
+      collectionId: 'app-notes',
+      encrypted: true,
+      generator
+    })
+    expect(snapshot).toHaveBeenCalledExactlyOnceWith({
+      collectionId: 'app-notes',
+      encrypted: true
+    })
+    expect(importRow).toHaveBeenCalledTimes(2)
+    for (const [args] of importRow.mock.calls) {
+      expect(args).toMatchObject({
+        collectionId: 'app-notes',
+        encrypted: true,
+        contentType: 'application/json',
+        held
+      })
+    }
+    expect(importRow.mock.calls.map(([args]) => args.content)).toEqual(
+      expect.arrayContaining([{ row: { id: 'a' } }, { row: { id: 'b' } }])
+    )
+    expect(result.report.collections['app-notes']?.accepted).toBe(2)
+    const [activity] = await importActivities(session)
+    // The Import activity carries the app collection's counts beside the
+    // standard collections'.
+    expect(
+      (
+        activity as unknown as {
+          object: { collections: Record<string, { accepted: number }> }
+        }
+      ).object.collections['app-notes']
+    ).toEqual({ accepted: 2, skipped: 0, failed: 0 })
   })
 
   it('carries on past a failed row and ends a collection after ten consecutive failures', async () => {

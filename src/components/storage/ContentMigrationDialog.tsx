@@ -119,7 +119,8 @@ export function ContentMigrationDialog({
 
   /**
    * The display name of one migrated collection: the wallet's canonical
-   * name for a standard collection, the raw id for any other.
+   * name for a standard collection, the raw id for any other, an app
+   * collection included.
    *
    * @param collectionId {string}
    * @returns {string}
@@ -331,6 +332,11 @@ export function ContentMigrationDialog({
                 {t(key)}
               </Typography>
             ))}
+            {!session.storage.canProvisionAppCollections && (
+              <Typography variant="body2" color="text.secondary">
+                {t('storage.migration.notMigratedAppCollections')}
+              </Typography>
+            )}
             {!session.storage.hasRemoteStorage && (
               <Typography variant="body2" color="text.secondary">
                 {t('storage.migration.notMigratedLocalOnly')}

@@ -111,6 +111,11 @@
 
 ### Changed
 
+- A backup export streams into the picked file as it runs: the Space
+  exports proceed as the file is written, up to three at a time, and a
+  failure part way through errors the save instead of finishing the file.
+  The registry settle check runs before the bundle's last entry is
+  written. Needs `@interop/wallet-backup` 0.4.0 (WBU-5).
 - `wallet-activity` is no longer shareable (wallet-core's
   `WALLET_ACTIVITY_COLLECTION_SPEC`). A `shared-wallet-collection` request
   naming it is unsatisfiable on both the App Connect and the standalone
@@ -322,6 +327,36 @@
   renders the per-collection report. Only content travels: the old account's
   DID, every grant and app key, every share, and the public links stay
   behind, which the dialog states before the run.
+
+- The content migration re-creates app collections, the collections a
+  connected app had the old account provision. An encrypted one is
+  provisioned owner-only under its archived attribution, its archived
+  blinded-index schema is declared on it, and each row is re-sealed under
+  the new user key with its blinded index entries. A plaintext one keeps
+  its public read, and each row keeps its archived resource id and content
+  type, a non-JSON row as its raw bytes. The public read and the index
+  schema are set only on a collection the run creates, as was-client's
+  ensure reports it, or on the run's own torn create: a standing
+  collection with no rows that carries the archived attribution. A re-run
+  finishes such a collection. A collection the account already holds keeps
+  its settings and is merged by the skip-existing rule: an encrypted row's
+  identity is its payload's `id` (or its content cid), a plaintext row's is
+  its resource id. One whose kind differs from the archive's, one
+  encrypted under a descriptor no log governs, and a plaintext one whose
+  public read differs is refused with the app-local
+  `AppCollectionMismatchError`, which the report names. An encrypted
+  archive's public read is ignored. Each encrypted row is sealed under the
+  collection's current epoch as of its write, so an epoch rotated mid-run
+  is picked up. A guest or a no-WAS session leaves app collections in
+  the backup, which the dialog states. New `StorageManager` methods:
+  `ensureImportedAppCollection`, `snapshotAppCollection`,
+  `importAppCollectionRow`, and `canProvisionAppCollections`;
+  `provisionEncryptedCollection`'s `recipient` is now optional.
+  `WASRemoteStore` gains `listCollectionDocuments`, `putCollectionResource`,
+  `putPlaintextResource`, `getResourceBytes`, and
+  `declareCollectionIndexes`, and its `ensureCollection` and
+  `ensureGovernedCollection` resolve `{ created }`. Requires `@interop/wallet-backup`
+  `^0.4.0` and `@interop/space-archive` `^0.3.0`.
 
 - A WAS e2e spec for the backup export
   (`tests/e2e-was/backup-export.spec.ts`). A transient session's bundle is

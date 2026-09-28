@@ -707,39 +707,6 @@ async function exportUnlockSpace({
 }
 
 /**
- * The tar pack the package hands back, as a web stream the save path can
- * pipe. The pack is an async iterable of chunks, pulled one at a time -- but
- * the bundle is already written and finalized by the time it arrives, with no
- * consumer attached while it was packed, so the whole thing is sitting in the
- * pack's queue and this stream drains it rather than producing it. Making the
- * writer stream is wallet-backup's WBU-5.
- *
- * @param options {object}
- * @param options.pack {AsyncIterable<Uint8Array>}
- * @returns {ReadableStream<Uint8Array>}
- */
-function streamFromPack({
-  pack
-}: {
-  pack: AsyncIterable<Uint8Array>
-}): ReadableStream<Uint8Array> {
-  const chunks = pack[Symbol.asyncIterator]()
-  return new ReadableStream<Uint8Array>({
-    async pull(controller) {
-      const { done, value } = await chunks.next()
-      if (done) {
-        controller.close()
-        return
-      }
-      controller.enqueue(value)
-    },
-    async cancel(reason) {
-      await chunks.return?.(reason)
-    }
-  })
-}
-
-/**
  * Runs the export ceremony and hands back the bundle as a stream.
  *
  * The capability pre-flight runs before anything is minted, so a refusal
@@ -750,6 +717,11 @@ function streamFromPack({
  * follows, in the order the bundle lists them -- the account Space, the
  * client-annex Space, then one per unlock-methods registry entry -- and any
  * one of them failing fails the whole run.
+ *
+ * The stream is handed back once the Spaces are listed. The Space exports run
+ * as the caller reads it, so a failure from then on (a refused export, the
+ * registry settle check, a cancel) errors the stream rather than rejecting
+ * this call.
  *
  * @param options {object}
  * @param options.session {Session}
@@ -815,7 +787,7 @@ export async function exportBackup({
    */
   let establishedSpaceId: string | undefined
 
-  const pack = await exportBundle({
+  return await exportBundle({
     meta: {
       created: new Date().toISOString(),
       createdBy: { controller: context.pointer.did, client: BACKUP_CLIENT }
@@ -873,8 +845,8 @@ export async function exportBackup({
       try {
         if (role === BUNDLE_ROLE.accountSpaceArchive) {
           // Buffered whole so the log inside it can be read before it is
-          // packed. The package buffers the pack anyway, so this holds no
-          // more in memory than the run already did.
+          // packed. The package collects each archive whole before writing
+          // its entry anyway, so this holds no more in memory than it does.
           const archive = await collectBytes(
             await context.remoteStore.exportSpace({
               ...(signal ? { signal } : {})
@@ -930,22 +902,17 @@ export async function exportBackup({
         ...(position >= 0 ? { index: position + 1 } : {}),
         ...(spaceOrder.length ? { total: spaceOrder.length } : {})
       })
-    }
+    },
+    // The export is a walk, not a snapshot: each Space is read at its own
+    // moment, and nothing on the server holds the set still. So the registry
+    // is read once more when every archive is in hand, and a set of unlock
+    // Spaces that differs from the listed one fails the run under the same
+    // fail-whole rule -- a credential added mid-run would be missing from the
+    // bundle, and one removed would be in it after its Space was gone. The
+    // package runs this before the bundle's last entry is written, so a
+    // refusal errors the stream rather than ending a saved file as complete.
+    settle: () => settledRegistry({ session, listed: unlockEntries })
   })
-
-  // The export is a walk, not a snapshot: each Space is read at its own
-  // moment, and nothing on the server holds the set still. So the registry is
-  // read once more now that every archive is in hand, and a set of unlock
-  // Spaces that differs from the listed one fails the run under the same
-  // fail-whole rule -- a credential added mid-run would be missing from the
-  // bundle, and one removed would be in it after its Space was gone. The
-  // check sits here rather than inside the last export because the pack is
-  // buffered whole: nothing has been handed to the caller yet.
-  await settledRegistry({ session, listed: unlockEntries })
-
-  // tar-stream's `Pack` is a stream of chunks typed `unknown`; every one is
-  // a `Uint8Array`, which the pack's own writers guarantee.
-  return streamFromPack({ pack: pack as AsyncIterable<Uint8Array> })
 }
 
 /**

@@ -691,7 +691,7 @@ describe('processZcaps two rows naming one new private collection', () => {
     const provision = vi.mocked(session.storage.provisionEncryptedCollection)
     expect(provision).toHaveBeenCalledTimes(2)
     expect(
-      new Set(provision.mock.calls.map(([args]) => args.recipient.id)).size
+      new Set(provision.mock.calls.map(([args]) => args.recipient?.id)).size
     ).toBe(2)
   })
 })

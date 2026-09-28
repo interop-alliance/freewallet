@@ -50,6 +50,7 @@ const CAUSE_NAMES = [
   'CollectionLogUnreadableError',
   'QuotaExceededError',
   'PayloadTooLargeError',
+  'AppCollectionMismatchError',
   'failed'
 ]
 

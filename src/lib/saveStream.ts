@@ -5,8 +5,10 @@
  * The save is two steps, because where the file goes is asked before the
  * bytes exist. With the File System Access API, {@link pickSaveFile} opens the
  * picker and answers a target whose `write` pipes a stream into the chosen
- * file; a caller that runs a long ceremony first therefore asks the question
- * before it starts, so a dismissed picker costs nothing. Without the API
+ * file as the stream produces it. A caller whose stream comes out of a long
+ * ceremony asks the question before the ceremony starts, so a dismissed
+ * picker costs nothing, and the chosen file fills as the ceremony runs.
+ * Without the API
  * (Firefox and Safari) `pickSaveFile` answers `undefined` and the caller
  * hands the finished stream to {@link saveStreamAsBlob}, which buffers it and
  * takes the ordinary anchor download.

@@ -28,6 +28,9 @@ const CAUSE_KEYS: Record<string, string> = {
   QuotaExceededError: 'storage.migration.causes.quotaExceeded',
   // One row is larger than this server accepts.
   PayloadTooLargeError: 'storage.migration.causes.payloadTooLarge',
+  // The account already holds this app collection in a different shape, so
+  // it was left as it is. Minted app-side, in the storage manager.
+  AppCollectionMismatchError: 'storage.migration.causes.appCollectionMismatch',
   // The outcome word, reported when a write failed without throwing.
   failed: 'storage.migration.causes.failed'
 }

@@ -24,7 +24,11 @@
  */
 import type { ZcapClient } from '@interop/ezcap'
 import type { ResourceLogPinStore } from '@interop/vh-resource-log'
-import type { IDID } from '@interop/data-integrity-core'
+import type {
+  IDID,
+  IKeyAgreementKey,
+  IKeyResolver
+} from '@interop/data-integrity-core'
 import {
   readEtag,
   WasClient,
@@ -32,8 +36,10 @@ import {
   type CollectionEncryption,
   type CollectionGenerator,
   type CollectionMetadata,
+  type IndexSchema,
   type IZcap,
   type Resource,
+  type ResourceData,
   type ResourceMetadata,
   type ServiceDescription,
   type Space,
@@ -434,6 +440,116 @@ export class WASRemoteStore {
   }
 
   /**
+   * Writes one plaintext resource into any collection of this Space, by WAS
+   * collection id, under the given content type, create-if-absent. A JSON
+   * body is sent as JSON and raw bytes as they are. A `412` (the id is
+   * already taken) reports `{ created: false }` rather than throwing.
+   *
+   * @param options {object}
+   * @param options.collectionId {string}   the WAS collection id
+   * @param options.resourceId {string}
+   * @param options.data {Json | Uint8Array}   a JSON body or raw bytes
+   * @param options.contentType {string}
+   * @returns {Promise<{ created: boolean }>}
+   */
+  async putPlaintextResource({
+    collectionId,
+    resourceId,
+    data,
+    contentType
+  }: {
+    collectionId: string
+    resourceId: string
+    data: Json | Uint8Array
+    contentType: string
+  }): Promise<{ created: boolean }> {
+    try {
+      await this.#space()
+        .collection(collectionId)
+        .resource(resourceId, { encryption: 'plaintext' })
+        .put(data as ResourceData, { contentType, ifNoneMatch: true })
+      return { created: true }
+    } catch (err) {
+      if (errorStatus(err) === 412) {
+        return { created: false }
+      }
+      throw err
+    }
+  }
+
+  /**
+   * Reads one plaintext resource of any collection of this Space as its raw
+   * stored bytes. Returns `undefined` when the resource is missing (WAS
+   * conflates 404 for missing and unauthorized).
+   *
+   * @param options {object}
+   * @param options.collectionId {string}   the WAS collection id
+   * @param options.resourceId {string}
+   * @returns {Promise<Uint8Array | undefined>}
+   */
+  async getResourceBytes({
+    collectionId,
+    resourceId
+  }: {
+    collectionId: string
+    resourceId: string
+  }): Promise<Uint8Array | undefined> {
+    const data = await this.#space()
+      .collection(collectionId)
+      .resource(resourceId, { encryption: 'plaintext' })
+      .get()
+    if (data === null) {
+      return undefined
+    }
+    if (data instanceof Blob) {
+      return new Uint8Array(await data.arrayBuffer())
+    }
+    return new TextEncoder().encode(JSON.stringify(data))
+  }
+
+  /**
+   * Declares a batch of blinded-index attributes on an encrypted collection:
+   * was-client's `declareIndexes`, an add-only compare-and-swap over the
+   * collection's sealed metadata `custom`. An attribute already declared on
+   * the same terms is skipped, so it works on a new collection and on one
+   * that already carries a schema.
+   *
+   * This store's client holds no keystore, so the handle carries the
+   * collection's descriptor and the reader's keys as a per-handle encryption
+   * override. The codec then seals the updated schema under the current
+   * epoch.
+   *
+   * @param options {object}
+   * @param options.collectionId {string}   the WAS collection id
+   * @param options.encryption {CollectionEncryption}   the collection's
+   *   current descriptor, carrying its blinded-index key
+   * @param options.keyAgreementKey {IKeyAgreementKey}   a recipient of the
+   *   current epoch and of the blinded-index key
+   * @param options.keyResolver {IKeyResolver}
+   * @param options.indexes {Array<{ attribute: string | string[]; unique?: boolean }>}
+   * @returns {Promise<IndexSchema>}   the schema now in force
+   */
+  async declareCollectionIndexes({
+    collectionId,
+    encryption,
+    keyAgreementKey,
+    keyResolver,
+    indexes
+  }: {
+    collectionId: string
+    encryption: CollectionEncryption
+    keyAgreementKey: IKeyAgreementKey
+    keyResolver: IKeyResolver
+    indexes: Array<{ attribute: string | string[]; unique?: boolean }>
+  }): Promise<IndexSchema> {
+    return await this.#space()
+      .collection(collectionId, {
+        encryption: { ...encryption, keys: { keyAgreementKey, keyResolver } }
+      })
+      .declareIndexes({ indexes })
+  }
+
+  /**
    * The `Space` handle (root capability), needed by `removeRecipient` to revoke
    * a reader's pull-axis zcap(s) via `space.revoke()`.
    *
@@ -707,7 +823,9 @@ export class WASRemoteStore {
    * @param [options.isPublic] {boolean}   grant collection-level world read
    * @param [options.generator] {CollectionGenerator}   the application this
    *   collection is provisioned for
-   * @returns {Promise<string>}   the collection's base URL
+   * @returns {Promise<{ created: boolean }>}   whether this call's guarded
+   *   create made the collection; `false` when it already stood or a rival
+   *   won the create race
    */
   async ensureCollection({
     id,
@@ -719,9 +837,9 @@ export class WASRemoteStore {
     name?: string
     isPublic?: boolean
     generator?: CollectionGenerator
-  }): Promise<string> {
+  }): Promise<{ created: boolean }> {
     try {
-      await this.#ensureCollectionInSpace({
+      return await this.#ensureCollectionInSpace({
         id,
         name,
         encryption: 'plaintext',
@@ -735,7 +853,6 @@ export class WASRemoteStore {
         { cause: err }
       )
     }
-    return this.collectionTargetUrl(id)
   }
 
   /**
@@ -759,7 +876,9 @@ export class WASRemoteStore {
    * @param [options.name] {string}   display name; defaults to the id
    * @param [options.generator] {CollectionGenerator}   the application this
    *   collection is provisioned for
-   * @returns {Promise<void>}
+   * @returns {Promise<{ created: boolean }>}   whether this call's guarded
+   *   create made the collection; `false` when it already stood or a rival
+   *   won the create race
    */
   async ensureGovernedCollection({
     id,
@@ -769,8 +888,8 @@ export class WASRemoteStore {
     id: string
     name?: string
     generator?: CollectionGenerator
-  }): Promise<void> {
-    await this.#ensureCollectionInSpace({
+  }): Promise<{ created: boolean }> {
+    return await this.#ensureCollectionInSpace({
       id,
       name,
       encryption: 'governed',
@@ -792,7 +911,8 @@ export class WASRemoteStore {
    * @param options.encryption {'plaintext' | 'governed'}
    * @param [options.isPublic] {boolean}
    * @param [options.generator] {CollectionGenerator}
-   * @returns {Promise<void>}
+   * @returns {Promise<{ created: boolean }>}   was-client's report of whether
+   *   its guarded create made the collection
    */
   async #ensureCollectionInSpace({
     id,
@@ -806,8 +926,8 @@ export class WASRemoteStore {
     encryption: 'plaintext' | 'governed'
     isPublic?: boolean
     generator?: CollectionGenerator
-  }): Promise<void> {
-    await ensureSpaceAndCollection({
+  }): Promise<{ created: boolean }> {
+    return await ensureSpaceAndCollection({
       was: this.was,
       spaceId: this.spaceId,
       controllerDid: this.controller,
@@ -1119,7 +1239,28 @@ export class WASRemoteStore {
   }: {
     logicalKey: string
   }): Promise<Array<{ id: string; data: Json }>> {
-    const collectionId = this.#collectionId(logicalKey)
+    return await this.listCollectionDocuments({
+      collectionId: this.#collectionId(logicalKey)
+    })
+  }
+
+  /**
+   * Lists every live document of one collection, by WAS collection id, as its
+   * raw stored body (the EDV envelope on an encrypted collection, the
+   * document itself on a plaintext one). It walks the collection's `changes`
+   * feed, so it costs one request per page rather than one per resource. A
+   * missing collection (or one this session cannot see; the server answers
+   * 404 for both) lists as empty.
+   *
+   * @param options {object}
+   * @param options.collectionId {string}   the WAS collection id
+   * @returns {Promise<Array<{ id: string; data: Json }>>}
+   */
+  async listCollectionDocuments({
+    collectionId
+  }: {
+    collectionId: string
+  }): Promise<Array<{ id: string; data: Json }>> {
     let documents
     try {
       documents = await this.#space()
@@ -1128,7 +1269,7 @@ export class WASRemoteStore {
           limit: WAS_SYNC_BATCH_SIZE ?? SYNCED_LISTING_PAGE_SIZE
         })
     } catch (err) {
-      log.error('Error listing synced documents for collection', {
+      log.error('Error listing documents for collection', {
         collectionId,
         err
       })
@@ -1276,7 +1417,45 @@ export class WASRemoteStore {
     epoch?: string
     ifMatch?: string
   }): Promise<{ created: boolean }> {
-    const collectionId = this.#collectionId(logicalKey)
+    return await this.putCollectionResource({
+      collectionId: this.#collectionId(logicalKey),
+      resourceId,
+      body,
+      ...(epoch !== undefined && { epoch }),
+      ...(ifMatch !== undefined && { ifMatch })
+    })
+  }
+
+  /**
+   * Writes one raw body into any collection of this Space, by WAS collection
+   * id, on the terms {@link putSyncedResource} states: the body is stored
+   * verbatim, created-if-absent by default (a `412` reports
+   * `{ created: false }`), updated in place with `ifMatch` (a `412`
+   * propagates), and stamped with `Key-Epoch` when `epoch` is given.
+   *
+   * @param options {object}
+   * @param options.collectionId {string}   the WAS collection id
+   * @param options.resourceId {string}
+   * @param options.body {Json}   the raw EDV envelope or plaintext document
+   * @param [options.epoch] {string}   the key epoch the envelope was
+   *   encrypted under
+   * @param [options.ifMatch] {string}   the quoted ETag an update-in-place
+   *   must match; create-if-absent when omitted
+   * @returns {Promise<{ created: boolean }>}
+   */
+  async putCollectionResource({
+    collectionId,
+    resourceId,
+    body,
+    epoch,
+    ifMatch
+  }: {
+    collectionId: string
+    resourceId: string
+    body: Json
+    epoch?: string
+    ifMatch?: string
+  }): Promise<{ created: boolean }> {
     const headers: Record<string, string> =
       ifMatch !== undefined ? { 'if-match': ifMatch } : { 'if-none-match': '*' }
     if (epoch !== undefined) {

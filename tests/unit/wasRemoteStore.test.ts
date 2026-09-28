@@ -4,7 +4,11 @@ import { TEST_SERVICE_DESCRIPTION } from '../shared/wasServiceFixture'
 
 import { memoryResourceLogPinStore } from '@interop/vh-resource-log'
 import type { ZcapClient } from '@interop/ezcap'
-import type { IZcap } from '@interop/data-integrity-core'
+import type {
+  IKeyAgreementKey,
+  IKeyResolver,
+  IZcap
+} from '@interop/data-integrity-core'
 import type { SpaceMetadata, WasClient } from '@interop/was-client'
 
 vi.mock('@interop/wallet-core/keys', async importOriginal => ({
@@ -18,7 +22,13 @@ vi.mock('../../src/app.config', async importOriginal => ({
   WAS_SYNC_BATCH_SIZE: 2
 }))
 
-import { wasClientLabelsStore } from '@interop/wallet-core/keys'
+import {
+  ensureIndexedFirstEpoch,
+  wasClientLabelsStore
+} from '@interop/wallet-core/keys'
+import { X25519KeyAgreementKey2020 } from '@interop/x25519-key-agreement-key'
+import { createEdvDocCipher, ownerRecipient } from '@interop/was-client/edv'
+import { memoryDescriptorStores } from './fakeDescriptorStores'
 import { mintSpaceId, WASRemoteStore } from '../../src/stores/wasRemoteStore'
 import { deriveSpaceId } from '@interop/was-client/sync'
 import type { ControllerProfile, User } from '../../src/types/auth'
@@ -603,7 +613,9 @@ describe('WASRemoteStore.ensureCollection', () => {
       space: vi.fn().mockReturnValue({ collection })
     })
 
-    await store.ensureCollection({ id: 'example-app-data' })
+    await expect(
+      store.ensureCollection({ id: 'example-app-data' })
+    ).resolves.toEqual({ created: true })
     expect(collection).toHaveBeenCalledWith('example-app-data')
     // No encryption descriptor: the collection is provisioned plaintext, by
     // a guarded create.
@@ -671,7 +683,9 @@ describe('WASRemoteStore.ensureCollection', () => {
       space: vi.fn().mockReturnValue({ collection })
     })
 
-    await store.ensureCollection({ id: 'example-app-data' })
+    await expect(
+      store.ensureCollection({ id: 'example-app-data' })
+    ).resolves.toEqual({ created: false })
     // The served `encryption` is the server's projection of the governing
     // log; a Description PUT carrying it would be refused, so none is sent.
     expect(replaceDescription).not.toHaveBeenCalled()
@@ -743,7 +757,7 @@ describe('WASRemoteStore.ensureGovernedCollection', () => {
 
     await expect(
       store.ensureGovernedCollection({ id: 'example-app-data' })
-    ).resolves.toBeUndefined()
+    ).resolves.toEqual({ created: true })
     expect(replaceDescription).toHaveBeenCalledOnce()
     // The declaration carries the name alone: the `encryption` member is the
     // server's to derive from the collection's governing log.
@@ -774,7 +788,7 @@ describe('WASRemoteStore.ensureGovernedCollection', () => {
 
     await expect(
       store.ensureGovernedCollection({ id: 'example-app-data' })
-    ).resolves.toBeUndefined()
+    ).resolves.toEqual({ created: false })
     expect(replaceDescription).not.toHaveBeenCalled()
   })
 
@@ -822,7 +836,7 @@ describe('WASRemoteStore.ensureGovernedCollection', () => {
 
     await expect(
       store.ensureGovernedCollection({ id: 'example-app-data' })
-    ).resolves.toBeUndefined()
+    ).resolves.toEqual({ created: true })
     // A generation delegation cannot reach the bare Space URL: the Space is
     // neither described nor created, and every handle carries the capability.
     expect(describe).not.toHaveBeenCalled()
@@ -862,7 +876,7 @@ describe('WASRemoteStore.ensureGovernedCollection', () => {
 
     await expect(
       store.ensureGovernedCollection({ id: 'example-app-data' })
-    ).resolves.toBeUndefined()
+    ).resolves.toEqual({ created: false })
     expect(describeWithEtag).toHaveBeenCalledTimes(2)
   })
 })
@@ -1065,5 +1079,97 @@ describe('WASRemoteStore.clientLabelsStore', () => {
     expect(vi.mocked(wasClientLabelsStore)).toHaveBeenLastCalledWith(
       expect.objectContaining({ capability: renewed })
     )
+  })
+})
+
+describe('WASRemoteStore.declareCollectionIndexes', () => {
+  it('seals the schema through its keystore-less client with the handle override', async () => {
+    const key = await X25519KeyAgreementKey2020.generate({
+      controller: 'did:key:z6MkOwner'
+    })
+    const keyAgreementKey = key as unknown as IKeyAgreementKey
+    const keyResolver: IKeyResolver = async () => ({
+      id: key.id!,
+      type: key.type,
+      publicKeyMultibase: key.publicKeyMultibase
+    })
+    const stores = memoryDescriptorStores()
+    const { descriptor: encryption } = await ensureIndexedFirstEpoch({
+      store: await stores.storeFor('app-notes'),
+      recipients: [ownerRecipient({ keyAgreementKey })]
+    })
+
+    // A stub server holding the one Collection Metadata object, enforcing
+    // `If-Match` on its version.
+    let meta: { document: Record<string, unknown>; version: number } = {
+      document: { id: 'app-notes', type: ['Collection'], encryption },
+      version: 0
+    }
+    const response = (data: unknown, etag?: string) => ({
+      status: 200,
+      headers: new Headers(etag !== undefined ? { etag } : {}),
+      data,
+      async json() {
+        return data
+      }
+    })
+    const request = vi.fn(
+      async (args: {
+        url: string
+        method?: string
+        json?: unknown
+        headers?: Record<string, string>
+      }) => {
+        const path = new URL(args.url).pathname
+        const method = args.method ?? 'GET'
+        if (path === '/space/space-id/app-notes/meta' && method === 'GET') {
+          return response(meta.document, `"${meta.version}"`)
+        }
+        if (path === '/space/space-id/app-notes/meta' && method === 'PUT') {
+          meta = {
+            document: {
+              ...(args.json as Record<string, unknown>),
+              type: ['Collection'],
+              encryption
+            },
+            version: meta.version + 1
+          }
+          return response({}, `"${meta.version}"`)
+        }
+        throw Object.assign(new Error('not found'), { status: 404 })
+      }
+    )
+    const store = new WASRemoteStore({
+      serviceDescription: TEST_SERVICE_DESCRIPTION,
+      pinStore: memoryResourceLogPinStore(),
+      storageServerUrl: 'https://example.test',
+      zcapClient: {
+        request,
+        invocationSigner: { id: 'did:key:test#key' }
+      } as unknown as ZcapClient,
+      spaceId: 'space-id',
+      controller: 'did:key:test'
+    })
+
+    const schema = await store.declareCollectionIndexes({
+      collectionId: 'app-notes',
+      encryption,
+      keyAgreementKey,
+      keyResolver,
+      indexes: [{ attribute: 'content.type' }]
+    })
+
+    expect(schema.indexes).toEqual([{ attribute: 'content.type', addedIn: 1 }])
+    // The server holds an opaque envelope, which a cipher over the same keys
+    // opens back into the declared schema.
+    const custom = meta.document.custom
+    expect(JSON.stringify(custom)).not.toContain('content.type')
+    const cipher = await createEdvDocCipher({
+      keyAgreementKey,
+      keyResolver,
+      collectionId: 'app-notes',
+      encryption
+    })
+    expect(await cipher.applyMeta({ custom })).toEqual(schema)
   })
 })

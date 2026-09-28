@@ -498,7 +498,9 @@ describe('exportBackup', () => {
     const failure = await exportBackup({
       session,
       credentialLabel: 'Backup'
-    }).catch((err: unknown) => err)
+    })
+      .then(drain)
+      .catch((err: unknown) => err)
 
     // The passphrase entry is the first one exported, so its kind picks the
     // message.
@@ -523,7 +525,9 @@ describe('exportBackup', () => {
     const failure = await exportBackup({
       session,
       credentialLabel: 'Backup'
-    }).catch((err: unknown) => err)
+    })
+      .then(drain)
+      .catch((err: unknown) => err)
 
     // The enrolled branch invokes the stored zcap rather than minting a
     // child, and runs the same pre-flight over it, so the refusal is this
@@ -560,7 +564,9 @@ describe('exportBackup', () => {
     const failure = await exportBackup({
       session,
       credentialLabel: 'Backup'
-    }).catch((err: unknown) => err)
+    })
+      .then(drain)
+      .catch((err: unknown) => err)
 
     expect(backupExportErrorKey(failure)).toBe(
       'storage.backup.errors.missingCapability.passkey'
@@ -584,7 +590,9 @@ describe('exportBackup', () => {
     const failure = await exportBackup({
       session,
       credentialLabel: 'Backup'
-    }).catch((err: unknown) => err)
+    })
+      .then(drain)
+      .catch((err: unknown) => err)
 
     expect(failure).toBeInstanceOf(BackupCredentialNotListedError)
     expect(backupExportErrorKey(failure)).toBe(
@@ -606,7 +614,9 @@ describe('exportBackup', () => {
     const failure = await exportBackup({
       session,
       credentialLabel: 'Backup'
-    }).catch((err: unknown) => err)
+    })
+      .then(drain)
+      .catch((err: unknown) => err)
 
     expect(backupExportErrorKey(failure)).toBe(
       'storage.backup.errors.credentialNotListed'
@@ -628,7 +638,9 @@ describe('exportBackup', () => {
     const failure = await exportBackup({
       session,
       credentialLabel: 'Backup'
-    }).catch((err: unknown) => err)
+    })
+      .then(drain)
+      .catch((err: unknown) => err)
 
     expect(backupExportErrorKey(failure)).toBe(
       'storage.backup.errors.registryChanged'
@@ -645,7 +657,9 @@ describe('exportBackup', () => {
     const failure = await exportBackup({
       session,
       credentialLabel: 'Backup'
-    }).catch((err: unknown) => err)
+    })
+      .then(drain)
+      .catch((err: unknown) => err)
 
     expect(backupExportErrorKey(failure)).toBe(
       'storage.backup.errors.spaceExportFailed'
@@ -700,7 +714,9 @@ describe('exportBackup', () => {
     const failure = await exportBackup({
       session,
       credentialLabel: 'Backup'
-    }).catch((err: unknown) => err)
+    })
+      .then(drain)
+      .catch((err: unknown) => err)
 
     expect(backupExportErrorKey(failure)).toBe(
       'storage.backup.errors.unsupportedCapability.passphrase'
@@ -720,7 +736,9 @@ describe('exportBackup', () => {
     const failure = await exportBackup({
       session,
       credentialLabel: 'Backup'
-    }).catch((err: unknown) => err)
+    })
+      .then(drain)
+      .catch((err: unknown) => err)
 
     // The document names an annex Space this session cannot reach, so the
     // run refuses rather than writing a bundle that reads as complete.
@@ -740,7 +758,9 @@ describe('exportBackup', () => {
     const failure = await exportBackup({
       session,
       credentialLabel: 'Backup'
-    }).catch((err: unknown) => err)
+    })
+      .then(drain)
+      .catch((err: unknown) => err)
 
     expect(backupExportErrorKey(failure)).toBe(
       'storage.backup.errors.unsupportedCapability.generic'
@@ -760,7 +780,9 @@ describe('exportBackup', () => {
     const failure = await exportBackup({
       session,
       credentialLabel: 'Backup'
-    }).catch((err: unknown) => err)
+    })
+      .then(drain)
+      .catch((err: unknown) => err)
 
     // A record sealed before the delegated-clients action set gained POST:
     // the pre-flight catches it, so no orphan credential is left behind.
@@ -785,7 +807,9 @@ describe('exportBackup', () => {
     const failure = await exportBackup({
       session,
       credentialLabel: 'Backup'
-    }).catch((err: unknown) => err)
+    })
+      .then(drain)
+      .catch((err: unknown) => err)
 
     expect(backupExportErrorKey(failure)).toBe(
       'storage.backup.errors.unsupportedCapability.generic'
@@ -822,7 +846,9 @@ describe('exportBackup', () => {
     const failure = await exportBackup({
       session,
       credentialLabel: 'Backup'
-    }).catch((err: unknown) => err)
+    })
+      .then(drain)
+      .catch((err: unknown) => err)
 
     // The new credential's rung cannot be committed into the pointed annex
     // generation, so the run refuses before anything is minted.
@@ -844,7 +870,9 @@ describe('exportBackup', () => {
     const failure = await exportBackup({
       session,
       credentialLabel: 'Backup'
-    }).catch((err: unknown) => err)
+    })
+      .then(drain)
+      .catch((err: unknown) => err)
 
     // Read-only: the admission is asked of the generation the pre-flight
     // resolved, with this session's own ladder seed, and nothing is written.
@@ -915,7 +943,9 @@ describe('exportBackup', () => {
     const failure = await exportBackup({
       session,
       credentialLabel: 'Backup'
-    }).catch((err: unknown) => err)
+    })
+      .then(drain)
+      .catch((err: unknown) => err)
 
     expect(backupExportErrorKey(failure)).toBe(
       'storage.backup.errors.notEstablished'
@@ -948,7 +978,9 @@ describe('exportBackup', () => {
     const failure = await exportBackup({
       session,
       credentialLabel: 'Backup'
-    }).catch((err: unknown) => err)
+    })
+      .then(drain)
+      .catch((err: unknown) => err)
 
     expect(backupExportErrorKey(failure)).toBe(
       'storage.backup.errors.continuity'

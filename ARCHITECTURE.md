@@ -450,10 +450,12 @@ on the Collection Metadata object, as one `generator` object: `id`, the app's
 did:key; `origin`, the Web origin that DID was bound to; `url`, the app's
 canonical app URL; and `name`, its display name. App Connect provisioning
 stamps it when it creates the collection, taking `url` and `name` from the
-validated request's `app`, the source the app-key credential records. A
-collection that already stands keeps its attribution, so a second app
-admitted to it does not rename the creator. An interaction-URL grant stamps
-none. The listing carries the object whole to every surface. A surface
+validated request's `app`, the source the app-key credential records. The
+content migration stamps it too, on an app collection it creates. It copies
+the bundle's value as it stands, and nothing verifies it. The stamp only
+labels the consent row and the listings, and grants nothing. A collection
+that already stands keeps its attribution, so a second app admitted to it
+does not rename the creator. An interaction-URL grant stamps none. The listing carries the object whole to every surface. A surface
 names the creator by `generator.name` first. For a collection stamped
 without it, one reader, `lookupCollectionCreators`
 (`src/lib/connectedApps.ts`), names the app behind `generator.id`, for the
@@ -472,12 +474,41 @@ lands on the session's own backend and every session kind may run it. The
 walk contacts no server of the old account: everything it reads comes out of
 the file. The run's counts become one Import activity.
 
+The walk also carries app collections, the collections a connected app had
+the old account provision. The session needs remote storage and the
+descriptor logs of a promoted account to take them, so a guest or a no-WAS
+session leaves them counted as not migrated. An encrypted one is
+provisioned owner-only under its archived `generator`, with a fresh
+governing log and blinded-index key. Its archived index schema is declared
+on it, and each row is re-sealed under the new user key with its blinded
+index entries, under a fresh content-derived id. A plaintext one is created
+private and then made world-readable when the archived collection policy
+was. Each of its rows keeps its archived resource id and content type. Rows
+are written remote-direct on every session kind. The ensure's own report of
+whether it created the collection decides what the run sets up, not an
+earlier read. The public read and the index schema travel only to a
+collection the run creates, or to its own torn create. A standing collection
+counts as that when it holds no rows and carries the archived `generator`.
+An unattributed archive never counts, since an interaction-URL grant also
+leaves an unattributed collection. A re-run finishes such a collection, so
+a run torn between its create and its settings converges. Any other
+collection the account already holds keeps its attribution, public read,
+and schema, and is merged by the same skip-existing rule. It is refused
+when its kind differs from the archive's, when it is encrypted under a
+descriptor no log governs, or when a plaintext archive's public read
+differs from it. An encrypted archive's public read is ignored.
+An encrypted row's identity is its payload's own `id`, or its content cid
+when it has none. A plaintext row's identity is its resource id, and a
+non-JSON row whose id is taken is compared by its bytes.
+
 The backup bundle is the other direction. The Storage page's export action
 (`src/components/storage/BackupExportDialog.tsx`) runs
 `src/session/backupExport.ts`. It establishes a backup credential
 (`src/session/backupCredential.ts`), exports every Space the account names
 through the server's per-Space export route, and packs the results into one
-outer tar with `@interop/wallet-backup`'s `exportBundle`. A pre-flight runs
+outer tar with `@interop/wallet-backup`'s `exportBundle`. The bundle streams:
+`exportBundle` hands it back once the Spaces are listed, and the exports run
+as the picked file is written, up to three at a time. A pre-flight runs
 first, before anything is minted. It checks the account Space's capability,
 the annex Space's, and every registry entry's, each for `POST`. It also
 refuses a session that could not commit the new credential's rung into the
@@ -500,7 +531,10 @@ for the account log before the bundle is written. A mismatch refuses the
 run, and a visit holding no pin for that log skips the check. A Space that
 cannot be exported fails the whole run. So does a registry, read back from
 the server after the establishment, that does not list the new credential,
-and one whose entries change while the run is under way.
+and one whose entries change while the run is under way. That last check runs
+through `exportBundle`'s `settle` port, once every archive is in hand and
+before the bundle's last entry is written. A refusal after the listing errors
+the stream, so the save fails and does not finish the file.
 
 A user's remote Space is identified by an independent random `spaceId`
 minted at signup and carried in the account pointer; unlock Spaces keep
@@ -578,7 +612,7 @@ ceremony-tail entry reports from its own call site instead.
 | Account genesis (plain)                   | a no-WAS deployment's signup only; healed at every login              | `src/session/signup.ts`                                                     | `/genesis`                  | re-run (every stage an ensure)                                                                                                                                                                                                                                                                                                    | `account-genesis.md`     |
 | Account deletion                          | Settings, any session type                                            | `src/session/accountSettings.ts` + `wipe.ts`                                | app-side phase order        | re-run; an in-run retry for the acting credential's own unlock Space; otherwise the next login with that credential offering to remove it (not yet built)                                                                                                                                                                         | `did-webvh-identity.md`  |
 | Shared wipe (executor, not user-facing)   | consumed by the deletion-shaped ceremonies                            | `src/session/wipe.ts`                                                       | app-side                    | re-probe verification; the `unverified` report                                                                                                                                                                                                                                                                                    | `did-webvh-identity.md`  |
-| Content migration                         | Storage page, beside Export Space, every session kind including guest | `src/session/contentMigration.ts`                                           | `@interop/wallet-backup`    | re-run (skip existing by content identity; the import activity replaced put-then-delete-others)                                                                                                                                                                                                                                   | `session-persistence.md` |
+| Content migration                         | Storage page, beside Export Space, every session kind including guest | `src/session/contentMigration.ts`                                           | `@interop/wallet-backup`    | re-run (skip existing by content identity; the import activity replaced put-then-delete-others; an app collection's own torn create, empty and carrying the archived `generator`, finished)                                                                                                                                       | `session-persistence.md` |
 | Backup export                             | Storage page, the export action, any session with remote storage      | `src/session/backupExport.ts`                                               | `@interop/wallet-backup`    | re-run; the pre-flight refuses before the pivot; a tear inside the establishment leaves the entry-first row, whose Remove under Settings > Backup credentials converges whatever it reached (strike, roster rotation, Space delete, entry drop); a tear after it leaves an ordinary labeled backup credential the user can remove | `session-persistence.md` |
 
 A WAS signup's remembered and passkey flavors continue into the

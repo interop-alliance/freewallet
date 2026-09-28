@@ -726,7 +726,7 @@
     "migration": {
       "action": "Importar desde otra billetera",
       "title": "Importar desde otra billetera",
-      "intro": "Trae el contenido de una copia de seguridad de otra billetera a esta cuenta. Se agregan aquí las credenciales, los contactos y su historial. No se elimina nada de esta cuenta.",
+      "intro": "Trae el contenido de una copia de seguridad de otra billetera a esta cuenta. Se agregan aquí las credenciales, los contactos, su historial y las colecciones que guardaban las aplicaciones conectadas. No se elimina nada de esta cuenta.",
       "chooseFile": "Elegir archivo de copia de seguridad",
       "changeFile": "Elegir otro archivo",
       "selectedFile": "{{name}} ({{size}})",
@@ -746,6 +746,7 @@
       "notMigratedGrants": "Todas las autorizaciones, los permisos y las claves de aplicación. Cada aplicación y agente conectado debe agregarse de nuevo desde cero; volver a conectarse no basta.",
       "notMigratedShares": "Todo lo compartido de una colección.",
       "notMigratedPublicLinks": "Los enlaces públicos. Una credencial que era pública vuelve como privada y puedes volver a compartirla a mano.",
+      "notMigratedAppCollections": "Las colecciones que guardaban las aplicaciones conectadas. Esta sesión no puede crearlas, así que quedan en la copia de seguridad.",
       "notMigratedLocalOnly": "Esta billetera no tiene almacenamiento remoto, así que el contenido importado solo se puede leer mientras este navegador conserve sus datos del sitio.",
       "run": "Importar contenido",
       "cancel": "Cancelar",
@@ -775,6 +776,7 @@
         "logUnreadable": "No se pudo leer el historial de claves de la colección.",
         "quotaExceeded": "El almacenamiento de esta cuenta está lleno.",
         "payloadTooLarge": "El elemento es más grande de lo que acepta este servidor.",
+        "appCollectionMismatch": "Esta cuenta ya tiene una colección con este nombre y otra configuración, así que se dejó como estaba.",
         "failed": "La escritura no se completó.",
         "unknown": "Inesperado: {{name}}."
       },

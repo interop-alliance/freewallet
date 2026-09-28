@@ -292,10 +292,16 @@ Space, the client-annex Space, and one unlock Space per unlock-methods
 registry entry. A registry that carries no entry for the new credential's
 unlock Space refuses the run (`BackupCredentialNotListedError`), since a
 bundle missing that Space does not restore the account. Then one export per
-Space, in listing order. The account Space's archive is checked against this
-visit's pinned chain head for the account log before the bundle is written,
+Space, started in listing order. The bundle stream is handed back once the
+listing is done, and the exports run as the picked file is written, up to
+three at a time. The account Space's archive is checked against this
+visit's pinned chain head for the account log before its entry is written,
 and a mismatch refuses the run. A visit holding no pin for that log skips
-the check. Then the packing.
+the check. Then the packing. Once every archive is in hand, and before the
+bundle's last entry is written, the registry is read once more. A set of
+unlock Spaces that differs from the listed one refuses the run
+(`BackupRegistryChangedError`). A refusal after the listing errors the
+stream, so the save fails and does not finish the file.
 
 The establishment (`establishBackupCredential`) is entry-first, in the
 passkey's shape with one difference. A passkey writes a bare entry and
@@ -380,6 +386,72 @@ afterwards. A browser without the File System Access API buffers the
 finished bundle into a Blob instead. A cancelled run renders the cancelled
 message, which says any backup credential it already established is listed
 under Settings > Backup credentials.
+
+**Content migration's app collections** (`src/session/contentMigration.ts`).
+Beside the standard collections, the walk hands the sink every app
+collection in the bundle's account archive, one at a time: an
+`ensureCollection` call, then its rows. The sink carries that member only
+when `StorageManager.canProvisionAppCollections` holds (remote storage and
+descriptor logs), so a guest or a no-WAS session leaves app collections in
+the report's not-migrated counts. `ensureImportedAppCollection` reads the
+collection's standing state and checks a standing collection before it
+writes anything. It then runs was-client's guarded ensure, whose `created`
+report decides whether this run made the collection. The earlier read only
+feeds the checks. A create lost to a rival reads the rival's collection
+back and checks it the same way. An encrypted collection is ensured bare
+and then gets its first epoch owner-only, the second half of
+`provisionEncryptedCollection` with no grantee. On a collection the run
+creates, it declares the archived index schema through was-client's
+add-only `declareIndexes`. It then builds the row cipher from the
+descriptor and the collection metadata as it then stands. A standing
+collection that predates the blinded index has no key to declare under, and
+its rows land without index entries. A plaintext collection is ensured
+private with its archived attribution. When the run creates it and the
+archive says public, the world-read grant follows.
+
+A collection the account already holds keeps its own settings: its public
+read, its index schema, and its attribution are left as they are. The one
+exception is this migration's own torn create. A standing collection that
+holds no rows and whose `generator` equals the archived one is finished as
+if the run had created it. A plaintext one gets the archived public read,
+and an encrypted one gets its first epoch and, when it declares none yet,
+the archived index schema. An archive with no `generator` never qualifies,
+since an interaction-URL grant also leaves an unattributed collection. So a
+run torn between the create and the public read, or between the first epoch
+and the schema, converges on its re-run.
+
+Every other standing collection runs the refusal matrix. It is refused with
+`AppCollectionMismatchError`, and its rows are not written, in these cases.
+An archived plaintext collection is refused over one that stands encrypted.
+Any archive is refused over a collection encrypted under a client-written
+descriptor, which no governing log can take over. An archived encrypted
+collection is refused over a plaintext one holding rows, and finishes an
+empty one. A plaintext archive is refused when its public read differs from
+the standing one. It is also refused over an empty collection with no
+`encryption` member and no public read. That empty state is also what an
+App Connect encrypted provision torn before its first epoch leaves, and
+plaintext rows landed there would keep the app's provision refused. An
+encrypted archive's public read is ignored, on the create and in the
+checks.
+
+The row cipher rides the same once-per-session unknown-epoch refresh the
+storage browser's app-collection reads use: a snapshot row sealed under an
+epoch the cipher does not know drops the cipher, and the rebuilt one reads
+the verified log head. The server takes a write's `Key-Epoch` as advisory,
+so the write path checks too. Before each row is sealed, the collection's
+served metadata is read and its current epoch compared with the cipher's.
+When they differ, the verified log head is read, and the cipher is rebuilt
+with its schema when that head has moved. A row is therefore sealed under
+the current epoch as of its own write, even after a rotation in another
+tab. `snapshotAppCollection` reads the collection's held rows once per
+run, at its first row, and `importAppCollectionRow` decides each row
+against that snapshot: `skipped` for the same identity and content,
+`conflicting` for the same identity under other content, and otherwise a
+write. A plaintext row keeps its archived content type. A non-JSON one
+arrives as raw bytes and is not in the snapshot, so an id already taken is
+read back and compared by its bytes. App collections are remote-only, so these writes go remote-direct
+on a remembered session too. The app's own recipient entry and grants do
+not travel; the app is admitted again when it reconnects.
 
 **Removing a backup credential.** Settings > Backup credentials lists one
 "Backup <date>" row per entry of the `backup-credential` kind. Its Remove

@@ -726,7 +726,7 @@
     "migration": {
       "action": "Import from Another Wallet",
       "title": "Import from another wallet",
-      "intro": "Brings the content of a backup file from another wallet into this account. Credentials, contacts, and their history are added here. Nothing in this account is removed.",
+      "intro": "Brings the content of a backup file from another wallet into this account. Credentials, contacts, their history, and the collections connected apps kept are added here. Nothing in this account is removed.",
       "chooseFile": "Choose backup file",
       "changeFile": "Choose a different file",
       "selectedFile": "{{name}} ({{size}})",
@@ -746,6 +746,7 @@
       "notMigratedGrants": "Every authorization, grant, and app key. Each connected app and agent has to be added again from scratch; reconnecting is not enough.",
       "notMigratedShares": "Every share of a collection.",
       "notMigratedPublicLinks": "The public links. A credential that was public comes back private, and you can share it again by hand.",
+      "notMigratedAppCollections": "The collections connected apps kept. This session cannot create them, so they stay in the backup.",
       "notMigratedLocalOnly": "This wallet keeps no remote storage, so the imported content is readable only as long as this browser keeps its site data.",
       "run": "Import content",
       "cancel": "Cancel",
@@ -775,6 +776,7 @@
         "logUnreadable": "The collection's key history could not be read.",
         "quotaExceeded": "This account's storage is full.",
         "payloadTooLarge": "The item is larger than this server accepts.",
+        "appCollectionMismatch": "This account already holds a collection by this name with different settings, so it was left as it is.",
         "failed": "The write did not land.",
         "unknown": "Unexpected: {{name}}."
       },

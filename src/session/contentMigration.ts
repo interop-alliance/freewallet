@@ -21,9 +21,17 @@
  * Every session kind may run it, a guest included: every import method
  * routes to the session's own backend, so a transient session writes
  * remote-direct and a remembered one writes to the replica.
+ *
+ * App collections, the ones a connected app had the old account provision,
+ * migrate too when the session can create them (remote storage and the
+ * descriptor logs of a promoted account). Each is re-created owner-only
+ * under its archived attribution, and its rows are written remote-direct on
+ * every session kind, since no replica holds an app collection. A guest or a
+ * no-WAS session leaves them counted as not migrated.
  */
 import { migrateBundle, MIGRATION_WALK_ORDER } from '@interop/wallet-backup'
 import type {
+  AppCollectionRow,
   ByteSource,
   MigrationReport,
   MigrationSecret,
@@ -45,7 +53,8 @@ import { isRememberedSession } from '@/session/persistence'
 import { awaitCollectionsInSync } from '@/stores/syncStatusStore'
 import type { WalletActivity } from '@/stores/storageManager'
 import type { Session } from '@/types/auth'
-import type { HeldContent } from '@/types/migration'
+import type { HeldAppRows, HeldContent } from '@/types/migration'
+import type { Json } from '@interop/was-sync'
 
 const log = createLogger('fw:session:migration')
 
@@ -149,6 +158,80 @@ function targetDidOf(session: Session): string {
 }
 
 /**
+ * The sink's app-collection member, over the session's app-collection import
+ * methods. It holds what those methods cannot: whether each collection is
+ * encrypted, and each collection's held-row snapshot, read at its first row
+ * and kept current by the writes.
+ *
+ * @param options {object}
+ * @param options.session {Session}
+ * @returns {NonNullable<MigrationSink['appCollections']>}
+ */
+function appCollectionsSink({
+  session
+}: {
+  session: Session
+}): NonNullable<MigrationSink['appCollections']> {
+  const { storage } = session
+  const encryptedById = new Map<string, boolean>()
+  const snapshots = new Map<string, Promise<HeldAppRows>>()
+
+  return {
+    async ensureCollection({
+      collectionId,
+      encrypted,
+      isPublic,
+      generator,
+      indexSchema
+    }): Promise<void> {
+      encryptedById.set(collectionId, encrypted)
+      snapshots.delete(collectionId)
+      await storage.ensureImportedAppCollection({
+        collectionId,
+        encrypted,
+        ...(isPublic !== undefined && { isPublic }),
+        ...(generator !== undefined && { generator }),
+        ...(indexSchema !== undefined && { indexSchema })
+      })
+    },
+
+    async importRow(handed: AppCollectionRow): Promise<SinkOutcome> {
+      const { collectionId, resourceId, contentType } = handed
+      const encrypted = encryptedById.get(collectionId) ?? true
+      let snapshot = snapshots.get(collectionId)
+      if (!snapshot) {
+        snapshot = storage.snapshotAppCollection({ collectionId, encrypted })
+        snapshots.set(collectionId, snapshot)
+      }
+      let held: HeldAppRows
+      try {
+        held = await snapshot
+      } catch (err) {
+        // Read again at the next row: one failed listing must not decide
+        // every row behind it.
+        snapshots.delete(collectionId)
+        log.warn('Could not read an app collection before importing into it', {
+          collectionId,
+          err
+        })
+        return 'failed'
+      }
+      return await storage.importAppCollectionRow({
+        collectionId,
+        encrypted,
+        resourceId,
+        contentType,
+        content:
+          'bytes' in handed
+            ? { bytes: handed.bytes }
+            : { row: handed.row as Json },
+        held
+      })
+    }
+  }
+}
+
+/**
  * Builds the sink over the session's import methods, holding the per-run
  * state they cannot see: the held-content snapshot they all decide against
  * and keep current, what this run did with each archived contact head, and
@@ -205,6 +288,10 @@ function migrationSink({ session }: { session: Session }): MigrationSink {
   }
 
   return {
+    ...(storage.canProvisionAppCollections && {
+      appCollections: appCollectionsSink({ session })
+    }),
+
     async importCredential({ row }): Promise<SinkOutcome> {
       return await storage.importCredential({
         credential: row as IVerifiableCredential

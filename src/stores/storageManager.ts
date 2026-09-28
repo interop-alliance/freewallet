@@ -46,9 +46,11 @@ import {
 import type { RxCollection, RxStorage } from 'rxdb/plugins/core'
 import {
   KeyUnwrapError,
+  isGovernedDescriptor,
   type CollectionEncryption,
   type CollectionGenerator,
   type IDelegatedZcap,
+  type IndexSchema,
   type ServiceDescription,
   type SpaceMetadata
 } from '@interop/was-client'
@@ -96,7 +98,7 @@ import {
 import { credentialTitle } from '@/lib/viewMappers/credentialTitle'
 import { SEED_CONTACT_NAMES } from '@/fixtures/defaultContacts'
 import { WALK_STOPPING_ERROR_NAME } from '@interop/wallet-backup'
-import type { HeldContent, ImportOutcome } from '@/types/migration'
+import type { HeldAppRows, HeldContent, ImportOutcome } from '@/types/migration'
 import { didWebFromSpace } from '@/lib/didWeb'
 import { ensureKmsAuthentication } from '@/lib/kms'
 import { collectionIdFromTarget } from '@/lib/zcap'
@@ -331,6 +333,59 @@ async function decryptEnvelope({
     log.warn('Could not decrypt resource envelope', { source, err })
     return { value: undefined, unknownEpoch: false }
   }
+}
+
+/**
+ * Whether two byte arrays hold the same bytes.
+ *
+ * @param left {Uint8Array}
+ * @param right {Uint8Array}
+ * @returns {boolean}
+ */
+function sameBytes(left: Uint8Array, right: Uint8Array): boolean {
+  if (left.byteLength !== right.byteLength) {
+    return false
+  }
+  return left.every((byte, index) => byte === right[index])
+}
+
+/**
+ * A standing app collection's metadata as the content migration checks it:
+ * its `encryption` member, its `custom` value, and its attribution.
+ */
+type StandingAppCollection = NonNullable<
+  Awaited<ReturnType<WASRemoteStore['collectionMetadata']>>
+>
+
+/**
+ * The refusal message for an app collection encrypted under a client-written
+ * descriptor, which no governing log can take over.
+ *
+ * @param collectionId {string}
+ * @returns {string}
+ */
+function clientWrittenDescriptorMessage(collectionId: string): string {
+  return (
+    `The collection "${collectionId}" is encrypted under a descriptor no ` +
+    'governing log owns, so an archived collection cannot be imported into it.'
+  )
+}
+
+/**
+ * An encrypted app collection row's identity, as the content migration
+ * dedupes on it: the payload's own string `id` (was-react rows carry one),
+ * or else the payload's content cid. The two kinds are prefixed apart, so an
+ * `id` value can never match a cid.
+ *
+ * @param row {Json}   the decrypted payload
+ * @returns {string}
+ */
+function appRowIdentity(row: Json): string {
+  const id =
+    typeof row === 'object' && row !== null && !Array.isArray(row)
+      ? (row as Record<string, unknown>).id
+      : undefined
+  return typeof id === 'string' ? `id:${id}` : `cid:${contentCid(row)}`
 }
 
 // The `wallet-activity` builder each single-credential activity verb records
@@ -581,6 +636,33 @@ export class PublicCopyRetractionError extends Error {
 }
 
 /**
+ * Thrown when the content migration meets an app collection the account
+ * already holds in a different shape than the archived one: encrypted where
+ * the archive is plaintext or the reverse, encrypted under a client-written
+ * descriptor no log governs, public where a plaintext archive is private or
+ * the reverse, or empty with no marker that it was made plaintext. The
+ * standing collection is left as it is, and its rows are not imported. See
+ * {@link StorageManager.ensureImportedAppCollection}.
+ */
+export class AppCollectionMismatchError extends Error {
+  collectionId: string
+
+  constructor({
+    collectionId,
+    message,
+    cause
+  }: {
+    collectionId: string
+    message: string
+    cause?: unknown
+  }) {
+    super(message, { cause })
+    this.name = 'AppCollectionMismatchError'
+    this.collectionId = collectionId
+  }
+}
+
+/**
  * Manages storage operations for the wallet and a logged-in user profile:
  * routes all wallet reads/writes to the local active replica and exposes the
  * optional remote WAS backend for replication and remote-only features.
@@ -669,6 +751,7 @@ export class StorageManager {
         // the re-read rebuilds them from a fresh Description fetch.
         delete this.#appDescriptors[collectionId]
         delete this.#appCiphers[collectionId]
+        this.#importCiphers.delete(collectionId)
       }
     }
   })
@@ -681,6 +764,20 @@ export class StorageManager {
   // The descriptors the `#appCiphers` entries were built from, keyed by WAS
   // collection id -- the offline/lazy source for an app collection's cipher.
   #appDescriptors: Record<string, CollectionEncryption> = {}
+  // The encrypted app collections the content migration has ensured this
+  // session, by WAS collection id. A Set, since the ids come from a bundle.
+  #importCollections = new Set<string>()
+  // The ciphers the content migration reads and writes those collections'
+  // rows through, keyed by WAS collection id, each beside the verified
+  // descriptor it was built from. Each carries the collection's index schema
+  // as it stands, so its writes carry the blinded index entries. An
+  // unknown-epoch refresh drops the entry, and the next use rebuilds it from
+  // the verified descriptor. A write rebuilds it too, when the collection's
+  // current epoch has moved since the build.
+  #importCiphers = new Map<
+    string,
+    { cipher: DocCipher; descriptor: CollectionEncryption }
+  >()
   // The session's typed persistence strategy: the writer id and the cache
   // pair come from it, so their storage tier is the strategy's rather than a
   // flag here.
@@ -871,6 +968,16 @@ export class StorageManager {
    */
   get hasRemoteStorage(): boolean {
     return !!this.#remoteStore
+  }
+
+  /**
+   * Whether this session can create an app collection: it needs remote
+   * storage, and for an encrypted one the descriptor logs of a promoted
+   * account to write the collection's governing log through. A guest and a
+   * no-WAS session have neither.
+   */
+  get canProvisionAppCollections(): boolean {
+    return !!this.#remoteStore && this.#descriptorLogsFor() !== undefined
   }
 
   /**
@@ -1435,6 +1542,7 @@ export class StorageManager {
   }): Promise<void> {
     this.#appCiphers = {}
     this.#appDescriptors = {}
+    this.#importCiphers.clear()
     if (this.#remoteStore && this.#descriptorCache) {
       await this.#refreshDescriptors({ refuseStranded })
     } else {
@@ -2585,7 +2693,9 @@ export class StorageManager {
    * blinded index is adopted as it stands, without an HMAC key. The grantee is
    * then always escrowed in by `addRecipient` (into every epoch, and into the
    * HMAC key's wrap set -- adds are cheap) unless the current epoch already
-   * wraps to it (a re-grant with no intervening revoke: a no-op).
+   * wraps to it (a re-grant with no intervening revoke: a no-op). With no
+   * grantee, the provision is owner-only: the content migration re-creates an
+   * app collection this way, and the app is admitted when it reconnects.
    *
    * The grantee never needs the vault KAK and the wallet never needs the
    * grantee's secret at all (the recipient is derived from the grantee's
@@ -2598,9 +2708,10 @@ export class StorageManager {
    *
    * @param options {object}
    * @param options.collectionId {string}   the WAS collection id to provision
-   * @param options.recipient {RecipientPublicKey}   the grantee's identity
+   * @param [options.recipient] {RecipientPublicKey}   the grantee's identity
    *   public key-agreement key, the X25519 twin of its controller `did:key`
-   *   (its `id` is the recipient `kid`)
+   *   (its `id` is the recipient `kid`); omitted for an owner-only provision,
+   *   which ends at the first epoch
    * @param [options.generator] {CollectionGenerator}   the application this
    *   collection is provisioned for, stamped as the collection's attribution
    * @returns {Promise<CollectionEncryption>}   the current descriptor
@@ -2611,20 +2722,41 @@ export class StorageManager {
     generator
   }: {
     collectionId: string
-    recipient: RecipientPublicKey
+    recipient?: RecipientPublicKey
     generator?: CollectionGenerator
   }): Promise<CollectionEncryption> {
     const remote = this.#requireRemote('Provisioning an encrypted collection')
-    const { keyAgreementKey } = this.#vaultKeys
     await this.#refuseStandingPlaintextCollection({ remote, collectionId })
     // Ensure the collection exists (a bare create; the server derives its
-    // `encryption` member from the governing log), then install epoch[0]
-    // (owner as recipient zero) as that log's genesis -- create-if-absent,
-    // so an existing roster is adopted, never overwritten.
+    // `encryption` member from the governing log), then install epoch[0].
     await remote.ensureGovernedCollection({
       id: collectionId,
       generator
     })
+    return await this.#installFirstEpoch({ collectionId, recipient })
+  }
+
+  /**
+   * The second half of {@link provisionEncryptedCollection}, over a
+   * collection already ensured: installs epoch[0] (owner as recipient zero)
+   * as the governing log's genesis, then escrows the grantee when one is
+   * given. The genesis is create-if-absent, so an existing roster is
+   * adopted as it stands.
+   *
+   * @param options {object}
+   * @param options.collectionId {string}
+   * @param [options.recipient] {RecipientPublicKey}   the grantee's identity
+   *   public key-agreement key; omitted for an owner-only provision
+   * @returns {Promise<CollectionEncryption>}   the current descriptor
+   */
+  async #installFirstEpoch({
+    collectionId,
+    recipient
+  }: {
+    collectionId: string
+    recipient?: RecipientPublicKey
+  }): Promise<CollectionEncryption> {
+    const { keyAgreementKey } = this.#vaultKeys
     const store = await this.#collectionStore({
       collectionId,
       action: 'Provisioning an encrypted collection'
@@ -2635,9 +2767,11 @@ export class StorageManager {
     })
 
     if (
+      recipient === undefined ||
       currentEpochRecipientKids({ descriptor: current }).includes(recipient.id)
     ) {
-      // The grantee already reads the current epoch: nothing to do.
+      // No grantee (an owner-only provision), or the grantee already reads the
+      // current epoch: nothing to do.
       return current
     }
     // First grant, or a re-grant after a revoke rotated the epoch off the
@@ -5730,6 +5864,618 @@ export class StorageManager {
         return contentCid(stored as Json) === contentCid(activity as Json)
           ? 'skipped'
           : 'conflicting'
+      }
+    })
+  }
+
+  /**
+   * Creates, or adopts, one app collection the content migration is about to
+   * fill, in the account's own Space. App collections are remote-only on
+   * every session kind, so this and the two methods after it talk to the
+   * remote store directly.
+   *
+   * The standing collection is read first, and a collection the account
+   * already holds is checked before anything is written (see
+   * {@link #checkStandingAppCollection}). The check refuses a collection
+   * whose shape differs from the archive's with an
+   * {@link AppCollectionMismatchError}. Then the collection is ensured. The
+   * ensure's own report of whether its guarded create made the collection
+   * decides what this run may set up, not the earlier read. A create lost to
+   * a rival reads the rival's collection back and checks it the same way.
+   *
+   * A standing collection keeps its own settings: its public read, its index
+   * schema, and its attribution. One exception is this migration's own torn
+   * create. A standing collection that holds no rows and carries the
+   * archived `generator` is finished as if this run had created it. An
+   * archive with no `generator` never qualifies, since an interaction-URL
+   * grant also leaves an unattributed collection.
+   *
+   * An encrypted collection is provisioned owner-only: a fresh governing log
+   * whose first epoch wraps to the user key alone, with a new blinded-index
+   * key. The first epoch is create-if-absent, so a standing roster is
+   * adopted. On a collection this run creates or finishes, the archived
+   * `indexSchema`, when given, is declared, unless the collection already
+   * declares one. Last, the cipher the rows are read and written through is
+   * built from the descriptor and the collection's metadata as it now
+   * stands, so every write carries the blinded index entries the
+   * collection's schema asks for. A standing collection that predates the
+   * blinded index carries no key to declare under; its rows migrate without
+   * index entries. The archived public read is ignored for an encrypted
+   * collection.
+   *
+   * A plaintext collection is ensured private. When this run creates or
+   * finishes it and the archive says public, the world-read grant is set
+   * afterwards.
+   *
+   * `generator` is stamped on a create only.
+   *
+   * @param options {object}
+   * @param options.collectionId {string}   the WAS collection id
+   * @param options.encrypted {boolean}   whether the archived collection
+   *   carried a governing collection log
+   * @param [options.isPublic] {boolean}   whether the archived collection was
+   *   world-readable; read for a plaintext collection only
+   * @param [options.generator] {CollectionGenerator}   the archived app
+   *   attribution
+   * @param [options.indexSchema] {IndexSchema}   the archived blinded-index
+   *   schema; an encrypted collection only
+   * @returns {Promise<void>}
+   */
+  async ensureImportedAppCollection({
+    collectionId,
+    encrypted,
+    isPublic,
+    generator,
+    indexSchema
+  }: {
+    collectionId: string
+    encrypted: boolean
+    isPublic?: boolean
+    generator?: CollectionGenerator
+    indexSchema?: IndexSchema
+  }): Promise<void> {
+    const remote = this.#requireRemote('Importing an app collection')
+    this.#importCollections.delete(collectionId)
+    this.#importCiphers.delete(collectionId)
+    // An encrypted collection's public read is not the archive's to set.
+    const archivedPublic = !encrypted && isPublic === true
+    const check = async (standing: StandingAppCollection) =>
+      await this.#checkStandingAppCollection({
+        remote,
+        collectionId,
+        encrypted,
+        isPublic: archivedPublic,
+        generator,
+        standing
+      })
+    const standing = await remote.collectionMetadata({ collectionId })
+    let verdict = standing === undefined ? undefined : await check(standing)
+    const { created } = encrypted
+      ? await this.#ensureImportedGovernedCollection({
+          remote,
+          collectionId,
+          generator
+        })
+      : await this.#ensureImportedPlaintextCollection({
+          remote,
+          collectionId,
+          generator
+        })
+    if (!created && verdict === undefined) {
+      // A rival created the collection between the read and the create.
+      const rival = await remote.collectionMetadata({ collectionId })
+      if (rival === undefined) {
+        throw new Error(
+          `The collection "${collectionId}" vanished while it was ensured.`
+        )
+      }
+      verdict = await check(rival)
+    }
+    const finishes = created || verdict?.resumesOwnCreate === true
+
+    if (!encrypted) {
+      if (finishes && archivedPublic && verdict?.standsPublic !== true) {
+        await remote.collectionHandle({ collectionId }).setPublic()
+      }
+      return
+    }
+
+    const descriptor = await this.#installFirstEpoch({ collectionId })
+    const { keyAgreementKey, keyResolver } = this.#vaultKeys
+    // A standing collection keeps its own schema: declaring the archived one
+    // could add a `unique` constraint the collection's app never asked for.
+    // A finished torn create declares it unless an earlier run already did.
+    const declares =
+      created ||
+      (finishes &&
+        (await remote.collectionMeta({ collectionId })) === undefined)
+    const indexes = declares ? (indexSchema?.indexes ?? []) : []
+    if (indexes.length > 0 && !descriptor.hmac) {
+      log.warn(
+        'The collection carries no blinded-index key, so its imported rows ' +
+          'carry no index entries',
+        { collectionId }
+      )
+    } else if (indexes.length > 0) {
+      await remote.declareCollectionIndexes({
+        collectionId,
+        encryption: descriptor,
+        keyAgreementKey,
+        keyResolver,
+        indexes: indexes.map(({ attribute, unique }) => ({
+          attribute,
+          ...(unique !== undefined && { unique })
+        }))
+      })
+    }
+    await this.#installImportCipher({ collectionId, descriptor })
+    this.#importCollections.add(collectionId)
+  }
+
+  /**
+   * The plaintext half of {@link ensureImportedAppCollection}'s ensure:
+   * was-client's guarded create, always private. The world-read grant is the
+   * caller's to set, and only on a collection this run made.
+   *
+   * @param options {object}
+   * @param options.remote {WASRemoteStore}
+   * @param options.collectionId {string}
+   * @param [options.generator] {CollectionGenerator}
+   * @returns {Promise<{ created: boolean }>}
+   */
+  async #ensureImportedPlaintextCollection({
+    remote,
+    collectionId,
+    generator
+  }: {
+    remote: WASRemoteStore
+    collectionId: string
+    generator?: CollectionGenerator
+  }): Promise<{ created: boolean }> {
+    try {
+      return await remote.ensureCollection({
+        id: collectionId,
+        isPublic: false,
+        ...(generator !== undefined && { generator })
+      })
+    } catch (err) {
+      // The ensure wraps its failure; a full Space must still reach the
+      // walk under its own name, so the walk stops.
+      const cause = (err as Error).cause
+      if (errorNameOf(cause) === WALK_STOPPING_ERROR_NAME) {
+        throw cause
+      }
+      throw err
+    }
+  }
+
+  /**
+   * The encrypted half of {@link ensureImportedAppCollection}'s ensure: the
+   * bare guarded create of a log-governed collection. A rival that won the
+   * create with a client-written `encryption` descriptor makes was-client
+   * refuse with its `ValidationError`, which is reported as the mismatch it
+   * is.
+   *
+   * @param options {object}
+   * @param options.remote {WASRemoteStore}
+   * @param options.collectionId {string}
+   * @param [options.generator] {CollectionGenerator}
+   * @returns {Promise<{ created: boolean }>}
+   */
+  async #ensureImportedGovernedCollection({
+    remote,
+    collectionId,
+    generator
+  }: {
+    remote: WASRemoteStore
+    collectionId: string
+    generator?: CollectionGenerator
+  }): Promise<{ created: boolean }> {
+    try {
+      return await remote.ensureGovernedCollection({
+        id: collectionId,
+        ...(generator !== undefined && { generator })
+      })
+    } catch (err) {
+      if (errorNameOf(err) !== 'ValidationError') {
+        throw err
+      }
+      const encryption = (await remote.collectionMetadata({ collectionId }))
+        ?.encryption
+      if (encryption !== undefined && !isGovernedDescriptor(encryption)) {
+        throw new AppCollectionMismatchError({
+          collectionId,
+          message: clientWrittenDescriptorMessage(collectionId),
+          cause: err
+        })
+      }
+      throw err
+    }
+  }
+
+  /**
+   * Checks an app collection the account already holds against the
+   * archived one, before anything is written. Nothing is written here.
+   *
+   * First it decides whether the collection is this migration's own torn
+   * create. That holds when the collection has no rows and its `generator`
+   * equals the archived one. A missing archived `generator` never
+   * qualifies.
+   *
+   * Then it refuses, with an {@link AppCollectionMismatchError}:
+   *
+   * - an archived plaintext collection over one that stands encrypted;
+   * - any archive over a collection encrypted under a client-written
+   *   descriptor, which no governing log can take over;
+   * - an archived encrypted collection over a plaintext one that holds rows;
+   * - for a plaintext archive, a public read that differs from the
+   *   archive's. A torn create that stands private under a public archive is
+   *   let through, so the caller can grant the public read it missed;
+   * - for a plaintext archive, an empty collection with no `encryption`
+   *   member and no public read, unless it is a torn create. That is also
+   *   the state an App Connect encrypted provision torn before its first
+   *   epoch leaves, and a plaintext row landed there would keep the app's
+   *   provision refused for good.
+   *
+   * An empty collection with no `encryption` member is let through for an
+   * encrypted archive, which finishes such a provision.
+   *
+   * @param options {object}
+   * @param options.remote {WASRemoteStore}
+   * @param options.collectionId {string}
+   * @param options.encrypted {boolean}   the archived kind
+   * @param options.isPublic {boolean}   the archived public read; always
+   *   `false` for an encrypted archive
+   * @param [options.generator] {CollectionGenerator}   the archived
+   *   attribution
+   * @param options.standing {StandingAppCollection}   the standing
+   *   collection's metadata
+   * @returns {Promise<{ resumesOwnCreate: boolean; standsPublic: boolean }>}
+   */
+  async #checkStandingAppCollection({
+    remote,
+    collectionId,
+    encrypted,
+    isPublic,
+    generator,
+    standing
+  }: {
+    remote: WASRemoteStore
+    collectionId: string
+    encrypted: boolean
+    isPublic: boolean
+    generator?: CollectionGenerator
+    standing: StandingAppCollection
+  }): Promise<{ resumesOwnCreate: boolean; standsPublic: boolean }> {
+    const refuse = (message: string): never => {
+      throw new AppCollectionMismatchError({ collectionId, message })
+    }
+    const encryption = standing.encryption
+    const standsEncrypted = encryption !== undefined
+    if (standsEncrypted && !encrypted) {
+      refuse(
+        `The collection "${collectionId}" already stands encrypted, so an ` +
+          'archived plaintext collection cannot be imported into it.'
+      )
+    }
+    if (encryption !== undefined && !isGovernedDescriptor(encryption)) {
+      refuse(clientWrittenDescriptorMessage(collectionId))
+    }
+    const handle = remote.collectionHandle({ collectionId })
+    const sameGenerator =
+      generator !== undefined &&
+      standing.generator !== undefined &&
+      contentCid(generator as unknown as Json) ===
+        contentCid(standing.generator as unknown as Json)
+    // Rows matter for the torn-create test, and for the kind checks on a
+    // collection with no `encryption` member.
+    const listing =
+      sameGenerator || !standsEncrypted ? await handle.list() : undefined
+    const holdsRows = (listing?.items ?? []).length > 0
+    const resumesOwnCreate = sameGenerator && !holdsRows
+    if (encrypted) {
+      if (!standsEncrypted && holdsRows) {
+        refuse(
+          `The collection "${collectionId}" already holds unencrypted ` +
+            'resources, so an archived encrypted collection cannot be ' +
+            'imported into it.'
+        )
+      }
+      return { resumesOwnCreate, standsPublic: false }
+    }
+    const standsPublic = await handle.isPublic()
+    const missedGrant = resumesOwnCreate && isPublic && !standsPublic
+    if (standsPublic !== isPublic && !missedGrant) {
+      refuse(
+        `The collection "${collectionId}" already stands ` +
+          `${standsPublic ? 'public' : 'private'}, and the archived one is ` +
+          `${isPublic ? 'public' : 'private'}. Its setting is left as it is.`
+      )
+    }
+    if (!holdsRows && !standsPublic && !resumesOwnCreate) {
+      refuse(
+        `The collection "${collectionId}" stands empty with no encryption ` +
+          'set up, which may be an encrypted collection not yet finished, ' +
+          'so archived plaintext rows are not written into it.'
+      )
+    }
+    return { resumesOwnCreate, standsPublic }
+  }
+
+  /**
+   * Builds the cipher an encrypted app collection's imported rows go
+   * through, from its descriptor and its metadata as it now stands, so the
+   * collection's index schema is installed on it. The cipher is recorded
+   * beside the descriptor it was built from.
+   *
+   * @param options {object}
+   * @param options.collectionId {string}
+   * @param options.descriptor {CollectionEncryption}
+   * @returns {Promise<DocCipher>}
+   */
+  async #installImportCipher({
+    collectionId,
+    descriptor
+  }: {
+    collectionId: string
+    descriptor: CollectionEncryption
+  }): Promise<DocCipher> {
+    const { keyAgreementKey, keyResolver } = this.#vaultKeys
+    // Read back rather than built from the archived schema: a standing
+    // collection keeps its own declarations, and its rows must carry them.
+    const meta = await this.#requireRemote(
+      'Importing an app collection'
+    ).collectionMeta({ collectionId })
+    const cipher = await createEdvDocCipher({
+      keyAgreementKey,
+      keyResolver,
+      collectionId,
+      encryption: descriptor,
+      ...(meta !== undefined && { meta })
+    })
+    this.#importCiphers.set(collectionId, { cipher, descriptor })
+    return cipher
+  }
+
+  /**
+   * The cipher for an encrypted app collection
+   * {@link ensureImportedAppCollection} ensured, with the descriptor it was
+   * built from. After an unknown-epoch refresh dropped it, it is rebuilt
+   * from the verified head of the collection's governing log. Refuses a
+   * collection it has not ensured.
+   *
+   * @param collectionId {string}
+   * @returns {Promise<{ cipher: DocCipher; descriptor: CollectionEncryption }>}
+   */
+  async #importCipherFor(
+    collectionId: string
+  ): Promise<{ cipher: DocCipher; descriptor: CollectionEncryption }> {
+    if (!this.#importCollections.has(collectionId)) {
+      throw new Error(
+        `The app collection "${collectionId}" was not ensured before its rows.`
+      )
+    }
+    const cached = this.#importCiphers.get(collectionId)
+    if (cached) {
+      return cached
+    }
+    const descriptor = await this.#readGovernedDescriptor({ collectionId })
+    if (!descriptor) {
+      throw new Error(
+        `The app collection "${collectionId}" has no encryption descriptor.`
+      )
+    }
+    const cipher = await this.#installImportCipher({ collectionId, descriptor })
+    return { cipher, descriptor }
+  }
+
+  /**
+   * The cipher an imported row is sealed under, current as of this write.
+   * The server takes a write's `Key-Epoch` as advisory, so a row sealed
+   * under a superseded epoch would land. An epoch rotated mid-run, by a
+   * revocation cascade in another tab say, must therefore be caught here.
+   *
+   * Each write reads the collection's served metadata, one small request,
+   * and compares its current epoch with the one the cipher was built under.
+   * Only when they differ is the governing log's verified head read, and
+   * the cipher is rebuilt, schema included, when that head has moved. The
+   * served member only triggers the check. The cipher is always built from
+   * the verified head.
+   *
+   * @param collectionId {string}
+   * @returns {Promise<DocCipher>}
+   */
+  async #importCipherForWrite(collectionId: string): Promise<DocCipher> {
+    const entry = await this.#importCipherFor(collectionId)
+    const served = await this.#requireRemote(
+      'Importing an app collection'
+    ).collectionEncryption({ collectionId })
+    if (served?.currentEpoch === entry.descriptor.currentEpoch) {
+      return entry.cipher
+    }
+    const verified = await this.#readGovernedDescriptor({ collectionId })
+    if (
+      verified === undefined ||
+      verified.currentEpoch === entry.descriptor.currentEpoch
+    ) {
+      return entry.cipher
+    }
+    log.info(
+      'An app collection epoch moved mid-import; rebuilding its cipher',
+      {
+        collectionId,
+        currentEpoch: verified.currentEpoch
+      }
+    )
+    return await this.#installImportCipher({
+      collectionId,
+      descriptor: verified
+    })
+  }
+
+  /**
+   * Reads what the account holds in one app collection, once per run, as
+   * the map {@link importAppCollectionRow} decides against: each held row's
+   * identity to its content cid. An encrypted row's identity is its
+   * decrypted payload's own string `id`, or the payload's content cid when
+   * it carries none. A plaintext row's identity is its resource id. A row
+   * sealed under an epoch the cipher does not know drives the one
+   * unknown-epoch refresh, and the rows are decrypted again under the
+   * rebuilt cipher. A row that still will not decrypt is left out and
+   * logged.
+   *
+   * @param options {object}
+   * @param options.collectionId {string}   an app collection this run ensured
+   * @param options.encrypted {boolean}
+   * @returns {Promise<HeldAppRows>}
+   */
+  async snapshotAppCollection({
+    collectionId,
+    encrypted
+  }: {
+    collectionId: string
+    encrypted: boolean
+  }): Promise<HeldAppRows> {
+    const documents = await this.#requireRemote(
+      'Importing an app collection'
+    ).listCollectionDocuments({ collectionId })
+    if (!encrypted) {
+      const held: HeldAppRows = new Map()
+      for (const { id, data } of documents) {
+        held.set(id, contentCid(data))
+      }
+      return held
+    }
+    return await this.#readWithEpochRefresh({
+      collectionId,
+      read: async () => {
+        // Fetched inside the read: a refresh drops the cipher.
+        const { cipher } = await this.#importCipherFor(collectionId)
+        const rows = await Promise.all(
+          documents.map(({ id, data }) =>
+            decryptEnvelope({
+              cipher,
+              id,
+              envelope: data,
+              source: `app collection "${collectionId}"`
+            })
+          )
+        )
+        const held: HeldAppRows = new Map()
+        for (const { value } of rows) {
+          if (value !== undefined) {
+            held.set(appRowIdentity(value), contentCid(value))
+          }
+        }
+        return {
+          value: held,
+          unknownEpoch: rows.some(row => row.unknownEpoch)
+        }
+      }
+    })
+  }
+
+  /**
+   * Imports one archived app collection row, deduped by its identity (see
+   * {@link snapshotAppCollection}). A held row under the same identity is
+   * `skipped` when its content cid matches, and `conflicting` when it
+   * differs: the archived row lands nowhere and the held row is untouched.
+   *
+   * An encrypted row is re-sealed through the collection's import cipher and
+   * written under the fresh content-derived id the envelope takes. A
+   * plaintext row keeps its archived resource id and content type, written
+   * create-if-absent. A JSON row another writer landed there since the
+   * snapshot is `conflicting`. A non-JSON row is not in the snapshot, so an
+   * id already taken is read back: the same bytes are `skipped`, and other
+   * bytes are `conflicting`.
+   *
+   * @param options {object}
+   * @param options.collectionId {string}   an app collection this run ensured
+   * @param options.encrypted {boolean}
+   * @param options.resourceId {string}   the row's archived resource id
+   * @param options.contentType {string}   the archived content type
+   * @param options.content {{ row: Json } | { bytes: Uint8Array }}   the
+   *   decrypted payload or parsed JSON body, or a non-JSON body's raw bytes
+   * @param options.held {HeldAppRows}   the collection's snapshot, updated on
+   *   accept
+   * @returns {Promise<ImportOutcome>}
+   */
+  async importAppCollectionRow({
+    collectionId,
+    encrypted,
+    resourceId,
+    contentType,
+    content,
+    held
+  }: {
+    collectionId: string
+    encrypted: boolean
+    resourceId: string
+    contentType: string
+    content: { row: Json } | { bytes: Uint8Array }
+    held: HeldAppRows
+  }): Promise<ImportOutcome> {
+    return await this.#importRow({
+      what: 'app collection row',
+      write: async (): Promise<ImportOutcome> => {
+        const remote = this.#requireRemote('Importing an app collection')
+        if ('bytes' in content) {
+          if (encrypted) {
+            throw new Error(
+              'An encrypted collection row must arrive as a decrypted payload.'
+            )
+          }
+          if (held.has(resourceId)) {
+            // A JSON row stands under the id this non-JSON row would take.
+            return 'conflicting'
+          }
+          const { created } = await remote.putPlaintextResource({
+            collectionId,
+            resourceId,
+            data: content.bytes,
+            contentType
+          })
+          if (created) {
+            return 'accepted'
+          }
+          const stored = await remote.getResourceBytes({
+            collectionId,
+            resourceId
+          })
+          return stored !== undefined && sameBytes(stored, content.bytes)
+            ? 'skipped'
+            : 'conflicting'
+        }
+
+        const { row } = content
+        const identity = encrypted ? appRowIdentity(row) : resourceId
+        const cid = contentCid(row)
+        const stored = held.get(identity)
+        if (stored !== undefined) {
+          return stored === cid ? 'skipped' : 'conflicting'
+        }
+        if (encrypted) {
+          const cipher = await this.#importCipherForWrite(collectionId)
+          const { id, envelope, epoch } = await cipher.encrypt({ data: row })
+          await remote.putCollectionResource({
+            collectionId,
+            resourceId: id,
+            body: envelope,
+            ...(epoch !== undefined && { epoch })
+          })
+        } else {
+          const { created } = await remote.putPlaintextResource({
+            collectionId,
+            resourceId,
+            data: row,
+            contentType
+          })
+          if (!created) {
+            return 'conflicting'
+          }
+        }
+        held.set(identity, cid)
+        return 'accepted'
       }
     })
   }
