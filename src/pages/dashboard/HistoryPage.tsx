@@ -83,7 +83,10 @@ export function HistoryPage() {
       onError: err => log.error('Could not load the history', { err })
     }
   )
-  const historyItems = useMemo<HistoryItem[]>(() => data?.items ?? [], [data])
+  const historyItems = useMemo<HistoryItem[]>(
+    () => data?.items.entries ?? [],
+    [data]
+  )
   // The cids the wallet still holds, so an activity about a credential that
   // has since been deleted does not render a link to a missing page.
   const existingCids = useMemo(

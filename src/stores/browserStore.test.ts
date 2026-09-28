@@ -320,7 +320,7 @@ describe('BrowserStore (local active replica)', () => {
       activity: { summary: 'two' }
     })
 
-    const items = await localStore.listHistoryItems()
+    const { entries: items } = await localStore.listHistoryItems()
     expect(items.map(({ doc }) => doc.summary)).toEqual(['one', 'two'])
     expect(items.map(({ id }) => id)).toEqual(['first', 'second'])
   })
@@ -584,7 +584,7 @@ describe('BrowserStore (encrypted collections)', () => {
       expect((row.toMutableJSON().data as { jwe?: unknown }).jwe).toBeDefined()
     }
 
-    const items = await localStore.listHistoryItems()
+    const { entries: items } = await localStore.listHistoryItems()
     expect(items.map(({ doc }) => doc.summary)).toEqual(['one', 'two'])
     expect(items.map(({ id }) => id)).toEqual(['first', 'second'])
   })
@@ -600,7 +600,7 @@ describe('BrowserStore (encrypted collections)', () => {
       data: { id: 'legacy-activity', summary: 'legacy' } as Json
     })
 
-    const items = await localStore.listHistoryItems()
+    const { entries: items } = await localStore.listHistoryItems()
     expect(items).toEqual([
       {
         id: 'legacy-activity',
@@ -712,7 +712,7 @@ describe('BrowserStore (encrypted collections)', () => {
       })
       await insertUndecryptableRow(localStore, 'walletActivity', 'z6Poison')
 
-      const items = await localStore.listHistoryItems()
+      const { entries: items } = await localStore.listHistoryItems()
 
       expect(items.map(({ doc }) => doc.summary)).toEqual(['one'])
     })
@@ -1383,7 +1383,7 @@ describe('StorageManager (local-first facade)', () => {
       verb: 'created'
     })
 
-    const items = await storage.listHistoryItems()
+    const { entries: items } = await storage.listHistoryItems()
     expect(items).toHaveLength(3)
     expect(items[0].doc.summary).toMatch(/Sign Up/)
     // The no-remote branch records the local collections, not a remote Space.
@@ -1581,7 +1581,7 @@ describe('StorageManager (local-first facade)', () => {
     await storage.addCredential({ credential, user })
     await storage.addCredential({ credential, user })
 
-    const items = await storage.listHistoryItems()
+    const { entries: items } = await storage.listHistoryItems()
     expect(items).toHaveLength(1)
     expect(items[0].doc.summary).toMatch(/Credential created/)
   })

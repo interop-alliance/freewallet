@@ -455,7 +455,10 @@ function makeFakeRemote(): {
         owner: { keyAgreementKey: from.keyAgreementKey },
         // The pull axis ran elsewhere: the roster rotation is what retired
         // the key, and this fake has no zcaps to revoke.
-        pull: async () => {}
+        pull: async () => {},
+        // The incoming key is the one survivor, and it never routes through
+        // the resolver, so no roster entry is vouched for.
+        resolveRecipientKey: async () => null
       })
       descriptorStores.seed(id, descriptors[id])
     }
@@ -522,7 +525,7 @@ describe('replica-less remote-direct StorageManager', () => {
       expect(await storage.loadCredential({ cid })).toEqual(credential)
 
       // History round trip (addCredential recorded a Create entry itself).
-      const items = await storage.listHistoryItems()
+      const { entries: items } = await storage.listHistoryItems()
       expect(items.length).toBeGreaterThan(0)
 
       // The descriptor cache rode the strategy's in-memory pair, seeded at

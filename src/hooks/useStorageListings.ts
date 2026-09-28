@@ -57,7 +57,7 @@ export function useStorageListings({
   const { data: items, reload } = useAsyncLoad(
     async () => {
       if (!session) {
-        return []
+        return { entries: [], unreadable: 0 }
       }
       return session.storage.listHistoryItems()
     },

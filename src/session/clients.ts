@@ -31,6 +31,7 @@
 import { clientSigningKeyMultibase } from '@interop/wallet-core/webvh'
 import { delegatedClientsPointer } from '@interop/wallet-core/clientAnnex'
 import { removeClientLabel, setClientLabel } from '@interop/wallet-core/keys'
+import { epochKeyIdFor } from '@interop/was-client/edv'
 import {
   currentAccountSigningKeys as sharedCurrentAccountSigningKeys,
   listAccountClients as sharedListAccountClients,
@@ -203,6 +204,32 @@ export async function currentAccountSignerCheck({
     doc: verifiedLog.doc,
     ...(clientAnnexDid !== undefined ? { clientAnnexDid } : {})
   }
+}
+
+/**
+ * The kids of the account's user key generations, oldest first: each epoch
+ * of the verified `key-map/user-key.jsonl` roster is one generation, named
+ * in a collection epoch by its `<did:key>#<fingerprint>` kid. A collection
+ * key rotation reads them to keep an earlier generation a torn user key
+ * rotation left on a roster. Resolves an empty list when this session
+ * resolves no account-ceremony context, or the account has no roster yet.
+ * Throws when the roster cannot be read or verified.
+ *
+ * @param options {object}
+ * @param options.session {Session}
+ * @returns {Promise<string[]>}
+ */
+export async function accountUserKeyGenerationKids({
+  session
+}: {
+  session: Session
+}): Promise<string[]> {
+  const context = await accountCeremonyContext({ session })
+  if (!context) {
+    return []
+  }
+  const read = await context.rosterStore.read()
+  return (read?.descriptor.epochs ?? []).map(epoch => epochKeyIdFor(epoch.id))
 }
 
 /**

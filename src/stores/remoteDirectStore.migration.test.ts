@@ -211,7 +211,7 @@ describe('RemoteDirectStore activity row lookups', () => {
       activity: makeActivity('second')
     })
 
-    expect(await store.listHistoryItems()).toHaveLength(1)
+    expect((await store.listHistoryItems()).entries).toHaveLength(1)
     const held = await store.findHistoryItemsByInnerId({ id: 'activity-1' })
     expect(held).toHaveLength(2)
     expect(held.map(({ rowId }) => rowId)).toContain(firstRow)

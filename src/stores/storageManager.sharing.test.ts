@@ -44,6 +44,7 @@ import {
   initRecipients,
   removeRecipient,
   resolveHmacKey,
+  unwrapEpochSecret,
   x25519RecipientFromDidKey,
   type RecipientPublicKey
 } from '@interop/was-client/edv'
@@ -79,6 +80,7 @@ import {
   recordedGrant,
   SIGNER_FIXTURE
 } from '@interop/wallet-core/testing'
+import { mintUserKey, userKeyVaultKeys } from '@interop/wallet-core/keys'
 import { EXTERNAL_REQUEST_ORIGIN } from '@/lib/walletRequest/externalRequest'
 import type { WASRemoteStore } from './wasRemoteStore'
 import type { StorageCollection } from '@/lib/storage'
@@ -115,6 +117,22 @@ async function generateKey(): Promise<{
 }
 
 /**
+ * A `resolveRecipientKey` vouching for the given keys alone, standing in for
+ * the admitted-recipient resolver another client rotates with.
+ *
+ * @param keys {Array<{ keyAgreementKey: IKeyAgreementKey }>}
+ * @returns {Function}
+ */
+function vouchFor(
+  ...keys: Array<{ keyAgreementKey: IKeyAgreementKey }>
+): (kid: string) => Promise<RecipientPublicKey | null> {
+  const recipients = keys.map(({ keyAgreementKey }) =>
+    ownerRecipient({ keyAgreementKey })
+  )
+  return async kid => recipients.find(recipient => recipient.id === kid) ?? null
+}
+
+/**
  * An App Connect app's identity: a seed-derived Ed25519 `did:key` subject, the
  * epoch-recipient key App Connect provisioning derives from it, and the
  * matching private key-agreement key, so a test can both write the roster
@@ -137,6 +155,42 @@ async function generateAppIdentity(): Promise<{
     recipient: x25519RecipientFromDidKey({ did }),
     keyAgreementKey: keyAgreementKey as IKeyAgreementKey
   }
+}
+
+/**
+ * Records an App Connect Login granting one app read access to `app-docs`,
+ * carrying the delegated capability, so the grant admits the app to that
+ * collection's roster.
+ */
+async function recordAppGrant(
+  storage: StorageManager,
+  {
+    user,
+    origin,
+    grantee
+  }: { user: User; origin: string; grantee: { did: `did:${string}` } }
+): Promise<void> {
+  const future = new Date(Date.now() + 1_000_000).toISOString()
+  const target = 'https://was.example/space/s-space/app-docs'
+  await storage.addHistoryLogin({
+    user,
+    origin,
+    grants: [
+      {
+        id: `g-${origin}`,
+        target,
+        allowedActions: ['GET', 'HEAD'],
+        expires: future,
+        zcap: recordedGrant({
+          id: `z-${origin}`,
+          invocationTarget: target,
+          expires: future,
+          controller: grantee.did
+        })
+      }
+    ],
+    appConnect: { name: origin, firstRun: true }
+  })
 }
 
 /**
@@ -696,7 +750,7 @@ describe('StorageManager.shareCollection', () => {
     ).rejects.toThrow('read-only zcap')
     expect(stores.descriptorOf('private-credentials')).toEqual(before)
     expect(
-      (await storage.listHistoryItems()).some(({ doc }) =>
+      (await storage.listHistoryItems()).entries.some(({ doc }) =>
         doc.type?.includes('CollectionShare')
       )
     ).toBe(false)
@@ -753,7 +807,7 @@ describe('StorageManager.shareCollection', () => {
     )
 
     // The share was recorded (with the delegated zcap for later revocation).
-    const history = await storage.listHistoryItems()
+    const { entries: history } = await storage.listHistoryItems()
     const shareEntry = history.find(({ doc }) =>
       doc.type?.includes('CollectionShare')
     )
@@ -861,7 +915,7 @@ describe('StorageManager.unshareCollection', () => {
     ])
 
     // The unshare was recorded (no zcap on it).
-    const history = await storage.listHistoryItems()
+    const { entries: history } = await storage.listHistoryItems()
     expect(
       history.some(({ doc }) => doc.type?.includes('CollectionUnshare'))
     ).toBe(true)
@@ -906,7 +960,7 @@ describe('StorageManager.unshareCollection', () => {
       controller: 'did:key:z6MkReader'
     })
     const unshared = async () =>
-      (await storage.listHistoryItems()).some(({ doc }) =>
+      (await storage.listHistoryItems()).entries.some(({ doc }) =>
         doc.type?.includes('CollectionUnshare')
       )
 
@@ -991,7 +1045,7 @@ describe('StorageManager.unshareCollection', () => {
       recipientId: reader.keyAgreementKey.id!
     })
 
-    const history = await storage.listHistoryItems()
+    const { entries: history } = await storage.listHistoryItems()
     expect(
       history.some(({ doc }) => doc.type?.includes('CollectionUnshare'))
     ).toBe(true)
@@ -1047,6 +1101,106 @@ describe('StorageManager.unshareCollection', () => {
     expect(rotated.hmac?.id).toBe(shared.hmac?.id)
     expect(hmacKids(rotated)).not.toContain(reader.keyAgreementKey.id)
     expect(hmacKids(rotated)).toContain(owner.keyAgreementKey.id)
+  })
+
+  describe('the fresh epoch after a rotation', () => {
+    afterEach(() => {
+      vi.useRealTimers()
+    })
+
+    /**
+     * An owner-only session with two readers' keys, plus a clock the test
+     * steps between activities so share and unshare stamps order strictly.
+     */
+    async function setup() {
+      vi.useFakeTimers({ toFake: ['Date'] })
+      let clock = Date.parse('2026-09-01T00:00:00.000Z')
+      const tick = () => {
+        clock += 1000
+        vi.setSystemTime(clock)
+      }
+      tick()
+      const owner = await generateKey()
+      const first = await generateKey()
+      const second = await generateKey()
+      const stores = memoryDescriptorStores()
+      const { remoteStore } = makeFakeRemote({ stores })
+      const descriptors = await provisionGovernedCollections(owner, stores)
+      const ciphers = await buildCiphers(owner, descriptors)
+      const { localStore, user } = await initLocalStore(ciphers)
+      const { zcapClient } = makeFakeZcapClient()
+      const storage = new StorageManager({
+        persistence: browserLocalSessionPersistence(),
+        localStore,
+        remoteStore,
+        descriptorLogs: descriptorLogsFrom(stores),
+        ciphers,
+        vaultKeys: owner,
+        descriptors
+      })
+      const profile = makeProfile(owner, zcapClient)
+      const share = async (reader: { keyAgreementKey: IKeyAgreementKey }) => {
+        tick()
+        await shareWith(storage, {
+          profile,
+          user,
+          collectionId: 'private-credentials',
+          recipient: ownerRecipient({
+            keyAgreementKey: reader.keyAgreementKey
+          }),
+          controller: 'did:key:z6MkReader'
+        })
+      }
+      const unshare = async (reader: { keyAgreementKey: IKeyAgreementKey }) => {
+        tick()
+        return await storage.unshareCollection({
+          profile,
+          user,
+          collectionId: 'private-credentials',
+          recipientId: reader.keyAgreementKey.id!
+        })
+      }
+      return { owner, first, second, stores, share, unshare }
+    }
+
+    it('wraps no reader an earlier unshare removed, even when the roster lists it again', async () => {
+      const { owner, first, second, stores, share, unshare } = await setup()
+      await share(first)
+      await share(second)
+      await unshare(first)
+      // The unshared reader reappears on the current epoch, as anyone able
+      // to write the descriptor could make it.
+      await addRecipient({
+        store: stores.storeFor('private-credentials'),
+        recipient: ownerRecipient({ keyAgreementKey: first.keyAgreementKey }),
+        owner: { keyAgreementKey: owner.keyAgreementKey }
+      })
+      expect(
+        currentEpochKids(stores.descriptorOf('private-credentials')!)
+      ).toContain(first.keyAgreementKey.id)
+
+      const rotated = await unshare(second)
+
+      expect(currentEpochKids(rotated)).toEqual([owner.keyAgreementKey.id])
+    })
+
+    it('keeps a reader re-shared after its unshare', async () => {
+      const { owner, first, second, share, unshare } = await setup()
+      await share(first)
+      await unshare(first)
+      await share(first)
+      await share(second)
+
+      const rotated = await unshare(second)
+
+      expect(currentEpochKids(rotated)).toHaveLength(2)
+      expect(currentEpochKids(rotated)).toEqual(
+        expect.arrayContaining([
+          owner.keyAgreementKey.id,
+          first.keyAgreementKey.id
+        ])
+      )
+    })
   })
 
   it('lists current shares from the descriptor roster minus the owner', async () => {
@@ -1888,7 +2042,8 @@ describe('StorageManager.provisionEncryptedCollection', () => {
       store: stores.storeFor('app-docs'),
       space: remoteStore.spaceHandle(),
       recipientId: app.keyAgreementKey.id!,
-      revoke: []
+      revoke: [],
+      resolveRecipientKey: vouchFor(owner)
     })
     // Reconnect: the app is escrowed back in (add, not a rotation, so the
     // roster grows but the current epoch is the post-revoke one).
@@ -2386,6 +2541,27 @@ describe('StorageManager.revokeAppCollectionRecipients', () => {
       ],
       appConnect: { name: 'Example App', firstRun: true }
     })
+    // The co-admitted app's own recorded grant is what vouches for its
+    // roster entry when the rotation re-wraps the fresh epoch.
+    await storage.addHistoryLogin({
+      user,
+      origin: 'https://other.example',
+      grants: [
+        {
+          id: 'g-other-docs',
+          target,
+          allowedActions: ['GET', 'HEAD'],
+          expires: future,
+          zcap: recordedGrant({
+            id: 'z-other-docs',
+            invocationTarget: target,
+            expires: future,
+            controller: other.did
+          })
+        }
+      ],
+      appConnect: { name: 'Other App', firstRun: true }
+    })
 
     const outcome = await storage.revokeAppCollectionRecipients({
       origin: APP_ORIGIN,
@@ -2410,6 +2586,336 @@ describe('StorageManager.revokeAppCollectionRecipients', () => {
     expect((revoked as Array<{ id: string }>).map(zcap => zcap.id)).toEqual([
       'z-app-docs'
     ])
+  })
+
+  it('wraps the fresh epoch to no roster entry the wallet did not admit', async () => {
+    const owner = await generateKey()
+    const app = await generateAppIdentity()
+    const other = await generateAppIdentity()
+    const stores = memoryDescriptorStores()
+    const { remoteStore, revoked } = makeFakeRemote({ stores })
+    const descriptors = await provisionGovernedCollections(owner, stores)
+    const ciphers = await buildCiphers(owner, descriptors)
+    const { localStore, user } = await initLocalStore(ciphers)
+    const storage = new StorageManager({
+      persistence: browserLocalSessionPersistence(),
+      localStore,
+      remoteStore,
+      descriptorLogs: descriptorLogsFrom(stores),
+      ciphers,
+      vaultKeys: owner,
+      descriptors
+    })
+
+    await storage.provisionEncryptedCollection({
+      collectionId: 'app-docs',
+      recipient: app.recipient
+    })
+    await storage.provisionEncryptedCollection({
+      collectionId: 'app-docs',
+      recipient: other.recipient
+    })
+    // A well-formed did:key entry no recorded grant or share names, as
+    // anyone able to write the descriptor could inject.
+    const junk = await generateAppIdentity()
+    await addRecipient({
+      store: stores.storeFor('app-docs'),
+      recipient: junk.recipient,
+      owner: { keyAgreementKey: owner.keyAgreementKey }
+    })
+    const before = await remoteStore.collectionEncryption({
+      collectionId: 'app-docs'
+    })
+    expect(currentEpochKids(before!)).toContain(junk.recipient.id)
+    const epochsBefore = before!.epochs!.length
+
+    const future = new Date(Date.now() + 1_000_000).toISOString()
+    const target = 'https://was.example/space/s-space/app-docs'
+    await storage.addHistoryLogin({
+      user,
+      origin: APP_ORIGIN,
+      grants: [
+        {
+          id: 'g-app-docs',
+          target,
+          allowedActions: ['GET', 'HEAD'],
+          expires: future,
+          zcap: recordedGrant({
+            id: 'z-app-docs',
+            invocationTarget: target,
+            expires: future,
+            controller: app.did
+          })
+        }
+      ],
+      appConnect: { name: 'Example App', firstRun: true }
+    })
+    // The co-admitted app's own recorded grant is what vouches for its
+    // roster entry when the rotation re-wraps the fresh epoch.
+    await storage.addHistoryLogin({
+      user,
+      origin: 'https://other.example',
+      grants: [
+        {
+          id: 'g-other-docs',
+          target,
+          allowedActions: ['GET', 'HEAD'],
+          expires: future,
+          zcap: recordedGrant({
+            id: 'z-other-docs',
+            invocationTarget: target,
+            expires: future,
+            controller: other.did
+          })
+        }
+      ],
+      appConnect: { name: 'Other App', firstRun: true }
+    })
+
+    const outcome = await storage.revokeAppCollectionRecipients({
+      origin: APP_ORIGIN,
+      subjectDid: app.did
+    })
+
+    expect(outcome).toEqual({
+      collections: 1,
+      rotated: 1,
+      failed: 0,
+      revokedIds: ['z-app-docs']
+    })
+    const after = await remoteStore.collectionEncryption({
+      collectionId: 'app-docs'
+    })
+    // One fresh epoch, and the app that was not disconnected reads on.
+    expect(after!.epochs).toHaveLength(epochsBefore + 1)
+    expect(currentEpochKids(after!)).toEqual(
+      expect.arrayContaining([owner.keyAgreementKey.id, other.recipient.id])
+    )
+    expect(currentEpochKids(after!)).not.toContain(app.recipient.id)
+    expect(currentEpochKids(after!)).not.toContain(junk.recipient.id)
+    expect(currentEpochKids(after!)).toHaveLength(2)
+    expect((revoked as Array<{ id: string }>).map(zcap => zcap.id)).toEqual([
+      'z-app-docs'
+    ])
+  })
+
+  it('keeps an earlier user key generation a torn user key rotation left on the roster', async () => {
+    // A user key rotation that tore before this collection's re-epoch: the
+    // session runs on the current user key, and the collection's current
+    // epoch still names the previous generation.
+    const previous = userKeyVaultKeys({ userKey: await mintUserKey() })
+    const current = userKeyVaultKeys({ userKey: await mintUserKey() })
+    const app = await generateAppIdentity()
+    const other = await generateAppIdentity()
+    const stores = memoryDescriptorStores()
+    const { remoteStore } = makeFakeRemote({ stores })
+    const descriptors = await provisionGovernedCollections(previous, stores)
+    const ciphers = await buildCiphers(previous, descriptors)
+    const { localStore, user } = await initLocalStore(ciphers)
+    const parts = {
+      persistence: browserLocalSessionPersistence(),
+      localStore,
+      remoteStore,
+      descriptorLogs: descriptorLogsFrom(stores),
+      ciphers,
+      descriptors
+    }
+    const before = new StorageManager({ ...parts, vaultKeys: previous })
+    for (const grantee of [app, other]) {
+      await before.provisionEncryptedCollection({
+        collectionId: 'app-docs',
+        recipient: grantee.recipient
+      })
+    }
+    await recordAppGrant(before, { user, origin: APP_ORIGIN, grantee: app })
+    await recordAppGrant(before, {
+      user,
+      origin: 'https://other.example',
+      grantee: other
+    })
+    const storage = new StorageManager({
+      ...parts,
+      vaultKeys: current,
+      userKeyGenerationKids: async () => [
+        previous.keyAgreementKey.id!,
+        current.keyAgreementKey.id!
+      ]
+    })
+
+    const outcome = await storage.revokeAppCollectionRecipients({
+      origin: APP_ORIGIN,
+      subjectDid: app.did
+    })
+
+    expect(outcome).toMatchObject({ collections: 1, rotated: 1, failed: 0 })
+    const after = (await remoteStore.collectionEncryption({
+      collectionId: 'app-docs'
+    }))!
+    expect(currentEpochKids(after)).toHaveLength(2)
+    expect(currentEpochKids(after)).toEqual(
+      expect.arrayContaining([previous.keyAgreementKey.id, other.recipient.id])
+    )
+    // The account still unwraps the fresh epoch through that generation.
+    const entry = after
+      .epochs!.find(epoch => epoch.id === after.currentEpoch)!
+      .recipients.find(
+        recipient => recipient.header.kid === previous.keyAgreementKey.id
+      )!
+    expect(
+      await unwrapEpochSecret({
+        entry,
+        keyAgreementKey: previous.keyAgreementKey
+      })
+    ).toBeInstanceOf(Uint8Array)
+  })
+
+  it('warns naming the reader it drops when a history row could not be read', async () => {
+    const owner = await generateKey()
+    const app = await generateAppIdentity()
+    const other = await generateAppIdentity()
+    const stores = memoryDescriptorStores()
+    const { remoteStore } = makeFakeRemote({ stores })
+    const descriptors = await provisionGovernedCollections(owner, stores)
+    const ciphers = await buildCiphers(owner, descriptors)
+    const { localStore, user } = await initLocalStore(ciphers)
+    const storage = new StorageManager({
+      persistence: browserLocalSessionPersistence(),
+      localStore,
+      remoteStore,
+      descriptorLogs: descriptorLogsFrom(stores),
+      ciphers,
+      vaultKeys: owner,
+      descriptors
+    })
+    for (const grantee of [app, other]) {
+      await storage.provisionEncryptedCollection({
+        collectionId: 'app-docs',
+        recipient: grantee.recipient
+      })
+    }
+    await recordAppGrant(storage, { user, origin: APP_ORIGIN, grantee: app })
+    // The co-reader's one admission lands in a row this session cannot
+    // decrypt: sealed under a key epoch this account never held.
+    const stranger = await generateKey()
+    const strangerCiphers = await buildCiphers(stranger, {})
+    const { localStore: strangerStore } = await initLocalStore(strangerCiphers)
+    await recordAppGrant(
+      new StorageManager({
+        persistence: browserLocalSessionPersistence(),
+        localStore: strangerStore,
+        ciphers: strangerCiphers,
+        vaultKeys: stranger
+      }),
+      { user, origin: 'https://other.example', grantee: other }
+    )
+    for (const row of await strangerStore
+      .rxCollection('walletActivity')
+      .find()
+      .exec()) {
+      await localStore
+        .rxCollection('walletActivity')
+        .insert(row.toMutableJSON())
+    }
+    const capture = captureSink()
+    const removeSink = addSink(capture.sink)
+
+    try {
+      const outcome = await storage.revokeAppCollectionRecipients({
+        origin: APP_ORIGIN,
+        subjectDid: app.did
+      })
+
+      // The revocation is not blocked: the rotation lands without the
+      // reader whose admission could not be read.
+      expect(outcome).toMatchObject({ collections: 1, rotated: 1, failed: 0 })
+      const after = (await remoteStore.collectionEncryption({
+        collectionId: 'app-docs'
+      }))!
+      expect(currentEpochKids(after)).toEqual([owner.keyAgreementKey.id])
+      const warnings = capture.events.filter(
+        event =>
+          event.level === 'warn' &&
+          event.msg.includes('history with unreadable rows')
+      )
+      expect(warnings).toHaveLength(1)
+      expect(warnings[0].data).toMatchObject({
+        collectionId: 'app-docs',
+        unreadableHistory: 1,
+        dropped: [other.recipient.id]
+      })
+    } finally {
+      removeSink()
+    }
+  })
+
+  it('reads the unreadable count from the history it was handed', async () => {
+    const owner = await generateKey()
+    const app = await generateAppIdentity()
+    const stores = memoryDescriptorStores()
+    const { remoteStore } = makeFakeRemote({ stores })
+    const descriptors = await provisionGovernedCollections(owner, stores)
+    const ciphers = await buildCiphers(owner, descriptors)
+    const { localStore, user } = await initLocalStore(ciphers)
+    const storage = new StorageManager({
+      persistence: browserLocalSessionPersistence(),
+      localStore,
+      remoteStore,
+      descriptorLogs: descriptorLogsFrom(stores),
+      ciphers,
+      vaultKeys: owner,
+      descriptors
+    })
+    await storage.provisionEncryptedCollection({
+      collectionId: 'app-docs',
+      recipient: app.recipient
+    })
+    await recordAppGrant(storage, { user, origin: APP_ORIGIN, grantee: app })
+    // The history the caller read, before any unreadable row existed.
+    const items = await storage.listHistoryItems()
+    expect(items.unreadable).toBe(0)
+    // A later read skips a row this session cannot decrypt.
+    const stranger = await generateKey()
+    const strangerCiphers = await buildCiphers(stranger, {})
+    const { localStore: strangerStore } = await initLocalStore(strangerCiphers)
+    await recordAppGrant(
+      new StorageManager({
+        persistence: browserLocalSessionPersistence(),
+        localStore: strangerStore,
+        ciphers: strangerCiphers,
+        vaultKeys: stranger
+      }),
+      { user, origin: 'https://other.example', grantee: app }
+    )
+    for (const row of await strangerStore
+      .rxCollection('walletActivity')
+      .find()
+      .exec()) {
+      await localStore
+        .rxCollection('walletActivity')
+        .insert(row.toMutableJSON())
+    }
+    expect((await storage.listHistoryItems()).unreadable).toBe(1)
+    const capture = captureSink()
+    const removeSink = addSink(capture.sink)
+
+    try {
+      const outcome = await storage.revokeAppCollectionRecipients({
+        origin: APP_ORIGIN,
+        subjectDid: app.did,
+        items
+      })
+
+      expect(outcome).toMatchObject({ collections: 1, rotated: 1, failed: 0 })
+      expect(
+        capture.events.filter(
+          event =>
+            event.level === 'warn' &&
+            event.msg.includes('history with unreadable rows')
+        )
+      ).toHaveLength(0)
+    } finally {
+      removeSink()
+    }
   })
 
   it('drops the app from the blinding-key wrap set without rotating the key', async () => {
@@ -2969,7 +3475,7 @@ describe('StorageManager.revokeAgentCollectionRecipients', () => {
 
     expect(outcome).toMatchObject({ revoked: 1, rotated: 1 })
     expect(attempts).toBe(2)
-    const items = await storage.listHistoryItems()
+    const { entries: items } = await storage.listHistoryItems()
     expect(items.some(({ doc }) => doc.type?.includes('Revoke'))).toBe(true)
   })
 
@@ -3134,7 +3640,7 @@ describe('StorageManager.revokeAgentCollectionRecipients', () => {
         }
       })
     ).rejects.toThrow(/Could not rotate every collection/)
-    const items = await storage.listHistoryItems()
+    const { entries: items } = await storage.listHistoryItems()
     expect(items.some(({ doc }) => doc.type?.includes('Revoke'))).toBe(false)
   })
 
@@ -3273,7 +3779,8 @@ describe('StorageManager unknown-epoch refresh', () => {
       store: collectionStore,
       space: remoteStore.spaceHandle(),
       recipientId: extra.keyAgreementKey.id!,
-      revoke: []
+      revoke: [],
+      resolveRecipientKey: vouchFor(owner)
     })
     expect(descriptor2.currentEpoch).not.toBe(descriptor1.currentEpoch)
 
@@ -3352,7 +3859,8 @@ describe('StorageManager unknown-epoch refresh', () => {
       store: collectionStore,
       space: remoteStore.spaceHandle(),
       recipientId: extra.keyAgreementKey.id!,
-      revoke: []
+      revoke: [],
+      resolveRecipientKey: vouchFor(owner)
     })
     const epoch2Cipher = await createEdvDocCipher({
       keyAgreementKey: owner.keyAgreementKey,
@@ -3429,7 +3937,8 @@ describe('StorageManager unknown-epoch refresh', () => {
       store: collectionStore,
       space: remoteStore.spaceHandle(),
       recipientId: extra.keyAgreementKey.id!,
-      revoke: []
+      revoke: [],
+      resolveRecipientKey: vouchFor(owner)
     })
 
     // A credential lands in the remote collection under epoch 2, which the
@@ -3500,7 +4009,8 @@ describe('StorageManager unknown-epoch refresh', () => {
       store: collectionStore,
       space: remoteStore.spaceHandle(),
       recipientId: extra.keyAgreementKey.id!,
-      revoke: []
+      revoke: [],
+      resolveRecipientKey: vouchFor(owner)
     })
     setCollectionMeta({
       collectionId: 'private-credentials',
@@ -3672,7 +4182,7 @@ describe('StorageManager.addHistoryWalletLogin', () => {
 
     await storage.addHistoryWalletLogin({ user })
 
-    const history = await storage.listHistoryItems()
+    const { entries: history } = await storage.listHistoryItems()
     const loginEntry = history.find(({ doc }) => doc.type?.includes('Login'))
     expect(loginEntry).toBeDefined()
     expect(loginEntry!.doc.summary).toBe('Logged in to wallet.')

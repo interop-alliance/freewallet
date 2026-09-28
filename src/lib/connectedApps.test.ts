@@ -97,7 +97,7 @@ function storageWith(
   rosterCollections: string[] | Error = []
 ): StorageManager {
   return {
-    listHistoryItems: vi.fn(async () => items),
+    listHistoryItems: vi.fn(async () => ({ entries: items, unreadable: 0 })),
     spaceLocation: { serverUrl: 'https://was.example', spaceId: 's' },
     granteeRosterCollections: vi.fn(
       async ({ grantees }: { grantees: Array<{ controller: string }> }) =>
@@ -453,7 +453,9 @@ describe('listConnectedAgents', () => {
 
 describe('findKnownAgents', () => {
   const items = (rows: unknown[]) =>
-    rows as Parameters<typeof findKnownAgents>[0]['items']
+    ({ entries: rows, unreadable: 0 }) as Parameters<
+      typeof findKnownAgents
+    >[0]['items']
 
   it('returns the newest live Login name and stamp for a known controller', () => {
     const known = findKnownAgents({
@@ -533,7 +535,7 @@ describe('revokeAgentAccess', () => {
     grants: [],
     grantedAt: '2026-08-01T00:00:00.000Z'
   }
-  const items = [{ id: 'history-scan', doc: {} }]
+  const items = { entries: [{ id: 'history-scan', doc: {} }], unreadable: 0 }
 
   /**
    * A storage fake for the agent revoke: one history scan, a rotation that
@@ -778,7 +780,7 @@ describe('revokeAppAccess', () => {
     }
   }) {
     return {
-      listHistoryItems: vi.fn(async () => []),
+      listHistoryItems: vi.fn(async () => ({ entries: [], unreadable: 0 })),
       revokeAppCollectionRecipients: vi.fn(async () => rotation),
       revokeAppGrants: vi.fn(async () => ({ revoked: 1, skipped: 0 })),
       deleteAppKey: vi.fn(async () => {}),
@@ -803,7 +805,7 @@ describe('revokeAppAccess', () => {
     expect(storage.revokeAppGrants).toHaveBeenCalledWith({
       origin: app.origin,
       subjectDid: app.subjectDid,
-      items: [],
+      items: { entries: [], unreadable: 0 },
       revokedByRotation: ['urn:zcap:rotated']
     })
     expect(storage.deleteAppKey).toHaveBeenCalledWith({ cid: 'cid-app-key' })
@@ -826,7 +828,7 @@ describe('revokeAppAccess', () => {
     expect(storage.revokeAppGrants).toHaveBeenCalledWith({
       origin: app.origin,
       subjectDid: app.subjectDid,
-      items: [],
+      items: { entries: [], unreadable: 0 },
       revokedByRotation: []
     })
   })

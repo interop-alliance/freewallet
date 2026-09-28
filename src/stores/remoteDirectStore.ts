@@ -103,13 +103,16 @@ export interface SyncedCollectionStore {
   readonly integrityCredentials: number
   purgeUndecryptableCredentials(): Promise<number>
   readonly unknownEpochCredentials: number
-  readonly unknownEpochHistory: number
   readonly noEpochKeyCredentials: number
   addHistoryItem(options: {
     resourceId: string
     activity: WalletActivity
   }): Promise<string>
-  listHistoryItems(): Promise<Array<{ id: string; doc: WalletActivity }>>
+  listHistoryItems(): Promise<{
+    entries: Array<{ id: string; doc: WalletActivity }>
+    unknownEpoch: number
+    unreadable: number
+  }>
   addPublicCredential(options: {
     cid: string
     credential: IVerifiableCredential
@@ -161,7 +164,6 @@ export class RemoteDirectStore implements SyncedCollectionStore {
   // the facade's shared epoch-refresh path drives both backends identically.
   #undecryptableCredentials = 0
   #unknownEpochCredentials = 0
-  #unknownEpochHistory = 0
   // Same signal for the `app-connections` collection, so a rekey by another
   // client cannot make a stored app key read as absent (which would mint a
   // second identity for the app).
@@ -629,10 +631,6 @@ export class RemoteDirectStore implements SyncedCollectionStore {
     return this.#unknownEpochCredentials
   }
 
-  get unknownEpochHistory(): number {
-    return this.#unknownEpochHistory
-  }
-
   get noEpochKeyCredentials(): number {
     return this.#noEpochKeyCredentials
   }
@@ -697,23 +695,33 @@ export class RemoteDirectStore implements SyncedCollectionStore {
    * per-row tolerance the other scans apply (an unknown-epoch row is counted
    * for the facade's descriptor refresh; a no-epoch-key, integrity-failing, or
    * otherwise unreadable row is warned and skipped), and pairs each readable
-   * activity with the row id it was read under.
+   * activity with the row id it was read under. The counts describe this
+   * same read: `unknownEpoch` for the facade's descriptor refresh, and
+   * `unreadable` for every row skipped for any reason, the unknown-epoch rows
+   * included.
    *
    * The shared half of {@link listHistoryItems} (which collapses duplicates by
    * the activity's own id) and {@link findHistoryItemsByInnerId} (which keeps
    * every row, since the import path deletes the extras).
    *
-   * @returns {Promise<Array<{ rowId: string; activity: WalletActivity }>>}
+   * @returns {Promise<{
+   *   entries: Array<{ rowId: string; activity: WalletActivity }>,
+   *   unknownEpoch: number,
+   *   unreadable: number
+   * }>}
    */
-  async #historyEntries(): Promise<
-    Array<{ rowId: string; activity: WalletActivity }>
-  > {
+  async #historyEntries(): Promise<{
+    entries: Array<{ rowId: string; activity: WalletActivity }>
+    unknownEpoch: number
+    unreadable: number
+  }> {
     const cipher = this.#cipherFor('walletActivity')
     const resources = await this.#remote.listSyncedDocuments({
       logicalKey: 'walletActivity'
     })
     const entries: Array<{ rowId: string; activity: WalletActivity }> = []
     let unknownEpoch = 0
+    let unreadable = 0
     // Same shape as the credential scan: decrypt in parallel, fold in order.
     const decrypted = await Promise.all(
       resources.map(async ({ id, data }) => {
@@ -736,6 +744,7 @@ export class RemoteDirectStore implements SyncedCollectionStore {
       const { id: resourceId } = resources[position]
       const { activity, err } = decrypted[position]
       if (err) {
+        unreadable += 1
         const failure = classifyDecryptFailure(err)
         if (failure === 'unknown-epoch') {
           unknownEpoch += 1
@@ -770,14 +779,15 @@ export class RemoteDirectStore implements SyncedCollectionStore {
       }
       entries.push({ rowId: resourceId, activity })
     }
-    this.#unknownEpochHistory = unknownEpoch
-    return entries
+    return { entries, unknownEpoch, unreadable }
   }
 
-  async listHistoryItems(): Promise<
-    Array<{ id: string; doc: WalletActivity }>
-  > {
-    const entries = await this.#historyEntries()
+  async listHistoryItems(): Promise<{
+    entries: Array<{ id: string; doc: WalletActivity }>
+    unknownEpoch: number
+    unreadable: number
+  }> {
+    const { entries, unknownEpoch, unreadable } = await this.#historyEntries()
     const seen = new Set<string>()
     const items: Array<{ id: string; doc: WalletActivity }> = []
     for (const { rowId, activity } of entries) {
@@ -788,7 +798,7 @@ export class RemoteDirectStore implements SyncedCollectionStore {
       seen.add(id)
       items.push({ id, doc: activity })
     }
-    return items
+    return { entries: items, unknownEpoch, unreadable }
   }
 
   /**
@@ -807,7 +817,7 @@ export class RemoteDirectStore implements SyncedCollectionStore {
   }: {
     id: string
   }): Promise<Array<{ rowId: string; doc: WalletActivity }>> {
-    const entries = await this.#historyEntries()
+    const { entries } = await this.#historyEntries()
     return entries
       .filter(({ rowId, activity }) => (activity.id ?? rowId) === id)
       .map(({ rowId, activity }) => ({ rowId, doc: activity }))

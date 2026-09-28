@@ -64,7 +64,7 @@ describe('listSharedCollections', () => {
     )
     const session = {
       storage: {
-        listHistoryItems: vi.fn(async () => []),
+        listHistoryItems: vi.fn(async () => ({ entries: [], unreadable: 0 })),
         listCollectionShares
       }
     } as unknown as Session

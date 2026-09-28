@@ -40,7 +40,10 @@ import {
   type UserKeyRosterReadResult
 } from '@interop/wallet-core/keys'
 import { accountRosterStore } from '@/session/rosterStore'
-import { currentAccountSignerCheck } from '@/session/clients'
+import {
+  accountUserKeyGenerationKids,
+  currentAccountSignerCheck
+} from '@/session/clients'
 import { checkUserKeyRosterAtLogin as sharedCheckUserKeyRosterAtLogin } from '@interop/wallet-core/clients'
 import {
   browserLocalSessionPersistence,
@@ -443,7 +446,8 @@ export async function initSessionFromSeed({
   // The grant-revocation signer check reads the verified account log
   // through the session, which does not exist until the storage manager it
   // is part of does; the resolver is bound now over a slot the session
-  // built below fills, and reads it at the first revocation.
+  // built below fills, and reads it at the first revocation. The user key
+  // generations a collection key rotation keeps are read the same way.
   const bound: { session?: Session } = {}
   const [keystoreAgent, { storage, userExists }] = await Promise.all([
     keystorePromise,
@@ -456,7 +460,11 @@ export async function initSessionFromSeed({
       signerCheck: async () =>
         bound.session
           ? currentAccountSignerCheck({ session: bound.session })
-          : undefined
+          : undefined,
+      userKeyGenerationKids: async () =>
+        bound.session
+          ? accountUserKeyGenerationKids({ session: bound.session })
+          : []
     })
   ])
   // Bind the provisioned keystore onto the (already-shared) profile object;

@@ -202,7 +202,7 @@ describe('StorageManager.initStorageClients in local mode', () => {
 
     // `wallet-activity`: the credential write already recorded its Create
     // activity through the same encrypted path, and it reads back decrypted.
-    const history = await storage.listHistoryItems()
+    const { entries: history } = await storage.listHistoryItems()
     expect(history.length).toBeGreaterThanOrEqual(1)
     expect(history.some(({ doc }) => doc.type?.includes('Create'))).toBe(true)
   })

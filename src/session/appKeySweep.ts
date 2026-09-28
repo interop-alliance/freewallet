@@ -200,7 +200,8 @@ export async function sweepStrandedAppKeys({
  * @param options {object}
  * @param options.storage {StorageManager}
  * @param options.privateCids {Set<string>}   the cids the private pass covered
- * @param [options.items] {Array}   the activity history, if already fetched
+ * @param [options.items] {HistoryItems}   the activity history, if already
+ *   fetched
  * @param [options.collections] {Array}   the Space collection listing, if
  *   already fetched
  * @returns {Promise<number>}   how many public copies were retracted

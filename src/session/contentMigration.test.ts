@@ -287,7 +287,7 @@ async function makeBundle(
  * @returns {Promise<WalletActivity[]>}
  */
 async function importActivities(session: Session): Promise<WalletActivity[]> {
-  const items = await session.storage.listHistoryItems()
+  const { entries: items } = await session.storage.listHistoryItems()
   return items
     .map(({ doc }) => doc)
     .filter(doc => (doc.type ?? []).includes('Import'))
@@ -401,7 +401,7 @@ describe('migrateContent', () => {
       { accepted: 1, skipped: 1 }
     )
 
-    const items = await session.storage.listHistoryItems()
+    const { entries: items } = await session.storage.listHistoryItems()
     const ids = items.map(({ doc }) => doc.id)
     expect(ids).toContain('archived-fresh')
     expect(ids).not.toContain('archived-held')
@@ -429,7 +429,7 @@ describe('migrateContent', () => {
       { accepted: 4, skipped: 3 }
     )
 
-    const items = await session.storage.listHistoryItems()
+    const { entries: items } = await session.storage.listHistoryItems()
     const ids = items.map(({ doc }) => doc.id)
     expect(ids).toEqual(expect.arrayContaining(['a-1', 'a-2', 'a-3', 'a-4']))
     for (const absent of ['a-5', 'a-6', 'a-7']) {

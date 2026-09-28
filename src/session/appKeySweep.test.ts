@@ -77,7 +77,7 @@ function storageDouble({
     listCredentials: vi.fn(async () => credentials),
     listHistoryItems: vi.fn(async () => {
       calls.push('listHistoryItems')
-      return []
+      return { entries: [], unreadable: 0 }
     }),
     listCollections: vi.fn(async () => {
       calls.push('listCollections')
@@ -138,13 +138,13 @@ describe('sweepStrandedAppKeys', () => {
     expect(storage.revokeAppCollectionRecipients).toHaveBeenCalledWith({
       origin: 'https://app.example',
       subjectDid: 'did:key:z6MkfakeAppSubject',
-      items: [],
+      items: { entries: [], unreadable: 0 },
       collections: []
     })
     expect(storage.revokeAppGrants).toHaveBeenCalledWith({
       origin: 'https://app.example',
       subjectDid: 'did:key:z6MkfakeAppSubject',
-      items: [],
+      items: { entries: [], unreadable: 0 },
       revokedByRotation: ['z-rotated:did:key:z6MkfakeAppSubject']
     })
   })
@@ -224,13 +224,13 @@ describe('sweepStrandedAppKeys', () => {
     expect(storage.revokeAppGrants).toHaveBeenCalledWith({
       origin: 'https://app.example',
       subjectDid: 'did:key:z6MkfakeAppSubject',
-      items: [],
+      items: { entries: [], unreadable: 0 },
       revokedByRotation: ['z-rotated:did:key:z6MkfakeAppSubject']
     })
     expect(storage.revokeAppGrants).toHaveBeenCalledWith({
       origin: 'https://app.example',
       subjectDid: 'did:key:zOrphan',
-      items: [],
+      items: { entries: [], unreadable: 0 },
       revokedByRotation: ['z-rotated:did:key:zOrphan']
     })
   })

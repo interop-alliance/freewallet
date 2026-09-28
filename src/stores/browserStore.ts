@@ -124,7 +124,6 @@ export class BrowserStore {
   // feed entry). They are counted separately, skipped, and NOT cached, so a
   // caller can refresh the descriptor and re-read.
   #unknownEpochCredentials = 0
-  #unknownEpochHistory = 0
   #unknownEpochContacts = 0
   // The whole-collection contacts-history scan's counterpart of the contacts
   // counter above.
@@ -712,16 +711,6 @@ export class BrowserStore {
    */
   get integrityCredentials(): number {
     return this.#integrityCredentials
-  }
-
-  /**
-   * The count of `wallet-activity` rows the most recent
-   * {@link listHistoryItems} call had to skip for the same reason.
-   *
-   * @returns {number}
-   */
-  get unknownEpochHistory(): number {
-    return this.#unknownEpochHistory
   }
 
   /**
@@ -1382,17 +1371,36 @@ export class BrowserStore {
    *
    * A row whose envelope will not decrypt under the current KAK is skipped
    * (logged) rather than rejecting the whole read, so one poisoned row cannot hang the history page.
+   * The counts describe this same read: `unknownEpoch` for the facade's
+   * descriptor refresh, and `unreadable` for every row skipped for any
+   * reason, the unknown-epoch rows included.
    *
-   * @returns {Promise<Array<{ id: string; doc: WalletActivity }>>}
+   * @returns {Promise<{
+   *   entries: Array<{ id: string; doc: WalletActivity }>,
+   *   unknownEpoch: number,
+   *   unreadable: number
+   * }>}
    */
-  async listHistoryItems(): Promise<
-    Array<{ id: string; doc: WalletActivity }>
-  > {
-    const { entries, unknownEpochRowIds } = await this.#decryptedRows({
+  async listHistoryItems(): Promise<{
+    entries: Array<{ id: string; doc: WalletActivity }>
+    unknownEpoch: number
+    unreadable: number
+  }> {
+    const {
+      entries,
+      unknownEpochRowIds,
+      noEpochKeyRowIds,
+      integrityRowIds,
+      undecryptableRowIds
+    } = await this.#decryptedRows({
       logicalKey: 'walletActivity',
       sort: 'asc'
     })
-    this.#unknownEpochHistory = unknownEpochRowIds.length
+    const unreadable =
+      unknownEpochRowIds.length +
+      noEpochKeyRowIds.length +
+      integrityRowIds.length +
+      undecryptableRowIds.length
     const seen = new Set<string>()
     const items: Array<{ id: string; doc: WalletActivity }> = []
     for (const { rowId, data } of entries) {
@@ -1404,7 +1412,11 @@ export class BrowserStore {
       seen.add(id)
       items.push({ id, doc: activity })
     }
-    return items
+    return {
+      entries: items,
+      unknownEpoch: unknownEpochRowIds.length,
+      unreadable
+    }
   }
 
   /**

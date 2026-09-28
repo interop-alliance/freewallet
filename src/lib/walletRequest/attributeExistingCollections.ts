@@ -116,7 +116,7 @@ export async function attributeExistingCollections({
       // labels this pass does not use.
       const shares = await storage.listCollectionShares({
         collectionId,
-        items: []
+        items: { entries: [], unreadable: 0 }
       })
       rosters.set(
         collectionId,

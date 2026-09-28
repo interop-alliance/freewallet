@@ -4,6 +4,14 @@
 
 ### Fixed
 
+- A collection key rotation (an unshare, an app or agent revocation) wraps
+  the fresh epoch only to recipients the wallet admitted. These are the
+  owner, the account's earlier user key generations, the grantee of a
+  recorded grant on that collection that carries its capability, and a
+  recorded share reader no later unshare superseded. Any other roster entry
+  is left out. A rotation read from a history with unreadable rows logs a
+  warning naming the entries it left out. Requires `@interop/was-client`
+  `^0.74.0`.
 - The interaction-URL page refuses, before consent, a request whose
   capability queries name more than one grantee `controller`. The
   Applications page lists and revokes an agent by one controller, so a

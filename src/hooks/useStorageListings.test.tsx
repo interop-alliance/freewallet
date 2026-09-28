@@ -18,7 +18,7 @@ declare global {
 function storageDouble() {
   return {
     hasRemoteStorage: true,
-    listHistoryItems: vi.fn(async () => []),
+    listHistoryItems: vi.fn(async () => ({ entries: [], unreadable: 0 })),
     listCollectionShares: vi.fn(async () => []),
     listAppKeys: vi.fn(async () => ({ appKeys: [] }))
   }

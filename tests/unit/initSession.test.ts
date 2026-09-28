@@ -195,7 +195,8 @@ describe('initSessionFromSeed', () => {
       session: { profile: session.profile, persistence: session.persistence },
       isGuest: false,
       remoteDirect: false,
-      signerCheck: expect.any(Function)
+      signerCheck: expect.any(Function),
+      userKeyGenerationKids: expect.any(Function)
     })
   })
 

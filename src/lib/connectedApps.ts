@@ -389,9 +389,9 @@ export async function listConnectedApps({
   // `credentialSubject.appUrl` and every connect records
   // `object.appConnect.appUrl`, and it is what tells two apps sharing an
   // origin apart.
-  type HistoryItem = (typeof history)[number]
+  type HistoryItem = (typeof history.entries)[number]
   const latestLoginByAppUrl = new Map<string, HistoryItem>()
-  for (const item of history) {
+  for (const item of history.entries) {
     const origin = loginOrigin(item.doc.object)
     if (!origin || !isAppConnectLoginFor({ doc: item.doc, origin })) {
       continue
@@ -727,7 +727,7 @@ export async function lookupCollectionCreators({
     string,
     { created: string; name: string; appUrl: string }
   >()
-  for (const { doc } of history) {
+  for (const { doc } of history.entries) {
     if (!isAppConnectLogin({ doc })) {
       continue
     }
@@ -991,16 +991,17 @@ function revokeHidesLogin({
  *
  * @param options {object}
  * @param options.items {HistoryItems}
- * @returns {Map<string, HistoryItems>}   the live Logins, by controller
+ * @returns {Map<string, HistoryItems['entries']>}   the live Logins, by
+ *   controller
  */
 function liveAgentLogins({
   items
 }: {
   items: HistoryItems
-}): Map<string, HistoryItems> {
-  const loginsByController = new Map<string, HistoryItems>()
+}): Map<string, HistoryItems['entries']> {
+  const loginsByController = new Map<string, HistoryItems['entries']>()
   const latestRevokeByController = new Map<string, string>()
-  for (const item of items) {
+  for (const item of items.entries) {
     const { doc } = item
     if (isAgentGrantLogin({ doc })) {
       const controller = loginGrantController(doc.object)
@@ -1028,7 +1029,7 @@ function liveAgentLogins({
     }
   }
 
-  const live = new Map<string, HistoryItems>()
+  const live = new Map<string, HistoryItems['entries']>()
   for (const [controller, logins] of loginsByController) {
     const revokeCreated = latestRevokeByController.get(controller)
     const unhidden = logins.filter(
@@ -1046,10 +1047,12 @@ function liveAgentLogins({
  * The newest of a non-empty set of Logins by `created` stamp. A Login with no
  * stamp sorts oldest.
  *
- * @param logins {HistoryItems}   at least one Login
- * @returns {HistoryItems[number]}
+ * @param logins {HistoryItems['entries']}   at least one Login
+ * @returns {HistoryItems['entries'][number]}
  */
-function newestLogin(logins: HistoryItems): HistoryItems[number] {
+function newestLogin(
+  logins: HistoryItems['entries']
+): HistoryItems['entries'][number] {
   return logins.reduce((newest, item) =>
     (newest.doc.created ?? '') < (item.doc.created ?? '') ? item : newest
   )

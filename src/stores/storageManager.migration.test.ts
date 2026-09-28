@@ -47,10 +47,10 @@ describe('StorageManager.importCredential', () => {
     const { storage, user } = await memoryStorageManager()
 
     await storage.importCredential({ credential: credentialRow('Ada') })
-    expect(await storage.listHistoryItems()).toEqual([])
+    expect((await storage.listHistoryItems()).entries).toEqual([])
 
     await storage.addCredential({ credential: credentialRow('Grace'), user })
-    expect(await storage.listHistoryItems()).toHaveLength(1)
+    expect((await storage.listHistoryItems()).entries).toHaveLength(1)
   })
 
   it('screens an app key out of the bundle and stores it nowhere', async () => {
@@ -325,7 +325,7 @@ describe('StorageManager.importActivity', () => {
     expect(await storage.importActivity({ activity, held })).toBe('accepted')
     expect(await storage.importActivity({ activity, held })).toBe('skipped')
 
-    const items = await storage.listHistoryItems()
+    const { entries: items } = await storage.listHistoryItems()
     expect(items).toHaveLength(1)
     expect(items[0].id).toBe('activity-1')
     expect(items[0].doc.summary).toBe('Credential x')
@@ -345,7 +345,7 @@ describe('StorageManager.importActivity', () => {
     })
 
     expect(outcome).toBe('conflicting')
-    const items = await storage.listHistoryItems()
+    const { entries: items } = await storage.listHistoryItems()
     expect(items).toHaveLength(1)
     expect(items[0].doc.summary).toBe('Credential x')
   })
@@ -361,7 +361,7 @@ describe('StorageManager.putHistoryItemReplacingOthers', () => {
       activity: activityRow({ id: 'import-1', summary: 'Imported 7 rows' })
     })
 
-    const items = await storage.listHistoryItems()
+    const { entries: items } = await storage.listHistoryItems()
     expect(items).toHaveLength(1)
     expect(items[0].doc.summary).toBe('Imported 7 rows')
     // Not merely collapsed at read time: the stale row is really gone.

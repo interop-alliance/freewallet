@@ -57,6 +57,7 @@ import {
   addRecipient,
   DescriptorRefreshPolicy,
   removeRecipient,
+  trustRosterDidKeys,
   x25519RecipientFromDidKey,
   type EncryptionDescriptorCache,
   type EncryptionDescriptorSource,
@@ -194,9 +195,13 @@ export type RecipientRotationOutcome = {
 
 /**
  * The activity history as {@link StorageManager.listHistoryItems} lists it:
- * one entry per `wallet-activity` row, keyed by its resource id.
+ * one entry per `wallet-activity` row, keyed by its resource id, plus the
+ * count of `wallet-activity` rows that read skipped for any reason.
  */
-export type HistoryItems = Array<{ id: string; doc: WalletActivity }>
+export type HistoryItems = {
+  entries: Array<{ id: string; doc: WalletActivity }>
+  unreadable: number
+}
 
 export type ImportSpaceSummary = {
   collectionsCreated: number
@@ -610,6 +615,11 @@ export class StorageManager {
   // memoized for the session's lifetime upstream. Resolves `undefined` when
   // the session has no promoted account to check against.
   #signerCheckFor: () => Promise<AccountSignerCheck | undefined>
+  // The kids of the account's user key generations, read from the verified
+  // head of the user key roster log, oldest first. Resolved lazily from the
+  // session layer, and only when a rotation meets a roster entry no recorded
+  // admission names. Resolves an empty list when the session supplies none.
+  #userKeyGenerationKids: () => Promise<string[]>
   // The once-per-collection-per-session unknown-epoch refresh guard, shared by
   // the standard and the app-provisioned encrypted collections, so a genuinely
   // foreign envelope cannot drive a refresh loop. Its `reset` re-arms a
@@ -651,7 +661,8 @@ export class StorageManager {
     metas,
     persistence,
     descriptorLogs,
-    signerCheck
+    signerCheck,
+    userKeyGenerationKids
   }: {
     localStore?: BrowserStore
     remoteStore?: WASRemoteStore
@@ -666,6 +677,7 @@ export class StorageManager {
     persistence: SessionPersistence
     descriptorLogs?: DescriptorLogs | (() => DescriptorLogs | undefined)
     signerCheck?: () => Promise<AccountSignerCheck | undefined>
+    userKeyGenerationKids?: () => Promise<string[]>
   }) {
     this.#localStore = localStore
     this.#remoteStore = remoteStore
@@ -679,6 +691,7 @@ export class StorageManager {
         ? descriptorLogs
         : () => descriptorLogs
     this.#signerCheckFor = signerCheck ?? (async () => undefined)
+    this.#userKeyGenerationKids = userKeyGenerationKids ?? (async () => [])
     // The cache pair rides the persistence strategy: one instance per scope
     // per session (the strategy memoizes), localStorage or in-memory by the
     // strategy's storage tier, and absent only when there is no remote Space
@@ -1311,7 +1324,8 @@ export class StorageManager {
     remoteDirect = false,
     storage: rxStorage,
     descriptorLogs: suppliedDescriptorLogs,
-    signerCheck
+    signerCheck,
+    userKeyGenerationKids
   }: {
     user: User
     // The profile the clients sign as, and the session's persistence
@@ -1339,6 +1353,10 @@ export class StorageManager {
     // session this manager becomes part of); absent, no grant is skipped on
     // the document's reading.
     signerCheck?: () => Promise<AccountSignerCheck | undefined>
+    // The kids of the account's user key generations, read from the verified
+    // user key roster, resolved lazily from the session layer like
+    // `signerCheck`; absent, a rotation keeps no earlier generation.
+    userKeyGenerationKids?: () => Promise<string[]>
   }) {
     // Guest sessions never touch the remote WAS server -- they get no remote
     // replica. This keeps guest mode usable as a fallback even when the
@@ -1499,7 +1517,8 @@ export class StorageManager {
       metas,
       persistence,
       descriptorLogs: descriptorLogsFor,
-      signerCheck
+      signerCheck,
+      userKeyGenerationKids
     })
     return { storage, userExists }
   }
@@ -3837,10 +3856,11 @@ export class StorageManager {
       attributedTo?: string
     }
   }): Promise<RecipientRotationOutcome> {
+    const history = items ?? (await this.listHistoryItems())
     const { zcaps, expired } = this.#recordedGrantZcaps({
       matches,
       controller,
-      items: items ?? (await this.listHistoryItems())
+      items: history
     })
 
     // Group the pull-axis zcaps by the collection they target. Only the
@@ -3904,6 +3924,8 @@ export class StorageManager {
     // and only when some pull has a capability to POST.
     let signerCheck: Promise<AccountSignerCheck | undefined> | undefined
     const readSignerCheck = () => (signerCheck ??= this.#readSignerCheck())
+    // The account's user key generations, likewise read at most once.
+    const readGenerations = this.#userKeyGenerationsReader()
 
     // Each collection's rotation is independent of the others, so they run
     // together; the outcomes are summed below into the same counts a
@@ -3924,7 +3946,9 @@ export class StorageManager {
             collectionId,
             recipientId: granteeKid,
             revoke,
+            items: history,
             readSignerCheck,
+            readGenerations,
             action: 'Revoking a collection recipient'
           })
           // The rotation is durable whatever the pull did, so the session
@@ -3988,10 +4012,18 @@ export class StorageManager {
    * nothing pulled. `failed` names the capabilities whose POST failed, each
    * with its error, and the caller decides what that means.
    *
+   * The fresh epoch is wrapped only to the recipients
+   * {@link #admittedRecipientResolver} vouches for, so a roster entry this
+   * wallet has no record of admitting is left out of it.
+   *
    * @param options {object}
    * @param options.collectionId {string}
    * @param options.recipientId {string}   the retiring recipient's kid
    * @param options.revoke {IDelegatedZcap[]}   the pull-axis capabilities
+   * @param options.items {HistoryItems}   the pre-fetched history, read for
+   *   the recipients this wallet admitted to the collection
+   * @param options.readGenerations {Function}   reads the account's user
+   *   key generation kids, from {@link #userKeyGenerationsReader}
    * @param options.readSignerCheck {Function}   reads the verified
    *   document's reading, called only when there is something to POST
    * @param options.action {string}   names the operation in a refusal
@@ -4003,13 +4035,17 @@ export class StorageManager {
     collectionId,
     recipientId,
     revoke,
+    items,
     readSignerCheck,
+    readGenerations,
     action
   }: {
     collectionId: string
     recipientId: string
     revoke: IDelegatedZcap[]
+    items: HistoryItems
     readSignerCheck: () => Promise<AccountSignerCheck | undefined>
+    readGenerations: () => Promise<Set<string>>
     action: string
   }): Promise<{
     descriptor: CollectionEncryption
@@ -4022,9 +4058,15 @@ export class StorageManager {
       skipped: Array<{ id: string; reason: string }>
       failed: Array<{ id: string; err: unknown }>
     } = { revokedIds: [], skipped: [], failed: [] }
+    const admission = this.#admittedRecipientResolver({
+      collectionId,
+      items,
+      readGenerations
+    })
     const descriptor = await removeRecipient({
       store: await this.#collectionStore({ collectionId, action }),
       recipientId,
+      resolveRecipientKey: admission.resolve,
       pull: async () => {
         if (revoke.length === 0) {
           return
@@ -4045,7 +4087,123 @@ export class StorageManager {
         }
       }
     })
+    // The admitted set came from a history read that skipped rows, so a
+    // reader whose one admission sits in such a row was left out. The
+    // rotation still lands, since a revocation must not wait on history.
+    if (items.unreadable > 0) {
+      log.warn(
+        'Rotated a collection key from a history with unreadable rows; a reader admitted only there was left out',
+        {
+          collectionId,
+          unreadableHistory: items.unreadable,
+          dropped: [...admission.dropped]
+        }
+      )
+    }
     return { descriptor, ...posts }
+  }
+
+  /**
+   * A reader of the account's user key generation kids that reads the
+   * verified roster at most once, on its first call, so the rotations of
+   * one operation share one read.
+   *
+   * @returns {Function}
+   */
+  #userKeyGenerationsReader(): () => Promise<Set<string>> {
+    let generations: Promise<Set<string>> | undefined
+    return () =>
+      (generations ??= this.#userKeyGenerationKids().then(
+        kids => new Set(kids)
+      ))
+  }
+
+  /**
+   * The `resolveRecipientKey` a rotation of one collection hands
+   * was-client's `removeRecipient`. It vouches only for the recipients this
+   * wallet admitted to the collection, and resolves `null` for any other kid
+   * the roster lists, so a junk entry receives no wrap of the fresh epoch
+   * key. The admitted set is the owner (this session's vault KAK), every
+   * grantee a recorded Login grant targeting the collection was delegated
+   * to, expired grants included since a recipient entry outlives its grant,
+   * and every reader a recorded `CollectionShare` names for it, unless a
+   * `CollectionUnshare` for the pair supersedes that share
+   * ({@link #shareReaders}). The history is sealed under the account's own key, so the host can withhold
+   * an admission from it but cannot add one.
+   *
+   * The account's earlier user key generations are admitted too. A user key
+   * rotation torn before this collection's re-epoch leaves a generation
+   * other than the current one as the owner entry, and dropping it would
+   * seal the fresh epoch away from the account. The generations are read
+   * from the verified user key roster, and only when a kid is otherwise
+   * unadmitted.
+   *
+   * @param options {object}
+   * @param options.collectionId {string}
+   * @param options.items {HistoryItems}   the pre-fetched history
+   * @param options.readGenerations {Function}   reads the account's user key
+   *   generation kids, from {@link #userKeyGenerationsReader}
+   * @returns {{ resolve: Function, dropped: Set<string> }}   `resolve` maps a
+   *   kid to its public key-agreement key, or `null` for a kid this wallet
+   *   did not admit, and records that kid in `dropped`
+   */
+  #admittedRecipientResolver({
+    collectionId,
+    items,
+    readGenerations
+  }: {
+    collectionId: string
+    items: HistoryItems
+    readGenerations: () => Promise<Set<string>>
+  }): {
+    resolve: (kid: string) => Promise<RecipientPublicKey | null>
+    dropped: Set<string>
+  } {
+    const owner = ownerRecipient({
+      keyAgreementKey: this.#vaultKeys.keyAgreementKey
+    })
+    const admitted = StorageManager.#shareReaders({ collectionId, items })
+    for (const { doc } of items.entries) {
+      if (!doc.type?.includes('Login')) {
+        continue
+      }
+      const zcaps = (doc.object as { zcaps?: unknown } | undefined)?.zcaps
+      if (!Array.isArray(zcaps)) {
+        continue
+      }
+      for (const entry of zcaps) {
+        const zcap = ((entry ?? {}) as { zcap?: IZcap }).zcap
+        if (
+          !zcap?.invocationTarget ||
+          this.#rotatableCollectionOf(zcap.invocationTarget) !== collectionId
+        ) {
+          continue
+        }
+        const controllers = Array.isArray(zcap.controller)
+          ? zcap.controller
+          : [zcap.controller]
+        for (const controller of controllers) {
+          const kid = controller && StorageManager.#granteeRosterKid(controller)
+          if (kid) {
+            admitted.add(kid)
+          }
+        }
+      }
+    }
+    const dropped = new Set<string>()
+    return {
+      dropped,
+      async resolve(kid) {
+        if (kid === owner.id) {
+          return owner
+        }
+        if (admitted.has(kid) || (await readGenerations()).has(kid)) {
+          return await trustRosterDidKeys(kid)
+        }
+        dropped.add(kid)
+        return null
+      }
+    }
   }
 
   /**
@@ -4281,7 +4439,7 @@ export class StorageManager {
     const now = Date.now()
     let skipped = 0
     let unrevocable = 0
-    for (const { doc } of items) {
+    for (const { doc } of items.entries) {
       if (!doc.type?.includes('Login')) {
         continue
       }
@@ -4396,10 +4554,14 @@ export class StorageManager {
     // Same stale-descriptor refresh as `listCredentials`, once per session.
     return this.#readWithEpochRefresh({
       collectionId: 'wallet-activity',
-      read: async () => ({
-        value: await this.#store.listHistoryItems(),
-        unknownEpoch: this.#store.unknownEpochHistory > 0
-      })
+      read: async () => {
+        const { entries, unknownEpoch, unreadable } =
+          await this.#store.listHistoryItems()
+        return {
+          value: { entries, unreadable },
+          unknownEpoch: unknownEpoch > 0
+        }
+      }
     })
   }
 
@@ -4636,7 +4798,9 @@ export class StorageManager {
       collectionId,
       recipientId,
       revoke,
+      items,
       readSignerCheck: () => this.#readSignerCheck(),
+      readGenerations: this.#userKeyGenerationsReader(),
       action: 'Unsharing a collection'
     })
 
@@ -4719,7 +4883,7 @@ export class StorageManager {
     items: HistoryItems
   }): IDelegatedZcap[] {
     const zcaps: IDelegatedZcap[] = []
-    for (const { doc } of items) {
+    for (const { doc } of items.entries) {
       if (!doc.type?.includes('CollectionShare')) {
         continue
       }
@@ -4803,7 +4967,11 @@ export class StorageManager {
           descriptor,
           ownerKid: this.#vaultKeys.keyAgreementKey.id
         }),
-        ...this.#liveShareGrantRecipients({ collectionId, items: history })
+        ...StorageManager.#shareReaders({
+          collectionId,
+          items: history,
+          live: true
+        })
       ])
     ]
     if (recipientIds.length === 0) {
@@ -4821,7 +4989,7 @@ export class StorageManager {
         appOrigin?: string
       }
     >()
-    for (const { doc } of history) {
+    for (const { doc } of history.entries) {
       if (!doc.type?.includes('CollectionShare')) {
         continue
       }
@@ -4851,30 +5019,33 @@ export class StorageManager {
   }
 
   /**
-   * The readers of one collection that still hold a live share grant: a
-   * `CollectionShare` records a zcap to them that has not expired
-   * (wallet-core's `delegationExpired`, the reading the revocation's own
-   * expiry skip uses), and no `CollectionUnshare` for the same pair was
-   * recorded at or after that share. An unshare is recorded only once its
-   * pull has succeeded, so a reader listed here has a grant no unshare has
-   * confirmed revoked. An unshare whose stamp does not parse supersedes
-   * every share of the pair.
+   * The readers a recorded `CollectionShare` names for one collection, less
+   * those a `CollectionUnshare` for the same pair supersedes: one recorded
+   * at or after that share, or one whose stamp does not parse, which
+   * supersedes every share of the pair. With `live`, only a share recording
+   * a zcap that has not expired counts (wallet-core's `delegationExpired`,
+   * the reading the revocation's own expiry skip uses). An unshare is
+   * recorded only once its pull has succeeded, so a live reader has a grant
+   * no unshare has confirmed revoked.
    *
    * @param options {object}
    * @param options.collectionId {string}
    * @param options.items {HistoryItems}   the pre-fetched history
-   * @returns {string[]}   the readers' key-agreement kids
+   * @param [options.live] {boolean}   count only unexpired share grants
+   * @returns {Set<string>}   the readers' key-agreement kids
    */
-  #liveShareGrantRecipients({
+  static #shareReaders({
     collectionId,
-    items
+    items,
+    live = false
   }: {
     collectionId: string
     items: HistoryItems
-  }): string[] {
+    live?: boolean
+  }): Set<string> {
     // The latest unshare stamp per reader; NaN when a stamp does not parse.
     const unsharedAt = new Map<string, number>()
-    for (const { doc } of items) {
+    for (const { doc } of items.entries) {
       if (!doc.type?.includes('CollectionUnshare')) {
         continue
       }
@@ -4890,19 +5061,20 @@ export class StorageManager {
       }
     }
     const now = Date.now()
-    const live = new Set<string>()
-    for (const { doc } of items) {
+    const readers = new Set<string>()
+    for (const { doc } of items.entries) {
       if (!doc.type?.includes('CollectionShare')) {
         continue
       }
       const object = doc.object as
         | { collectionId?: string; recipientId?: string; zcap?: IZcap }
         | undefined
+      if (object?.collectionId !== collectionId || !object.recipientId) {
+        continue
+      }
       if (
-        object?.collectionId !== collectionId ||
-        !object.recipientId ||
-        !object.zcap ||
-        delegationExpired({ zcap: object.zcap, now })
+        live &&
+        (!object.zcap || delegationExpired({ zcap: object.zcap, now }))
       ) {
         continue
       }
@@ -4913,9 +5085,9 @@ export class StorageManager {
           continue
         }
       }
-      live.add(object.recipientId)
+      readers.add(object.recipientId)
     }
-    return [...live]
+    return readers
   }
 
   /**
@@ -5183,7 +5355,7 @@ export class StorageManager {
     }
 
     const activities = new Map<string, WalletActivity>()
-    for (const { id, doc } of items) {
+    for (const { id, doc } of items.entries) {
       activities.set(id, doc)
     }
 

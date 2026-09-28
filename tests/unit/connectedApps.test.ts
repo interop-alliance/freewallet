@@ -145,7 +145,7 @@ function fakeStorage({
       appKeys,
       skipped: { unknownEpoch: 0, noEpochKey: 0, undecryptable: 0 }
     })),
-    listHistoryItems: vi.fn(async () => history),
+    listHistoryItems: vi.fn(async () => ({ entries: history, unreadable: 0 })),
     deleteAppKey: vi.fn(async () => {}),
     addHistoryAppRevoke: vi.fn(async () => {}),
     revokeAppCollectionRecipients: vi.fn(async () => ({
@@ -522,14 +522,17 @@ describe('lookupCollectionCreators', () => {
         integrity: 0
       }
     }
-    const items = [
-      loginActivity({
-        origin: 'https://app.example',
-        appUrl: APP_URL,
-        name: 'Editor',
-        created: '2026-07-02T00:00:00Z'
-      })
-    ] as Awaited<ReturnType<StorageManager['listHistoryItems']>>
+    const items = {
+      entries: [
+        loginActivity({
+          origin: 'https://app.example',
+          appUrl: APP_URL,
+          name: 'Editor',
+          created: '2026-07-02T00:00:00Z'
+        })
+      ],
+      unreadable: 0
+    } as Awaited<ReturnType<StorageManager['listHistoryItems']>>
 
     const creators = await lookupCollectionCreators({
       storage,
@@ -716,12 +719,12 @@ describe('revokeAppAccess', () => {
     expect(storage.revokeAppCollectionRecipients).toHaveBeenCalledWith({
       origin: 'https://app.example',
       subjectDid: APP_DID,
-      items: []
+      items: { entries: [], unreadable: 0 }
     })
     expect(storage.revokeAppGrants).toHaveBeenCalledWith({
       origin: 'https://app.example',
       subjectDid: APP_DID,
-      items: []
+      items: { entries: [], unreadable: 0 }
     })
     expect(storage.deleteAppKey).toHaveBeenCalledWith({ cid: 'c-app' })
     expect(storage.addHistoryAppRevoke).toHaveBeenCalledWith({
@@ -746,7 +749,7 @@ describe('revokeAppAccess', () => {
     expect(storage.revokeAppGrants).toHaveBeenCalledWith({
       origin: 'https://app.example',
       subjectDid: APP_DID,
-      items: []
+      items: { entries: [], unreadable: 0 }
     })
     expect(storage.deleteAppKey).toHaveBeenCalledWith({ cid: 'c-app' })
   })

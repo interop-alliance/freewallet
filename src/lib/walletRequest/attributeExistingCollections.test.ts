@@ -49,7 +49,7 @@ function storageDouble({
 }) {
   return {
     listAppKeys: vi.fn(async () => ({ appKeys: [], skipped: {} })),
-    listHistoryItems: vi.fn(async () => []),
+    listHistoryItems: vi.fn(async () => ({ entries: [], unreadable: 0 })),
     collectionAttribution: vi.fn(async () => ({ encrypted })),
     listCollectionShares: vi.fn(async () =>
       recipientIds.map(recipientId => ({ recipientId }))
@@ -72,7 +72,7 @@ describe('attributeExistingCollections key-epoch read', () => {
     expect(attributed?.[0]!.target.encrypted).toBe(false)
     expect(storage.listCollectionShares).toHaveBeenCalledWith({
       collectionId: 'notes',
-      items: []
+      items: { entries: [], unreadable: 0 }
     })
   })
 

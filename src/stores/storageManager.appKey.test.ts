@@ -160,7 +160,7 @@ describe('StorageManager app-key collection surface', () => {
 
     await storage.addMintedAppKey({ credential })
 
-    expect(await storage.listHistoryItems()).toEqual([])
+    expect((await storage.listHistoryItems()).entries).toEqual([])
   })
 
   it('is idempotent on a re-store of the same app key (content cid)', async () => {

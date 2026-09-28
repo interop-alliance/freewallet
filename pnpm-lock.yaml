@@ -72,23 +72,23 @@ importers:
         specifier: ^3.5.10
         version: 3.5.10
       '@interop/vh-resource-log':
-        specifier: ^0.5.3
-        version: 0.5.3
+        specifier: ^0.5.4
+        version: 0.5.4
       '@interop/wallet-backup':
         specifier: ^0.3.0
-        version: 0.3.0(@interop/wallet-core@0.81.1(@interop/jsonld-signatures@11.8.6)(@interop/was-client@0.73.0(@interop/jsonld-signatures@11.8.6)))(@interop/was-client@0.73.0(@interop/jsonld-signatures@11.8.6))
+        version: 0.3.0(@interop/wallet-core@0.82.0(@interop/jsonld-signatures@11.8.6)(@interop/was-client@0.75.0(@interop/jsonld-signatures@11.8.6)))(@interop/was-client@0.75.0(@interop/jsonld-signatures@11.8.6))
       '@interop/wallet-core':
-        specifier: ^0.81.1
-        version: 0.81.1(@interop/jsonld-signatures@11.8.6)(@interop/was-client@0.73.0(@interop/jsonld-signatures@11.8.6))
+        specifier: ^0.82.0
+        version: 0.82.0(@interop/jsonld-signatures@11.8.6)(@interop/was-client@0.75.0(@interop/jsonld-signatures@11.8.6))
       '@interop/wallet-request':
         specifier: link:../wallet-request
         version: link:../wallet-request
       '@interop/was-client':
-        specifier: ^0.73.0
-        version: 0.73.0(@interop/jsonld-signatures@11.8.6)
+        specifier: ^0.75.0
+        version: 0.75.0(@interop/jsonld-signatures@11.8.6)
       '@interop/was-sync':
         specifier: ^0.5.1
-        version: 0.5.1(@interop/was-client@0.73.0(@interop/jsonld-signatures@11.8.6))(rxdb@17.5.0(react@19.3.0)(rxjs@7.8.2)(supports-color@7.2.0))
+        version: 0.5.1(@interop/was-client@0.75.0(@interop/jsonld-signatures@11.8.6))(rxdb@17.5.0(react@19.3.0)(rxjs@7.8.2)(supports-color@7.2.0))
       '@interop/webkms-client':
         specifier: ^15.0.2
         version: 15.0.2
@@ -717,6 +717,10 @@ packages:
     resolution: {integrity: sha512-AvQNNqv52X71TZrBjDP15rNJKRnwirTZgSg9BY2Gux7daKHtk0E7Uxvq73PesuksYQNevxAUoYMsQakg+8yTYQ==}
     engines: {node: '>=24.0'}
 
+  '@interop/vh-resource-log@0.5.4':
+    resolution: {integrity: sha512-pqkvBU6NoPYWrxkpXgX4MX2ynYOXTNpgIL6EeUg3i8eLjEWTXBEzZe9gjSrQ2DqJHT9vNY2IXv7pQiIjvTvSyw==}
+    engines: {node: '>=24.0'}
+
   '@interop/wallet-backup@0.3.0':
     resolution: {integrity: sha512-cBMzsEWALEo4Wj+/BXzpmqRsBCZzUv4GkiAQdT5j/tiasALbKw1h6qTksVKGET6tVMrtN/OMM2CB93Q/uMN6iQ==}
     engines: {node: '>=24.0'}
@@ -724,14 +728,14 @@ packages:
       '@interop/wallet-core': '>=0.80.0 <1.0.0'
       '@interop/was-client': '>=0.70.0 <1.0.0'
 
-  '@interop/wallet-core@0.81.1':
-    resolution: {integrity: sha512-+bSG0Z0nDZuiMoCndUcUVtWSivbbY+GugcGlQawV7zd+JgPbogI7Av4ifS/E1YZOmnoH+xIkMHp6SeuI6aLhRw==}
+  '@interop/wallet-core@0.82.0':
+    resolution: {integrity: sha512-MAhtfbUuuqSrZRLFU4kp0kqvUPwqEzXnL5dYg3tIcpOSOsLPH+2f7xXGZpo9VEI/6uuZMWDFzWJg9tZ9YBqXgg==}
     engines: {node: '>=24.0'}
     peerDependencies:
-      '@interop/was-client': '>=0.71.0 <1.0.0'
+      '@interop/was-client': '>=0.74.0 <1.0.0'
 
-  '@interop/was-client@0.73.0':
-    resolution: {integrity: sha512-g5RQuUU7vvlaVhPfuJUnvvLPvNoXKpI6q20zoUDRtMkQk+4aqo5V2y2vRP4Kpfu3nA+UmDFN53XElBlFt03yBw==}
+  '@interop/was-client@0.75.0':
+    resolution: {integrity: sha512-vgzltEwUNvImrOXmSyqlOuRLPIVEWUQlM7BeI8HQ8ws9zxjhkjLWTxnlcIedA+gQpF//FgC7frEddeZaAPzBuQ==}
     engines: {node: '>=24.0'}
 
   '@interop/was-sync@0.5.1':
@@ -4073,7 +4077,7 @@ snapshots:
     dependencies:
       '@interop/data-integrity-core': 8.8.0
       '@interop/http-client': 1.0.5
-      '@interop/http-signature-zcap-invoke': 6.2.6
+      '@interop/http-signature-zcap-invoke': 6.3.0
       '@interop/lru-memoize': 4.0.3
       '@interop/minimal-cipher': 7.10.3
       '@noble/hashes': 2.4.0
@@ -4251,13 +4255,18 @@ snapshots:
       '@interop/did-method-webvh': 5.11.0
       '@interop/storage-core': 0.19.1
 
-  '@interop/wallet-backup@0.3.0(@interop/wallet-core@0.81.1(@interop/jsonld-signatures@11.8.6)(@interop/was-client@0.73.0(@interop/jsonld-signatures@11.8.6)))(@interop/was-client@0.73.0(@interop/jsonld-signatures@11.8.6))':
+  '@interop/vh-resource-log@0.5.4':
+    dependencies:
+      '@interop/did-method-webvh': 5.11.0
+      '@interop/storage-core': 0.20.0
+
+  '@interop/wallet-backup@0.3.0(@interop/wallet-core@0.82.0(@interop/jsonld-signatures@11.8.6)(@interop/was-client@0.75.0(@interop/jsonld-signatures@11.8.6)))(@interop/was-client@0.75.0(@interop/jsonld-signatures@11.8.6))':
     dependencies:
       '@interop/social-core': 0.8.1
       '@interop/space-archive': 0.2.1
-      '@interop/vh-resource-log': 0.5.3
-      '@interop/wallet-core': 0.81.1(@interop/jsonld-signatures@11.8.6)(@interop/was-client@0.73.0(@interop/jsonld-signatures@11.8.6))
-      '@interop/was-client': 0.73.0(@interop/jsonld-signatures@11.8.6)
+      '@interop/vh-resource-log': 0.5.4
+      '@interop/wallet-core': 0.82.0(@interop/jsonld-signatures@11.8.6)(@interop/was-client@0.75.0(@interop/jsonld-signatures@11.8.6))
+      '@interop/was-client': 0.75.0(@interop/jsonld-signatures@11.8.6)
       '@scure/base': 2.4.0
       events: 3.3.0
       tar-stream: 3.2.1
@@ -4267,7 +4276,7 @@ snapshots:
       - bare-buffer
       - react-native-b4a
 
-  '@interop/wallet-core@0.81.1(@interop/jsonld-signatures@11.8.6)(@interop/was-client@0.73.0(@interop/jsonld-signatures@11.8.6))':
+  '@interop/wallet-core@0.82.0(@interop/jsonld-signatures@11.8.6)(@interop/was-client@0.75.0(@interop/jsonld-signatures@11.8.6))':
     dependencies:
       '@interop/capability-agent': 0.2.1
       '@interop/data-integrity-core': 8.8.0
@@ -4276,8 +4285,8 @@ snapshots:
       '@interop/ed25519-verification-key': 8.2.1
       '@interop/ezcap': 7.5.0
       '@interop/social-core': 0.8.1
-      '@interop/vh-resource-log': 0.5.3
-      '@interop/was-client': 0.73.0(@interop/jsonld-signatures@11.8.6)
+      '@interop/vh-resource-log': 0.5.4
+      '@interop/was-client': 0.75.0(@interop/jsonld-signatures@11.8.6)
       '@interop/x25519-key-agreement-key': 5.4.1
       '@noble/ciphers': 2.4.0
       '@noble/hashes': 2.4.0
@@ -4288,7 +4297,7 @@ snapshots:
       - expo-crypto
       - react-native-get-random-values
 
-  '@interop/was-client@0.73.0(@interop/jsonld-signatures@11.8.6)':
+  '@interop/was-client@0.75.0(@interop/jsonld-signatures@11.8.6)':
     dependencies:
       '@interop/capability-agent': 0.2.1
       '@interop/data-integrity-core': 8.8.0
@@ -4308,10 +4317,10 @@ snapshots:
       - expo-crypto
       - react-native-get-random-values
 
-  '@interop/was-sync@0.5.1(@interop/was-client@0.73.0(@interop/jsonld-signatures@11.8.6))(rxdb@17.5.0(react@19.3.0)(rxjs@7.8.2)(supports-color@7.2.0))':
+  '@interop/was-sync@0.5.1(@interop/was-client@0.75.0(@interop/jsonld-signatures@11.8.6))(rxdb@17.5.0(react@19.3.0)(rxjs@7.8.2)(supports-color@7.2.0))':
     dependencies:
       '@interop/social-core': 0.8.1
-      '@interop/was-client': 0.73.0(@interop/jsonld-signatures@11.8.6)
+      '@interop/was-client': 0.75.0(@interop/jsonld-signatures@11.8.6)
       json-canonicalize: 3.0.1
       uuidv7: 1.2.1
     optionalDependencies:

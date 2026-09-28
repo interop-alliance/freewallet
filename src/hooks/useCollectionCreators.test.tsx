@@ -50,27 +50,30 @@ function storageDouble() {
         integrity: 0
       }
     })),
-    listHistoryItems: vi.fn(async () => [
-      {
-        id: 'login-1',
-        doc: {
-          type: ['Login'],
-          created: '2026-07-01T00:00:00Z',
-          object: {
-            origin: CREATOR_ORIGIN,
-            appConnect: { name: 'Notes', appUrl: CREATOR_URL },
-            zcaps: [
-              {
-                id: 'urn:zcap:notes',
-                target: NOTES.url,
-                allowedActions: ['GET'],
-                zcap: { id: 'urn:zcap:notes', controller: CREATOR_DID }
-              }
-            ]
+    listHistoryItems: vi.fn(async () => ({
+      unreadable: 0,
+      entries: [
+        {
+          id: 'login-1',
+          doc: {
+            type: ['Login'],
+            created: '2026-07-01T00:00:00Z',
+            object: {
+              origin: CREATOR_ORIGIN,
+              appConnect: { name: 'Notes', appUrl: CREATOR_URL },
+              zcaps: [
+                {
+                  id: 'urn:zcap:notes',
+                  target: NOTES.url,
+                  allowedActions: ['GET'],
+                  zcap: { id: 'urn:zcap:notes', controller: CREATOR_DID }
+                }
+              ]
+            }
           }
         }
-      }
-    ]),
+      ]
+    })),
     listCollectionShares: vi.fn(async () => []),
     collectionAttribution: vi.fn(async () => ({
       generator: { id: CREATOR_DID, origin: CREATOR_ORIGIN }
