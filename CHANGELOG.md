@@ -4,6 +4,9 @@
 
 ### Fixed
 
+- The local contact point read and the contact revision history read now
+  report a row whose envelope was sealed for a different resource as an
+  integrity refusal, rather than as an undecryptable row.
 - The consent preview and the approval resolve a request's grants through
   one resolver (`resolveGrants`), against one unchanged pre-request
   snapshot. A request naming one new collection first public, then private,
@@ -144,6 +147,9 @@
 
 ### Added
 
+- The interaction-URL consent page notes a known agent: a requester key
+  this account has granted before and not revoked, with the date of the
+  newest grant and the name it recorded.
 - A production `Dockerfile` and the nginx config it serves the build with
   (`deploy/nginx.conf.template`), which also proxies the WAS server's routes on
   the same origin. It passes through the server's sandbox header on Resource

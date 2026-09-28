@@ -56,6 +56,8 @@ import {
   type ExternalRequestRefusal
 } from '@/lib/walletRequest/externalRequest'
 import { useAttributedGrants } from '@/hooks/useAttributedGrants'
+import { findKnownAgents } from '@/lib/connectedApps'
+import { formatDate } from '@/lib/viewMappers/formatDate'
 import { ChapiInitializing } from '@/pages/chapi/ChapiInitializing'
 import { CHAPILoginForm } from '@/pages/chapi/CHAPILoginForm'
 import { RequestSourcePanel } from '@/pages/chapi/RequestSourcePanel'
@@ -103,7 +105,7 @@ function requesterDids(profile: WalletRequestProfile): string[] {
 }
 
 export function ExternalRequestPage() {
-  const { t } = useTranslation()
+  const { t, i18n } = useTranslation()
   const navigate = useNavigate()
   const location = useLocation()
   const liveSession = useAuthStore(state => state.session)
@@ -119,6 +121,11 @@ export function ExternalRequestPage() {
   // the existing collections' attribution read in.
   const { grants: resolvedGrants, attributeGrants } = useAttributedGrants()
   const [loginError, setLoginError] = useState<string | null>(null)
+  // The requester DIDs this account has granted before and not revoked,
+  // read off the activity history after consent renders.
+  const [knownAgents, setKnownAgents] = useState<
+    Map<string, { name?: string; grantedAt?: string }>
+  >(new Map())
   // What the mint will actually produce: under a transient session's
   // generation delegation each configured TTL is clamped to that parent.
   const grantDays = useMemo(
@@ -181,6 +188,58 @@ export function ExternalRequestPage() {
     }
     attributeGrants({ resolution, grants, storage: loggedIn.storage })
     setPageState('consenting')
+    void readKnownAgents({ loggedIn, requestProfile })
+  }
+
+  /**
+   * Looks up which requester DIDs this account has granted before, for the
+   * display-only known-agent hint. Runs after consent renders and does not
+   * hold it. A failed history read logs and shows no hint.
+   *
+   * @param options {object}
+   * @param options.loggedIn {Session}
+   * @param options.requestProfile {WalletRequestProfile}
+   */
+  async function readKnownAgents({
+    loggedIn,
+    requestProfile
+  }: {
+    loggedIn: Session
+    requestProfile: WalletRequestProfile
+  }) {
+    try {
+      const items = await loggedIn.storage.listHistoryItems()
+      setKnownAgents(
+        findKnownAgents({ items, controllers: requesterDids(requestProfile) })
+      )
+    } catch (err) {
+      log.warn('Known-agent lookup failed', { err })
+    }
+  }
+
+  /**
+   * The known-agent hint for one requester DID, or null when this account
+   * has no live grant to it.
+   *
+   * @param did {string}
+   * @returns {string | null}
+   */
+  function knownAgentHint(did: string): string | null {
+    const known = knownAgents.get(did)
+    if (!known) {
+      return null
+    }
+    if (!known.grantedAt) {
+      return t('externalRequest.knownAgentUndated')
+    }
+    const date = formatDate({
+      isoDate: known.grantedAt,
+      locale: i18n.language
+    })
+    if (known.name) {
+      return t('externalRequest.knownAgentNamed', { date, name: known.name })
+    }
+    return t('externalRequest.knownAgent', { date })
   }
 
   useEffect(() => {
@@ -369,19 +428,35 @@ export function ExternalRequestPage() {
                   ? t('externalRequest.agentNameNote')
                   : t('externalRequest.requesterNote')}
               </Typography>
-              {requesters.map(did => (
-                <Typography
-                  key={did}
-                  variant="body2"
-                  sx={{
-                    fontFamily: 'monospace',
-                    overflowWrap: 'anywhere',
-                    mt: 0.5
-                  }}
-                >
-                  {did}
-                </Typography>
-              ))}
+              {requesters.map(did => {
+                const hint = knownAgentHint(did)
+                return (
+                  <Box key={did}>
+                    <Typography
+                      variant="body2"
+                      sx={{
+                        fontFamily: 'monospace',
+                        overflowWrap: 'anywhere',
+                        mt: 0.5
+                      }}
+                    >
+                      {did}
+                    </Typography>
+                    {hint && (
+                      // Display-only: naming someone else's DID gains a
+                      // requester nothing, since only the key holder can
+                      // invoke what is delegated to it.
+                      <Typography
+                        variant="caption"
+                        color="text.secondary"
+                        sx={{ display: 'block', overflowWrap: 'anywhere' }}
+                      >
+                        {hint}
+                      </Typography>
+                    )}
+                  </Box>
+                )
+              })}
             </Box>
             <Stack
               direction="row"

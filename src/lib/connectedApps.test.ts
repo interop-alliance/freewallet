@@ -7,10 +7,12 @@
  * current key epoch lists the agent), and the name / key-fingerprint fallback), and
  * the revocation `revokeAgentAccess` performs (the server revocation before
  * the recorded activity, the signer check handed through so the storage
- * layer settles the skips, and the forward-floored Revoke stamp).
+ * layer settles the skips, and the forward-floored Revoke stamp). Also the
+ * consent page's known-agent lookup (`findKnownAgents`), over the same join.
  */
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import {
+  findKnownAgents,
   isAgentGrantLogin,
   listConnectedAgents,
   revokeAgentAccess,
@@ -446,6 +448,75 @@ describe('listConnectedAgents', () => {
       storage: storageWith([agentLogin(), appRevoke, foreignRevoke])
     })
     expect(agents).toHaveLength(1)
+  })
+})
+
+describe('findKnownAgents', () => {
+  const items = (rows: unknown[]) =>
+    rows as Parameters<typeof findKnownAgents>[0]['items']
+
+  it('returns the newest live Login name and stamp for a known controller', () => {
+    const known = findKnownAgents({
+      items: items([
+        agentLogin({ name: 'Old name' }),
+        agentLogin({ created: '2026-08-03T00:00:00.000Z', name: 'Deploy bot' })
+      ]),
+      controllers: [AGENT_DID]
+    })
+    expect(known.get(AGENT_DID)).toEqual({
+      name: 'Deploy bot',
+      grantedAt: '2026-08-03T00:00:00.000Z'
+    })
+  })
+
+  it('hides a controller whose later Revoke covers every Login', () => {
+    const revoke = {
+      id: 'revoke-1',
+      doc: {
+        id: 'revoke-1',
+        type: ['Revoke'],
+        created: '2026-08-02T00:00:00.000Z',
+        object: { origin: EXTERNAL_REQUEST_ORIGIN, controller: AGENT_DID }
+      }
+    }
+    const known = findKnownAgents({
+      items: items([agentLogin({ name: 'Deploy bot' }), revoke]),
+      controllers: [AGENT_DID]
+    })
+    expect(known.size).toBe(0)
+  })
+
+  it('returns no name when the Login recorded none', () => {
+    const known = findKnownAgents({
+      items: items([agentLogin()]),
+      controllers: [AGENT_DID]
+    })
+    expect(known.get(AGENT_DID)).toEqual({
+      grantedAt: '2026-08-01T00:00:00.000Z'
+    })
+  })
+
+  it('omits a controller with no agent Login', () => {
+    const known = findKnownAgents({
+      items: items([agentLogin()]),
+      controllers: ['did:key:z6MkStranger']
+    })
+    expect(known.has('did:key:z6MkStranger')).toBe(false)
+    expect(known.has(AGENT_DID)).toBe(false)
+  })
+
+  it('does not count an App Connect Login', () => {
+    const appConnect = agentLogin({ name: 'Demo App' })
+    ;(appConnect.doc.object as Record<string, unknown>).origin =
+      'https://app.example'
+    ;(appConnect.doc.object as Record<string, unknown>).appConnect = {
+      name: 'Demo App'
+    }
+    const known = findKnownAgents({
+      items: items([appConnect]),
+      controllers: [AGENT_DID]
+    })
+    expect(known.size).toBe(0)
   })
 })
 

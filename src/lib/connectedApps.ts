@@ -982,6 +982,124 @@ function revokeHidesLogin({
 }
 
 /**
+ * The agent-grant Logins in the activity history, grouped by grantee
+ * controller, minus those a matching agent Revoke hides
+ * ({@link revokeHidesLogin}). A controller whose every Login is hidden is
+ * absent, so each group holds at least one Login.
+ *
+ * @param options {object}
+ * @param options.items {HistoryItems}
+ * @returns {Map<string, HistoryItems>}   the live Logins, by controller
+ */
+function liveAgentLogins({
+  items
+}: {
+  items: HistoryItems
+}): Map<string, HistoryItems> {
+  const loginsByController = new Map<string, HistoryItems>()
+  const latestRevokeByController = new Map<string, string>()
+  for (const item of items) {
+    const { doc } = item
+    if (isAgentGrantLogin({ doc })) {
+      const controller = loginGrantController(doc.object)
+      if (!controller) {
+        continue
+      }
+      const existing = loginsByController.get(controller)
+      if (existing) {
+        existing.push(item)
+      } else {
+        loginsByController.set(controller, [item])
+      }
+      continue
+    }
+    if (!isAgentRevoke({ doc })) {
+      continue
+    }
+    const controller = stringField(doc.object, 'controller')
+    const created = doc.created
+    if (!controller || !created) {
+      continue
+    }
+    if ((latestRevokeByController.get(controller) ?? '') < created) {
+      latestRevokeByController.set(controller, created)
+    }
+  }
+
+  const live = new Map<string, HistoryItems>()
+  for (const [controller, logins] of loginsByController) {
+    const revokeCreated = latestRevokeByController.get(controller)
+    const unhidden = logins.filter(
+      ({ doc }) =>
+        !revokeHidesLogin({ loginCreated: doc.created, revokeCreated })
+    )
+    if (unhidden.length > 0) {
+      live.set(controller, unhidden)
+    }
+  }
+  return live
+}
+
+/**
+ * The newest of a non-empty set of Logins by `created` stamp. A Login with no
+ * stamp sorts oldest.
+ *
+ * @param logins {HistoryItems}   at least one Login
+ * @returns {HistoryItems[number]}
+ */
+function newestLogin(logins: HistoryItems): HistoryItems[number] {
+  return logins.reduce((newest, item) =>
+    (newest.doc.created ?? '') < (item.doc.created ?? '') ? item : newest
+  )
+}
+
+/**
+ * Which of the given controllers this account has granted storage to through
+ * an interaction-URL request and not since revoked: a controller with at
+ * least one agent-grant Login no later agent Revoke hides. Each entry carries
+ * the newest such Login's self-declared name and `created` stamp, the same
+ * newest-Login rule {@link listConnectedAgents} applies.
+ *
+ * Unlike the listing, this reads no key-epoch roster for fully expired rows.
+ * The claim it backs is only "you granted this key before and have not
+ * revoked it", which holds for an expired grant too. Naming someone else's
+ * DID gains a requester nothing, since only the key holder can invoke grants
+ * delegated to it, so the result is safe to show without a proof of
+ * possession.
+ *
+ * @param options {object}
+ * @param options.items {HistoryItems}   the activity history
+ * @param options.controllers {string[]}   the grantee DIDs to look up
+ * @returns {Map<string, { name?: string; grantedAt?: string }>}
+ *   the known controllers only
+ */
+export function findKnownAgents({
+  items,
+  controllers
+}: {
+  items: HistoryItems
+  controllers: string[]
+}): Map<string, { name?: string; grantedAt?: string }> {
+  const live = liveAgentLogins({ items })
+  const known = new Map<string, { name?: string; grantedAt?: string }>()
+  for (const controller of controllers) {
+    const logins = live.get(controller)
+    if (!logins) {
+      continue
+    }
+    const latest = newestLogin(logins)
+    const name = loginAgentName(latest.doc.object)
+    known.set(controller, {
+      ...(name !== undefined && { name }),
+      ...(latest.doc.created !== undefined && {
+        grantedAt: latest.doc.created
+      })
+    })
+  }
+  return known
+}
+
+/**
  * Lists the agents holding storage grants answered from an interaction-URL
  * request, one row per grantee did:key.
  *
@@ -1016,50 +1134,10 @@ export async function listConnectedAgents({
   items?: HistoryItems
 }): Promise<ConnectedAgent[]> {
   const history = items ?? (await storage.listHistoryItems())
-  type HistoryItem = (typeof history)[number]
-
-  const loginsByController = new Map<string, HistoryItem[]>()
-  const latestRevokeByController = new Map<string, string>()
-  for (const item of history) {
-    const { doc } = item
-    if (isAgentGrantLogin({ doc })) {
-      const controller = loginGrantController(doc.object)
-      if (!controller) {
-        continue
-      }
-      const existing = loginsByController.get(controller)
-      if (existing) {
-        existing.push(item)
-      } else {
-        loginsByController.set(controller, [item])
-      }
-      continue
-    }
-    if (!isAgentRevoke({ doc })) {
-      continue
-    }
-    const controller = stringField(doc.object, 'controller')
-    const created = doc.created
-    if (!controller || !created) {
-      continue
-    }
-    if ((latestRevokeByController.get(controller) ?? '') < created) {
-      latestRevokeByController.set(controller, created)
-    }
-  }
 
   const now = Date.now()
   const agents: ConnectedAgent[] = []
-  for (const [controller, logins] of loginsByController) {
-    const revokeCreated = latestRevokeByController.get(controller)
-    const live = logins.filter(
-      ({ doc }) =>
-        !revokeHidesLogin({ loginCreated: doc.created, revokeCreated })
-    )
-    if (live.length === 0) {
-      continue
-    }
-
+  for (const [controller, live] of liveAgentLogins({ items: history })) {
     // The union of every live Login's grants, deduplicated by capability id:
     // one controller can hold grants from several requests, and the newest
     // request is not necessarily the one with the longest-lived grants.
@@ -1080,9 +1158,7 @@ export async function listConnectedAgents({
 
     // The newest live Login supplies the display members and the granted
     // stamp; the grants above are the union across all of them.
-    const latest = live.reduce((newest, item) =>
-      (newest.doc.created ?? '') < (item.doc.created ?? '') ? item : newest
-    )
+    const latest = newestLogin(live)
     const name = loginAgentName(latest.doc.object)
     agents.push({
       controller,

@@ -1529,8 +1529,8 @@ export class BrowserStore {
    * decrypt (the row id IS the RxDB primary key), never the full-collection
    * scan {@link listContacts} pays. Mirrors the scan's per-row tolerance: a
    * row whose envelope will not decrypt under the current KAK (or names an
-   * unknown key epoch) resolves to `undefined`, exactly as the scan would
-   * have skipped it. The head passes through the same idempotent
+   * unknown key epoch, or fails its integrity check) resolves to
+   * `undefined`, exactly as the scan would have skipped it. The head passes through the same idempotent
    * `upgradeContactHeadPayload` read-side upgrade as {@link #contactEntries}.
    *
    * @param options {object}
@@ -1553,7 +1553,14 @@ export class BrowserStore {
       try {
         raw = (await cipher.decrypt({ id, envelope: data! })) as Json
       } catch (err) {
-        log.warn('Skipping undecryptable contacts row', { id, err })
+        if (classifyDecryptFailure(err) === 'integrity') {
+          log.warn(
+            'Refusing a contacts row whose body failed its integrity check',
+            { readUnderId: id, err }
+          )
+        } else {
+          log.warn('Skipping undecryptable contacts row', { id, err })
+        }
         return undefined
       }
     } else {
@@ -1821,8 +1828,10 @@ export class BrowserStore {
    * skipped uncached AND left unindexed, since it is possibly-fresh data
    * behind a stale descriptor that must stay retryable after a descriptor
    * refresh; a `KeyUnwrapError` row (no key for its epoch on this wallet)
-   * is skipped the same way, retryable after a later key grant; any other
-   * decrypt failure is warned, skipped, and likewise left unindexed.
+   * is skipped the same way, retryable after a later key grant; an
+   * `IntegrityError` row (a body served under an id it was not sealed for)
+   * is refused under its own warning; any other decrypt failure is warned,
+   * skipped, and likewise left unindexed.
    *
    * @param options {object}
    * @param options.contactId {string}
@@ -1891,6 +1900,14 @@ export class BrowserStore {
             'Skipping contactsHistory row: this wallet is not a recipient ' +
               'of its key epoch',
             { id, err }
+          )
+        } else if (failure === 'integrity') {
+          // The host served a body that does not verify against the id it was
+          // read under: skip it uncached and unindexed.
+          log.warn(
+            'Refusing a contactsHistory row whose body failed its integrity ' +
+              'check',
+            { readUnderId: id, err }
           )
         } else {
           log.warn('Skipping undecryptable contactsHistory row', { id, err })

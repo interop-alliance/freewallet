@@ -6,6 +6,7 @@
  * @vitest-environment node
  */
 import { afterEach, describe, expect, it, vi } from 'vitest'
+import { addSink, captureSink } from '@interop/logger'
 import type { IVerifiableCredential } from '@interop/data-integrity-core'
 import { getRxStorageMemory } from 'rxdb/plugins/storage-memory'
 import type { User } from '@/types/auth'
@@ -930,6 +931,74 @@ describe('BrowserStore (misbound envelopes)', () => {
     expect(
       await localStore.rxCollection('appConnections').find().exec()
     ).toHaveLength(1)
+  })
+
+  it('refuses a misbound contacts row on the point read under its own warning', async () => {
+    const { localStore } = await initLocalStore({
+      ciphers: {
+        contacts: makeMisboundCipher(),
+        contactsHistory: makeMisboundCipher()
+      }
+    })
+    await localStore.rxCollection('contacts').insert({
+      id: 'z6ContactReadUnder',
+      updatedAt: new Date().toISOString(),
+      version: 0,
+      data: {
+        id: 'z6ContactReadUnder',
+        sequence: 0,
+        jwe: { ciphertext: JSON.stringify({ contactId: 'c1' }) }
+      } as Json
+    })
+    const capture = captureSink()
+    const removeSink = addSink(capture.sink)
+    try {
+      expect(
+        await localStore.loadContact({ id: 'z6ContactReadUnder' })
+      ).toBeUndefined()
+    } finally {
+      removeSink()
+    }
+
+    const logged = JSON.stringify(capture.events)
+    expect(logged).toContain(
+      'Refusing a contacts row whose body failed its integrity check'
+    )
+    expect(logged).not.toContain('Skipping undecryptable contacts row')
+  })
+
+  it('refuses a misbound contactsHistory row under its own warning', async () => {
+    const { localStore } = await initLocalStore({
+      ciphers: {
+        contacts: makeMisboundCipher(),
+        contactsHistory: makeMisboundCipher()
+      }
+    })
+    await localStore.rxCollection('contactsHistory').insert({
+      id: 'z6RevisionReadUnder',
+      updatedAt: new Date().toISOString(),
+      version: 0,
+      data: {
+        id: 'z6RevisionReadUnder',
+        sequence: 0,
+        jwe: { ciphertext: JSON.stringify({ contactId: 'c1' }) }
+      } as Json
+    })
+    const capture = captureSink()
+    const removeSink = addSink(capture.sink)
+    try {
+      expect(
+        await localStore.listContactRevisions({ contactId: 'c1' })
+      ).toEqual([])
+    } finally {
+      removeSink()
+    }
+
+    const logged = JSON.stringify(capture.events)
+    expect(logged).toContain(
+      'Refusing a contactsHistory row whose body failed its integrity check'
+    )
+    expect(logged).not.toContain('Skipping undecryptable contactsHistory row')
   })
 
   it('classifies the refusal raised from a second copy of the package', async () => {
