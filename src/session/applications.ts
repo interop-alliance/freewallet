@@ -155,19 +155,18 @@ export function revokeOutcomeKey({
 }
 
 /**
- * Revokes one connected agent's storage grants. `revokeAgentAccess` reads
- * the storage manager's own verified-document reading exactly as the app
- * path does: a grant the verified document already reads as dead is skipped
- * without a POST, and every other one is POSTed, a transient session's
- * included, since its annex signer derives as unknown while its generation
- * delegation may still stand. `withdrew` spans both stages, as on the app
- * path: a grant whose POST landed on this run, or a collection this run
- * re-keyed. A grant the server had already revoked does not count.
+ * Revokes one connected agent's storage grants and words the outcome.
+ * `revokeAgentAccess` reads the storage manager's own verified-document
+ * reading exactly as the app path does: a grant the verified document already
+ * reads as dead is skipped without a POST, and every other one is POSTed, a
+ * transient session's included, since its annex signer derives as unknown
+ * while its generation delegation may still stand.
  *
  * @param options {object}
  * @param options.session {Session}
  * @param options.agent {ConnectedAgent}
- * @returns {Promise<{ withdrew: boolean }>}
+ * @returns {Promise<{ outcomeKey: string }>}   the i18n key of the toast to
+ *   show ({@link agentRevokeOutcomeKey})
  */
 export async function revokeAgent({
   session,
@@ -175,11 +174,46 @@ export async function revokeAgent({
 }: {
   session: Session
   agent: ConnectedAgent
-}): Promise<{ withdrew: boolean }> {
+}): Promise<{ outcomeKey: string }> {
   const outcome = await revokeAgentAccess({
     storage: session.storage,
     user: session.user,
     agent
   })
-  return { withdrew: outcome.withdrawn > 0 || outcome.rotated > 0 }
+  return {
+    outcomeKey: agentRevokeOutcomeKey({
+      withdrew: outcome.withdrawn > 0 || outcome.rotated > 0,
+      unrevocable: outcome.unrevocable
+    })
+  }
+}
+
+/**
+ * The i18n key of the toast an agent revocation ends with. `withdrew` spans
+ * both stages, as on the app path: a grant whose POST landed on this run, or
+ * a collection this run re-keyed. A grant the server had already revoked does
+ * not count. `unrevocable` counts this agent's recorded grants that had no
+ * capability to POST (a legacy summary-only record). Such a grant may still
+ * be live and ends only at its own expiry, so a run that left any does not
+ * read as a clean revoke. An expired grant, or one the verified document
+ * reads as dead, is already over and does not count.
+ *
+ * @param options {object}
+ * @param options.withdrew {boolean}
+ * @param options.unrevocable {number}
+ * @returns {string}
+ */
+export function agentRevokeOutcomeKey({
+  withdrew,
+  unrevocable
+}: {
+  withdrew: boolean
+  unrevocable: number
+}): string {
+  if (!withdrew) {
+    return 'applications.revokeAgentSuccessLegacy'
+  }
+  return unrevocable > 0
+    ? 'applications.revokeAgentSuccessPartial'
+    : 'applications.revokeAgentSuccess'
 }

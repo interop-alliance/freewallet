@@ -198,16 +198,12 @@ export function ApplicationsPage() {
     setRevoking(true)
     setRevokeError(false)
     try {
-      const { withdrew } = await revokeAgent({
+      const { outcomeKey } = await revokeAgent({
         session,
         agent: revokeAgentTarget
       })
       setRevokeAgentTarget(null)
-      showToast({
-        message: withdrew
-          ? t('applications.revokeAgentSuccess')
-          : t('applications.revokeAgentSuccessLegacy')
-      })
+      showToast({ message: t(outcomeKey) })
       await reload()
     } catch (err) {
       log.error('Could not revoke agent access', { err })

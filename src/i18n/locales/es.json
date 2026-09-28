@@ -476,6 +476,7 @@
     "revokeAgentConfirm": "Al revocar el acceso se anulan los permisos de almacenamiento concedidos a {{name}}, de modo que ya no podrá leer ni escribir en las colecciones que se le dieron, aunque es posible que aún conserve copias de los datos que ya obtuvo. El agente tendrá que volver a solicitar acceso. Esta acción no se puede deshacer.",
     "revokeAgentSuccess": "Acceso del agente revocado.",
     "revokeAgentSuccessLegacy": "Agente eliminado. El acceso restante caducará por sí solo.",
+    "revokeAgentSuccessPartial": "Acceso del agente revocado. Parte de su acceso no se pudo retirar y solo terminará cuando caduque.",
     "revokeAgentFailed": "No se pudo revocar el acceso del agente. Inténtelo de nuevo."
   },
   "dashboard": {
@@ -1051,6 +1052,7 @@
       "appConnect": "Esta es una solicitud de conexión de aplicación. Las aplicaciones se conectan desde su propio sitio web, no desde un enlace.",
       "foreignDelivery": "Esta solicitud enviaría su respuesta a un lugar distinto de donde proviene, por lo que fue rechazada.",
       "barredGrant": "Esta solicitud pide un acceso que esta billetera no concede desde un enlace: aquí solo se pueden conceder colecciones creadas para el solicitante, no colecciones compartidas de la billetera.",
+      "multipleGrantees": "Esta solicitud pide acceso en nombre de más de una clave de programa. Un enlace puede conceder acceso a un solo solicitante a la vez, por lo que fue rechazada.",
       "zcapUnavailable": "Esta solicitud necesita almacenamiento remoto, con el que esta billetera no está configurada.",
       "processFailed": "Algo salió mal al preparar la respuesta. Inténtelo de nuevo.",
       "exchangeFailed": "No se pudo entregar la respuesta al servidor donde reside esta solicitud."

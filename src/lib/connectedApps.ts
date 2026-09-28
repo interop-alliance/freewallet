@@ -803,9 +803,11 @@ function loginAgentName(object: unknown): string | undefined {
 
 /**
  * The grantee did:key a Login activity's recorded grants were delegated to:
- * the `controller` of the first recorded full capability. One request page
- * approval delegates every grant to the same controller, so the first one
- * names the agent.
+ * the `controller` of the first recorded full capability. The request page's
+ * precheck (`precheckExternalRequest`) refuses a request whose capability
+ * queries name more than one `controller`, and each grant is delegated to its
+ * query's own, so every grant a request page approval records names the same
+ * controller and the first one names the agent.
  *
  * @param object {unknown}   the activity's `object` member
  * @returns {string | undefined}
@@ -1221,9 +1223,11 @@ export async function listConnectedAgents({
  * @param options.user {User}   the session user (activity actor)
  * @param options.agent {ConnectedAgent}
  * @returns {Promise<{ revoked: number; withdrawn: number; skipped: number;
- *   rotated: number }>}   the grant outcome, plus the collections the
- *   rotation re-keyed. `withdrawn` counts the grants this call's own POSTs
- *   revoked, leaving out any already revoked
+ *   unrevocable: number; rotated: number }>}   the grant outcome, plus the
+ *   collections the rotation re-keyed. `withdrawn` counts the grants this
+ *   call's own POSTs revoked, leaving out any already revoked. `unrevocable`
+ *   counts the grants with no capability to POST, which end only at their
+ *   own expiry
  */
 export async function revokeAgentAccess({
   storage,
@@ -1237,6 +1241,7 @@ export async function revokeAgentAccess({
   revoked: number
   withdrawn: number
   skipped: number
+  unrevocable: number
   rotated: number
 }> {
   const { outcome, rotated } = await rotateThenRevokeGrants({
@@ -1269,6 +1274,7 @@ export async function revokeAgentAccess({
     revoked: outcome.revoked,
     withdrawn: outcome.withdrawn,
     skipped: outcome.skipped,
+    unrevocable: outcome.unrevocable,
     rotated
   }
 }

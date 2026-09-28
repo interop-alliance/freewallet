@@ -476,6 +476,7 @@
     "revokeAgentConfirm": "Revoking access revokes the storage access {{name}} was granted, so it can no longer read or write the collections it was given. It may still hold copies of data it already fetched. The agent will have to ask for access again. This cannot be undone.",
     "revokeAgentSuccess": "Agent access revoked.",
     "revokeAgentSuccessLegacy": "Agent removed. Its remaining access will expire on its own.",
+    "revokeAgentSuccessPartial": "Agent access revoked. Some of its access could not be withdrawn and ends only when it expires.",
     "revokeAgentFailed": "Could not revoke agent access. Please try again."
   },
   "dashboard": {
@@ -1051,6 +1052,7 @@
       "appConnect": "This is an app connection request. Apps connect from their own website, not from a link.",
       "foreignDelivery": "This request would send your answer somewhere other than where it came from, so it was refused.",
       "barredGrant": "This request asks for access this wallet does not grant from a link: only collections created for the requester can be granted here, not shared wallet collections.",
+      "multipleGrantees": "This request asks for access on behalf of more than one program key. A link can grant access to one requester at a time, so it was refused.",
       "zcapUnavailable": "This request needs remote storage, which this wallet isn't configured with.",
       "processFailed": "Something went wrong preparing the answer. Please try again.",
       "exchangeFailed": "Could not deliver the answer to the server this request lives on."

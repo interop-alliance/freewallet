@@ -89,8 +89,9 @@ type BlockReason =
   | 'exchangeFailed'
 
 /**
- * The distinct grantee DIDs a request names, for the requester row. An agent
- * request names one; the row lists each in case a request names several.
+ * The distinct grantee DIDs a request names, for the requester row. The
+ * precheck refuses a request naming more than one, so a rendered row lists
+ * exactly one.
  *
  * @param profile {WalletRequestProfile}
  * @returns {string[]}

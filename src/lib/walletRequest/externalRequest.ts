@@ -97,6 +97,7 @@ export type ExternalRequestRefusal =
   | 'appConnect'
   | 'foreignDelivery'
   | 'barredGrant'
+  | 'multipleGrantees'
 
 /**
  * A request this entry point refuses before anything is shown or written.
@@ -224,8 +225,10 @@ class ExchangeNetworkError extends Error {
  * answer: an empty query set, an `AppConnectQuery` (checked ahead of
  * classification, which would otherwise throw for the missing origin), a
  * `DIDAuthentication` query (freewallet requires a `domain` for DID Auth and
- * there is no origin to match one against), a `domain` on any request, and a
- * presentation endpoint on another origin than the exchange's. The delivery
+ * there is no origin to match one against), a `domain` on any request, a
+ * request with no capability query, capability queries naming more than one
+ * grantee `controller`, and a presentation endpoint on another origin than
+ * the exchange's. The delivery
  * host is resolved exactly the way delivery resolves it, so the consent
  * screen names where the response will actually go.
  *
@@ -267,6 +270,15 @@ export function precheckExternalRequest({
   // consent screen with nothing to approve.
   if (profile.zcapRequests.length === 0) {
     throw new ExternalRequestRefusedError('nothingRequested')
+  }
+  // Every grant is delegated to its query's own `controller`, while the
+  // Applications page lists and revokes an agent by one controller per
+  // approval. A second grantee would hold grants no row names.
+  const controllers = new Set(
+    profile.zcapRequests.map(({ controller }) => controller)
+  )
+  if (controllers.size > 1) {
+    throw new ExternalRequestRefusedError('multipleGrantees')
   }
   const endpoint = presentationEndpointFor({
     request: request as ISpecVPRDetails,

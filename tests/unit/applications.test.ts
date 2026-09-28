@@ -3,10 +3,13 @@
  * (`revokeOutcomeKey`): what was actually withdrawn outranks the row's
  * marker, and a row nothing was withdrawn from reads as access that had
  * already ended, naming the disconnect only where the account document can
- * vouch for one. `withdrew` counts only what the run itself took away.
+ * vouch for one. `withdrew` counts only what the run itself took away. An
+ * agent revoke that skipped a grant reads as partial
+ * (`agentRevokeOutcomeKey`).
  */
 import { describe, expect, it, vi } from 'vitest'
 import {
+  agentRevokeOutcomeKey,
   revokeAgent,
   revokeApplication,
   revokeOutcomeKey
@@ -15,7 +18,7 @@ import type { ConnectedAgent, ConnectedApp } from '@/lib/connectedApps'
 import type { Session } from '@/types/auth'
 
 const access = vi.hoisted(() => ({
-  outcome: { revoked: 0, withdrawn: 0, skipped: 0, rotated: 0 }
+  outcome: { revoked: 0, withdrawn: 0, skipped: 0, rotated: 0, unrevocable: 0 }
 }))
 
 vi.mock('@/lib/connectedApps', async importOriginal => ({
@@ -51,7 +54,13 @@ describe('revokeOutcomeKey', () => {
 describe('revokeApplication and revokeAgent', () => {
   it('reads a grant the server had already revoked as access that had ended', async () => {
     // The grant stage counts it as revoked, but this run withdrew nothing.
-    access.outcome = { revoked: 1, withdrawn: 0, skipped: 0, rotated: 0 }
+    access.outcome = {
+      revoked: 1,
+      withdrawn: 0,
+      skipped: 0,
+      rotated: 0,
+      unrevocable: 0
+    }
 
     expect(
       await revokeApplication({
@@ -61,12 +70,18 @@ describe('revokeApplication and revokeAgent', () => {
       })
     ).toEqual({ outcomeKey: 'applications.revokeSuccessEnded' })
     expect(await revokeAgent({ session, agent: {} as ConnectedAgent })).toEqual(
-      { withdrew: false }
+      { outcomeKey: 'applications.revokeAgentSuccessLegacy' }
     )
   })
 
   it('reads a grant this run revoked as withdrawn', async () => {
-    access.outcome = { revoked: 1, withdrawn: 1, skipped: 0, rotated: 0 }
+    access.outcome = {
+      revoked: 1,
+      withdrawn: 1,
+      skipped: 0,
+      rotated: 0,
+      unrevocable: 0
+    }
 
     expect(
       await revokeApplication({
@@ -76,15 +91,55 @@ describe('revokeApplication and revokeAgent', () => {
       })
     ).toEqual({ outcomeKey: 'applications.revokeSuccess' })
     expect(await revokeAgent({ session, agent: {} as ConnectedAgent })).toEqual(
-      { withdrew: true }
+      { outcomeKey: 'applications.revokeAgentSuccess' }
     )
   })
 
-  it('reads a collection this run re-keyed as withdrawn', async () => {
-    access.outcome = { revoked: 0, withdrawn: 0, skipped: 1, rotated: 1 }
+  it('reads a re-keyed collection with only dead grants skipped as withdrawn', async () => {
+    access.outcome = {
+      revoked: 0,
+      withdrawn: 0,
+      skipped: 1,
+      rotated: 1,
+      unrevocable: 0
+    }
 
     expect(await revokeAgent({ session, agent: {} as ConnectedAgent })).toEqual(
-      { withdrew: true }
+      { outcomeKey: 'applications.revokeAgentSuccess' }
+    )
+  })
+
+  it('reads a run that left an unrevocable grant as a partial revoke', async () => {
+    access.outcome = {
+      revoked: 1,
+      withdrawn: 1,
+      skipped: 1,
+      rotated: 0,
+      unrevocable: 1
+    }
+
+    expect(await revokeAgent({ session, agent: {} as ConnectedAgent })).toEqual(
+      { outcomeKey: 'applications.revokeAgentSuccessPartial' }
+    )
+  })
+})
+
+describe('agentRevokeOutcomeKey', () => {
+  it('reads a run that withdrew everything it recorded as a clean revoke', () => {
+    expect(agentRevokeOutcomeKey({ withdrew: true, unrevocable: 0 })).toBe(
+      'applications.revokeAgentSuccess'
+    )
+  })
+
+  it('reads a run that left an unrevocable grant as a partial revoke', () => {
+    expect(agentRevokeOutcomeKey({ withdrew: true, unrevocable: 1 })).toBe(
+      'applications.revokeAgentSuccessPartial'
+    )
+  })
+
+  it('reads a run that withdrew nothing as access left to expire', () => {
+    expect(agentRevokeOutcomeKey({ withdrew: false, unrevocable: 2 })).toBe(
+      'applications.revokeAgentSuccessLegacy'
     )
   })
 })

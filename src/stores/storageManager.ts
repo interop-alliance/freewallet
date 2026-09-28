@@ -3611,7 +3611,9 @@ export class StorageManager {
    *   rotation stage already revoked on its pull axis: counted as revoked
    *   and not POSTed again
    * @returns {Promise<{ revoked: number; withdrawn: number; skipped: number;
-   *   revokedIds: string[] }>}
+   *   unrevocable: number; revokedIds: string[] }>}   `unrevocable` counts
+   *   the grantee's recorded grants with no capability to POST, which end
+   *   only at their own expiry
    */
   async revokeAgentGrants({
     controller,
@@ -3625,12 +3627,23 @@ export class StorageManager {
     revoked: number
     withdrawn: number
     skipped: number
+    unrevocable: number
     revokedIds: string[]
   }> {
     if (!this.#remoteStore) {
-      return { revoked: 0, withdrawn: 0, skipped: 0, revokedIds: [] }
+      return {
+        revoked: 0,
+        withdrawn: 0,
+        skipped: 0,
+        unrevocable: 0,
+        revokedIds: []
+      }
     }
-    const { zcaps, skipped: nonRevocable } = this.#recordedGrantZcaps({
+    const {
+      zcaps,
+      skipped: nonRevocable,
+      unrevocable
+    } = this.#recordedGrantZcaps({
       matches: isAgentActivityObject,
       controller,
       items: items ?? (await this.listHistoryItems())
@@ -3640,6 +3653,7 @@ export class StorageManager {
       revoked: outcome.revoked,
       withdrawn: outcome.withdrawn,
       skipped: outcome.skipped + nonRevocable,
+      unrevocable,
       revokedIds: outcome.revokedIds
     }
   }
@@ -4219,14 +4233,20 @@ export class StorageManager {
    * was delegated to `controller` and has not already expired by its own
    * `expires` (wallet-core's `delegationExpired`, beyond the revocation
    * clock-skew margin; an absent or unparseable
-   * value is not expired). Deduplicated by capability id. `skipped` counts
-   * the entries that carry no revocable capability (legacy summary-only
-   * records, a different controller, or an already-expired grant), and
-   * `expired` carries the grants dropped for expiry alone: nothing to revoke,
-   * but they still name the collections the grantee may remain a key-epoch
-   * recipient of. The predicate is what tells the two grantee kinds
-   * apart: an App Connect app (an origin plus an `appConnect` member) and an
-   * agent (the interaction-URL origin marker and no `appConnect`).
+   * value is not expired). Deduplicated by capability id. A capability
+   * delegated to another controller is another grantee's and is not counted
+   * at all. `skipped` counts this grantee's entries that carry no revocable
+   * capability: a legacy summary-only record, or an already-expired grant.
+   * `unrevocable` counts the legacy summary-only records alone, the one kind
+   * that may still be live: nothing can be POSTed for it, so it ends only at
+   * its own expiry. A summary-only record names no controller, so it is
+   * counted on a Login whose full capabilities name this controller, or name
+   * none at all. `expired` carries the grants dropped for expiry alone:
+   * nothing to revoke, but they still name the collections the grantee may
+   * remain a key-epoch recipient of. The predicate is what tells the two
+   * grantee kinds apart: an App Connect app (an origin plus an `appConnect`
+   * member) and an agent (the interaction-URL origin marker and no
+   * `appConnect`).
    *
    * @param options {object}
    * @param options.matches {Function}   the Login-object predicate
@@ -4235,7 +4255,7 @@ export class StorageManager {
    * @param options.items {HistoryItems}   the
    *   pre-fetched history, so this need not re-scan it
    * @returns {{ zcaps: IDelegatedZcap[]; skipped: number;
-   *   expired: IDelegatedZcap[] }}
+   *   unrevocable: number; expired: IDelegatedZcap[] }}
    */
   #recordedGrantZcaps({
     matches,
@@ -4249,12 +4269,18 @@ export class StorageManager {
     }) => boolean
     controller: string
     items: HistoryItems
-  }): { zcaps: IDelegatedZcap[]; skipped: number; expired: IDelegatedZcap[] } {
+  }): {
+    zcaps: IDelegatedZcap[]
+    skipped: number
+    unrevocable: number
+    expired: IDelegatedZcap[]
+  } {
     const zcaps: IDelegatedZcap[] = []
     const expired: IDelegatedZcap[] = []
     const seen = new Set<string>()
     const now = Date.now()
     let skipped = 0
+    let unrevocable = 0
     for (const { doc } of items) {
       if (!doc.type?.includes('Login')) {
         continue
@@ -4267,12 +4293,15 @@ export class StorageManager {
       if (!Array.isArray(object.zcaps)) {
         continue
       }
+      let legacy = 0
+      let namesController = false
+      let namesOther = false
       for (const entry of object.zcaps) {
         const zcap = ((entry ?? {}) as { zcap?: IZcap }).zcap
         // A legacy summary-only entry has no revocable capability; expiry is
         // the backstop.
         if (!zcap || !('parentCapability' in zcap)) {
-          skipped += 1
+          legacy += 1
           continue
         }
         // Only revoke capabilities delegated to this grantee's key.
@@ -4280,9 +4309,10 @@ export class StorageManager {
           ? zcap.controller
           : [zcap.controller]
         if (!controllers.includes(controller)) {
-          skipped += 1
+          namesOther = true
           continue
         }
+        namesController = true
         if (seen.has(zcap.id)) {
           continue
         }
@@ -4296,8 +4326,13 @@ export class StorageManager {
         }
         zcaps.push(zcap)
       }
+      // A Login naming only other controllers is another grantee's.
+      if (namesController || !namesOther) {
+        skipped += legacy
+        unrevocable += legacy
+      }
     }
-    return { zcaps, skipped, expired }
+    return { zcaps, skipped, unrevocable, expired }
   }
 
   /**

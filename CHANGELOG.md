@@ -4,6 +4,15 @@
 
 ### Fixed
 
+- The interaction-URL page refuses, before consent, a request whose
+  capability queries name more than one grantee `controller`. The
+  Applications page lists and revokes an agent by one controller, so a
+  second grantee's grants were unlisted and survived a revoke.
+- An agent revocation that leaves a recorded grant it could not POST a
+  revocation for ends with its own toast, rather than reading as a clean
+  revoke.
+- A revocation's `skipped` count, returned and recorded on the Revoke
+  activity, no longer counts grants delegated to another grantee's key.
 - The local contact point read and the contact revision history read now
   report a row whose envelope was sealed for a different resource as an
   integrity refusal, rather than as an undecryptable row.

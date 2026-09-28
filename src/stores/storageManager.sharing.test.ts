@@ -1252,7 +1252,7 @@ describe('StorageManager.revokeAppGrants', () => {
     expect((revoked[0] as { id: string }).id).toBe('z-active')
   })
 
-  it('skips grants delegated to a different controller', async () => {
+  it('leaves grants delegated to a different controller uncounted', async () => {
     const owner = await generateKey()
     const revoked: unknown[] = []
     const stores = memoryDescriptorStores()
@@ -1292,7 +1292,8 @@ describe('StorageManager.revokeAppGrants', () => {
       subjectDid: APP_SUBJECT
     })
 
-    expect(outcome).toEqual({ revoked: 0, withdrawn: 0, skipped: 1 })
+    // Another controller's grant is another grantee's, so it is not counted.
+    expect(outcome).toEqual({ revoked: 0, withdrawn: 0, skipped: 0 })
     expect(revoked).toHaveLength(0)
   })
 
@@ -1415,6 +1416,7 @@ describe('StorageManager.revokeAppGrants', () => {
       revoked: 2,
       withdrawn: 1,
       skipped: 0,
+      unrevocable: 0,
       revokedIds: ['z-done', 'z-live']
     })
   })
@@ -2686,10 +2688,85 @@ describe('StorageManager.revokeAgentCollectionRecipients', () => {
       revoked: 1,
       withdrawn: 0,
       skipped: 0,
+      unrevocable: 0,
       revokedIds: ['z-agent-notes']
     })
     const posted = (revoked as Array<{ id: string }>).map(zcap => zcap.id)
     expect(posted.filter(id => id === 'z-agent-notes')).toHaveLength(1)
+  })
+
+  it("counts neither another agent's grants nor its summary-only entries", async () => {
+    const agent = await generateAppIdentity()
+    const other = await generateAppIdentity()
+    const { storage, user } = await agentGrantStorage(agent)
+    const future = new Date(Date.now() + 1_000_000).toISOString()
+    const target = 'https://was.example/space/s-space/other-notes'
+    await storage.addHistoryLogin({
+      user,
+      origin: EXTERNAL_REQUEST_ORIGIN,
+      grants: [
+        {
+          id: 'g-other-notes',
+          target,
+          allowedActions: ['GET'],
+          expires: future,
+          zcap: recordedGrant({
+            id: 'z-other-notes',
+            invocationTarget: target,
+            expires: future,
+            controller: other.did
+          })
+        },
+        {
+          id: 'g-other-summary',
+          target,
+          allowedActions: ['GET'],
+          expires: future
+        }
+      ]
+    })
+
+    expect(await storage.revokeAgentGrants({ controller: agent.did })).toEqual({
+      revoked: 1,
+      withdrawn: 1,
+      skipped: 0,
+      unrevocable: 0,
+      revokedIds: ['z-agent-notes']
+    })
+  })
+
+  it("counts a summary-only entry on the agent's own Login as unrevocable", async () => {
+    const agent = await generateAppIdentity()
+    const { storage, user } = await agentGrantStorage(agent)
+    const future = new Date(Date.now() + 1_000_000).toISOString()
+    const target = 'https://was.example/space/s-space/agent-notes'
+    await storage.addHistoryLogin({
+      user,
+      origin: EXTERNAL_REQUEST_ORIGIN,
+      grants: [
+        {
+          id: 'g-agent-second',
+          target,
+          allowedActions: ['GET'],
+          expires: future,
+          zcap: recordedGrant({
+            id: 'z-agent-second',
+            invocationTarget: target,
+            expires: future,
+            controller: agent.did
+          })
+        },
+        {
+          id: 'g-agent-summary',
+          target,
+          allowedActions: ['GET'],
+          expires: future
+        }
+      ]
+    })
+
+    const outcome = await storage.revokeAgentGrants({ controller: agent.did })
+    expect(outcome).toMatchObject({ skipped: 1, unrevocable: 1 })
   })
 
   it('leaves an app login for the same DID to the app path', async () => {
@@ -2940,7 +3017,13 @@ describe('StorageManager.revokeAgentCollectionRecipients', () => {
         controller: agent.did,
         revokedByRotation: rotation.revokedIds
       })
-    ).toEqual({ revoked: 0, withdrawn: 0, skipped: 1, revokedIds: [] })
+    ).toEqual({
+      revoked: 0,
+      withdrawn: 0,
+      skipped: 1,
+      unrevocable: 0,
+      revokedIds: []
+    })
   })
 
   it('reads no key epoch for a grant target the listing reports public', async () => {

@@ -254,6 +254,41 @@ describe('precheckExternalRequest', () => {
     ).rejects.toMatchObject({ refusal: 'malformedRequest' })
   })
 
+  it('refuses capability queries naming more than one grantee controller', () => {
+    const second = {
+      ...ZCAP_QUERY.capabilityQuery[0],
+      referenceId: 'notes',
+      controller: 'did:key:z6MkOtherAgent'
+    }
+    const request = {
+      query: [
+        { ...ZCAP_QUERY, capabilityQuery: [ZCAP_QUERY.capabilityQuery[0]] },
+        { ...ZCAP_QUERY, capabilityQuery: [second] }
+      ]
+    } as unknown as IVPRDetails
+    expect(
+      refusalOf(() =>
+        precheckExternalRequest({ request, exchangeUrl: EXCHANGE_URL })
+      )
+    ).toBe('multipleGrantees')
+  })
+
+  it('accepts several capability queries naming the same controller', () => {
+    const second = { ...ZCAP_QUERY.capabilityQuery[0], referenceId: 'notes' }
+    const request = {
+      query: [
+        {
+          ...ZCAP_QUERY,
+          capabilityQuery: [ZCAP_QUERY.capabilityQuery[0], second]
+        }
+      ]
+    } as unknown as IVPRDetails
+    expect(
+      precheckExternalRequest({ request, exchangeUrl: EXCHANGE_URL }).profile
+        .zcapRequests
+    ).toHaveLength(2)
+  })
+
   it('refuses a domain on any request', () => {
     expect(
       refusalOf(() =>

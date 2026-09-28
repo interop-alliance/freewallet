@@ -42,6 +42,9 @@ module `src/lib/walletRequest/externalRequest.ts`, each with its own copy:
   since the server answers the same for both), an unreachable one, or one
   answering with no readable VPR;
 - a request asking for no storage access;
+- capability queries naming more than one grantee `controller`, since each
+  grant is delegated to its own query's controller and an agent row names
+  one;
 - a `DIDAuthentication` query in either form, and a `domain` on any request
   (freewallet requires a `domain` for DID Auth and there is no origin to
   match it against);
@@ -65,7 +68,8 @@ decline abandons the exchange, which expires on its own.
 
 Grants answered here are listed and revocable on the Applications page as
 agent rows, keyed by the grant's `controller` did:key (`listConnectedAgents`
-in `src/lib/connectedApps.ts`) and titled by `agent.name`, or by the grantee
+in `src/lib/connectedApps.ts`), which is every grant's controller, since the
+precheck refuses a request naming two and titled by `agent.name`, or by the grantee
 key's fingerprint when no name was sent. A row's grants are the union over
 every agent Login for that controller newer than the latest matching Revoke
 activity (same origin marker, no `appConnect`, the controller in
@@ -89,7 +93,12 @@ generation is no longer the pointed one) counts as skipped, the server's
 `AlreadyRevokedError` counts as revoked, and any other refusal is thrown
 before any Revoke is recorded. The Revoke's
 `created` is stamped at least one millisecond past the latest Login, so a
-fast-clocked terminal cannot leave the row standing.
+fast-clocked terminal cannot leave the row standing. A run that left a
+recorded grant with no capability to POST (a legacy summary-only entry)
+ends with its own toast (`agentRevokeOutcomeKey` in
+`src/session/applications.ts`), so a partial revoke does not read as a clean
+one. Expired and dead-chain grants do not count, being already over, and
+neither does a grant delegated to another agent's key.
 
 A `#private-collection` grant provisions its collection encrypted, as on
 the App Connect path: the user is recipient zero and the agent's identity
