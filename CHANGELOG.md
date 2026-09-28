@@ -4,6 +4,12 @@
 
 ### Fixed
 
+- The user key cascade walks every collection the Space listing names,
+  rather than only those whose host-served metadata carries `encryption`.
+  Each collection's own governing log decides whether it rotates, so a host
+  omitting that member can no longer keep an app-provisioned collection on
+  the retired user key generation. The listing is now one lean GET with no
+  per-collection describe.
 - A collection key rotation (an unshare, an app or agent revocation) wraps
   the fresh epoch only to recipients the wallet admitted. These are the
   owner, the account's earlier user key generations, the grantee of a

@@ -2,10 +2,10 @@
 /**
  * Unit tests for the collection fan-out of the user key cascade
  * (`src/session/userKeyCascade.ts`): the enumeration (encrypted standard
- * collections plus every remotely listed encrypted collection, deduplicated,
+ * collections plus every remotely listed collection, deduplicated,
  * degrading to the standard set when the remote listing fails) and the
- * remote-store adapter handed to the `@interop/wallet-core/keys` driver
- * (`isEncrypted` over the encryption descriptor), plus the caller's
+ * `isEncrypted` probe handed to the `@interop/wallet-core/keys` driver
+ * (over each collection's own governing log), plus the caller's
  * per-collection descriptor-store lookup, which the fan-out now takes rather
  * than builds. The driving and the per-collection staleness/rotation logic
  * live in wallet-core and are mocked here.
@@ -62,21 +62,22 @@ const STANDARD_ENCRYPTED_IDS = WALLET_STANDARD_COLLECTIONS.filter(
 ).map(spec => spec.id)
 
 /**
- * A remote-store stub: `listCollections` yields the given remote items, and
- * `collectionEncryption` declares every collection encrypted unless the test
- * overrides it.
+ * A remote-store stub: the lean `listCollectionPublicStates` yields the given
+ * remote items' ids, and the full `listCollections` reports each item's
+ * host-derived `isEncrypted` flag, which the cascade must not consult.
  */
 function makeFakeRemoteStore({
   remoteItems = [] as Array<{ id?: string; isEncrypted?: boolean }>,
   listFails = false
 } = {}) {
   return {
-    listCollections: vi.fn(async () => {
+    listCollectionPublicStates: vi.fn(async () => {
       if (listFails) {
         throw new Error('listing down')
       }
-      return remoteItems
+      return remoteItems.map(item => ({ id: item.id, isPublic: false }))
     }),
+    listCollections: vi.fn(async () => remoteItems),
     collectionEncryption: vi.fn(
       async () => ({ scheme: 'edv' }) as unknown as CollectionEncryption
     )
@@ -97,11 +98,11 @@ beforeEach(() => {
 })
 
 describe('cascadeCollectionsToUserKey', () => {
-  it('names the encrypted standard collections plus the remotely listed encrypted ones, deduplicated', async () => {
+  it('names the encrypted standard collections plus every remotely listed one, deduplicated', async () => {
     const remoteStore = makeFakeRemoteStore({
       remoteItems: [
         // A duplicate of a standard collection, an app-provisioned one, and
-        // a plaintext one that must be excluded.
+        // a plaintext one, which the log-governed probe drops later.
         { id: STANDARD_ENCRYPTED_IDS[0], isEncrypted: true },
         { id: 'app-notes', isEncrypted: true },
         { id: 'public-credentials', isEncrypted: false }
@@ -117,7 +118,7 @@ describe('cascadeCollectionsToUserKey', () => {
 
     const args = driverArgs()
     expect([...args.collectionIds].sort()).toEqual(
-      [...STANDARD_ENCRYPTED_IDS, 'app-notes'].sort()
+      [...STANDARD_ENCRYPTED_IDS, 'app-notes', 'public-credentials'].sort()
     )
     expect(args.rosterDescriptor).toBe(ROSTER_DESCRIPTOR)
     expect(args.clientKeyAgreementKey).toBe(CLIENT_KAK)
@@ -176,14 +177,44 @@ describe('cascadeCollectionsToUserKey', () => {
     const { isEncrypted } = driverArgs()
     await expect(isEncrypted!('app-notes')).resolves.toBe(true)
     await expect(isEncrypted!('public-credentials')).resolves.toBe(false)
-    // One listing, for the enumeration alone: the probe reads the
+    // One lean listing, for the enumeration alone: the probe reads the
     // collection's own verified log, so the server's derived `encryption`
     // member decides nothing here.
-    expect(remoteStore.listCollections).toHaveBeenCalledOnce()
+    expect(remoteStore.listCollectionPublicStates).toHaveBeenCalledOnce()
+    expect(remoteStore.listCollections).not.toHaveBeenCalled()
     expect(remoteStore.collectionEncryption).not.toHaveBeenCalled()
     expect(stores.asked).toEqual(
       expect.arrayContaining(['app-notes', 'public-credentials'])
     )
+  })
+
+  it('rotates an app collection whose listing omits `encryption`', async () => {
+    // The host drops the derived `encryption` member for an app-provisioned
+    // collection whose governing log stands. The cascade must still name it
+    // and the probe must still admit it, or its epoch keeps naming the
+    // retired user key generation.
+    const remoteStore = makeFakeRemoteStore({
+      remoteItems: [{ id: 'app-notes', isEncrypted: false }]
+    })
+    vi.mocked(driveCascade).mockImplementation(
+      async ({ collectionIds, isEncrypted }) => {
+        const outcomes: Record<string, 'rotated'> = {}
+        for (const collectionId of collectionIds) {
+          if (!isEncrypted || (await isEncrypted(collectionId))) {
+            outcomes[collectionId] = 'rotated'
+          }
+        }
+        return { outcomes, failed: [] }
+      }
+    )
+    const result = await cascadeCollectionsToUserKey({
+      remoteStore,
+      storeFor: recordingStoreFor().storeFor,
+      rosterDescriptor: ROSTER_DESCRIPTOR,
+      clientKeyAgreementKey: CLIENT_KAK,
+      userKey: USER_KEY
+    })
+    expect(result.outcomes['app-notes']).toBe('rotated')
   })
 
   it('treats a listed-encrypted collection with no log as not encrypted', async () => {

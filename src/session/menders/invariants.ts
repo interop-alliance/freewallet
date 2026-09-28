@@ -102,8 +102,9 @@ const DECLARATIONS: ReadonlyArray<
       'recovery-code-issuance'
     ],
     // Each collection's epoch comes from its governing log's verified head;
-    // the candidate set the cascade walks is seeded from the host-served
-    // `isEncrypted` flag on the collection listing (design note 3).
+    // the candidate set the cascade walks is seeded from every collection
+    // the host-served listing names, and each candidate's own log decides
+    // whether it is encrypted (design note 3).
     evidence: ['verified-log', 'host-listing']
   },
   // 4

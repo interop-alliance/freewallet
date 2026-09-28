@@ -142,9 +142,11 @@ its rotation ahead of the edit and seal nothing, and a ladder-signed append
 there would be refused for naming a version the edit is not in. A rotation
 that appends
 nothing still seals. Which collections it covers is decided from the same
-logs: the Space listing only enumerates collections, and whether one is
-encrypted is answered by reading its own governing log, so a host omitting
-the derived `encryption` member cannot keep a collection out of a rotation.
+logs. The candidates are the encrypted standard collections plus every
+collection the Space listing names. Whether a candidate is encrypted is
+answered by reading its own governing log, and one with no log is skipped.
+So a host omitting the derived `encryption` member cannot keep a collection
+out of a rotation.
 
 **The read path and the cache.** A descriptor is the verified head of its
 collection's log, read at login and on the unknown-epoch refresh. The

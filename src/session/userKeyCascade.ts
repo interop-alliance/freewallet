@@ -40,35 +40,29 @@ const log = createLogger('fw:session:cascade')
 export type { UserKeyCascadeResult } from '@interop/wallet-core/keys'
 
 /**
- * The Space's collection listing, reduced to what the cascade asks of it:
- * which collections exist remotely and which of those the server declares
- * encrypted. One listing answers both questions -- the enumeration and the
- * per-collection `isEncrypted` probe -- so the fan-out no longer re-describes
- * every collection it is about to rotate.
+ * The Space's collection ids, the cascade's candidate set. The listing only
+ * enumerates: whether each candidate is encrypted is answered by its own
+ * governing log (`isEncrypted` below), so the lean listing is enough and no
+ * collection is described here.
  *
- * The listing is best-effort: offline, `listed` is false, the standard
- * encrypted set still rotates, and the probe falls back to a describe per
- * collection (the sweep covers the rest at a later login).
+ * The listing is best-effort: offline it yields nothing, the standard
+ * encrypted set still rotates, and the sweep covers the rest at a later
+ * login.
  *
  * @param options {object}
  * @param options.remoteStore {WASRemoteStore}
- * @returns {Promise<{ listed: boolean, ids: Set<string>, encrypted: Set<string> }>}
+ * @returns {Promise<Set<string>>}
  */
-async function listedCollections({
+async function listedCollectionIds({
   remoteStore
 }: {
   remoteStore: WASRemoteStore
-}): Promise<{ listed: boolean; ids: Set<string>; encrypted: Set<string> }> {
+}): Promise<Set<string>> {
   const ids = new Set<string>()
-  const encrypted = new Set<string>()
   try {
-    for (const item of await remoteStore.listCollections()) {
-      if (!item.id) {
-        continue
-      }
-      ids.add(item.id)
-      if (item.isEncrypted) {
-        encrypted.add(item.id)
+    for (const item of await remoteStore.listCollectionPublicStates()) {
+      if (item.id) {
+        ids.add(item.id)
       }
     }
   } catch (err) {
@@ -76,21 +70,19 @@ async function listedCollections({
       'Could not list remote collections for the user key cascade; rotating the standard collections only',
       { err }
     )
-    return { listed: false, ids, encrypted }
   }
-  return { listed: true, ids, encrypted }
+  return ids
 }
 
 /**
  * The fan-out's work, as the shared cascade orchestrator expects it: which
- * encrypted collections exist in this Space (the standard collections that
- * declare encryption, plus every remotely listed encrypted collection,
- * deduplicated), each one's descriptor store, and how its encryption
- * declaration is reached through the remote store.
+ * encrypted collections exist in this Space, each one's descriptor store,
+ * and how its encryption declaration is reached.
  *
- * The remote listing is read once per cascade and memoized, since the
- * orchestrator asks for the ids and then for each collection's encryption
- * state.
+ * The candidates are the standard encrypted collections plus every
+ * collection the Space listing names, deduplicated. The host-served
+ * `encryption` member plays no part: `isEncrypted` reads each candidate's
+ * own verified log and only drops one that has no log.
  *
  * @param options {object}
  * @param options.remoteStore {WASRemoteStore}
@@ -107,32 +99,23 @@ export function cascadeCollections({
   remoteStore: WASRemoteStore
   storeFor: CollectionStoreFor
 }): CascadeCollections & { collectionIds: () => Promise<string[]> } {
-  let listing: Promise<{
-    listed: boolean
-    ids: Set<string>
-    encrypted: Set<string>
-  }> | null = null
-  const listOnce = () => (listing ??= listedCollections({ remoteStore }))
-
   return {
     collectionIds: async () => {
-      const { encrypted } = await listOnce()
       const ids = new Set<string>(
         ENCRYPTED_STANDARD_COLLECTIONS.map(spec => spec.id)
       )
-      for (const id of encrypted) {
+      for (const id of await listedCollectionIds({ remoteStore })) {
         ids.add(id)
       }
       return [...ids]
     },
     storeFor,
-    // Skip a collection that carries no governing log (a plaintext one, or
-    // a standard collection on an account that never provisioned it).
+    // Skip a candidate that carries no governing log (a plaintext one, or a
+    // standard collection on an account that never provisioned it).
     // Answered from the collection's own verified log rather than the
-    // server's derived `encryption` member: the listing above only
-    // enumerates, since a host omitting the member for one collection could
-    // otherwise keep it out of every rotation and leave it keyed to the
-    // retired generation.
+    // server's derived `encryption` member, and only ever removing a
+    // listed candidate: a host omitting the member for one collection
+    // cannot keep it out of a rotation.
     isEncrypted: async collectionId =>
       (await storeFor(collectionId).read()) !== null
   }
@@ -140,8 +123,8 @@ export function cascadeCollections({
 
 /**
  * Re-epochs every encrypted collection onto the roster's current user key, in
- * parallel. Collections not declared encrypted server-side are skipped; a
- * collection that fails is reported in `failed` and the rest proceed.
+ * parallel. A collection with no governing log is skipped; a collection
+ * that fails is reported in `failed` and the rest proceed.
  *
  * @param options {object}
  * @param options.remoteStore {WASRemoteStore}
