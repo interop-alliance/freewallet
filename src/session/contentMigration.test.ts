@@ -66,6 +66,7 @@ import {
   revisionRow
 } from '@/stores/testing/migrationFixtures'
 import type { Session } from '@/types/auth'
+import { captureCeremonyEvents } from '../../tests/unit/ceremonyEventCapture'
 import {
   ContentMigrationInProgressError,
   contentMigrationErrorKey,
@@ -804,6 +805,178 @@ describe('migrateContent', () => {
 
     await migrateContent({ session, bundle, secret })
     expect(fetch).not.toHaveBeenCalled()
+  })
+})
+
+describe('content-migration ceremony events', () => {
+  let capture: ReturnType<typeof captureCeremonyEvents>
+  beforeEach(() => {
+    capture = captureCeremonyEvents()
+  })
+  afterEach(() => {
+    capture.stop()
+  })
+
+  /**
+   * Every captured event of the migration, serialized, for the redaction
+   * checks.
+   *
+   * @returns {string}
+   */
+  function serialized(): string {
+    return JSON.stringify(
+      capture.events.filter(event => event.ns === 'fw:session:migration')
+    )
+  }
+
+  it('emits its stages and one clean outcome, with counts and no bundle text', async () => {
+    const session = await memorySession()
+    const { bundle, secret } = await makeBundle([
+      {
+        collectionId: PRIVATE_CREDENTIALS_COLLECTION,
+        rows: [credentialRow('first'), credentialRow('second')]
+      }
+    ])
+
+    await migrateContent({ session, bundle, secret })
+
+    expect(capture.stageNames('content-migration')).toEqual([
+      'preflight',
+      'walk',
+      'import-activity'
+    ])
+    const outcome = capture.soleOutcome('content-migration')
+    expect(outcome.level).toBe('info')
+    expect(outcome.data).toMatchObject({
+      outcome: 'clean',
+      accepted: 2,
+      stopped: false
+    })
+    const text = serialized()
+    for (const bundleText of [
+      'Fixture Wallet',
+      'zFixtureScid',
+      PRIVATE_CREDENTIALS_COLLECTION,
+      (secret as { recoveryCode: string }).recoveryCode
+    ]) {
+      expect(text).not.toContain(bundleText)
+    }
+  })
+
+  it('classifies a quota-stopped walk as partial', async () => {
+    const session = await memorySession()
+    const { bundle, secret } = await makeBundle([
+      {
+        collectionId: PRIVATE_CREDENTIALS_COLLECTION,
+        rows: [credentialRow('first')]
+      }
+    ])
+    vi.spyOn(session.storage, 'importCredential').mockRejectedValue(
+      new QuotaExceededError('The Space is full.')
+    )
+
+    await migrateContent({ session, bundle, secret })
+
+    const outcome = capture.soleOutcome('content-migration')
+    expect(outcome.level).toBe('warn')
+    expect(outcome.data).toMatchObject({
+      outcome: 'partial',
+      stopped: true
+    })
+  })
+
+  it('classifies a quota refusal of the Import activity write as failed', async () => {
+    const session = await memorySession()
+    const { bundle, secret } = await makeBundle([
+      {
+        collectionId: PRIVATE_CREDENTIALS_COLLECTION,
+        rows: [credentialRow('first')]
+      }
+    ])
+    vi.spyOn(
+      session.storage,
+      'putHistoryItemReplacingOthers'
+    ).mockRejectedValue(new QuotaExceededError('The Space is full.'))
+
+    await expect(
+      migrateContent({ session, bundle, secret })
+    ).rejects.toBeInstanceOf(QuotaExceededError)
+
+    const outcome = capture.soleOutcome('content-migration')
+    expect(outcome.level).toBe('error')
+    expect(outcome.data).toMatchObject({
+      outcome: 'failed',
+      errorName: 'QuotaExceededError'
+    })
+  })
+
+  it('classifies a second concurrent run as refused, one outcome per run', async () => {
+    const session = await memorySession()
+    const { bundle, secret } = await makeBundle([
+      {
+        collectionId: PRIVATE_CREDENTIALS_COLLECTION,
+        rows: [credentialRow('first')]
+      }
+    ])
+
+    const first = migrateContent({ session, bundle, secret })
+    await expect(migrateContent({ session, bundle, secret })).rejects.toThrow()
+    await first
+
+    const outcomes = capture.outcomes('content-migration')
+    expect(
+      outcomes.map(event => (event.data as { outcome: string }).outcome).sort()
+    ).toEqual(['clean', 'refused'])
+    const refused = outcomes.find(
+      event => (event.data as { outcome: string }).outcome === 'refused'
+    )
+    expect(refused?.data).toMatchObject({
+      errorName: 'ContentMigrationInProgressError'
+    })
+    // Two runs, two run ids.
+    expect(
+      new Set(outcomes.map(event => (event.data as { run: string }).run)).size
+    ).toBe(2)
+  })
+
+  it('classifies a cancelled run as refused', async () => {
+    const session = await memorySession()
+    const { bundle, secret } = await makeBundle([
+      {
+        collectionId: PRIVATE_CREDENTIALS_COLLECTION,
+        rows: [credentialRow('first')]
+      }
+    ])
+    const controller = new AbortController()
+    controller.abort()
+
+    await expect(
+      migrateContent({ session, bundle, secret, signal: controller.signal })
+    ).rejects.toBeDefined()
+
+    const outcome = capture.soleOutcome('content-migration')
+    expect(outcome.data).toMatchObject({
+      outcome: 'refused',
+      errorName: 'AbortError'
+    })
+  })
+
+  it('classifies an unreadable bundle as refused', async () => {
+    const session = await memorySession()
+
+    await expect(
+      migrateContent({
+        session,
+        bundle: new TextEncoder().encode('not a bundle'),
+        secret: { recoveryCode: generateRecoveryCode() }
+      })
+    ).rejects.toBeDefined()
+
+    const outcome = capture.soleOutcome('content-migration')
+    expect(outcome.data).toMatchObject({ outcome: 'refused' })
+    expect(['BundleInvalidError', 'AccountSpaceArchiveMissingError']).toContain(
+      (outcome.data as { errorName: string }).errorName
+    )
   })
 })
 

@@ -80,9 +80,11 @@ import {
 } from '@/session/pendingEnrollment'
 import {
   assertClientStillEnrolled,
-  wipeStaleClientResidue
+  wipeStaleClientResidue,
+  type BrowserForgottenError
 } from '@/session/forget'
 import {
+  errorNameOf,
   mendReportAccumulator,
   type MendReportAccumulator
 } from '@interop/wallet-core/menders'
@@ -498,7 +500,7 @@ export async function initSessionFromSeed({
   // report, so every reader has one shape to read. A caller that starts one
   // stamps `session.mends` itself, beside `session.registryReady`.
   if (!accumulator) {
-    const mends = mendReportAccumulator<CeremonyId>()
+    const mends = mendReportAccumulator<CeremonyId>({ logger: log })
     session.mends = mends.settled
     mends.settle()
   }
@@ -906,7 +908,7 @@ async function loginWithUnlockCredential({
   // One report per login attempt loop, so the routing entries a re-routed
   // attempt already reported (the stale-record wipe) stay in the report the
   // session finally carries.
-  const mends = mendReportAccumulator<CeremonyId>()
+  const mends = mendReportAccumulator<CeremonyId>({ logger: log })
   for (let staleRetries = 0; ; staleRetries++) {
     const routed = await routeUnlockLogin({
       ...(secret !== undefined ? { secret } : {}),
@@ -1017,6 +1019,56 @@ async function loginWithUnlockCredential({
         throw new KeyringRecordUnusableError({ cause: err })
       }
     }
+  }
+}
+
+/**
+ * The forgotten-browser detector, with its mend reported. A detector that
+ * finds this browser forgotten wipes the residue and throws
+ * `BrowserForgottenError`; that wipe is the mend, so it reports
+ * `this-browser-is-still-an-enrolled-client` as `clean`, or `partial` with
+ * counts when a wipe stage failed or went unconfirmed, emits the entry, and
+ * rethrows. The typed error stays the caller's contract. Every other
+ * outcome returns unchanged for the caller to grade.
+ *
+ * @param options {object}
+ * @param options.found {KeyringFetchResult}
+ * @param options.pinStore {ResourceLogPinStore}
+ * @param [options.idb] {IDBFactory}
+ * @param options.mends {MendReportAccumulator}   the login's accumulator
+ * @returns {Promise<Awaited<ReturnType<typeof assertClientStillEnrolled>>>}
+ */
+async function detectForgottenBrowser({
+  found,
+  pinStore,
+  idb,
+  mends
+}: Parameters<typeof assertClientStillEnrolled>[0] & {
+  mends: MendReportAccumulator<CeremonyId>
+}): Promise<Awaited<ReturnType<typeof assertClientStillEnrolled>>> {
+  try {
+    return await assertClientStillEnrolled({ found, pinStore, idb })
+  } catch (err) {
+    if (errorNameOf(err) === 'BrowserForgottenError') {
+      const { wipeFailed = [], wipeUnverified = [] } =
+        err as Partial<BrowserForgottenError>
+      const residue = wipeFailed.length + wipeUnverified.length > 0
+      mends.report({
+        invariant: 'this-browser-is-still-an-enrolled-client',
+        outcome: residue ? 'partial' : 'clean',
+        // Counts alone: a failed wipe stage's name can carry an unlock
+        // Space id.
+        ...(residue
+          ? {
+              detail: {
+                failed: wipeFailed.length,
+                unverified: wipeUnverified.length
+              }
+            }
+          : {})
+      })
+    }
+    throw err
   }
 }
 
@@ -1167,7 +1219,7 @@ async function sessionFromKeyringHit({
   const pinStore = persistence.logPins
   const detected =
     found.clientKeys && !pendingResume
-      ? await assertClientStillEnrolled({ found, pinStore, idb })
+      ? await detectForgottenBrowser({ found, pinStore, idb, mends })
       : undefined
   const detectorLog = detected === 'unverified' ? undefined : detected
   if (detectorLog) {
@@ -1222,11 +1274,17 @@ async function sessionFromKeyringHit({
         confirmOwed ||
         spendResume.standing === 'pending' ||
         spendResume.registry === 'skipped'
+      // No spend stage ran at all: the marker says the record was
+      // spend-written, and the resume reported nothing.
+      let spendOutcome: 'noop' | 'partial' | 'clean' = 'clean'
+      if (!spendResume) {
+        spendOutcome = 'noop'
+      } else if (outstanding) {
+        spendOutcome = 'partial'
+      }
       mends.report({
         invariant: 'recovery-spend-is-completed',
-        // No spend stage ran at all: the marker says the record was
-        // spend-written, and the resume reported nothing.
-        outcome: !spendResume ? 'noop' : outstanding ? 'partial' : 'clean',
+        outcome: spendOutcome,
         ...(spendResume
           ? {
               detail: {

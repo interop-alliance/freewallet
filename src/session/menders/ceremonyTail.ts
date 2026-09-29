@@ -9,14 +9,16 @@
  * runner ever sees such an entry, so the ceremony's own caller is what
  * reports it, and the grading here is the runner's: an entry the ceremony
  * graded `failed` or `refused` logs the declared `warn` of the invariant it
- * names, and every other grade logs at info. The warning comes from the
- * warn table rather than from the assembled registry, which reaches the
- * ceremony modules that call this and would close an import cycle.
+ * names. The warning comes from the warn table rather than from the
+ * assembled registry, which reaches the ceremony modules that call this and
+ * would close an import cycle.
  *
- * The outcome members stay on the ceremony's own outcome, so a later mender
- * event channel can consume the same entries without going through the log.
+ * Every entry, whatever its grade, also emits one `'ceremony mender'` event
+ * naming the ceremony that just ran. The caller wraps a shared ceremony and
+ * holds no emitter of its run, so the event carries no `run` id.
  */
 import type { MendReport } from '@interop/wallet-core/menders'
+import { menderEvent } from '@interop/wallet-core'
 import type { CeremonyId } from '@interop/wallet-core'
 import { createLogger } from '@/lib/log'
 import { MENDER_WARNINGS } from './warnings.js'
@@ -29,13 +31,16 @@ const log = createLogger('fw:session:registry')
  * on the way out.
  *
  * @param options {object}
+ * @param options.ceremony {CeremonyId}   the ceremony that just ran
  * @param options.mended {MendReport}   the entries the ceremony's outcome
  *   carries, in report order
  * @returns {void}
  */
 export function reportCeremonyTail({
+  ceremony,
   mended
 }: {
+  ceremony: CeremonyId
   mended: MendReport<CeremonyId>
 }): void {
   for (const entry of mended) {
@@ -50,8 +55,7 @@ export function reportCeremonyTail({
     }
     if (outcome === 'failed' || outcome === 'refused') {
       log.warn(MENDER_WARNINGS[invariant], context)
-    } else {
-      log.info('A ceremony reported its tail mend entry', context)
     }
+    menderEvent({ log, entry, ceremony })
   }
 }

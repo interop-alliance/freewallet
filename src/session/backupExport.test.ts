@@ -15,6 +15,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { base64urlnopad } from '@scure/base'
 import { addSink, captureSink } from '@interop/logger'
 import type { Session } from '@/types/auth'
+import { captureCeremonyEvents } from '../../tests/unit/ceremonyEventCapture'
 
 vi.mock('@/app.config', async importOriginal => ({
   ...(await importOriginal<Record<string, unknown>>()),
@@ -107,6 +108,7 @@ const {
   BackupCapabilityUnsupportedError,
   BackupContinuityError,
   BackupCredentialNotListedError,
+  BackupRemoteStorageMissingError,
   BackupSpaceExportError
 } = await import('@/session/backupExport')
 
@@ -1044,6 +1046,218 @@ describe('exportBackup', () => {
     expect(logged).not.toContain(Array.from(SECRET).join(','))
     expect(logged).not.toContain(JSON.stringify(SECRET))
     expect(logged).not.toContain('an-export-password')
+  })
+})
+
+describe('backup-export ceremony events', () => {
+  /**
+   * Runs one export to its end with the channel captured, handing back the
+   * failure, if any, and the capture.
+   *
+   * @param options {object}
+   * @param options.session {Session}
+   * @param [options.exportPassphrase] {string}
+   * @returns {Promise<object>}
+   */
+  async function captured({
+    session,
+    exportPassphrase
+  }: {
+    session: Session
+    exportPassphrase?: string
+  }): Promise<{
+    failure: unknown
+    capture: ReturnType<typeof captureCeremonyEvents>
+  }> {
+    const capture = captureCeremonyEvents()
+    try {
+      const failure = await exportBackup({
+        session,
+        credentialLabel: 'Backup',
+        ...(exportPassphrase ? { exportPassphrase } : {})
+      })
+        .then(drain)
+        .then(() => undefined)
+        .catch((err: unknown) => err)
+      return { failure, capture }
+    } finally {
+      capture.stop()
+    }
+  }
+
+  it('emits every stage and one clean outcome when the stream closes, carrying no secret or unlock Space id', async () => {
+    const { session, remoteStore } = makeSession()
+    vi.mocked(accountCeremonyContext).mockResolvedValue(
+      ladderContext({ remoteStore }) as never
+    )
+
+    const { failure, capture } = await captured({
+      session,
+      exportPassphrase: 'an-export-password'
+    })
+
+    expect(failure).toBeUndefined()
+    expect(capture.stageNames('backup-export')).toEqual([
+      'preflight',
+      'establish-credential',
+      'list-spaces',
+      'export-spaces',
+      'settle'
+    ])
+    expect(capture.soleOutcome('backup-export').data).toMatchObject({
+      outcome: 'clean',
+      spaces: 4,
+      sealed: true
+    })
+    const events = capture.serialized()
+    for (const secretText of [
+      base64urlnopad.encode(SECRET),
+      'an-export-password',
+      'unlock-passphrase',
+      'unlock-backup',
+      'annex-space'
+    ]) {
+      expect(events).not.toContain(secretText)
+    }
+  })
+
+  it('classifies a session with no remote Space as refused, under its named class', async () => {
+    const { session, remoteStore } = makeSession({ hasRemoteStorage: false })
+    vi.mocked(accountCeremonyContext).mockResolvedValue(
+      ladderContext({ remoteStore }) as never
+    )
+
+    const { failure, capture } = await captured({ session })
+
+    expect(failure).toBeInstanceOf(BackupRemoteStorageMissingError)
+    expect((failure as Error).name).toBe('BackupRemoteStorageMissingError')
+    expect(capture.soleOutcome('backup-export').data).toMatchObject({
+      outcome: 'refused',
+      errorName: 'BackupRemoteStorageMissingError'
+    })
+  })
+
+  it('classifies each pre-flight refusal as refused', async () => {
+    const { session, remoteStore } = makeSession({ withLadderSeed: false })
+    vi.mocked(accountCeremonyContext).mockResolvedValue(
+      enrolledContext({ remoteStore }) as never
+    )
+    const annex = await captured({ session })
+    expect(annex.capture.soleOutcome('backup-export').data).toMatchObject({
+      outcome: 'refused',
+      errorName: 'BackupAnnexCommitError'
+    })
+
+    const unsupported = makeSession()
+    vi.mocked(accountCeremonyContext).mockResolvedValue(
+      ladderContext({ remoteStore: unsupported.remoteStore }) as never
+    )
+    vi.mocked(unlockSpaceCapabilityRefusal).mockReturnValue(
+      'unsupported-capability' as never
+    )
+    const capability = await captured({ session: unsupported.session })
+    expect(capability.capture.soleOutcome('backup-export').data).toMatchObject({
+      outcome: 'refused',
+      errorName: 'BackupCapabilityUnsupportedError'
+    })
+  })
+
+  it('classifies a failure once the establishment began as failed', async () => {
+    const { session, remoteStore } = makeSession()
+    vi.mocked(accountCeremonyContext).mockResolvedValue(
+      ladderContext({ remoteStore }) as never
+    )
+    vi.mocked(getUnlockMethods)
+      .mockResolvedValueOnce({ methods: registryMethods() } as never)
+      .mockResolvedValueOnce({ methods: credentialEntryOnly() } as never)
+      .mockResolvedValue({ methods: [] } as never)
+
+    const { failure, capture } = await captured({ session })
+
+    expect(failure).toBeDefined()
+    expect(capture.soleOutcome('backup-export').data).toMatchObject({
+      outcome: 'failed'
+    })
+  })
+
+  it('classifies a Space export refused mid-stream as failed', async () => {
+    const { session, remoteStore } = makeSession()
+    vi.mocked(accountCeremonyContext).mockResolvedValue(
+      ladderContext({ remoteStore }) as never
+    )
+    remoteStore.exportSpace.mockRejectedValue(new Error('403 Forbidden'))
+
+    const { failure, capture } = await captured({ session })
+
+    expect(failure).toBeDefined()
+    expect(capture.soleOutcome('backup-export').data).toMatchObject({
+      outcome: 'failed'
+    })
+    // The stream had started: the establishment and the listing landed.
+    expect(capture.stageNames('backup-export')).toEqual([
+      'preflight',
+      'establish-credential',
+      'list-spaces'
+    ])
+  })
+
+  it('classifies a user cancel once the stream has started as refused', async () => {
+    const { session, remoteStore } = makeSession()
+    vi.mocked(accountCeremonyContext).mockResolvedValue(
+      ladderContext({ remoteStore }) as never
+    )
+    const cancel = new Error('The user cancelled.')
+    cancel.name = 'AbortError'
+    remoteStore.exportSpace.mockRejectedValue(cancel)
+
+    const { failure, capture } = await captured({ session })
+
+    expect(failure).toBeDefined()
+    expect(capture.soleOutcome('backup-export').data).toMatchObject({
+      outcome: 'refused'
+    })
+  })
+
+  it('classifies a user cancel before the stream is handed back as refused', async () => {
+    const { session, remoteStore } = makeSession()
+    vi.mocked(accountCeremonyContext).mockResolvedValue(
+      ladderContext({ remoteStore }) as never
+    )
+    const cancel = new Error('The user cancelled.')
+    cancel.name = 'AbortError'
+    vi.mocked(establishBackupCredential).mockRejectedValue(cancel)
+    const capture = captureCeremonyEvents()
+    try {
+      await expect(
+        exportBackup({ session, credentialLabel: 'Backup' })
+      ).rejects.toThrow('The user cancelled.')
+      expect(capture.soleOutcome('backup-export').data).toMatchObject({
+        outcome: 'refused',
+        errorName: 'AbortError'
+      })
+    } finally {
+      capture.stop()
+    }
+  })
+
+  it('classifies a reader cancel with an AbortError as refused', async () => {
+    const { session, remoteStore } = makeSession()
+    vi.mocked(accountCeremonyContext).mockResolvedValue(
+      ladderContext({ remoteStore }) as never
+    )
+    const capture = captureCeremonyEvents()
+    try {
+      const stream = await exportBackup({ session, credentialLabel: 'Backup' })
+      const abort = new Error('The save was cancelled.')
+      abort.name = 'AbortError'
+      await stream.cancel(abort)
+      expect(capture.soleOutcome('backup-export').data).toMatchObject({
+        outcome: 'refused',
+        errorName: 'AbortError'
+      })
+    } finally {
+      capture.stop()
+    }
   })
 })
 

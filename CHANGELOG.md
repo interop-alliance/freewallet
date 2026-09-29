@@ -4,6 +4,8 @@
 
 ### Fixed
 
+- The shared wipe's failed-stage warn names the `unlock-local-state` family
+  rather than the unlock Space id.
 - Content migration lands a small binary or text Resource of an encrypted
   app collection. Two such Resources in one collection no longer collapse
   to one identity, so the second is no longer reported `skipped` and lost.
@@ -114,6 +116,15 @@
 
 ### Changed
 
+- `reportCeremonyTail` takes the ceremony that ran. Its info line for a
+  non-failed entry is replaced by the entry's mender event; the declared
+  warn stays.
+- The credential-anchored mend's routing entries carry an arm's result
+  under `detail.arm` (was `detail.outcome`).
+- A backup export on a session with no remote Space throws
+  `BackupRemoteStorageMissingError` (was a plain `Error`).
+- Requires `@interop/wallet-core` 0.88.0 for the ceremony event helpers and
+  the event-emitting mend report accumulator.
 - The account-deletion, wallet-wipe, content-migration, and backup-export
   ceremony ids come from `@interop/wallet-core`'s `CEREMONY_IDS`.
   `src/session/ceremonies.ts` (`APP_CEREMONY_IDS`, `FREEWALLET_CEREMONY_IDS`,
@@ -233,6 +244,27 @@
 
 ### Added
 
+- The ceremony event channel's freewallet emit sites. Account deletion, the
+  shared wallet wipe, content migration, and backup export each emit
+  `'ceremony stage'` events and one `'ceremony outcome'` per run through
+  `@interop/wallet-core`'s `ceremonyEvents`, and export their stage ids
+  (`ACCOUNT_DELETION_STAGES`, `WALLET_WIPE_STAGES`,
+  `CONTENT_MIGRATION_STAGES`, `BACKUP_EXPORT_STAGES`). Detail is counts and
+  enums; wipe events name no unlock Space.
+- Every routing mend entry, the did:web projection entry, and every
+  ceremony-tail entry emits a `'ceremony mender'` event beside its report.
+  The login chain's entries emit through the login's report accumulator, on
+  the namespace of the composition that created it (`fw:session:init` for a
+  login, `fw:session:transient` for the session a signup opens).
+- The forgotten-browser detector reports its wipe as a mend of
+  `this-browser-is-still-an-enrolled-client` (`clean`, or `partial` with
+  counts) before `BrowserForgottenError` propagates.
+- A dev build emits one `e2e page tag` marker line per page load when a
+  Playwright init script tagged the page. The e2e fixture
+  `tests/shared/ceremonyEvents.ts` scopes the dev-log file by that tag and
+  offers `waitForStage`, `waitForOutcome`, `expectMender`, and
+  `expectNoFailedMenders`. The login specs and the torn-establishment spec
+  use it.
 - A remembered session's background replication declares the browser
   profile's `writerId` on every push, sent as the WAS `Writer-Id` header,
   so the changes feed echoes it. A transient session declares no label.

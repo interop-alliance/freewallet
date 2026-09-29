@@ -534,7 +534,8 @@ export async function transientSessionFromKeyringHit({
   accountLog?: PublishedWebvhLog
   mends?: MendReportAccumulator<CeremonyId>
 }): Promise<{ session: Session; userExists: boolean }> {
-  const mends = suppliedMends ?? mendReportAccumulator<CeremonyId>()
+  const mends =
+    suppliedMends ?? mendReportAccumulator<CeremonyId>({ logger: log })
   const standing = found.standing
   if (!standing?.ladderSeed) {
     // Invariant, not a user state: a standing record is the only record a
@@ -693,12 +694,15 @@ export async function transientSessionFromKeyringHit({
   // re-sealed, and the generation delegation it installs. The two the stage
   // itself decides grade the same way: a refusal where nothing was readied
   // at all, and otherwise whether this visit is what mended the predicate.
-  const graded = (mended: boolean): MendOutcome =>
-    readiness.outcome
-      ? mended
-        ? { outcome: 'clean' }
-        : { outcome: 'noop' }
-      : { outcome: 'refused', detail: { reason: 'generation-unavailable' } }
+  const graded = (mended: boolean): MendOutcome => {
+    if (!readiness.outcome) {
+      return {
+        outcome: 'refused',
+        detail: { reason: 'generation-unavailable' }
+      }
+    }
+    return { outcome: mended ? 'clean' : 'noop' }
+  }
   mends.report({
     invariant: 'annex-generation-is-reachable',
     ...graded(
@@ -708,16 +712,25 @@ export async function transientSessionFromKeyringHit({
   // Either re-mint counts as a mend: a fresh sibling is re-sealed into the
   // record just as a fresh bridge is, and grading on the bridge alone would
   // report a sibling-only re-mint as a no-op.
-  mends.report({
-    invariant: 'standing-delegations-verify-under-the-current-document',
-    ...(readiness.outcome?.bridgeResealError !== undefined
-      ? { outcome: 'partial' as const, detail: { reason: 'bridge-reseal' } }
-      : readiness.outcome &&
-          (readiness.outcome.siblingReminted ||
-            readiness.outcome.bridgeReminted)
-        ? { outcome: 'clean' as const }
-        : { outcome: 'noop' as const })
-  })
+  let standingDelegations: MendOutcome = { outcome: 'noop' }
+  if (readiness.outcome?.bridgeResealError !== undefined) {
+    standingDelegations = {
+      outcome: 'partial',
+      detail: { reason: 'bridge-reseal' }
+    }
+  } else if (
+    readiness.outcome &&
+    (readiness.outcome.siblingReminted || readiness.outcome.bridgeReminted)
+  ) {
+    standingDelegations = { outcome: 'clean' }
+  }
+  mends.report(
+    {
+      invariant: 'standing-delegations-verify-under-the-current-document',
+      ...standingDelegations
+    },
+    { err: readiness.outcome?.bridgeResealError }
+  )
   // Graded on what the ensure DID, not on what it handed back: the outcome
   // always carries a generation delegation, so only a renewal or a freshly
   // minted generation (which installs one with its genesis) is a mend.

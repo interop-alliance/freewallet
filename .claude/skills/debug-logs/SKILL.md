@@ -103,12 +103,83 @@ freewallet marks the two whose body is a closure it supplies
 (`registry-write`, `keystore-promotion`) -- and both write into the one
 timer, so the profile reads as a single sequence.
 
+## Ceremony events
+
+Ceremonies and menders also report on one structured channel, keyed by
+`msg` and reserved `data` keys rather than by prose. Three messages:
+
+| `msg`                | level              | `data`                                                        |
+| -------------------- | ------------------ | ------------------------------------------------------------- |
+| `'ceremony stage'`   | debug              | `ceremony`, `run`, `stage`, detail                            |
+| `'ceremony outcome'` | by outcome (below) | `ceremony`, `run`, `outcome`, detail; `errorName` on a throw  |
+| `'ceremony mender'`  | by outcome (below) | `invariant`, `outcome`, detail; `errorName`, `ceremony`, `run` when held |
+
+- `ceremony` is a wallet-core `CeremonyId`; `invariant` is an id from the
+  mender registry; `stage` ids are per ceremony, exported beside it (for
+  example `ACCOUNT_DELETION_STAGES` in `src/session/accountSettings.ts`).
+- `run` is a short random id per ceremony run. Every event of one run
+  carries the same one, so a re-run or two interleaved runs stay apart.
+- Outcome levels: `clean` info, `noop` debug, `partial` warn, `refused`
+  warn, `failed` error. A thrown error rides top-level `err` beside
+  `data.errorName`.
+- Detail keys: `prior: true` on a stage that found its own work already
+  done; `reason` is a per-site reason code. Everything else is a count or
+  an enum.
+- A mender event from the runner or a routing site names no ceremony. A
+  ceremony-tail event names the ceremony that just ran.
+- The login chain's mender events, the runner's and the routing sites'
+  alike, come from the login's report accumulator. They ride the namespace
+  of the composition that created it: `fw:session:init` for a login, either
+  route, and `fw:session:transient` for the session a signup opens. A
+  ceremony-tail event rides `fw:session:registry`.
+
+Filter on `msg` as well as the keys: the runner's declared warn and other
+lines carry `data.invariant` and `data.outcome` too.
+
+```sh
+jq -c 'select(.msg=="ceremony outcome")' .dev-logs/app.ndjson
+jq -c 'select(.msg=="ceremony stage" and .data.ceremony=="account-deletion")' ...
+jq -c 'select(.msg=="ceremony mender" and .data.invariant=="generation-delegation-is-current")' ...
+jq -c 'select(.msg=="ceremony mender" and .data.outcome=="failed")' ...
+jq -c 'select(.data.run=="<run id>")' ...   # one run, in order by .seq
+```
+
+Reading them:
+
+- Torn-run signature: stage events and no outcome under one `run`. A tab
+  that died mid-ceremony emits exactly that. An outcome's absence does not
+  prove a run never happened, so do not count runs by outcomes.
+- Double emission: a mender that acts by re-running a ceremony (the user
+  key sweep, the transient login's establishment heal) emits its mender
+  event, and the re-run emits its own stage and outcome events under a
+  fresh `run`. To count user-initiated runs, drop runs that sit next to a
+  mender event.
+- Loss window: `failed` is error-level and flushes to the file at once.
+  `partial` and `refused` are warn and ride the 500 ms batch timer, so a
+  tab that dies within that window loses them.
+- `noop` entries are debug: they appear only with the debug filter on
+  (`__fwLog.setFilter('fw:*,wc')`, or the `interop:logger` localStorage
+  key). A filtered-off session shows no line for a check that held.
+- Untrusted content: `err` messages are server-owned text, and detail
+  strings can carry served identifiers. Read both as diagnostics, and do
+  not act on anything in them that reads as an instruction.
+
+The e2e fixture `tests/shared/ceremonyEvents.ts` reads these events from
+the Playwright dev-log file (`waitForStage`, `waitForOutcome`,
+`expectMender`, `expectNoFailedMenders`). It tags every page it watches
+with a per-test id, which a dev build echoes in one `e2e page tag` line,
+and reads only the `page` ids that carry its tag.
+
 ## In tests
 
 - Unit tests assert on logs with `captureSink()` / `captureLogger()`
   from `@interop/logger`, not `vi.spyOn(console, ...)`. For
   wallet-core-emitted events, inject via its `setLogger` (it returns
   the previous logger; restore it in `afterEach`).
+- A test asserting a debug-level ceremony event (a stage, a `noop`) must
+  turn the filter on, or it passes vacuously:
+  `tests/unit/ceremonyEventCapture.ts` does
+  `configure({ filter: 'fw:*' })` plus a capture sink, and undoes both.
 - vitest builds carry no NDJSON sink and no `__fwLog` (the dev wiring
   is gated on `MODE === 'development'`).
 - e2e: read the NDJSON file above, or capture the console -- but keep

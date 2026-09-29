@@ -1,4 +1,4 @@
-import { test, expect } from '@playwright/test'
+import { test, expect } from '../shared/ceremonyEvents'
 
 test.describe('Login page', () => {
   test.beforeEach(async ({ page }) => {
@@ -31,7 +31,8 @@ test.describe('Login page', () => {
   })
 
   test('successful login navigates to dashboard', async ({
-    page
+    page,
+    ceremonyEvents
   }, testInfo) => {
     const token = `${Date.now()}-w${testInfo.workerIndex}`
     const passphrase = `Str0ngpass-${token}-Aa1!`
@@ -63,5 +64,6 @@ test.describe('Login page', () => {
     await expect(passphraseInput).toHaveValue(passphrase)
     await page.getByRole('button', { name: 'Log in', exact: true }).click()
     await expect(page).toHaveURL(/#\/dashboard/)
+    await ceremonyEvents.expectNoFailedMenders({ page })
   })
 })

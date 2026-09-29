@@ -619,7 +619,10 @@ mender is also declared as an invariant in the mender registry
 The declarations are data and the registrations are code
 (`src/session/menders/registrations.ts`): the runner executes one chain's
 list in order and reports each entry into `session.mends`, and a routing or
-ceremony-tail entry reports from its own call site instead.
+ceremony-tail entry reports from its own call site instead. Every ceremony
+and every reported mend entry also emits on the ceremony event channel
+(wallet-core's `ceremonyEvents` and `menderEvent`), which the debug-logs
+skill documents.
 
 | Ceremony                                  | Entry point                                                           | Module                                                                      | Shared half                 | Mender                                                                                                                                                                                                                                                                                                                            | Topic doc                |
 | ----------------------------------------- | --------------------------------------------------------------------- | --------------------------------------------------------------------------- | --------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------ |

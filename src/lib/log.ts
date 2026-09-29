@@ -9,7 +9,8 @@
  * alike, which sit outside the shell -- runs the bootstrap wiring exactly
  * once: the `setLogger` of wallet-core, wallet-request, and was-sync, and in
  * dev builds the NDJSON dev sink plus the ring buffer behind the
- * `window.__fwLog` devtools handle.
+ * `window.__fwLog` devtools handle, and the e2e page-tag marker on a page a
+ * test tagged.
  *
  * The dev wiring is gated on `import.meta.env.MODE === 'development'`,
  * never bare `DEV` (true under vitest, which would start flush timers and
@@ -29,6 +30,7 @@ import { setLogger, stageNotifier } from '@interop/wallet-core'
 import { setLogger as setRequestLogger } from '@interop/wallet-request'
 import { setLogger as setSyncLogger } from '@interop/was-sync'
 import type { CeremonyId, StageNotifier } from '@interop/wallet-core'
+import { E2E_LOG_TAG_GLOBAL, E2E_LOG_TAG_MSG } from '@/lib/e2eLogTag'
 
 export { createLogger }
 
@@ -174,6 +176,24 @@ function wireOnce(): void {
     const { sink, snapshot, clear } = ringBufferSink()
     addSink(sink)
     host.__fwLog = { snapshot, setFilter, clear }
+    announcePageTag({ host })
+  }
+}
+
+/**
+ * The e2e page-tag marker, dev builds only: when a Playwright init script
+ * set a per-test tag on this page before it loaded, one info line carries
+ * it, so the ceremony-event fixture can tell which sink-stamped `page` ids
+ * belong to its test on a dev-log file shared by parallel workers. An
+ * untagged page emits nothing.
+ *
+ * @param options {object}
+ * @param options.host {Record<string, unknown>}   the global object
+ */
+function announcePageTag({ host }: { host: Record<string, unknown> }): void {
+  const tag = host[E2E_LOG_TAG_GLOBAL]
+  if (typeof tag === 'string' && tag.length > 0) {
+    createLogger('fw:e2e').info(E2E_LOG_TAG_MSG, { tag })
   }
 }
 

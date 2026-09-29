@@ -293,7 +293,7 @@ export async function disconnectAccountClient({
   // The cascade's ceremony-tail entry, reported from the ceremony's own call
   // site: it carries no registration, so no login chain's runner ever sees
   // it.
-  reportCeremonyTail({ mended: outcome.mended })
+  reportCeremonyTail({ ceremony: 'client-revocation', mended: outcome.mended })
   try {
     await removeClientLabel({
       store: remoteStore.clientLabelsStore(),

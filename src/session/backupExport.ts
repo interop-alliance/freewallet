@@ -73,6 +73,8 @@ import {
   delegatedClientsDelegationSpaceId
 } from '@interop/wallet-core/clientAnnex'
 import { errorNameOf } from '@interop/wallet-core/menders'
+import { ceremonyEvents } from '@interop/wallet-core'
+import type { CeremonyEmitter } from '@interop/wallet-core'
 import { DID_LOG_RESOURCE, ID_COLLECTION } from '@interop/wallet-core/space'
 import { accountLogPinId } from '@interop/wallet-core/webvh'
 import { createLogger } from '@/lib/log'
@@ -198,6 +200,48 @@ function backupCapabilityRefusal({
     named
   )
 }
+
+/**
+ * Thrown when the session has no remote account Space, so there is nothing
+ * to export. A precondition refusal: it fires before anything is minted.
+ */
+export class BackupRemoteStorageMissingError extends Error {
+  constructor() {
+    super('A backup export needs a remote Space to export.')
+    this.name = 'BackupRemoteStorageMissingError'
+  }
+}
+
+/**
+ * The export's stage ids for the ceremony event channel, in run order. The
+ * last two fire as the caller reads the stream: once every Space's archive
+ * is in hand, and once the registry settle check has passed.
+ */
+export const BACKUP_EXPORT_STAGES = [
+  'preflight',
+  'establish-credential',
+  'list-spaces',
+  'export-spaces',
+  'settle'
+] as const
+
+/**
+ * One value of {@link BACKUP_EXPORT_STAGES}.
+ */
+export type BackupExportStage = (typeof BACKUP_EXPORT_STAGES)[number]
+
+/**
+ * The pre-flight errors a run classifies as `refused` on the event channel.
+ * Both capability refusals are named, since matching is by `err.name`. A
+ * throw once the establishment has begun, or once the stream has started, is
+ * `failed` whatever its name, except the user's cancel, which is `refused`.
+ */
+const BACKUP_EXPORT_REFUSALS: ReadonlyArray<string> = [
+  'BackupCapabilityMissingError',
+  'BackupCapabilityUnsupportedError',
+  'BackupAnnexCommitError',
+  'BackupRemoteStorageMissingError'
+]
 
 /**
  * Thrown when the registry read back after the establishment does not list
@@ -723,6 +767,11 @@ async function exportUnlockSpace({
  * registry settle check, a cancel) errors the stream rather than rejecting
  * this call.
  *
+ * Each call is one `backup-export` run on the ceremony event channel. Its
+ * outcome fires where the run ends: at a rejection of this call, or when
+ * the returned stream closes, errors, or is cancelled. Detail is counts and
+ * booleans alone.
+ *
  * @param options {object}
  * @param options.session {Session}
  * @param options.credentialLabel {string}   the label the backup credential
@@ -747,6 +796,144 @@ export async function exportBackup({
   signal?: AbortSignal
   onProgress?: (progress: BackupExportProgress) => void
 }): Promise<ReadableStream<Uint8Array>> {
+  const events = ceremonyEvents<BackupExportStage>({
+    ceremony: 'backup-export',
+    log
+  })
+  // `committing` is set once the establishment begins: from there on nothing
+  // is a pre-flight refusal, whatever its name. `spaceOrder` is the listed
+  // Space ids in pack order.
+  const progress = { committing: false, spaceOrder: [] as string[] }
+  let stream: ReadableStream<Uint8Array>
+  try {
+    stream = await runBackupExport({
+      session,
+      credentialLabel,
+      exportPassphrase,
+      signal,
+      onProgress,
+      events,
+      progress
+    })
+  } catch (err) {
+    failOutcome({ events, err, preflight: !progress.committing })
+    throw err
+  }
+  return observedExportStream({
+    stream,
+    events,
+    detail: () => ({
+      spaces: progress.spaceOrder.length,
+      sealed: exportPassphrase !== undefined
+    })
+  })
+}
+
+/**
+ * Emits a run's outcome for a throw, a stream error, or a stream cancel:
+ * `refused` for the user's cancel (an `AbortError` anywhere in the cause
+ * chain) and for a pre-flight refusal, `failed` for anything else.
+ *
+ * @param options {object}
+ * @param options.events {CeremonyEmitter}
+ * @param options.err {unknown}   the thrown value or the cancel reason
+ * @param [options.preflight] {boolean}   true while the run is still before
+ *   the establishment, so a named pre-flight refusal classifies as `refused`
+ */
+function failOutcome({
+  events,
+  err,
+  preflight = false
+}: {
+  events: CeremonyEmitter<BackupExportStage>
+  err: unknown
+  preflight?: boolean
+}): void {
+  const refused =
+    backupExportCancelled(err) ||
+    (preflight && BACKUP_EXPORT_REFUSALS.includes(errorNameOf(err)))
+  events.outcome(refused ? 'refused' : 'failed', undefined, err)
+}
+
+/**
+ * Passes the bundle stream through unchanged and emits the run's outcome
+ * where the run ends: `clean` when the stream closes, `refused` when the
+ * user cancelled (an `AbortError` anywhere in the cause chain), and `failed`
+ * for any other error or cancel, since by then the stream has started.
+ *
+ * @param options {object}
+ * @param options.stream {ReadableStream<Uint8Array>}
+ * @param options.events {CeremonyEmitter}
+ * @param options.detail {Function}   the clean outcome's counts, read at the
+ *   close
+ * @returns {ReadableStream<Uint8Array>}
+ */
+function observedExportStream({
+  stream,
+  events,
+  detail
+}: {
+  stream: ReadableStream<Uint8Array>
+  events: CeremonyEmitter<BackupExportStage>
+  detail: () => { spaces: number; sealed: boolean }
+}): ReadableStream<Uint8Array> {
+  const reader = stream.getReader()
+  return new ReadableStream<Uint8Array>({
+    async pull(controller) {
+      let chunk: ReadableStreamReadResult<Uint8Array>
+      try {
+        chunk = await reader.read()
+      } catch (err) {
+        failOutcome({ events, err })
+        controller.error(err)
+        return
+      }
+      if (chunk.done) {
+        events.outcome('clean', detail())
+        controller.close()
+        return
+      }
+      controller.enqueue(chunk.value)
+    },
+    async cancel(reason) {
+      failOutcome({ events, err: reason })
+      await reader.cancel(reason)
+    }
+  })
+}
+
+/**
+ * The body of {@link exportBackup}, with the run's emitter and the progress
+ * the outcome reads.
+ *
+ * @param options {object}
+ * @param options.session {Session}
+ * @param options.credentialLabel {string}
+ * @param [options.exportPassphrase] {string}
+ * @param [options.signal] {AbortSignal}
+ * @param [options.onProgress] {Function}
+ * @param options.events {CeremonyEmitter}
+ * @param options.progress {object}   `committing` once the establishment
+ *   begins, and the listed Space ids in pack order
+ * @returns {Promise<ReadableStream<Uint8Array>>}
+ */
+async function runBackupExport({
+  session,
+  credentialLabel,
+  exportPassphrase,
+  signal,
+  onProgress,
+  events,
+  progress
+}: {
+  session: Session
+  credentialLabel: string
+  exportPassphrase?: string
+  signal?: AbortSignal
+  onProgress?: (progress: BackupExportProgress) => void
+  events: CeremonyEmitter<BackupExportStage>
+  progress: { committing: boolean; spaceOrder: string[] }
+}): Promise<ReadableStream<Uint8Array>> {
   // The registry passes and the mender block both rewrite what this run
   // reads (the unlock-methods registry, the roster, the annex pointer), so
   // the ceremony waits them out rather than racing them. Neither rejects.
@@ -759,7 +946,7 @@ export async function exportBackup({
 
   const accountSpaceId = session.storage.spaceId
   if (!accountSpaceId) {
-    throw new Error('A backup export needs a remote Space to export.')
+    throw new BackupRemoteStorageMissingError()
   }
 
   // Before the pivot: a capability this run cannot export under refuses here,
@@ -770,17 +957,16 @@ export async function exportBackup({
     context
   })
   const annexSpaceId = annex?.spaceId
+  events.stage('preflight', {
+    annex: annexSpaceId !== undefined,
+    unlockMethods: registry?.methods.length ?? 0
+  })
 
   /**
    * The registry entries this run exports, by Space id, filled in by the
    * listing below so each export knows which entry it is exporting.
    */
   const unlockEntries = new Map<string, UnlockMethod>()
-  /**
-   * The Space ids in pack order, so a progress report can say which of how
-   * many is being exported.
-   */
-  let spaceOrder: string[] = []
   /**
    * The unlock Space id of the credential the establishment recorded, which
    * the listing checks the registry for.
@@ -793,6 +979,7 @@ export async function exportBackup({
       createdBy: { controller: context.pointer.did, client: BACKUP_CLIENT }
     },
     establishBackupCredential: async () => {
+      progress.committing = true
       const established = await establishBackupCredential({
         session,
         context,
@@ -801,6 +988,7 @@ export async function exportBackup({
         registry
       })
       establishedSpaceId = established.unlockSpaceId
+      events.stage('establish-credential')
       return established.secret
     },
     listSpaces: async () => {
@@ -838,7 +1026,10 @@ export async function exportBackup({
           role: BUNDLE_ROLE.unlockSpaceArchive
         })
       }
-      spaceOrder = spaces.map(space => space.spaceId)
+      // The Space ids in pack order, so a progress report can say which of
+      // how many is being exported.
+      progress.spaceOrder = spaces.map(space => space.spaceId)
+      events.stage('list-spaces', { spaces: spaces.length })
       return spaces
     },
     exportSpace: async ({ spaceId, role }): Promise<ByteSource> => {
@@ -896,6 +1087,7 @@ export async function exportBackup({
     ...(exportPassphrase ? { exportPassphrase } : {}),
     ...(signal ? { signal } : {}),
     onProgress: ({ stage, spaceId }) => {
+      const { spaceOrder } = progress
       const position = spaceId ? spaceOrder.indexOf(spaceId) : -1
       onProgress?.({
         stage,
@@ -911,7 +1103,11 @@ export async function exportBackup({
     // bundle, and one removed would be in it after its Space was gone. The
     // package runs this before the bundle's last entry is written, so a
     // refusal errors the stream rather than ending a saved file as complete.
-    settle: () => settledRegistry({ session, listed: unlockEntries })
+    settle: async () => {
+      events.stage('export-spaces', { spaces: progress.spaceOrder.length })
+      await settledRegistry({ session, listed: unlockEntries })
+      events.stage('settle')
+    }
   })
 }
 

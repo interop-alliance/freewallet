@@ -381,7 +381,10 @@ export async function recoverFailedStandingEstablishment({
         verb: `cleaning up a failed ${entry.type} addition`
       })
       if (rotation) {
-        reportCeremonyTail({ mended: rotation.mended })
+        reportCeremonyTail({
+          ceremony: 'unlock-credential-rotation',
+          mended: rotation.mended
+        })
       }
       if (rotation?.rotated && rotation.userKey) {
         await adoptRotatedUserKey({

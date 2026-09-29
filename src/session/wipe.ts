@@ -25,6 +25,7 @@
  * account-scoped.
  */
 import { deriveSpaceId } from '@interop/was-client/sync'
+import { ceremonyEvents, type CeremonyEmitter } from '@interop/wallet-core'
 import {
   deleteAccountDidForSpace,
   deletePasskeySafetyNotice,
@@ -40,6 +41,28 @@ import type { Session } from '@/types/auth'
 import { createLogger } from '@/lib/log'
 
 const log = createLogger('fw:session:wipe')
+
+/**
+ * The wipe's stage ids for the ceremony event channel, one per target
+ * family in execution order. A family's stage event is one aggregate over
+ * its targets, carrying counts only: a per-target id can name an unlock
+ * Space, which no event may carry.
+ */
+export const WALLET_WIPE_STAGES = [
+  'replica',
+  'replica-databases',
+  'unlock-local-state',
+  'space-did-mapping',
+  'unlock-methods-cache',
+  'passkey-safety-notice',
+  'cache-families',
+  'writer-id'
+] as const
+
+/**
+ * One value of {@link WALLET_WIPE_STAGES}.
+ */
+export type WalletWipeStage = (typeof WALLET_WIPE_STAGES)[number]
 
 /**
  * Every browser-local target the wipe deletes, derived up front. The members
@@ -184,6 +207,11 @@ export function snapshotWipeTargets({
  * reaches a transient session's replica-less browser and a SIBLING enrolled
  * client's database. Deleting an absent database is a no-op.
  *
+ * Each call is one `wallet-wipe` run on the ceremony event channel: one
+ * stage event per target family and one outcome, `partial` when any stage
+ * failed or went unconfirmed. Events carry counts alone and no target's
+ * name.
+ *
  * @param options {object}
  * @param options.targets {WipeTargets}
  * @param [options.storage] {{ wipeLocalStorage: () => Promise<{ verified: boolean } | void> }}
@@ -207,14 +235,87 @@ export async function executeLocalWipe({
   idb?: IDBFactory
   clearWriter?: boolean
 }): Promise<{ failed: string[]; unverified: string[] }> {
+  const events = ceremonyEvents<WalletWipeStage>({
+    ceremony: 'wallet-wipe',
+    log
+  })
+  return await events.run(
+    () =>
+      runLocalWipe({
+        targets,
+        storage,
+        idb,
+        clearWriter,
+        events
+      }),
+    ({ failed, unverified }) => ({
+      outcome: failed.length + unverified.length > 0 ? 'partial' : 'clean',
+      detail: {
+        failed: failed.length,
+        unverified: unverified.length,
+        registryUnread: targets.registryUnread
+      }
+    })
+  )
+}
+
+/**
+ * The body of {@link executeLocalWipe}. Each target family emits one stage
+ * event when its last target has run, with counts alone.
+ *
+ * @param options {object}
+ * @param options.targets {WipeTargets}
+ * @param [options.storage] {object}
+ * @param [options.idb] {IDBFactory}
+ * @param options.clearWriter {boolean}
+ * @param options.events {CeremonyEmitter}   the run's stage emitter
+ * @returns {Promise<{ failed: string[], unverified: string[] }>}
+ */
+async function runLocalWipe({
+  targets,
+  storage,
+  idb,
+  clearWriter,
+  events
+}: {
+  targets: WipeTargets
+  storage?: { wipeLocalStorage: () => Promise<{ verified: boolean } | void> }
+  idb?: IDBFactory
+  clearWriter: boolean
+  events: CeremonyEmitter<WalletWipeStage>
+}): Promise<{ failed: string[]; unverified: string[] }> {
   const failed: string[] = []
   const unverified: string[] = []
-  async function stage(name: string, run: () => Promise<void> | void) {
+  const tally = new Map<WalletWipeStage, { targets: number; failed: number }>()
+  async function stage(
+    family: WalletWipeStage,
+    run: () => Promise<void> | void,
+    target?: string
+  ) {
+    // A per-client replica database fails as `replica:<prefix>`, the name
+    // the forget ceremony's wipe also reports.
+    const prefix = family === 'replica-databases' ? 'replica' : family
+    const name = target === undefined ? family : `${prefix}:${target}`
+    const counts = tally.get(family) ?? { targets: 0, failed: 0 }
+    tally.set(family, counts)
+    counts.targets += 1
     try {
       await run()
     } catch (err) {
       failed.push(name)
-      log.warn('Local wipe stage failed', { stage: name, err })
+      counts.failed += 1
+      // An unlock Space id is credential-derived, so that family's warn
+      // names the family alone.
+      log.warn('Local wipe stage failed', {
+        stage: family === 'unlock-local-state' ? family : name,
+        err
+      })
+    }
+  }
+  function familyDone(family: WalletWipeStage): void {
+    const counts = tally.get(family)
+    if (counts) {
+      events.stage(family, counts)
     }
   }
 
@@ -240,17 +341,25 @@ export async function executeLocalWipe({
         unverified.push('replica')
       }
     })
+    familyDone('replica')
   }
   if (typeof indexedDB !== 'undefined') {
     for (const did of [targets.clientDid, ...targets.accountDids]) {
       const dbPrefix = deriveSpaceId(did)
-      await stage(`replica:${dbPrefix}`, async () => {
-        const { verified } = await new BrowserStore({ dbPrefix }).wipeStorage()
-        if (!verified) {
-          unverified.push(`replica:${dbPrefix}`)
-        }
-      })
+      await stage(
+        'replica-databases',
+        async () => {
+          const { verified } = await new BrowserStore({
+            dbPrefix
+          }).wipeStorage()
+          if (!verified) {
+            unverified.push(`replica:${dbPrefix}`)
+          }
+        },
+        dbPrefix
+      )
     }
+    familyDone('replica-databases')
   }
 
   // The session database's families -- guarded by a create-nothing probe, so
@@ -260,40 +369,62 @@ export async function executeLocalWipe({
   const haveSessionDb = await sessionDatabaseExists({ idb }).catch(() => true)
   if (haveSessionDb) {
     for (const unlockSpaceId of targets.unlockSpaceIds) {
-      await stage(`unlock-local-state:${unlockSpaceId}`, async () => {
-        await deleteUnlockLocalState({ spaceId: unlockSpaceId, idb })
-      })
+      await stage(
+        'unlock-local-state',
+        async () => {
+          await deleteUnlockLocalState({ spaceId: unlockSpaceId, idb })
+        },
+        unlockSpaceId
+      )
     }
+    familyDone('unlock-local-state')
     if (targets.accountSpaceId) {
       const spaceId = targets.accountSpaceId
       await stage('space-did-mapping', async () => {
         await deleteAccountDidForSpace({ spaceId, idb })
       })
+      familyDone('space-did-mapping')
     }
     // Keyed on this browser's own client did:key AND on the account: a
     // transient visit's client did:key is a per-visit annex key, so the
     // families an enrolled client of the same account left here are named by
     // the account instead. An absent key deletes as a no-op.
     for (const controller of [targets.clientDid, ...targets.accountDids]) {
-      await stage(`unlock-methods-cache:${controller}`, async () => {
-        await deleteUnlockMethodsCache({ controller, idb })
-      })
-      await stage(`passkey-safety-notice:${controller}`, async () => {
-        await deletePasskeySafetyNotice({ controller, idb })
-      })
+      await stage(
+        'unlock-methods-cache',
+        async () => {
+          await deleteUnlockMethodsCache({ controller, idb })
+        },
+        controller
+      )
+      await stage(
+        'passkey-safety-notice',
+        async () => {
+          await deletePasskeySafetyNotice({ controller, idb })
+        },
+        controller
+      )
     }
+    familyDone('unlock-methods-cache')
+    familyDone('passkey-safety-notice')
   }
 
   // The per-account localStorage families, last.
   for (const scope of targets.cacheScopes) {
-    await stage(`cache-families:${scope}`, () => {
-      deleteLocalCacheFamilies({ scope })
-    })
+    await stage(
+      'cache-families',
+      () => {
+        deleteLocalCacheFamilies({ scope })
+      },
+      scope
+    )
   }
+  familyDone('cache-families')
   if (clearWriter) {
     await stage('writer-id', () => {
       clearWriterId()
     })
+    familyDone('writer-id')
   }
   return { failed, unverified }
 }

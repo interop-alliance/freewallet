@@ -17,7 +17,7 @@
  * The keyring and every remote seam are mocked; the seed-to-identity
  * derivation runs for real.
  */
-import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 import { CapabilityAgent } from '@interop/capability-agent'
 
@@ -50,6 +50,14 @@ vi.mock('@/session/transientLogin', () => ({
   transientSessionFromKeyringHit: vi.fn()
 }))
 vi.mock('@/lib/kms', () => ({ ensureKeystore: vi.fn() }))
+// The detector runs for real unless a test arranges a forgotten browser.
+vi.mock('@/session/forget', async importOriginal => {
+  const actual = await importOriginal<typeof import('@/session/forget')>()
+  return {
+    ...actual,
+    assertClientStillEnrolled: vi.fn(actual.assertClientStillEnrolled)
+  }
+})
 vi.mock('@/stores/storageManager', () => ({
   StorageManager: { initStorageClients: vi.fn() }
 }))
@@ -137,6 +145,11 @@ import { StorageManager } from '@/stores/storageManager'
 import { loginWithPassphrase } from '@/session/initSession'
 import { sweepStrandedAppKeys } from '@/session/appKeySweep'
 import { mintUserKey } from '@interop/wallet-core/keys'
+import {
+  assertClientStillEnrolled,
+  BrowserForgottenError
+} from '@/session/forget'
+import { captureCeremonyEvents } from './ceremonyEventCapture'
 import type { WASRemoteStore } from '@/stores/wasRemoteStore'
 
 const PASSPHRASE = 'correct horse battery staple'
@@ -550,4 +563,96 @@ describe('the FW-300 storageReady / registryReady split', () => {
     ])
     await expect(session!.storageReady).rejects.toThrow('provisioning exploded')
   })
+})
+
+describe('the remembered login chain on the event channel', () => {
+  let capture: ReturnType<typeof captureCeremonyEvents>
+  beforeEach(() => {
+    capture = captureCeremonyEvents()
+  })
+  afterEach(() => {
+    capture.stop()
+  })
+
+  it("emits one mender event per reported entry, a healthy check's at debug", async () => {
+    const fake = await arrangeEnrolledLogin()
+
+    const { session } = await loginWithPassphrase({ passphrase: PASSPHRASE })
+    fake.resolveProvisioning()
+    const report = (await session!.mends)!
+
+    const events = capture.menders()
+    expect(
+      events.map(event => (event.data as { invariant: string }).invariant)
+    ).toEqual(report.map(entry => entry.invariant))
+    for (const [index, entry] of report.entries()) {
+      expect(events[index]?.data).toMatchObject({
+        invariant: entry.invariant,
+        outcome: entry.outcome
+      })
+      if (entry.outcome === 'noop') {
+        expect(events[index]?.level).toBe('debug')
+      }
+    }
+    // A chain or routing entry names no ceremony.
+    expect(events.some(event => 'ceremony' in (event.data ?? {}))).toBe(false)
+  })
+
+  it('emits a failed mender event beside the declared warn when a pass throws', async () => {
+    const fake = await arrangeEnrolledLogin()
+    vi.mocked(sweepStrandedAppKeys).mockRejectedValue(
+      new TypeError('the sweep broke')
+    )
+
+    const { session } = await loginWithPassphrase({ passphrase: PASSPHRASE })
+    fake.resolveProvisioning()
+    await session!.mends
+
+    const events = capture.menders('app-keys-live-only-in-app-connections')
+    expect(events).toHaveLength(1)
+    expect(events[0]?.level).toBe('error')
+    expect(events[0]?.data).toMatchObject({
+      outcome: 'failed',
+      errorName: 'TypeError'
+    })
+    // The declared warn still carries the error itself.
+    const warns = capture.events.filter(
+      event =>
+        event.level === 'warn' &&
+        event.msg !== 'ceremony mender' &&
+        (event.data as { invariant?: string } | undefined)?.invariant ===
+          'app-keys-live-only-in-app-connections'
+    )
+    expect(warns).toHaveLength(1)
+    expect(warns[0]?.err).toBeInstanceOf(TypeError)
+  })
+
+  for (const { name, wipeFailed, outcome } of [
+    { name: 'a clean wipe', wipeFailed: [], outcome: 'clean' },
+    {
+      name: 'a torn wipe',
+      wipeFailed: ['unlock-local-state:unlock-space-test'],
+      outcome: 'partial'
+    }
+  ]) {
+    it(`reports and emits the forgotten-browser mend (${name}) before the refusal propagates`, async () => {
+      await arrangeEnrolledLogin()
+      vi.mocked(assertClientStillEnrolled).mockRejectedValueOnce(
+        new BrowserForgottenError({ wipeFailed, wipeUnverified: [] })
+      )
+
+      await expect(
+        loginWithPassphrase({ passphrase: PASSPHRASE })
+      ).rejects.toBeInstanceOf(BrowserForgottenError)
+
+      const events = capture.menders('this-browser-is-still-an-enrolled-client')
+      expect(events).toHaveLength(1)
+      expect(events[0]?.data).toMatchObject({ outcome })
+      if (outcome === 'partial') {
+        expect(events[0]?.data).toMatchObject({ failed: 1, unverified: 0 })
+      }
+      // Counts alone: a failed stage's name carries an unlock Space id.
+      expect(JSON.stringify(events)).not.toContain('unlock-space-test')
+    })
+  }
 })

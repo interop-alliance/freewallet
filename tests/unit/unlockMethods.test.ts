@@ -1631,6 +1631,7 @@ describe('the credential rotation inside a revocation', () => {
     // warn discipline from here, its own call site: it carries no
     // registration, so no login chain's runner ever reports it.
     expect(vi.mocked(reportCeremonyTail)).toHaveBeenCalledWith({
+      ceremony: 'unlock-credential-rotation',
       mended: outcome?.mended
     })
     expect(outcome).toEqual({

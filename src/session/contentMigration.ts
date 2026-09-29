@@ -41,6 +41,12 @@ import type {
 import { addHistoryContentImported } from '@interop/wallet-core/space'
 import type { ImportCollectionOutcome } from '@interop/wallet-core/space'
 import { errorNameOf } from '@interop/wallet-core/menders'
+import { ceremonyEvents } from '@interop/wallet-core'
+import type {
+  CeremonyDetail,
+  CeremonyEmitter,
+  CeremonyOutcome
+} from '@interop/wallet-core'
 import type {
   ContactHeadPayload,
   ContactRevisionPayload
@@ -73,6 +79,37 @@ export class ContentMigrationInProgressError extends Error {
 
 // Whether a migration is running in this tab. The sink runs one at a time.
 let migrationRunning = false
+
+/**
+ * The migration's stage ids for the ceremony event channel, in run order:
+ * the waits and pre-checks before the walk, the walk itself, and the Import
+ * activity write.
+ */
+export const CONTENT_MIGRATION_STAGES = [
+  'preflight',
+  'walk',
+  'import-activity'
+] as const
+
+/**
+ * One value of {@link CONTENT_MIGRATION_STAGES}.
+ */
+export type ContentMigrationStage = (typeof CONTENT_MIGRATION_STAGES)[number]
+
+/**
+ * The thrown errors a migration run classifies as `refused`: a run already
+ * going in this tab, the walk's own refusals of the bundle and the secret,
+ * and the user's cancel. Each leaves what landed safe for a re-run to build
+ * on. Every other throw is `failed`, a `QuotaExceededError` from the Import
+ * activity write included.
+ */
+const CONTENT_MIGRATION_REFUSALS: ReadonlyArray<string> = [
+  'ContentMigrationInProgressError',
+  'BundleInvalidError',
+  'AccountSpaceArchiveMissingError',
+  'BundleRecipientMissingError',
+  'AbortError'
+]
 
 /**
  * The quota pre-check's finding: the bundle is bigger than the Space has
@@ -413,6 +450,9 @@ function importedCollections(
  * thrown errors it maps through {@link contentMigrationErrorKey}. Past those,
  * every failure is a count in the returned report.
  *
+ * Each call is one `content-migration` run on the ceremony event channel.
+ * Its events carry counts and enums alone.
+ *
  * @param options {object}
  * @param options.session {Session}   the account imported INTO
  * @param options.bundle {ByteSource}   the bundle tar's bytes, or a stream
@@ -445,22 +485,95 @@ export async function migrateContent({
     outcome: SinkOutcome | 'unopenable'
   }) => void
 }): Promise<ContentMigrationResult> {
-  if (migrationRunning) {
-    throw new ContentMigrationInProgressError()
+  const events = ceremonyEvents<ContentMigrationStage>({
+    ceremony: 'content-migration',
+    log,
+    refusals: CONTENT_MIGRATION_REFUSALS
+  })
+  return await events.run(async () => {
+    if (migrationRunning) {
+      throw new ContentMigrationInProgressError()
+    }
+    migrationRunning = true
+    try {
+      return await runMigration({
+        session,
+        bundle,
+        secret,
+        bundleBytes,
+        signal,
+        onProgress,
+        events
+      })
+    } finally {
+      migrationRunning = false
+    }
+  }, migrationOutcomeEvent)
+}
+
+/**
+ * The outcome event one returned migration maps to: `partial` when the walk
+ * stopped early or left Resources unmigrated, `clean` otherwise. Detail is
+ * totals across the collections: no collection name, bundle id, or other
+ * bundle-supplied text.
+ *
+ * @param result {ContentMigrationResult}
+ * @returns {{ outcome: CeremonyOutcome, detail: CeremonyDetail }}
+ */
+function migrationOutcomeEvent(result: ContentMigrationResult): {
+  outcome: CeremonyOutcome
+  detail: CeremonyDetail
+} {
+  const detail = migrationCounts(result.report)
+  const stopped = result.report.stoppedAt !== undefined
+  const unmigrated = detail.failed + detail.unopenable + detail.notMigrated
+  return {
+    outcome: stopped || unmigrated > 0 ? 'partial' : 'clean',
+    detail: {
+      ...detail,
+      stopped,
+      replicaInSync: result.replicaInSync,
+      quotaWarning: result.quotaWarning !== undefined
+    }
   }
-  migrationRunning = true
-  try {
-    return await runMigration({
-      session,
-      bundle,
-      secret,
-      bundleBytes,
-      signal,
-      onProgress
-    })
-  } finally {
-    migrationRunning = false
+}
+
+/**
+ * A walk report's totals across its collections, as event detail.
+ *
+ * @param report {MigrationReport}
+ * @returns {object}   the totals, each a count
+ */
+function migrationCounts(report: MigrationReport): {
+  collections: number
+  accepted: number
+  skipped: number
+  conflicting: number
+  failed: number
+  unopenable: number
+  notMigrated: number
+} {
+  const totals = {
+    collections: 0,
+    accepted: 0,
+    skipped: 0,
+    conflicting: 0,
+    failed: 0,
+    unopenable: 0,
+    notMigrated: 0
   }
+  for (const counts of Object.values(report.collections)) {
+    totals.collections += 1
+    totals.accepted += counts.accepted
+    totals.skipped += counts.skipped
+    totals.conflicting += counts.conflicting
+    totals.failed += counts.failed
+    totals.unopenable += counts.unopenable
+  }
+  for (const count of Object.values(report.notMigrated)) {
+    totals.notMigrated += count
+  }
+  return totals
 }
 
 /**
@@ -482,8 +595,11 @@ async function runMigration({
   secret,
   bundleBytes,
   signal,
-  onProgress
-}: Parameters<typeof migrateContent>[0]): Promise<ContentMigrationResult> {
+  onProgress,
+  events
+}: Parameters<typeof migrateContent>[0] & {
+  events: CeremonyEmitter<ContentMigrationStage>
+}): Promise<ContentMigrationResult> {
   // The login-time mender block can rotate the user key and rebuild every
   // cipher under a Resource in flight, so the walk waits it out. It never
   // rejects.
@@ -519,6 +635,10 @@ async function runMigration({
       freeBytes: quotaWarning.freeBytes
     })
   }
+  events.stage('preflight', {
+    replicaInSync,
+    quotaWarning: quotaWarning !== undefined
+  })
 
   const report = await migrateBundle({
     bundle,
@@ -526,6 +646,10 @@ async function runMigration({
     sink: migrationSink({ session }),
     ...(signal !== undefined && { signal }),
     ...(onProgress !== undefined && { onProgress })
+  })
+  events.stage('walk', {
+    ...migrationCounts(report),
+    stopped: report.stoppedAt !== undefined
   })
 
   // The run record, written whenever the walk ended by its own rules (its
@@ -541,6 +665,7 @@ async function runMigration({
       ...(report.stoppedAt !== undefined && { stoppedAt: report.stoppedAt })
     })
   })
+  events.stage('import-activity')
 
   return { report, quotaWarning, replicaInSync }
 }

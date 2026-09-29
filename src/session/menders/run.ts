@@ -177,8 +177,8 @@ export function startLoginMenderBlock({
     logger: log,
     registrations,
     ...(seed ? { seed } : {}),
+    mends: accumulator,
     onOutcome: entry => {
-      accumulator.report(entry)
       awaited.delete(entry.invariant)
       if (awaited.size === 0) {
         settleRegistry()

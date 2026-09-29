@@ -310,7 +310,10 @@ export async function repairTornPassphraseRetirement({
     // call site: it carries no registration, so no login chain's runner ever
     // sees it.
     if (outcome) {
-      reportCeremonyTail({ mended: outcome.mended })
+      reportCeremonyTail({
+        ceremony: 'unlock-credential-rotation',
+        mended: outcome.mended
+      })
     }
     if (outcome?.rotated && outcome.userKey) {
       // Already adopted in band by the retirement's roster tail, so this

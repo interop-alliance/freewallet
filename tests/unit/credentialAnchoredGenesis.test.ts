@@ -99,8 +99,13 @@ import { promoteKeystoreController } from '@/lib/kms'
 import {
   establishCredentialAnchoredAccount,
   mendCredentialAnchoredAccount,
-  passphraseRegistryUpsertHook
+  passphraseRegistryUpsertHook,
+  reportCredentialAnchoredMend
 } from '@/session/credentialAnchoredGenesis'
+import { mendReportAccumulator } from '@interop/wallet-core/menders'
+import { createLogger } from '@/lib/log'
+import type { CeremonyId } from '@interop/wallet-core'
+import { captureCeremonyEvents } from './ceremonyEventCapture'
 import {
   updateUnlockMethodsWithClient,
   upsertPassphraseUnlockMethod
@@ -599,5 +604,61 @@ describe('passphraseRegistryUpsertHook -- the shared registry hook', () => {
       })
     )
     removeSink()
+  })
+})
+
+describe('reportCredentialAnchoredMend', () => {
+  it("reports each arm's result under detail.arm and emits the entry's event", () => {
+    const capture = captureCeremonyEvents()
+    try {
+      const mends = mendReportAccumulator<CeremonyId>({
+        logger: createLogger('fw:session:genesis')
+      })
+      const boom = new Error(`the promotion died at ${ACCOUNT_DID}`)
+      reportCredentialAnchoredMend({
+        mends,
+        report: {
+          reenter: true,
+          establishment: { converged: true, outcome: 'rebound' },
+          promotion: { converged: false, outcome: 'promoted', error: boom }
+        } as never
+      })
+
+      const entries = mends.entries()
+      expect(entries.map(entry => [entry.invariant, entry.outcome])).toEqual([
+        ['unlock-record-points-at-the-account-did', 'clean'],
+        ['space-controller-is-the-account-did', 'failed'],
+        ['roster-and-collection-epochs-exist', 'noop'],
+        ['registry-records-the-establishing-credential', 'noop']
+      ])
+      expect(entries[0]?.detail).toEqual({ arm: 'rebound' })
+      expect(entries[1]?.detail).toEqual({ arm: 'promoted' })
+
+      const events = capture.menders()
+      expect(
+        events.map(event => {
+          const { invariant, outcome } = event.data as {
+            invariant: string
+            outcome: string
+          }
+          return [invariant, outcome]
+        })
+      ).toEqual(entries.map(entry => [entry.invariant, entry.outcome]))
+      expect(events[0]?.data).toMatchObject({ arm: 'rebound' })
+      expect(events[0]?.data).not.toHaveProperty('ceremony')
+      // The failed arm's event carries the error the site holds, and its
+      // detail names no account identifier.
+      expect(events[1]?.err).toBe(boom)
+      expect(events[1]?.data).toMatchObject({
+        outcome: 'failed',
+        errorName: 'Error',
+        arm: 'promoted'
+      })
+      expect(JSON.stringify(events.map(event => event.data))).not.toContain(
+        ACCOUNT_DID
+      )
+    } finally {
+      capture.stop()
+    }
   })
 })

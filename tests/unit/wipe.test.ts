@@ -24,6 +24,7 @@ import {
 import type { UnlockMethodsRecord } from '@/session/unlockMethods'
 import type { Session } from '@/types/auth'
 import { createFakeSessionIdb } from './fakeSessionIdb'
+import { captureCeremonyEvents } from './ceremonyEventCapture'
 
 const CLIENT_DID = 'did:key:z6MkClientClientClientClient'
 const DB_PREFIX = deriveSpaceId(CLIENT_DID)
@@ -465,5 +466,109 @@ describe('the shared wipe enumeration', () => {
     ).toBe(false)
     expect(localStorageBacking.get('freewallet:writerId')).toBe('writer-1')
     expect(localStorageBacking.get('fw-theme')).toBe('dark')
+  })
+})
+
+describe('the wallet-wipe ceremony events', () => {
+  let capture: ReturnType<typeof captureCeremonyEvents>
+
+  beforeEach(() => {
+    const { storage, backing } = createFakeLocalStorage()
+    vi.stubGlobal('localStorage', storage)
+    seedLocalStorage(backing)
+    capture = captureCeremonyEvents()
+  })
+
+  afterEach(() => {
+    capture.stop()
+    vi.unstubAllGlobals()
+  })
+
+  /**
+   * Every event the wipe's logger dispatched, serialized.
+   *
+   * @returns {string}
+   */
+  function wipeEvents(): string {
+    return JSON.stringify(
+      capture.events.filter(event => event.ns === 'fw:session:wipe')
+    )
+  }
+
+  it('emits one aggregate stage per family and one clean outcome, naming no unlock Space', async () => {
+    const { idb } = createFakeSessionIdb()
+    await seedSessionDatabase(idb)
+    const session = sessionFixture({
+      storage: { wipeLocalStorage: async () => {} }
+    })
+    const targets = snapshotWipeTargets({ session, registry })
+
+    await executeLocalWipe({ targets, storage: session.storage!, idb })
+
+    const outcome = capture.soleOutcome('wallet-wipe')
+    expect(outcome.level).toBe('info')
+    expect(outcome.data).toMatchObject({
+      outcome: 'clean',
+      failed: 0,
+      unverified: 0
+    })
+    const stages = capture
+      .stages('wallet-wipe')
+      .map(event => event.data as { stage: string; targets: number })
+    expect(stages.map(stage => stage.stage)).toContain('unlock-local-state')
+    expect(
+      stages.find(stage => stage.stage === 'unlock-local-state')?.targets
+    ).toBe(2)
+    for (const unlockSpaceId of [
+      PASSPHRASE_UNLOCK_SPACE,
+      PASSKEY_UNLOCK_SPACE
+    ]) {
+      expect(wipeEvents()).not.toContain(unlockSpaceId)
+    }
+  })
+
+  it('reports failures and a narrowed enumeration as partial, in counts alone', async () => {
+    const { idb } = createFakeSessionIdb()
+    await seedSessionDatabase(idb)
+    const session = sessionFixture({ unlockSpaceId: PASSPHRASE_UNLOCK_SPACE })
+    const targets = snapshotWipeTargets({
+      session,
+      registry: null,
+      registryUnread: true
+    })
+
+    await executeLocalWipe({
+      targets,
+      storage: {
+        wipeLocalStorage: async () => {
+          throw new Error('blocked by a sibling tab')
+        }
+      },
+      idb
+    })
+
+    const outcome = capture.soleOutcome('wallet-wipe')
+    expect(outcome.level).toBe('warn')
+    expect(outcome.data).toMatchObject({
+      outcome: 'partial',
+      failed: 2,
+      registryUnread: true
+    })
+    expect(wipeEvents()).not.toContain(PASSPHRASE_UNLOCK_SPACE)
+  })
+
+  it('emits one outcome per call, each under its own run id', async () => {
+    const { idb } = createFakeSessionIdb()
+    const session = sessionFixture()
+    const targets = snapshotWipeTargets({ session, registry })
+
+    await executeLocalWipe({ targets, idb })
+    await executeLocalWipe({ targets, idb })
+
+    const runs = capture
+      .outcomes('wallet-wipe')
+      .map(event => (event.data as { run: string }).run)
+    expect(runs).toHaveLength(2)
+    expect(new Set(runs).size).toBe(2)
   })
 })

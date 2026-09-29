@@ -136,6 +136,7 @@ describe('disconnectAccountClient', () => {
 
     expect(vi.mocked(revokeEnrolledClient)).toHaveBeenCalledOnce()
     expect(vi.mocked(reportCeremonyTail)).toHaveBeenCalledWith({
+      ceremony: 'client-revocation',
       mended: MENDED
     })
     expect(outcome.mended).toEqual(MENDED)

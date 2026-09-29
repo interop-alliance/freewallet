@@ -1620,7 +1620,10 @@ export async function revokeUnlockMethod({
   // call site: it carries no registration, so no login chain's runner ever
   // sees it.
   if (rotation) {
-    reportCeremonyTail({ mended: rotation.mended })
+    reportCeremonyTail({
+      ceremony: 'unlock-credential-rotation',
+      mended: rotation.mended
+    })
   }
   if (WAS_SERVER_URL) {
     const outcome = await deleteUnlockSpaceForEntry({
@@ -1796,7 +1799,10 @@ export async function revokeUnlockMethodByCeremony({
     verb
   })
   if (rotation) {
-    reportCeremonyTail({ mended: rotation.mended })
+    reportCeremonyTail({
+      ceremony: 'unlock-credential-rotation',
+      mended: rotation.mended
+    })
   }
   await deleteUnlockMethod({
     secret: prfOutput,

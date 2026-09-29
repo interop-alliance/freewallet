@@ -17,7 +17,8 @@
  * (no enrolled client anywhere) has its own residue suite in
  * `credential-anchored-signup.spec.ts`.
  */
-import { test, expect, type Browser, type Page } from '@playwright/test'
+import { type Browser, type Page } from '@playwright/test'
+import { test, expect } from '../shared/ceremonyEvents'
 import {
   addCredentialViaPaste,
   awaitLoginChain,
@@ -93,12 +94,15 @@ test.describe.serial('transient login residue', () => {
   })
 
   test('a transient visit ended by logout leaves zero residue', async ({
-    browser
+    browser,
+    ceremonyEvents
   }) => {
     const { context, page } = await coldTerminal(browser)
     try {
+      await ceremonyEvents.tag(context)
       const baseline = await transientLogin(page, passphrase)
       await addCredentialViaPaste(page)
+      await ceremonyEvents.expectNoFailedMenders({ page })
       // The logging seam's storage-tier invariant: the visit above ran the
       // wired loggers (the dev ring buffer holds events), and exercising
       // the dev handle's setFilter writes nothing browser-local -- the
@@ -132,12 +136,15 @@ test.describe.serial('transient login residue', () => {
   })
 
   test('a transient visit ended by a crash leaves zero residue', async ({
-    browser
+    browser,
+    ceremonyEvents
   }) => {
     const { context, page } = await coldTerminal(browser)
     try {
+      await ceremonyEvents.tag(context)
       const baseline = await transientLogin(page, passphrase)
       await addCredentialViaPaste(page)
+      await ceremonyEvents.expectNoFailedMenders({ page })
       // The simulated crash: the tab dies with no logout (scenario D). The
       // context stays live so the assertions can inspect what the origin
       // still holds afterwards.

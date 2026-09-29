@@ -1,4 +1,4 @@
-import { test, expect } from '@playwright/test'
+import { test, expect } from '../shared/ceremonyEvents'
 import { gotoGuestLogin } from './helpers/auth'
 
 test.describe('Guest login page', () => {
@@ -32,8 +32,12 @@ test.describe('Guest login page', () => {
     ).toBeVisible()
   })
 
-  test('submitting navigates to dashboard', async ({ page }) => {
+  test('submitting navigates to dashboard', async ({
+    page,
+    ceremonyEvents
+  }) => {
     await page.getByRole('button', { name: 'Guest Mode Log In' }).click()
     await expect(page).toHaveURL(/#\/dashboard/)
+    await ceremonyEvents.expectNoFailedMenders({ page })
   })
 })

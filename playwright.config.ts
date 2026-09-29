@@ -2,6 +2,11 @@ import { defineConfig, devices } from '@playwright/test'
 
 const APP_PORT = 5273
 const BASE_URL = `http://localhost:${APP_PORT}`
+// The dev-log file the app's dev server writes, kept off the live dev
+// session's file. Set on this process too, so the test workers (which
+// inherit it) read the file the ceremony-event fixture scopes.
+const DEV_LOG_FILE = 'test-results/dev-logs/app.ndjson'
+process.env.INTEROP_LOGGER_FILE = DEV_LOG_FILE
 
 export default defineConfig({
   testDir: './tests/e2e',
@@ -32,8 +37,7 @@ export default defineConfig({
       // Pin local (IndexedDB) mode; override any VITE_WAS_SERVER_URL leaked
       // from the surrounding shell or a separately-running dev server.
       VITE_WAS_SERVER_URL: '',
-      // Keep the dev-log endpoint off the live dev session's file.
-      INTEROP_LOGGER_FILE: 'test-results/dev-logs/app.ndjson'
+      INTEROP_LOGGER_FILE: DEV_LOG_FILE
     }
   }
 })

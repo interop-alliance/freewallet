@@ -34,6 +34,12 @@ import {
 } from '@interop/wallet-core/clientAnnex'
 import { readUserKeyRoster } from '@interop/wallet-core/keys'
 import { KEYRING_KDF } from '@interop/wallet-core/keyring'
+import { ceremonyEvents } from '@interop/wallet-core'
+import type {
+  CeremonyDetail,
+  CeremonyEmitter,
+  CeremonyOutcome
+} from '@interop/wallet-core'
 import { resourcePath, toUrl } from '@interop/was-client/paths'
 import {
   DATE_FMT,
@@ -672,7 +678,10 @@ export async function changeAccountPassphrase({
       // own call site: it carries no registration, so no login chain's
       // runner ever sees it.
       if (outcome) {
-        reportCeremonyTail({ mended: outcome.mended })
+        reportCeremonyTail({
+          ceremony: 'unlock-credential-rotation',
+          mended: outcome.mended
+        })
       }
       if (outcome?.rotated && outcome.userKey) {
         rotation = 'rotated'
@@ -1644,6 +1653,53 @@ export interface UnnamedUnlockSpace {
 }
 
 /**
+ * The deletion's stage ids for the ceremony event channel, in run order. A
+ * stage fires once its phase is complete; the per-Space phases report one
+ * aggregate stage with a count. A phase that did not run on this session
+ * (the quiesce on a transient session, the remote phases on a guest)
+ * emits nothing.
+ */
+export const ACCOUNT_DELETION_STAGES = [
+  'authenticate',
+  'quiesce',
+  'discover',
+  'annex-spaces',
+  'unlock-spaces',
+  'account-space',
+  'acting-unlock-space',
+  'local-wipe'
+] as const
+
+/**
+ * One value of {@link ACCOUNT_DELETION_STAGES}.
+ */
+export type AccountDeletionStage = (typeof ACCOUNT_DELETION_STAGES)[number]
+
+/**
+ * The thrown errors a deletion run classifies as `refused` on the event
+ * channel: the user dismissed the passkey re-assertion, or the passkey
+ * cannot evaluate PRF. Both stop the run before anything is deleted.
+ */
+const ACCOUNT_DELETION_REFUSALS: ReadonlyArray<string> = [
+  'PasskeyCancelledError',
+  'PasskeyPrfUnsupportedError'
+]
+
+/**
+ * The event outcome each returned deletion result maps to.
+ */
+const ACCOUNT_DELETION_EVENT_OUTCOMES: Record<
+  AccountDeletionResult,
+  CeremonyOutcome
+> = {
+  deleted: 'clean',
+  'deleted-unverified': 'partial',
+  refused: 'refused',
+  'wrong-passphrase': 'refused',
+  failed: 'failed'
+}
+
+/**
  * The ceremony's progress, for the dialog's keep-this-tab-open copy.
  */
 export type AccountDeletionPhase =
@@ -1863,6 +1919,10 @@ function labelOf(entry: UnlockMethod): { label?: string } {
  * refuses and never returns `'failed'`;
  * (w) the shared wipe enumeration.
  *
+ * Each call is one `account-deletion` run on the ceremony event channel: a
+ * stage event per completed phase and one outcome mapped from the returned
+ * result. The shared wipe at (w) is a `wallet-wipe` run of its own.
+ *
  * Clearing the session and leaving for the landing page stay with the caller,
  * which owns the app shell.
  *
@@ -1884,6 +1944,68 @@ export async function deleteAccount({
   passphrase: string
   onPhase?: (phase: AccountDeletionPhase) => void
   signal?: AbortSignal
+}): Promise<AccountDeletionOutcome> {
+  const events = ceremonyEvents<AccountDeletionStage>({
+    ceremony: 'account-deletion',
+    log,
+    refusals: ACCOUNT_DELETION_REFUSALS
+  })
+  return await events.run(
+    () => runAccountDeletion({ session, passphrase, onPhase, signal, events }),
+    accountDeletionOutcomeEvent
+  )
+}
+
+/**
+ * The outcome event one deletion run's returned outcome maps to: the two
+ * deleted results are `clean` and `partial`, a pre-flight refusal and a
+ * wrong passphrase are `refused`, and a pre-pivot failure is `failed`.
+ * Detail is counts and enums alone.
+ *
+ * @param outcome {AccountDeletionOutcome}
+ * @returns {{ outcome: CeremonyOutcome, detail: CeremonyDetail }}
+ */
+function accountDeletionOutcomeEvent(outcome: AccountDeletionOutcome): {
+  outcome: CeremonyOutcome
+  detail: CeremonyDetail
+} {
+  const count = (grade: SpaceDeletionReport['outcome']) =>
+    outcome.spaces.filter(space => space.outcome === grade).length
+  const detail: CeremonyDetail = {
+    result: outcome.result,
+    ...(outcome.refusal ? { reason: outcome.refusal } : {}),
+    spacesDeleted: count('deleted'),
+    spacesUnconfirmed: count('unconfirmed'),
+    spacesUnreachable: count('unreachable'),
+    unnamed: outcome.unnamed.length,
+    localWipeNarrowed: outcome.localWipeNarrowed
+  }
+  return { outcome: ACCOUNT_DELETION_EVENT_OUTCOMES[outcome.result], detail }
+}
+
+/**
+ * The body of {@link deleteAccount}, with the run's emitter.
+ *
+ * @param options {object}
+ * @param options.session {Session}
+ * @param options.passphrase {string}
+ * @param [options.onPhase] {Function}
+ * @param [options.signal] {AbortSignal}
+ * @param options.events {CeremonyEmitter}   the run's stage emitter
+ * @returns {Promise<AccountDeletionOutcome>}
+ */
+async function runAccountDeletion({
+  session,
+  passphrase,
+  onPhase,
+  signal,
+  events
+}: {
+  session: Session
+  passphrase: string
+  onPhase?: (phase: AccountDeletionPhase) => void
+  signal?: AbortSignal
+  events: CeremonyEmitter<AccountDeletionStage>
 }): Promise<AccountDeletionOutcome> {
   // Wait out the login-time registry passes rather than racing their
   // read-modify-writes (deletion walks the registry); on a settled session
@@ -2076,6 +2198,10 @@ export async function deleteAccount({
     }
   }
 
+  if (credential) {
+    events.stage('authenticate')
+  }
+
   // (a1) Quiesce: stop background replication and close the local replica
   // before the first destructive phase, so replication does not race the
   // replica delete at (w). A transient session drives neither.
@@ -2086,6 +2212,7 @@ export async function deleteAccount({
     } catch (err) {
       log.warn('Could not stop background replication before deletion', { err })
     }
+    events.stage('quiesce')
   }
 
   // (a2) Discover.
@@ -2386,6 +2513,14 @@ export async function deleteAccount({
     }
   }
 
+  if (remote && credential) {
+    events.stage('discover', {
+      annexSpaces: annexSpaces.length,
+      unlockSpaces: siblingEntries.length,
+      ...(accountAlreadyGone ? { prior: true } : {})
+    })
+  }
+
   // (b3) The auxiliary annex Space(s). Per Space: mint the DELETE-only child
   // of THAT Space's root, then send its recursive DELETE, which takes the
   // generation collections with it. Minting immediately before the request
@@ -2440,6 +2575,9 @@ export async function deleteAccount({
       return refuse('space-delete-failed')
     }
     spaces.push({ kind: 'annex', spaceId, outcome: grade })
+  }
+  if (annexSpaces.length > 0) {
+    events.stage('annex-spaces', { spaces: annexSpaces.length })
   }
 
   // (b2) The KMS keystore. Shipped skipped and reported.
@@ -2520,6 +2658,9 @@ export async function deleteAccount({
       method: entry.type,
       ...labelOf(entry)
     })
+  }
+  if (siblingEntries.length > 0) {
+    events.stage('unlock-spaces', { spaces: siblingEntries.length })
   }
 
   // (b5) The account Space: the pivot. Everything the walk needs from the
@@ -2656,6 +2797,12 @@ export async function deleteAccount({
     }
   }
 
+  if (remote && accountGone) {
+    events.stage('account-space', {
+      ...(accountAlreadyGone ? { prior: true } : {})
+    })
+  }
+
   // (b6) The acting credential's own unlock Space: a root invocation under
   // the credential's own unlock identity, which needs nothing the account
   // held. Past the pivot, so it reports rather than refuses -- and never
@@ -2705,6 +2852,7 @@ export async function deleteAccount({
       })
     }
     await deleteUnlockLocalState({ spaceId, idb })
+    events.stage('acting-unlock-space')
   }
 
   // (w) The local half: the shared wipe enumeration, for guests and full
@@ -2735,6 +2883,10 @@ export async function deleteAccount({
     idb
   })
   localWipeNarrowed = failed.includes('unlock-methods-registry')
+  events.stage('local-wipe', {
+    failed: failed.length,
+    unverified: unverified.length
+  })
   if (failed.includes('replica')) {
     return done(accountGone ? 'deleted-unverified' : 'failed')
   }

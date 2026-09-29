@@ -8,11 +8,12 @@
  */
 import { readFileSync } from 'node:fs'
 import path from 'node:path'
-import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 import { addSink, captureSink } from '@interop/logger'
 import { base64urlnopad } from '@scure/base'
 import type { Session } from '@/types/auth'
+import { captureCeremonyEvents } from './ceremonyEventCapture'
 
 const state = vi.hoisted(() => ({
   calls: [] as string[],
@@ -3954,5 +3955,100 @@ describe('the SettingsPage reload-after-mutation race', () => {
       afterPasskey.methods.find(method => method.type === 'passphrase')
         ?.unlockSpaceId
     ).toBe('unlock-space-new-passphrase')
+  })
+})
+
+describe('deleteAccount (the ceremony events)', () => {
+  let capture: ReturnType<typeof captureCeremonyEvents>
+
+  beforeEach(() => {
+    state.wasUrl = 'https://was.example.test'
+    state.registry = deletionRegistry()
+    state.annexHistory = [annexHistoryEntry(ANNEX_SPACE_A)]
+    capture = captureCeremonyEvents()
+  })
+
+  afterEach(() => {
+    capture.stop()
+  })
+
+  it('emits each completed phase and one clean outcome, with counts and no Space id', async () => {
+    const outcome = await deleteAccount({
+      session: makeSession({ transient: true }),
+      passphrase: PASSPHRASE
+    })
+    expect(outcome.result).toBe('deleted')
+
+    expect(capture.stageNames('account-deletion')).toEqual([
+      'authenticate',
+      'discover',
+      'annex-spaces',
+      'unlock-spaces',
+      'account-space',
+      'acting-unlock-space',
+      'local-wipe'
+    ])
+    expect(capture.soleOutcome('account-deletion').data).toMatchObject({
+      outcome: 'clean',
+      result: 'deleted',
+      spacesDeleted: outcome.spaces.filter(space => space.outcome === 'deleted')
+        .length
+    })
+    const events = capture.serialized()
+    for (const space of outcome.spaces) {
+      expect(events).not.toContain(space.spaceId)
+    }
+  })
+
+  it('classifies a deletion whose local wipe went unconfirmed as partial', async () => {
+    state.localWipeUnverified = ['replica']
+    const outcome = await deleteAccount({
+      session: makeSession({ transient: true }),
+      passphrase: PASSPHRASE
+    })
+    expect(outcome.result).toBe('deleted-unverified')
+    expect(capture.soleOutcome('account-deletion').data).toMatchObject({
+      outcome: 'partial'
+    })
+  })
+
+  it('classifies a pre-flight refusal and a wrong passphrase as refused', async () => {
+    state.ladderVmAnchored = false
+    await deleteAccount({
+      session: makeSession({ transient: true }),
+      passphrase: PASSPHRASE
+    })
+    expect(capture.soleOutcome('account-deletion').data).toMatchObject({
+      outcome: 'refused',
+      result: 'refused',
+      reason: 'ladder-vm-not-anchored'
+    })
+
+    capture.stop()
+    capture = captureCeremonyEvents()
+    state.ladderVmAnchored = true
+    state.verifyFails = 'wrong'
+    await deleteAccount({
+      session: makeSession({ transient: true }),
+      passphrase: 'wrong'
+    })
+    expect(capture.soleOutcome('account-deletion').data).toMatchObject({
+      outcome: 'refused',
+      result: 'wrong-passphrase'
+    })
+    // Nothing past (a) completed.
+    expect(capture.stages('account-deletion')).toEqual([])
+  })
+
+  it('classifies a pre-pivot failure as failed', async () => {
+    state.verifyFails = 'other'
+    await deleteAccount({
+      session: makeSession({ transient: true }),
+      passphrase: PASSPHRASE
+    })
+    expect(capture.soleOutcome('account-deletion').data).toMatchObject({
+      outcome: 'failed',
+      result: 'failed'
+    })
   })
 })

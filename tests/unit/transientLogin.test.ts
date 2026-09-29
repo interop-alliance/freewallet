@@ -10,6 +10,7 @@
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { TEST_SERVICE_DESCRIPTION } from '../shared/wasServiceFixture'
+import { captureCeremonyEvents } from './ceremonyEventCapture'
 
 import { addSink, captureSink } from '@interop/logger'
 import { WasError } from '@interop/was-client'
@@ -134,6 +135,7 @@ import {
 } from '@/session/unlockMethods'
 import { initSessionFromSeed } from '@/session/initSession'
 import { mendReportAccumulator } from '@interop/wallet-core/menders'
+import { createLogger } from '@/lib/log'
 import type { CeremonyId } from '@interop/wallet-core'
 import type { TransientKeyringFetchResult } from '@/session/keyring'
 import { transientSessionStores } from '@/session/persistence'
@@ -941,7 +943,9 @@ describe('transientSessionFromKeyringHit -- the client-annex generation-readines
    */
   async function runComposition(found = makeFound()) {
     const persistence = transientSessionStores()
-    const mends = mendReportAccumulator<CeremonyId>()
+    const mends = mendReportAccumulator<CeremonyId>({
+      logger: createLogger('fw:session:transient')
+    })
     const { session } = await transientSessionFromKeyringHit({
       found,
       type: 'passphrase',
@@ -952,6 +956,7 @@ describe('transientSessionFromKeyringHit -- the client-annex generation-readines
       session,
       persistence,
       found,
+      mends,
       ensureCall: vi.mocked(ensureCredentialClientAnnexGeneration).mock
         .calls[0]![0],
       // The grade each routing entry reported, keyed by invariant id.
@@ -1042,6 +1047,66 @@ describe('transientSessionFromKeyringHit -- the client-annex generation-readines
         'standing-delegations-verify-under-the-current-document'
       ]
     ).toBe('partial')
+  })
+
+  it('emits one mender event per routing entry, matching it, with no account identifier', async () => {
+    primeHappyPath()
+    const resealError = new Error('the re-seal failed')
+    vi.mocked(ensureCredentialClientAnnexGeneration).mockResolvedValue(
+      ensureOutcome({
+        delegationRenewed: true,
+        generationDelegation: FRESH_DELEGATION,
+        bridgeReminted: true,
+        delegation: FRESH_BRIDGE,
+        bridgeResealError: resealError
+      }) as never
+    )
+    const capture = captureCeremonyEvents()
+    try {
+      const { mends } = await runComposition()
+      const routing = [
+        'annex-generation-is-reachable',
+        'standing-delegations-verify-under-the-current-document',
+        'generation-delegation-is-current'
+      ]
+      const events = capture
+        .menders()
+        .filter(event => event.ns === 'fw:session:transient')
+      expect(
+        events.map(event => {
+          const { invariant, outcome } = event.data as {
+            invariant: string
+            outcome: string
+          }
+          return [invariant, outcome, event.level]
+        })
+      ).toEqual(
+        mends
+          .entries()
+          .filter(entry => routing.includes(entry.invariant))
+          .map(entry => [
+            entry.invariant,
+            entry.outcome,
+            { clean: 'info', noop: 'debug', partial: 'warn' }[
+              entry.outcome as string
+            ]
+          ])
+      )
+      // The site holds the re-seal's error, so its entry's event carries it.
+      const partial = events.find(
+        event => (event.data as { outcome: string }).outcome === 'partial'
+      )
+      expect(partial?.err).toBe(resealError)
+      expect(partial?.data).toMatchObject({ reason: 'bridge-reseal' })
+      // A transient path: no account identifier in any mender event.
+      const serialized = JSON.stringify(
+        capture.menders().map(event => event.data)
+      )
+      expect(serialized).not.toContain(POINTER.did)
+      expect(serialized).not.toContain(POINTER.spaceId)
+    } finally {
+      capture.stop()
+    }
   })
 
   it('runs the ensure on every visit, with the credential members', async () => {

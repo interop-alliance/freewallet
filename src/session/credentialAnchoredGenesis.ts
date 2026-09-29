@@ -108,7 +108,9 @@ export type { CredentialAnchoredEstablishment, CredentialAnchoredMendReport }
  * Reports one credential-anchored mend run into a login's mend report: one
  * entry per arm, in the arms' own order. The run is the routing site of four
  * invariants, so the report says what each arm made true rather than that
- * "the mend ran". An arm that did not run this time reports a no-op.
+ * "the mend ran". An arm that did not run this time reports a no-op. An
+ * arm's own result (`established`, `rebound`, `promoted`) rides
+ * `detail.arm`, and each entry emits its mender event beside the report.
  *
  * @param options {object}
  * @param options.report {CredentialAnchoredMendReport}   the run's report
@@ -134,14 +136,14 @@ export function reportCredentialAnchoredMend({
     if (arm.converged) {
       return {
         outcome: 'clean',
-        ...(arm.outcome ? { detail: { outcome: arm.outcome } } : {})
+        ...(arm.outcome ? { detail: { arm: arm.outcome } } : {})
       }
     }
     if (arm.error !== undefined) {
       return {
         outcome: 'failed',
         errorName: errorNameOf(arm.error),
-        ...(arm.outcome ? { detail: { outcome: arm.outcome } } : {})
+        ...(arm.outcome ? { detail: { arm: arm.outcome } } : {})
       }
     }
     const reason = arm.skipped ?? arm.outcome
@@ -150,22 +152,15 @@ export function reportCredentialAnchoredMend({
       ...(reason ? { detail: { reason } } : {})
     }
   }
-  mends.report({
-    invariant: 'unlock-record-points-at-the-account-did',
-    ...outcomeOf(report.establishment)
-  })
-  mends.report({
-    invariant: 'space-controller-is-the-account-did',
-    ...outcomeOf(report.promotion)
-  })
-  mends.report({
-    invariant: 'roster-and-collection-epochs-exist',
-    ...outcomeOf(report.rosterEpochs)
-  })
-  mends.report({
-    invariant: 'registry-records-the-establishing-credential',
-    ...outcomeOf(report.registry)
-  })
+  const arms = [
+    ['unlock-record-points-at-the-account-did', report.establishment],
+    ['space-controller-is-the-account-did', report.promotion],
+    ['roster-and-collection-epochs-exist', report.rosterEpochs],
+    ['registry-records-the-establishing-credential', report.registry]
+  ] as const
+  for (const [invariant, arm] of arms) {
+    mends.report({ invariant, ...outcomeOf(arm) }, { err: arm?.error })
+  }
 }
 
 const log = createLogger('fw:session:genesis')
