@@ -28,8 +28,7 @@ import type { Logger } from '@interop/logger'
 import { setLogger, stageNotifier } from '@interop/wallet-core'
 import { setLogger as setRequestLogger } from '@interop/wallet-request'
 import { setLogger as setSyncLogger } from '@interop/was-sync'
-import type { StageNotifier } from '@interop/wallet-core'
-import type { FreewalletCeremonyId } from '../session/ceremonies.js'
+import type { CeremonyId, StageNotifier } from '@interop/wallet-core'
 
 export { createLogger }
 
@@ -39,7 +38,7 @@ export { createLogger }
  * with stages of its own but no ceremony id. Typed so the diagnostics
  * label cannot drift from the vocabulary (nothing stores it).
  */
-export type StageLabel = FreewalletCeremonyId | 'credential-anchored-mend'
+export type StageLabel = CeremonyId | 'credential-anchored-mend'
 
 /**
  * A per-stage stopwatch for a ceremony: each `mark(stage)` logs one info

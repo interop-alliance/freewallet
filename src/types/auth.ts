@@ -20,7 +20,7 @@ import type { StandingUnlockClient } from '@interop/wallet-core/unlock'
 import type { AccountPointer } from '@interop/wallet-core/keyring'
 import type { PersistableClientKeys } from '@/session/keyring'
 import type { MendReport } from '@interop/wallet-core/menders'
-import type { FreewalletCeremonyId } from '@/session/ceremonies'
+import type { CeremonyId } from '@interop/wallet-core'
 import type { VerifiedLogCache } from '@/session/verifiedLog'
 import type { SessionPersistence } from '@/session/persistence'
 
@@ -251,7 +251,7 @@ export interface Session {
   // run, the app-key sweep and the annex GC included, so it settles behind
   // `registryReady` rather than with it. In memory only, scalar detail
   // only, and it never rejects.
-  mends?: Promise<MendReport<FreewalletCeremonyId>>
+  mends?: Promise<MendReport<CeremonyId>>
   // Settles when the credential-anchored signup's best-effort
   // welcome-content seeding finishes (success, failure, or timeout -- it
   // never rejects); the dashboard shows a "generating welcome credentials"

@@ -93,7 +93,7 @@ import {
   type MendOutcome,
   type MendReportAccumulator
 } from '@interop/wallet-core/menders'
-import type { FreewalletCeremonyId } from '@/session/ceremonies'
+import type { CeremonyId } from '@interop/wallet-core'
 import {
   blockCeremonyContext,
   startLoginMenderBlock
@@ -532,9 +532,9 @@ export async function transientSessionFromKeyringHit({
   healAttempted?: boolean
   repairShaped?: boolean
   accountLog?: PublishedWebvhLog
-  mends?: MendReportAccumulator<FreewalletCeremonyId>
+  mends?: MendReportAccumulator<CeremonyId>
 }): Promise<{ session: Session; userExists: boolean }> {
-  const mends = suppliedMends ?? mendReportAccumulator<FreewalletCeremonyId>()
+  const mends = suppliedMends ?? mendReportAccumulator<CeremonyId>()
   const standing = found.standing
   if (!standing?.ladderSeed) {
     // Invariant, not a user state: a standing record is the only record a

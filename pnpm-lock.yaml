@@ -78,8 +78,8 @@ importers:
         specifier: link:../wallet-backup
         version: link:../wallet-backup
       '@interop/wallet-core':
-        specifier: ^0.85.0
-        version: 0.85.0(@interop/jsonld-signatures@11.8.6)(@interop/was-client@0.80.0(@interop/jsonld-signatures@11.8.6))
+        specifier: link:../wallet-core
+        version: link:../wallet-core
       '@interop/wallet-request':
         specifier: ^0.4.1
         version: 0.4.1(@interop/jsonld-signatures@11.8.6)
@@ -707,12 +707,6 @@ packages:
   '@interop/vh-resource-log@0.5.4':
     resolution: {integrity: sha512-pqkvBU6NoPYWrxkpXgX4MX2ynYOXTNpgIL6EeUg3i8eLjEWTXBEzZe9gjSrQ2DqJHT9vNY2IXv7pQiIjvTvSyw==}
     engines: {node: '>=24.0'}
-
-  '@interop/wallet-core@0.85.0':
-    resolution: {integrity: sha512-4BcWK383xMDfuoKGQmqmcYcZ7WM96In9qfkKUIUM3wh9aHNCMF7a9YbrG0bysPK30+VhWM+3SxqXsnAnbtYxHA==}
-    engines: {node: '>=24.0'}
-    peerDependencies:
-      '@interop/was-client': '>=0.78.0 <1.0.0'
 
   '@interop/wallet-request@0.4.1':
     resolution: {integrity: sha512-B3Z/9xxOMYzH0aS9PAtyqQRds1IDmL8WCVQUysJS9Xa5uvVMDbxIxbCWRdBe3S3dxzysgqpBYx7YQD6GJGUZ7w==}
@@ -4233,27 +4227,6 @@ snapshots:
     dependencies:
       '@interop/did-method-webvh': 5.11.1
       '@interop/storage-core': 0.20.0
-
-  '@interop/wallet-core@0.85.0(@interop/jsonld-signatures@11.8.6)(@interop/was-client@0.80.0(@interop/jsonld-signatures@11.8.6))':
-    dependencies:
-      '@interop/capability-agent': 0.2.1
-      '@interop/data-integrity-core': 8.8.0
-      '@interop/did-method-webvh': 5.11.1
-      '@interop/ed25519-signature': 7.2.3(@interop/jsonld-signatures@11.8.6)
-      '@interop/ed25519-verification-key': 8.2.1
-      '@interop/ezcap': 7.5.0
-      '@interop/social-core': 0.8.1
-      '@interop/vh-resource-log': 0.5.4
-      '@interop/was-client': 0.80.0(@interop/jsonld-signatures@11.8.6)
-      '@interop/x25519-key-agreement-key': 5.4.1
-      '@noble/ciphers': 2.4.0
-      '@noble/hashes': 2.4.0
-      '@scure/base': 2.4.0
-      byoe-context: 0.5.0
-    transitivePeerDependencies:
-      - '@interop/jsonld-signatures'
-      - expo-crypto
-      - react-native-get-random-values
 
   '@interop/wallet-request@0.4.1(@interop/jsonld-signatures@11.8.6)':
     dependencies:

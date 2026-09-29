@@ -2,7 +2,7 @@
 /**
  * The doc counterpart test for the ceremony vocabulary: parses
  * ARCHITECTURE.md's "## Ceremony inventory" table and asserts it names
- * exactly the ids `FREEWALLET_CEREMONY_IDS` exports, that every id is
+ * exactly the ids wallet-core's `CEREMONY_IDS` exports, that every id is
  * kebab-case and unique, and that every module path a row names actually
  * exists. A new ceremony added to the table with no id mapping here, or an
  * id exported with no table row, fails the test -- the seam that keeps the
@@ -11,7 +11,7 @@
 import { existsSync, readFileSync } from 'node:fs'
 import path from 'node:path'
 import { describe, expect, it } from 'vitest'
-import { FREEWALLET_CEREMONY_IDS } from '@/session/ceremonies'
+import { CEREMONY_IDS } from '@interop/wallet-core'
 
 const REPO_ROOT = path.resolve(__dirname, '..', '..')
 const ARCHITECTURE_PATH = path.join(REPO_ROOT, 'ARCHITECTURE.md')
@@ -139,12 +139,12 @@ describe('ceremony inventory counterpart', () => {
       return id
     })
 
-    expect(new Set(mappedIds)).toEqual(new Set(FREEWALLET_CEREMONY_IDS))
+    expect(new Set(mappedIds)).toEqual(new Set(CEREMONY_IDS))
   })
 
   it('exports only kebab-case, unique ceremony ids', () => {
     const seen = new Set<string>()
-    for (const id of FREEWALLET_CEREMONY_IDS) {
+    for (const id of CEREMONY_IDS) {
       expect(id).toMatch(/^[a-z]+(-[a-z]+)*$/)
       expect(seen.has(id)).toBe(false)
       seen.add(id)

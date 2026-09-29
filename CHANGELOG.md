@@ -114,6 +114,12 @@
 
 ### Changed
 
+- The account-deletion, wallet-wipe, content-migration, and backup-export
+  ceremony ids come from `@interop/wallet-core`'s `CEREMONY_IDS`.
+  `src/session/ceremonies.ts` (`APP_CEREMONY_IDS`, `FREEWALLET_CEREMONY_IDS`,
+  `FreewalletCeremonyId`) is removed; importers use `CeremonyId`.
+  `@interop/wallet-core` is consumed via `link:../wallet-core` pending its
+  next release.
 - Requires `@interop/was-sync` 0.6.0, `@interop/was-client` 0.80.0,
   `@interop/wallet-core` 0.85.0, and `@interop/storage-core` 0.22.0.
 - Adapt to `@interop/wallet-backup` 0.5.0's sink rename (`importResource`,

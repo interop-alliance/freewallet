@@ -86,7 +86,7 @@ import {
   mendReportAccumulator,
   type MendReportAccumulator
 } from '@interop/wallet-core/menders'
-import type { FreewalletCeremonyId } from '@/session/ceremonies'
+import type { CeremonyId } from '@interop/wallet-core'
 import {
   blockCeremonyContext,
   startLoginMenderBlock
@@ -260,7 +260,7 @@ export async function initSessionFromSeed({
   provisionStorage?: boolean
   idb?: IDBFactory
   accountLog?: DIDLog
-  mends?: MendReportAccumulator<FreewalletCeremonyId>
+  mends?: MendReportAccumulator<CeremonyId>
   persistence?: SessionPersistence
 }) {
   // A popup's localStorage cache pair is suppressed -- but only where the
@@ -498,7 +498,7 @@ export async function initSessionFromSeed({
   // report, so every reader has one shape to read. A caller that starts one
   // stamps `session.mends` itself, beside `session.registryReady`.
   if (!accumulator) {
-    const mends = mendReportAccumulator<FreewalletCeremonyId>()
+    const mends = mendReportAccumulator<CeremonyId>()
     session.mends = mends.settled
     mends.settle()
   }
@@ -655,7 +655,7 @@ async function healUnpromotedRememberedAccount({
   email?: string
   persistence: BrowserLocalSessionPersistence
   idb?: IDBFactory
-  mends: MendReportAccumulator<FreewalletCeremonyId>
+  mends: MendReportAccumulator<CeremonyId>
 }): Promise<KeyringFetchResult> {
   const ladderSeed = found.standing?.ladderSeed
   const pointer = found.pointer
@@ -906,7 +906,7 @@ async function loginWithUnlockCredential({
   // One report per login attempt loop, so the routing entries a re-routed
   // attempt already reported (the stale-record wipe) stay in the report the
   // session finally carries.
-  const mends = mendReportAccumulator<FreewalletCeremonyId>()
+  const mends = mendReportAccumulator<CeremonyId>()
   for (let staleRetries = 0; ; staleRetries++) {
     const routed = await routeUnlockLogin({
       ...(secret !== undefined ? { secret } : {}),
@@ -1076,7 +1076,7 @@ async function sessionFromKeyringHit({
   persistence: BrowserLocalSessionPersistence
   idb?: IDBFactory
   loginCredential?: { secret: string | Uint8Array; derived?: UnlockCredential }
-  mends: MendReportAccumulator<FreewalletCeremonyId>
+  mends: MendReportAccumulator<CeremonyId>
 }): Promise<{ session: Session | null; userExists: boolean }> {
   // The three-way record routing, keyed on `userKey` presence: a record
   // holding a user key proceeds through the detector and the ordinary login;

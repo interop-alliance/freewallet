@@ -606,8 +606,10 @@ Every row from `/dashboard` through `/settings` is protected;
 
 The account ceremonies in one place: the set AGENTS.md's design gate
 governs. The shared stage orders are canonical in wallet-core's
-ARCHITECTURE.md ("Ceremonies and cascades"); this table lists the
-freewallet-side wrappers and the app-only ceremonies. The mender column
+ARCHITECTURE.md ("Ceremonies and cascades"), and every ceremony here is
+named by an id in wallet-core's `CEREMONY_IDS`. This table lists the
+freewallet-side wrappers and the ceremonies implemented app-side. The
+mender column
 names how a torn run gets finished (see Tear mending in the Glossary): a
 trigger a credential-only visit can fire, or a remembered-login sweep on a
 ceremony only a remembered session runs. A residue left to that chain on an

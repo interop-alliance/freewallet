@@ -50,7 +50,7 @@ import {
   type MendReportEntry
 } from '@interop/wallet-core/menders'
 import type { Session } from '@/types/auth'
-import type { FreewalletCeremonyId } from '@/session/ceremonies'
+import type { CeremonyId } from '@interop/wallet-core'
 import {
   clientAnnexReachFor,
   ensureGenerationDelegation,
@@ -97,7 +97,7 @@ export type { RevokedClientKeys } from '@interop/wallet-core/webvh'
 export interface RevocationOutcome {
   rotated: boolean
   collections: UserKeyCascadeResult
-  mended: MendReport<FreewalletCeremonyId>
+  mended: MendReport<CeremonyId>
 }
 
 /**
@@ -111,11 +111,11 @@ export interface RevocationOutcome {
  * @param remint {object}   the stage's report -- the enrolled branch's
  *   re-mint or the ladder branch's pre-entry replacement -- carrying the
  *   error class name this module's own catch recorded
- * @returns {MendReportEntry<FreewalletCeremonyId>}
+ * @returns {MendReportEntry<CeremonyId>}
  */
 function generationDelegationEntry(
   remint: GenerationDelegationRemint & { errorName?: string }
-): MendReportEntry<FreewalletCeremonyId> {
+): MendReportEntry<CeremonyId> {
   const reported = {
     invariant: 'generation-delegation-is-current',
     ceremonies: ['client-revocation']

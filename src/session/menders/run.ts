@@ -20,7 +20,7 @@ import {
   type Registration
 } from '@interop/wallet-core/menders'
 import type { Session } from '@/types/auth'
-import type { FreewalletCeremonyId } from '@/session/ceremonies'
+import type { CeremonyId } from '@interop/wallet-core'
 import {
   accountCeremonyContext,
   sessionAuthorityKind,
@@ -130,7 +130,7 @@ export function startLoginMenderBlock({
   deps,
   pendingReports
 }: {
-  accumulator: MendReportAccumulator<FreewalletCeremonyId>
+  accumulator: MendReportAccumulator<CeremonyId>
   route: LoginRoute
   deps: LoginMenderDeps
   pendingReports?: ReadonlyArray<Promise<unknown>>
@@ -143,7 +143,7 @@ export function startLoginMenderBlock({
           registrations: REMEMBERED_REGISTRATIONS,
           registryWriting: REMEMBERED_REGISTRY_REGISTRATIONS,
           seed: REMEMBERED_SEED as
-            Registration<LoginMenderDeps, FreewalletCeremonyId> | undefined
+            Registration<LoginMenderDeps, CeremonyId> | undefined
         }
       : {
           trigger: 'transient-login-chain' as const,

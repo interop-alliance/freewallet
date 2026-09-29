@@ -72,7 +72,7 @@ import {
   type MendOutcome,
   type MendReportAccumulator
 } from '@interop/wallet-core/menders'
-import type { FreewalletCeremonyId } from '@/session/ceremonies'
+import type { CeremonyId } from '@interop/wallet-core'
 import {
   DID_KEYS_RESOURCE,
   ENCRYPTED_STANDARD_COLLECTIONS,
@@ -120,7 +120,7 @@ export function reportCredentialAnchoredMend({
   mends
 }: {
   report: CredentialAnchoredMendReport
-  mends: MendReportAccumulator<FreewalletCeremonyId>
+  mends: MendReportAccumulator<CeremonyId>
 }): void {
   const outcomeOf = (arm?: {
     converged: boolean

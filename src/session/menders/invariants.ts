@@ -18,7 +18,7 @@
  */
 import type { InvariantDeclaration } from '@interop/wallet-core/menders'
 
-import type { FreewalletCeremonyId } from '../ceremonies.js'
+import type { CeremonyId } from '@interop/wallet-core'
 import { findPendingPassphraseEntries } from '../credentialCoverage.js'
 import { documentListsCredential } from '../pendingRetirement.js'
 import { checkRecoveryHealth } from '../recovery.js'
@@ -31,7 +31,7 @@ import { MENDER_WARNINGS } from './warnings.js'
  * restated here.
  */
 const DECLARATIONS: ReadonlyArray<
-  Omit<InvariantDeclaration<never, FreewalletCeremonyId>, 'warn'>
+  Omit<InvariantDeclaration<never, CeremonyId>, 'warn'>
 > = [
   // 1
   // converger: `convergeRosterToDocument` (`src/session/userKeySweep.ts`)
@@ -665,7 +665,7 @@ const DECLARATIONS: ReadonlyArray<
  * string a runner logs when the code reporting it throws.
  */
 export const MENDER_INVARIANTS: ReadonlyArray<
-  InvariantDeclaration<never, FreewalletCeremonyId>
+  InvariantDeclaration<never, CeremonyId>
 > = DECLARATIONS.map(declaration => ({
   ...declaration,
   warn: MENDER_WARNINGS[declaration.id]

@@ -9,7 +9,7 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { mendReportAccumulator } from '@interop/wallet-core/menders'
 import type { Session } from '@/types/auth'
-import type { FreewalletCeremonyId } from '@/session/ceremonies'
+import type { CeremonyId } from '@interop/wallet-core'
 import type { LoginMenderDeps } from '@/session/menders/registrations'
 
 vi.mock('@interop/wallet-core/menders', async importOriginal => ({
@@ -53,7 +53,7 @@ describe('the block starter', () => {
       new Error('A registration reports an undeclared invariant: nope')
     )
     const session = fakeSession()
-    const accumulator = mendReportAccumulator<FreewalletCeremonyId>()
+    const accumulator = mendReportAccumulator<CeremonyId>()
 
     startLoginMenderBlock({
       accumulator,
@@ -67,7 +67,7 @@ describe('the block starter', () => {
 
   it('carries a report fired beside the block, which settles after it', async () => {
     const session = fakeSession()
-    const accumulator = mendReportAccumulator<FreewalletCeremonyId>()
+    const accumulator = mendReportAccumulator<CeremonyId>()
     // The did:web projection mend's shape: fired before the block, reporting
     // from its own `.then` a turn or more later. In the popup the block runs
     // empty and settles at once, so without the wait the entry would land

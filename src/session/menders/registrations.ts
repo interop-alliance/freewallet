@@ -30,7 +30,7 @@ import type { SealableEncryptionDescriptorStore } from '@interop/wallet-core/key
 import type { IZcap } from '@interop/data-integrity-core'
 import type { PublishedKeyDocument } from '@interop/wallet-core/webvh'
 import type { Session } from '@/types/auth'
-import type { FreewalletCeremonyId } from '@/session/ceremonies'
+import type { CeremonyId } from '@interop/wallet-core'
 import type {
   KeyringFetchResult,
   TransientKeyringFetchResult,
@@ -188,10 +188,7 @@ function transient(deps: LoginMenderDeps): TransientMenderDeps {
  * whose provisioning was refused -- which is what a rejected chain seed has
  * always done.
  */
-export const REMEMBERED_SEED: Registration<
-  LoginMenderDeps,
-  FreewalletCeremonyId
-> = {
+export const REMEMBERED_SEED: Registration<LoginMenderDeps, CeremonyId> = {
   trigger: 'remembered-login-chain',
   reports: ['standard-collections-are-provisioned'],
   async converge(deps) {
@@ -213,7 +210,7 @@ export const REMEMBERED_SEED: Registration<
  * rewrite the record under the pre-rotation keys and undo it within one
  * login.
  */
-const USER_KEY_SWEEP: Registration<LoginMenderDeps, FreewalletCeremonyId> = {
+const USER_KEY_SWEEP: Registration<LoginMenderDeps, CeremonyId> = {
   trigger: 'remembered-login-chain',
   reports: [
     'roster-wraps-exactly-the-document-key-set',
@@ -369,7 +366,7 @@ const SHARED_PASSES: ReadonlyArray<{
  */
 function sharedRegistryPasses(
   trigger: 'remembered-login-chain' | 'transient-login-chain'
-): ReadonlyArray<Registration<LoginMenderDeps, FreewalletCeremonyId>> {
+): ReadonlyArray<Registration<LoginMenderDeps, CeremonyId>> {
   return SHARED_PASSES.map(pass => ({
     trigger,
     reports: [pass.invariant],
@@ -387,10 +384,7 @@ function sharedRegistryPasses(
  * host cannot serve (or a chain-head pin that refuses what it serves) must
  * not stand the re-mint down.
  */
-const STANDING_DELEGATION_REFRESH: Registration<
-  LoginMenderDeps,
-  FreewalletCeremonyId
-> = {
+const STANDING_DELEGATION_REFRESH: Registration<LoginMenderDeps, CeremonyId> = {
   trigger: 'remembered-login-chain',
   reports: ['standing-delegations-verify-under-the-current-document'],
   async converge(deps) {
@@ -441,50 +435,47 @@ const STANDING_DELEGATION_REFRESH: Registration<
 /**
  * The recorded ladder rung, after a self-enrollment climbed the ladder.
  */
-const LADDER_RUNG_REFRESH: Registration<LoginMenderDeps, FreewalletCeremonyId> =
-  {
-    trigger: 'remembered-login-chain',
-    reports: ['registry-records-the-committed-ladder-rung'],
-    async converge(deps) {
-      const { session, found, selfEnrolled } = remembered(deps)
-      const invariant = 'registry-records-the-committed-ladder-rung'
-      const ladderSeed = selfEnrolled ? found.standing?.ladderSeed : undefined
-      if (!ladderSeed) {
-        return [
-          {
-            invariant,
-            outcome: 'noop',
-            detail: { reason: 'no-self-enrollment' }
-          }
-        ]
-      }
-      const promoted = await promotedAccountView({ session })
-      if (!promoted) {
-        return [
-          {
-            invariant,
-            outcome: 'noop',
-            detail: { reason: 'unpromoted-account' }
-          }
-        ]
-      }
-      const recorded = await refreshCommittedLadderRung({
-        session,
-        verified: promoted.verified,
-        ladderSeed,
-        unlockSpaceId: found.unlockSpaceId,
-        ...(found.standingClient?.keyAgreementKeyMultibase
-          ? {
-              keyAgreementKeyMultibase:
-                found.standingClient.keyAgreementKeyMultibase
-            }
-          : {})
-      })
+const LADDER_RUNG_REFRESH: Registration<LoginMenderDeps, CeremonyId> = {
+  trigger: 'remembered-login-chain',
+  reports: ['registry-records-the-committed-ladder-rung'],
+  async converge(deps) {
+    const { session, found, selfEnrolled } = remembered(deps)
+    const invariant = 'registry-records-the-committed-ladder-rung'
+    const ladderSeed = selfEnrolled ? found.standing?.ladderSeed : undefined
+    if (!ladderSeed) {
       return [
-        { invariant, outcome: recorded === 'recorded' ? 'clean' : 'noop' }
+        {
+          invariant,
+          outcome: 'noop',
+          detail: { reason: 'no-self-enrollment' }
+        }
       ]
     }
+    const promoted = await promotedAccountView({ session })
+    if (!promoted) {
+      return [
+        {
+          invariant,
+          outcome: 'noop',
+          detail: { reason: 'unpromoted-account' }
+        }
+      ]
+    }
+    const recorded = await refreshCommittedLadderRung({
+      session,
+      verified: promoted.verified,
+      ladderSeed,
+      unlockSpaceId: found.unlockSpaceId,
+      ...(found.standingClient?.keyAgreementKeyMultibase
+        ? {
+            keyAgreementKeyMultibase:
+              found.standingClient.keyAgreementKeyMultibase
+          }
+        : {})
+    })
+    return [{ invariant, outcome: recorded === 'recorded' ? 'clean' : 'noop' }]
   }
+}
 
 /**
  * The did:webvh pointer heal and the Space-controller promotion behind it.
@@ -492,7 +483,7 @@ const LADDER_RUNG_REFRESH: Registration<LoginMenderDeps, FreewalletCeremonyId> =
  * for the tail registration below to read, so `session.registryReady` does
  * not wait on a KMS round trip.
  */
-const POINTER_HEAL: Registration<LoginMenderDeps, FreewalletCeremonyId> = {
+const POINTER_HEAL: Registration<LoginMenderDeps, CeremonyId> = {
   trigger: 'remembered-login-chain',
   reports: [
     'account-pointer-names-the-account-did',
@@ -534,32 +525,28 @@ const POINTER_HEAL: Registration<LoginMenderDeps, FreewalletCeremonyId> = {
  * It reports `noop` only when no promotion ran at all (a session with no
  * remote store or no account DID).
  */
-const KEYSTORE_PROMOTION: Registration<LoginMenderDeps, FreewalletCeremonyId> =
-  {
-    trigger: 'remembered-login-chain',
-    reports: ['keystore-controller-is-the-account-did'],
-    async converge(deps) {
-      const { session } = remembered(deps)
-      const invariant = 'keystore-controller-is-the-account-did'
-      const pending = session.storage.keystorePromotion
-      if (!pending) {
-        return [
-          { invariant, outcome: 'noop', detail: { reason: 'no-promotion' } }
-        ]
-      }
-      return [{ invariant, ...(await pending) }]
+const KEYSTORE_PROMOTION: Registration<LoginMenderDeps, CeremonyId> = {
+  trigger: 'remembered-login-chain',
+  reports: ['keystore-controller-is-the-account-did'],
+  async converge(deps) {
+    const { session } = remembered(deps)
+    const invariant = 'keystore-controller-is-the-account-did'
+    const pending = session.storage.keystorePromotion
+    if (!pending) {
+      return [
+        { invariant, outcome: 'noop', detail: { reason: 'no-promotion' } }
+      ]
     }
+    return [{ invariant, ...(await pending) }]
   }
+}
 
 /**
  * The generation-delegation self-heal: the pointed generation's embedded
  * delegation is renewed when it is expiring OR its signer has left the
  * verified account document.
  */
-const GENERATION_DELEGATION_HEAL: Registration<
-  LoginMenderDeps,
-  FreewalletCeremonyId
-> = {
+const GENERATION_DELEGATION_HEAL: Registration<LoginMenderDeps, CeremonyId> = {
   trigger: 'remembered-login-chain',
   reports: ['generation-delegation-is-current'],
   async converge(deps) {
@@ -628,7 +615,7 @@ const GENERATION_DELEGATION_HEAL: Registration<
  * is deleted rather than left behind a revocation the server would refuse at
  * every login, and a clean account verifies nothing extra.
  */
-const APP_KEY_SWEEP: Registration<LoginMenderDeps, FreewalletCeremonyId> = {
+const APP_KEY_SWEEP: Registration<LoginMenderDeps, CeremonyId> = {
   trigger: 'remembered-login-chain',
   reports: ['app-keys-live-only-in-app-connections'],
   async converge(deps) {
@@ -650,7 +637,7 @@ const APP_KEY_SWEEP: Registration<LoginMenderDeps, FreewalletCeremonyId> = {
  * The annex GC sweep, after the registry-writing entries: a sibling re-mint
  * above lands first.
  */
-const ANNEX_GC: Registration<LoginMenderDeps, FreewalletCeremonyId> = {
+const ANNEX_GC: Registration<LoginMenderDeps, CeremonyId> = {
   trigger: 'remembered-login-chain',
   reports: ['no-annex-generation-outlives-its-pointer'],
   async converge(deps) {
@@ -695,46 +682,45 @@ const ANNEX_GC: Registration<LoginMenderDeps, FreewalletCeremonyId> = {
  * rewrite, and two writers racing one entry would spend the retry budget
  * undoing each other.
  */
-const TRANSIENT_MANAGE_ZCAP_REFRESH: Registration<
-  LoginMenderDeps,
-  FreewalletCeremonyId
-> = {
-  trigger: 'transient-login-chain',
-  reports: ['acting-credential-manage-zcap-is-current'],
-  async converge(deps) {
-    const { session, found, rosterRead, generationDelegation } = transient(deps)
-    const invariant = 'acting-credential-manage-zcap-is-current'
-    // The capability the visit rides now, not the one it started on: a
-    // registration above may have renewed the generation delegation.
-    const capability =
-      session.profile.invocationCapability ?? generationDelegation
-    const spaceId = session.profile.accountPointer?.spaceId
-    if (!found.manageCapability || !capability || !spaceId) {
-      return [
-        {
-          invariant,
-          outcome: 'noop',
-          detail: { reason: 'no-management-zcap' }
-        }
-      ]
-    }
-    await refreshTransientManageCapability({
-      zcapClient: session.profile.zcapClient,
-      spaceId,
-      userKey: rosterRead.userKey,
-      capability,
-      unlockSpaceId: found.unlockSpaceId,
-      manageCapability: found.manageCapability,
-      ...(found.standingClient?.keyAgreementKeyMultibase
-        ? {
-            keyAgreementKeyMultibase:
-              found.standingClient.keyAgreementKeyMultibase
+const TRANSIENT_MANAGE_ZCAP_REFRESH: Registration<LoginMenderDeps, CeremonyId> =
+  {
+    trigger: 'transient-login-chain',
+    reports: ['acting-credential-manage-zcap-is-current'],
+    async converge(deps) {
+      const { session, found, rosterRead, generationDelegation } =
+        transient(deps)
+      const invariant = 'acting-credential-manage-zcap-is-current'
+      // The capability the visit rides now, not the one it started on: a
+      // registration above may have renewed the generation delegation.
+      const capability =
+        session.profile.invocationCapability ?? generationDelegation
+      const spaceId = session.profile.accountPointer?.spaceId
+      if (!found.manageCapability || !capability || !spaceId) {
+        return [
+          {
+            invariant,
+            outcome: 'noop',
+            detail: { reason: 'no-management-zcap' }
           }
-        : {})
-    })
-    return [{ invariant, outcome: 'clean' }]
+        ]
+      }
+      await refreshTransientManageCapability({
+        zcapClient: session.profile.zcapClient,
+        spaceId,
+        userKey: rosterRead.userKey,
+        capability,
+        unlockSpaceId: found.unlockSpaceId,
+        manageCapability: found.manageCapability,
+        ...(found.standingClient?.keyAgreementKeyMultibase
+          ? {
+              keyAgreementKeyMultibase:
+                found.standingClient.keyAgreementKeyMultibase
+            }
+          : {})
+      })
+      return [{ invariant, outcome: 'clean' }]
+    }
   }
-}
 
 /**
  * The transient chain's collection fan-out: every encrypted collection whose
@@ -766,70 +752,68 @@ const TRANSIENT_MANAGE_ZCAP_REFRESH: Registration<
  * registration therefore settles before, so the two never race one
  * collection's epochs.
  */
-const TRANSIENT_COLLECTION_CASCADE: Registration<
-  LoginMenderDeps,
-  FreewalletCeremonyId
-> = {
-  trigger: 'transient-login-chain',
-  reports: [
-    'collection-epochs-name-the-current-user-key',
-    'governed-log-heads-anchor-past-the-membership-change'
-  ],
-  async converge(deps) {
-    const { session, context, rosterRead } = transient(deps)
-    const resolved = await context()
-    if (resolved?.kind !== 'ladder') {
-      const detail = { reason: 'no-ladder-context' }
+const TRANSIENT_COLLECTION_CASCADE: Registration<LoginMenderDeps, CeremonyId> =
+  {
+    trigger: 'transient-login-chain',
+    reports: [
+      'collection-epochs-name-the-current-user-key',
+      'governed-log-heads-anchor-past-the-membership-change'
+    ],
+    async converge(deps) {
+      const { session, context, rosterRead } = transient(deps)
+      const resolved = await context()
+      if (resolved?.kind !== 'ladder') {
+        const detail = { reason: 'no-ladder-context' }
+        return [
+          {
+            invariant: 'collection-epochs-name-the-current-user-key',
+            outcome: 'noop',
+            detail
+          },
+          {
+            invariant: 'governed-log-heads-anchor-past-the-membership-change',
+            outcome: 'noop',
+            detail
+          }
+        ]
+      }
+      const cascade = await cascadeCollectionsToUserKey({
+        remoteStore: resolved.remoteStore,
+        storeFor: resolved.collectionStore,
+        rosterDescriptor: rosterRead.descriptor,
+        clientKeyAgreementKey: resolved.standingKeyAgreementKey,
+        userKey: rosterRead.userKey
+      })
+      if (
+        anyCollectionRotated({ cascade }) ||
+        session.storage.strandedCollectionIds.length > 0
+      ) {
+        // The rotated descriptors are refetched and the ciphers rebuilt on
+        // them, so this visit's next writes seal under the fresh epochs. A
+        // collection built stranded is rebuilt even when this run rotated
+        // nothing: another client may have re-epoched it since.
+        await session.storage.refreshEncryptedDescriptors()
+      }
       return [
-        {
-          invariant: 'collection-epochs-name-the-current-user-key',
-          outcome: 'noop',
-          detail
-        },
+        collectionEpochsEntry({ cascade }),
         {
           invariant: 'governed-log-heads-anchor-past-the-membership-change',
-          outcome: 'noop',
-          detail
+          // The collection half alone: this registration seals no roster log.
+          // A collection that failed may be the one left unsealed.
+          ...(cascade.failed.length > 0
+            ? {
+                outcome: 'partial' as const,
+                detail: { failedCollections: cascade.failed.length }
+              }
+            : Object.values(cascade.outcomes).some(
+                  outcome => outcome === 'sealed'
+                )
+              ? { outcome: 'clean' as const }
+              : { outcome: 'noop' as const })
         }
       ]
     }
-    const cascade = await cascadeCollectionsToUserKey({
-      remoteStore: resolved.remoteStore,
-      storeFor: resolved.collectionStore,
-      rosterDescriptor: rosterRead.descriptor,
-      clientKeyAgreementKey: resolved.standingKeyAgreementKey,
-      userKey: rosterRead.userKey
-    })
-    if (
-      anyCollectionRotated({ cascade }) ||
-      session.storage.strandedCollectionIds.length > 0
-    ) {
-      // The rotated descriptors are refetched and the ciphers rebuilt on
-      // them, so this visit's next writes seal under the fresh epochs. A
-      // collection built stranded is rebuilt even when this run rotated
-      // nothing: another client may have re-epoched it since.
-      await session.storage.refreshEncryptedDescriptors()
-    }
-    return [
-      collectionEpochsEntry({ cascade }),
-      {
-        invariant: 'governed-log-heads-anchor-past-the-membership-change',
-        // The collection half alone: this registration seals no roster log.
-        // A collection that failed may be the one left unsealed.
-        ...(cascade.failed.length > 0
-          ? {
-              outcome: 'partial' as const,
-              detail: { failedCollections: cascade.failed.length }
-            }
-          : Object.values(cascade.outcomes).some(
-                outcome => outcome === 'sealed'
-              )
-            ? { outcome: 'clean' as const }
-            : { outcome: 'noop' as const })
-      }
-    ]
   }
-}
 
 /**
  * The remembered block's registry-writing registrations, in execution order.
@@ -837,7 +821,7 @@ const TRANSIENT_COLLECTION_CASCADE: Registration<
  * is the meaning its awaiters have always had.
  */
 export const REMEMBERED_REGISTRY_REGISTRATIONS: ReadonlyArray<
-  Registration<LoginMenderDeps, FreewalletCeremonyId>
+  Registration<LoginMenderDeps, CeremonyId>
 > = [
   USER_KEY_SWEEP,
   ...sharedRegistryPasses('remembered-login-chain'),
@@ -853,14 +837,14 @@ export const REMEMBERED_REGISTRY_REGISTRATIONS: ReadonlyArray<
  * neither sweep queues behind its KMS round trip.
  */
 const REMEMBERED_TAIL_REGISTRATIONS: ReadonlyArray<
-  Registration<LoginMenderDeps, FreewalletCeremonyId>
+  Registration<LoginMenderDeps, CeremonyId>
 > = [APP_KEY_SWEEP, ANNEX_GC, KEYSTORE_PROMOTION]
 
 /**
  * The remembered block, seed excluded (the runner takes that separately).
  */
 export const REMEMBERED_REGISTRATIONS: ReadonlyArray<
-  Registration<LoginMenderDeps, FreewalletCeremonyId>
+  Registration<LoginMenderDeps, CeremonyId>
 > = [...REMEMBERED_REGISTRY_REGISTRATIONS, ...REMEMBERED_TAIL_REGISTRATIONS]
 
 /**
@@ -868,7 +852,7 @@ export const REMEMBERED_REGISTRATIONS: ReadonlyArray<
  * the collection fan-out first, then the registry-writing passes.
  */
 export const TRANSIENT_REGISTRATIONS: ReadonlyArray<
-  Registration<LoginMenderDeps, FreewalletCeremonyId>
+  Registration<LoginMenderDeps, CeremonyId>
 > = [
   TRANSIENT_COLLECTION_CASCADE,
   ...sharedRegistryPasses('transient-login-chain'),

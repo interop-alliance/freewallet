@@ -17,7 +17,7 @@
  * event channel can consume the same entries without going through the log.
  */
 import type { MendReport } from '@interop/wallet-core/menders'
-import type { FreewalletCeremonyId } from '@/session/ceremonies'
+import type { CeremonyId } from '@interop/wallet-core'
 import { createLogger } from '@/lib/log'
 import { MENDER_WARNINGS } from './warnings.js'
 
@@ -36,7 +36,7 @@ const log = createLogger('fw:session:registry')
 export function reportCeremonyTail({
   mended
 }: {
-  mended: MendReport<FreewalletCeremonyId>
+  mended: MendReport<CeremonyId>
 }): void {
   for (const entry of mended) {
     const { invariant, outcome, detail, errorName, ceremonies } = entry

@@ -134,7 +134,7 @@ import {
 } from '@/session/unlockMethods'
 import { initSessionFromSeed } from '@/session/initSession'
 import { mendReportAccumulator } from '@interop/wallet-core/menders'
-import type { FreewalletCeremonyId } from '@/session/ceremonies'
+import type { CeremonyId } from '@interop/wallet-core'
 import type { TransientKeyringFetchResult } from '@/session/keyring'
 import { transientSessionStores } from '@/session/persistence'
 import { verifiedAccountLog } from '@/session/verifiedLog'
@@ -941,7 +941,7 @@ describe('transientSessionFromKeyringHit -- the client-annex generation-readines
    */
   async function runComposition(found = makeFound()) {
     const persistence = transientSessionStores()
-    const mends = mendReportAccumulator<FreewalletCeremonyId>()
+    const mends = mendReportAccumulator<CeremonyId>()
     const { session } = await transientSessionFromKeyringHit({
       found,
       type: 'passphrase',

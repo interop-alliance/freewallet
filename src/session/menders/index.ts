@@ -14,7 +14,7 @@
  */
 import { menderRegistry } from '@interop/wallet-core/menders'
 
-import type { FreewalletCeremonyId } from '../ceremonies.js'
+import type { CeremonyId } from '@interop/wallet-core'
 import { MENDER_INVARIANTS } from './invariants.js'
 import { MENDER_SITES, type LoginMenderDeps } from './registrations.js'
 
@@ -34,7 +34,7 @@ export {
 export const freewalletMenderRegistry = menderRegistry<
   (typeof MENDER_SITES)[number],
   LoginMenderDeps,
-  FreewalletCeremonyId
+  CeremonyId
 >({
   declarations: MENDER_INVARIANTS,
   sites: MENDER_SITES

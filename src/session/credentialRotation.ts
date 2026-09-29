@@ -54,7 +54,7 @@ import {
 import type { IKeyAgreementKey, IZcap } from '@interop/data-integrity-core'
 import type { ZcapClient } from '@interop/ezcap'
 import type { Session } from '@/types/auth'
-import type { FreewalletCeremonyId } from '@/session/ceremonies'
+import type { CeremonyId } from '@interop/wallet-core'
 import {
   clientAnnexReachFor,
   standingClientAnnexReachFor
@@ -92,7 +92,7 @@ export interface CredentialRotationOutcome {
   rotated: boolean
   collections: UserKeyCascadeResult
   userKey?: UserKey
-  mended: MendReport<FreewalletCeremonyId>
+  mended: MendReport<CeremonyId>
 }
 
 /**
@@ -108,11 +108,11 @@ export interface CredentialRotationOutcome {
  * @param [retirement] {object}   the stage's report, carrying the error
  *   class name this module's own catch recorded; absent when the ceremony
  *   reported no stage
- * @returns {MendReportEntry<FreewalletCeremonyId>}
+ * @returns {MendReportEntry<CeremonyId>}
  */
 function annexInventoryEntry(
   retirement?: ClientAnnexInventoryRetirement & { errorName?: string }
-): MendReportEntry<FreewalletCeremonyId> {
+): MendReportEntry<CeremonyId> {
   const reported = {
     invariant: 'retired-credential-leaves-no-annex-inventory',
     ceremonies: ['unlock-credential-rotation']
