@@ -165,6 +165,15 @@ export const MENDER_GAPS: ReadonlyArray<InvariantGap> = [
     item: 'FW-466',
     kind: 'none'
   },
+  // 22. Listed after row 16 so the ARCHITECTURE.md order holds.
+  {
+    invariant: 'no-registered-writer-outlives-its-expiry',
+    tornState:
+      'A registered-writers entry past its inactivity window, on an account this wallet visits: this wallet does not read the writer roster, so nothing here sweeps it.',
+    standsOn: ['ladder-anchored', 'enrolled'],
+    item: 'FW-141',
+    kind: 'none'
+  },
   // 17
   {
     invariant: 'no-auxiliary-space-stands-unnamed',

@@ -86,12 +86,14 @@ describe('the gap allowlist', () => {
       derived
         .filter(gap => gap.kind === 'none')
         .map(gap => rowOf(gap.invariant))
-    ).toEqual([26, 28, 29, 30, 31, 32, 34])
+    ).toEqual([26, 28, 29, 30, 31, 32, 34, 35])
     // Row 2 moved out of `none` when the transient chain's collection
     // fan-out began reporting its collection half.
     // Rows 11 and 27 moved out of `none` when stage B gave each an
     // addressable converger the pointer-heal registration reports. Rows 26
     // and 32 are the two detectors, `none` since a detector is not a mender.
+    // Row 35 entered `none` with its declaration: this wallet runs no
+    // writer-roster sweep yet.
     expect(
       derived
         .filter(gap => gap.kind === 'unreachable')

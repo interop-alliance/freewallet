@@ -224,8 +224,8 @@ export async function unwrapRecordEnvelope({
       collectionId,
       encryption
     })
-    // A record body is JSON: only a chunked document decrypts to a `Blob`,
-    // and a self-contained record is never one.
+    // A record body is JSON. A binary or text payload decrypts to a `Blob`,
+    // and no record is sealed from one.
     return (await cipher.decrypt({
       id: envelopeId,
       envelope: wrapped as never

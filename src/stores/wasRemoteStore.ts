@@ -51,7 +51,8 @@ import {
   spacePath,
   toUrl
 } from '@interop/was-client/paths'
-import { createEdvEncryption } from '@interop/was-client/edv'
+import { blobBytes, createEdvEncryption } from '@interop/was-client/edv'
+import { errorNameOf } from '@interop/wallet-core/menders'
 import { publicCredentialUrl as buildPublicCredentialUrl } from '@interop/wallet-core/space'
 import {
   wasClientLabelsStore,
@@ -547,6 +548,106 @@ export class WASRemoteStore {
         encryption: { ...encryption, keys: { keyAgreementKey, keyResolver } }
       })
       .declareIndexes({ indexes })
+  }
+
+  /**
+   * Writes one binary Resource into an encrypted collection at a chosen id,
+   * create-if-absent: was-client's `Resource.put` with `ifNoneMatch`, which
+   * stores a payload over the codec's blob limit as a chunked document. The
+   * handle carries the descriptor and the reader's keys as a per-handle
+   * encryption override, as {@link declareCollectionIndexes} does, since this
+   * store's client holds no keystore.
+   *
+   * A `412` (the id is taken) reads the held copy back and returns its bytes,
+   * reassembling a chunked one through the handle. A held copy that decrypts
+   * to JSON is returned with no bytes. When the held copy fails its decrypt
+   * with `EncryptionError`, its raw envelope is read, and a pending stub
+   * (the `{ pending: true }` document a killed chunked write leaves) is
+   * deleted with its chunks and the write is tried again. Only the id being
+   * written is ever reaped. Any other failure propagates, a `507` as
+   * was-client's `QuotaExceededError`.
+   *
+   * @param options {object}
+   * @param options.collectionId {string}   the WAS collection id
+   * @param options.resourceId {string}   the id to write at
+   * @param options.bytes {Uint8Array}   the plaintext bytes
+   * @param options.contentType {string}   the content type sealed with them
+   * @param options.encryption {CollectionEncryption}   the collection's
+   *   current descriptor
+   * @param options.keyAgreementKey {IKeyAgreementKey}   a recipient of the
+   *   current epoch
+   * @param options.keyResolver {IKeyResolver}
+   * @param options.isPendingStub {function}   tells whether a raw stored
+   *   envelope at `resourceId` is a pending stub (the collection cipher's
+   *   `isPendingStub`)
+   * @returns {Promise<{ created: true } | { created: false; held?: Uint8Array }>}
+   */
+  async putEncryptedResourceBytes({
+    collectionId,
+    resourceId,
+    bytes,
+    contentType,
+    encryption,
+    keyAgreementKey,
+    keyResolver,
+    isPendingStub
+  }: {
+    collectionId: string
+    resourceId: string
+    bytes: Uint8Array
+    contentType: string
+    encryption: CollectionEncryption
+    keyAgreementKey: IKeyAgreementKey
+    keyResolver: IKeyResolver
+    isPendingStub: (envelope: Json) => Promise<boolean>
+  }): Promise<{ created: true } | { created: false; held?: Uint8Array }> {
+    const collection = this.#space().collection(collectionId, {
+      encryption: { ...encryption, keys: { keyAgreementKey, keyResolver } }
+    })
+    const resource = collection.resource(resourceId)
+    // One write, plus one retry after a reaped stub or a held copy removed
+    // between the 412 and its read.
+    for (let attempt = 0; attempt < 2; attempt++) {
+      try {
+        await resource.put(bytes, { contentType, ifNoneMatch: true })
+        return { created: true }
+      } catch (err) {
+        if (errorNameOf(err) !== 'PreconditionFailedError') {
+          throw err
+        }
+      }
+      let held: unknown
+      try {
+        held = await resource.get()
+      } catch (err) {
+        if (errorNameOf(err) !== 'EncryptionError') {
+          throw err
+        }
+        const envelope = await collection
+          .resource(resourceId, { encryption: 'plaintext' })
+          .get()
+        if (envelope === null || !(await isPendingStub(envelope as Json))) {
+          throw err
+        }
+        log.info('Removing the pending stub a torn chunked write left', {
+          collectionId,
+          resourceId
+        })
+        await resource.delete()
+        continue
+      }
+      if (held === null) {
+        continue
+      }
+      if (held instanceof Blob) {
+        return { created: false, held: await blobBytes(held) }
+      }
+      return { created: false }
+    }
+    throw new Error(
+      `The resource "${resourceId}" in collection "${collectionId}" could ` +
+        'not be written: its id stayed taken by a copy that could not be read.'
+    )
   }
 
   /**
@@ -1392,6 +1493,8 @@ export class WASRemoteStore {
    * When `epoch` is given, it is stamped as the `Key-Epoch` header exactly
    * as background replication does (the sync port's `putContent`), so a
    * remote-direct write records the key epoch its envelope was encrypted under.
+   * It sends no `Writer-Id`, on any session kind, so the revision it writes
+   * is unlabeled even where a replication push would have declared one.
    *
    * @param options {object}
    * @param options.logicalKey {string}

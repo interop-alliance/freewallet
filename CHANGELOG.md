@@ -4,6 +4,9 @@
 
 ### Fixed
 
+- Content migration lands a small binary or text Resource of an encrypted
+  app collection. Two such Resources in one collection no longer collapse
+  to one identity, so the second is no longer reported `skipped` and lost.
 - Credential verification retries a blocked fetch (a DID document, a
   JSON-LD context, a status list) once through the CORS proxy, so a
   did:web issuer whose host sends no `Access-Control-Allow-Origin` header
@@ -111,10 +114,25 @@
 
 ### Changed
 
+- Requires `@interop/was-sync` 0.6.0, `@interop/was-client` 0.80.0,
+  `@interop/wallet-core` 0.85.0, and `@interop/storage-core` 0.22.0.
 - Adapt to `@interop/wallet-backup` 0.5.0's sink rename (`importResource`,
   `json` payload). `StorageManager.importAppCollectionRow` is now
   `importAppCollectionResource`, and its `content` takes `{ json }` in place
   of `{ row }`.
+- Content migration writes an encrypted app collection's bytes Resource
+  (chunked or small) at its archived resource id, create-if-absent, and
+  writes a large one in chunks. A taken id is compared by bytes: the same
+  bytes are `skipped`, other bytes `conflicting`. A pending stub a killed
+  chunked write left at that id is deleted with its chunks and the Resource
+  written again. The held-Resource snapshot records a bytes Resource by id
+  without reassembling it. A `507` mid-chunk ends the walk under
+  `QuotaExceededError`. Needs `@interop/wallet-backup` 0.5.0.
+- `migrateContent` refuses a second run in the same tab while one is going
+  (`ContentMigrationInProgressError`).
+- The migration report maps `NotFoundError`, `EncryptionError`, `DataError`,
+  and a plain `Error` to their own sentences. The chunked-Resource sentence
+  now covers only chunked Resources outside an encrypted app collection.
 - A backup export streams into the picked file as it runs: the Space
   exports proceed as the file is written, up to three at a time, and a
   failure part way through errors the save instead of finishing the file.
@@ -209,6 +227,12 @@
 
 ### Added
 
+- A remembered session's background replication declares the browser
+  profile's `writerId` on every push, sent as the WAS `Writer-Id` header,
+  so the changes feed echoes it. A transient session declares no label.
+- The cross-replica conformance suite runs a mixed feed under writer
+  attribution: labeled, unlabeled, and foreign-labeled writes plus
+  tombstones, with the SyncEngine's own-echo suppression on.
 - The interaction-URL consent page notes a known agent: a requester key
   this account has granted before and not revoked, with the date of the
   newest grant and the name it recorded.

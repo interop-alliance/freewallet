@@ -99,7 +99,11 @@ import {
 import { credentialTitle } from '@/lib/viewMappers/credentialTitle'
 import { SEED_CONTACT_NAMES } from '@/fixtures/defaultContacts'
 import { WALK_STOPPING_ERROR_NAME } from '@interop/wallet-backup'
-import type { HeldAppRows, HeldContent, ImportOutcome } from '@/types/migration'
+import type {
+  HeldAppResources,
+  HeldContent,
+  ImportOutcome
+} from '@/types/migration'
 import { didWebFromSpace } from '@/lib/didWeb'
 import { ensureKmsAuthentication } from '@/lib/kms'
 import { collectionIdFromTarget } from '@/lib/zcap'
@@ -301,38 +305,102 @@ async function decryptEnvelope({
 }): Promise<{ value: Json | undefined; unknownEpoch: boolean }> {
   try {
     return {
-      // A synced document is JSON: only a chunked document decrypts to a
-      // `Blob`, and no wallet collection stores one.
+      // Every synced collection stores JSON, which decrypts to JSON. A binary
+      // or text payload decrypts to a `Blob`, and no synced row is sealed
+      // from one.
       value: (await cipher.decrypt({ id, envelope })) as Json,
       unknownEpoch: false
     }
   } catch (err) {
-    const failure = classifyDecryptFailure(err)
-    if (failure === 'unknown-epoch') {
-      return { value: undefined, unknownEpoch: true }
-    }
-    if (failure === 'no-epoch-key') {
-      log.warn(
-        'This wallet is not a recipient of the key epoch of a resource',
-        {
-          source,
-          err
-        }
-      )
-      return { value: undefined, unknownEpoch: false }
-    }
-    if (failure === 'integrity') {
-      // The host served a body that does not verify against the id it was read
-      // under. No refresh can help, and the read yields nothing rather than
-      // another resource's content.
-      log.warn('Refusing a resource whose body failed its integrity check', {
-        source,
-        err
-      })
-      return { value: undefined, unknownEpoch: false }
-    }
-    log.warn('Could not decrypt resource envelope', { source, err })
+    return decryptFailure({ err, source })
+  }
+}
+
+/**
+ * The `{ value, unknownEpoch }` result of a failed decrypt, as
+ * {@link decryptEnvelope} states it: an `UnknownEpochError` is the refresh
+ * signal, and every other failure is logged and yields no value.
+ *
+ * @param options {object}
+ * @param options.err {unknown}   what the decrypt threw
+ * @param options.source {string}   how the log names the collection
+ * @returns {{ value: undefined, unknownEpoch: boolean }}
+ */
+function decryptFailure({ err, source }: { err: unknown; source: string }): {
+  value: undefined
+  unknownEpoch: boolean
+} {
+  const failure = classifyDecryptFailure(err)
+  if (failure === 'unknown-epoch') {
+    return { value: undefined, unknownEpoch: true }
+  }
+  if (failure === 'no-epoch-key') {
+    log.warn('This wallet is not a recipient of the key epoch of a resource', {
+      source,
+      err
+    })
     return { value: undefined, unknownEpoch: false }
+  }
+  if (failure === 'integrity') {
+    // The host served a body that does not verify against the id it was read
+    // under. No refresh can help, and the read yields nothing rather than
+    // another resource's content.
+    log.warn('Refusing a resource whose body failed its integrity check', {
+      source,
+      err
+    })
+    return { value: undefined, unknownEpoch: false }
+  }
+  log.warn('Could not decrypt resource envelope', { source, err })
+  return { value: undefined, unknownEpoch: false }
+}
+
+/**
+ * Decrypts one held envelope of an encrypted app collection for the content
+ * migration's snapshot, without reading a chunk. The decrypt is handed a
+ * chunk source that holds nothing, so a complete chunked Resource throws
+ * `NotFoundError` at its first chunk and is reported as a bytes Resource. A
+ * small binary or text Resource decrypts to a `Blob` and is reported the same
+ * way. Neither is reassembled or read. Every other failure is stated as
+ * {@link decryptFailure} states it.
+ *
+ * @param options {object}
+ * @param options.cipher {EdvDocCipher}
+ * @param options.id {string}   the resource id the envelope was read under
+ * @param options.envelope {Json}
+ * @param options.source {string}   how a failure names the collection
+ * @returns {Promise<{ value: Json | undefined; bytes: boolean; unknownEpoch: boolean }>}
+ */
+async function decryptHeldAppResource({
+  cipher,
+  id,
+  envelope,
+  source
+}: {
+  cipher: EdvDocCipher
+  id: string
+  envelope: Json
+  source: string
+}): Promise<{
+  value: Json | undefined
+  bytes: boolean
+  unknownEpoch: boolean
+}> {
+  try {
+    const value = await cipher.decrypt({
+      id,
+      envelope,
+      chunkSource: async () => undefined
+    })
+    if (value instanceof Blob) {
+      return { value: undefined, bytes: true, unknownEpoch: false }
+    }
+    return { value: value as Json, bytes: false, unknownEpoch: false }
+  } catch (err) {
+    if (errorNameOf(err) === 'NotFoundError') {
+      return { value: undefined, bytes: true, unknownEpoch: false }
+    }
+    return { ...decryptFailure({ err, source }), bytes: false }
   }
 }
 
@@ -359,20 +427,27 @@ function clientWrittenDescriptorMessage(collectionId: string): string {
 }
 
 /**
- * An encrypted app collection row's identity, as the content migration
- * dedupes on it: the payload's own string `id` (was-react rows carry one),
- * or else the payload's content cid. The two kinds are prefixed apart, so an
- * `id` value can never match a cid.
+ * An encrypted app collection Resource's identity, as the content migration
+ * dedupes on it. A JSON Resource is identified by its payload's own string
+ * `id` (was-react rows carry one), or else by the payload's content cid. A
+ * bytes Resource (one that decrypts to a `Blob`, chunked or not) is
+ * identified by its resource id. The three kinds are prefixed apart, so no
+ * value of one kind can match another.
  *
- * @param options {object}
- * @param options.row {Json}   the decrypted payload
- * @param options.cid {string}   the payload's content cid
+ * @param resource {{ json: Json; cid: string } | { resourceId: string }}   the
+ *   decrypted JSON payload with its content cid, or a bytes Resource's id
  * @returns {string}
  */
-function appRowIdentity({ row, cid }: { row: Json; cid: string }): string {
+function appResourceIdentity(
+  resource: { json: Json; cid: string } | { resourceId: string }
+): string {
+  if ('resourceId' in resource) {
+    return `resource:${resource.resourceId}`
+  }
+  const { json, cid } = resource
   const id =
-    typeof row === 'object' && row !== null && !Array.isArray(row)
-      ? (row as Record<string, unknown>).id
+    typeof json === 'object' && json !== null && !Array.isArray(json)
+      ? (json as Record<string, unknown>).id
       : undefined
   return typeof id === 'string' ? `id:${id}` : `cid:${cid}`
 }
@@ -765,7 +840,7 @@ export class StorageManager {
   // current epoch has moved since the build.
   #importCiphers = new Map<
     string,
-    { cipher: DocCipher; descriptor: CollectionEncryption }
+    { cipher: EdvDocCipher; descriptor: CollectionEncryption }
   >()
   // The session's typed persistence strategy: the writer id and the cache
   // pair come from it, so their storage tier is the strategy's rather than a
@@ -6209,7 +6284,7 @@ export class StorageManager {
    * @param options {object}
    * @param options.collectionId {string}
    * @param options.descriptor {CollectionEncryption}
-   * @returns {Promise<{ cipher: DocCipher; descriptor: CollectionEncryption }>}
+   * @returns {Promise<{ cipher: EdvDocCipher; descriptor: CollectionEncryption }>}
    */
   async #installImportCipher({
     collectionId,
@@ -6217,7 +6292,7 @@ export class StorageManager {
   }: {
     collectionId: string
     descriptor: CollectionEncryption
-  }): Promise<{ cipher: DocCipher; descriptor: CollectionEncryption }> {
+  }): Promise<{ cipher: EdvDocCipher; descriptor: CollectionEncryption }> {
     const { keyAgreementKey, keyResolver } = this.#vaultKeys
     // Read back rather than built from the archived schema: a standing
     // collection keeps its own declarations, and its rows must carry them.
@@ -6244,11 +6319,11 @@ export class StorageManager {
    * collection it has not ensured.
    *
    * @param collectionId {string}
-   * @returns {Promise<{ cipher: DocCipher; descriptor: CollectionEncryption }>}
+   * @returns {Promise<{ cipher: EdvDocCipher; descriptor: CollectionEncryption }>}
    */
   async #importCipherFor(
     collectionId: string
-  ): Promise<{ cipher: DocCipher; descriptor: CollectionEncryption }> {
+  ): Promise<{ cipher: EdvDocCipher; descriptor: CollectionEncryption }> {
     if (!this.#importCollections.has(collectionId)) {
       throw new Error(
         `The app collection "${collectionId}" was not ensured before its rows.`
@@ -6281,22 +6356,24 @@ export class StorageManager {
    * the verified head.
    *
    * @param collectionId {string}
-   * @returns {Promise<DocCipher>}
+   * @returns {Promise<{ cipher: EdvDocCipher; descriptor: CollectionEncryption }>}
    */
-  async #importCipherForWrite(collectionId: string): Promise<DocCipher> {
+  async #importCipherForWrite(
+    collectionId: string
+  ): Promise<{ cipher: EdvDocCipher; descriptor: CollectionEncryption }> {
     const entry = await this.#importCipherFor(collectionId)
     const served = await this.#requireRemote(
       'Importing an app collection'
     ).collectionEncryption({ collectionId })
     if (served?.currentEpoch === entry.descriptor.currentEpoch) {
-      return entry.cipher
+      return entry
     }
     const verified = await this.#readGovernedDescriptor({ collectionId })
     if (
       verified === undefined ||
       verified.currentEpoch === entry.descriptor.currentEpoch
     ) {
-      return entry.cipher
+      return entry
     }
     log.info(
       'An app collection epoch moved mid-import; rebuilding its cipher',
@@ -6305,28 +6382,30 @@ export class StorageManager {
         currentEpoch: verified.currentEpoch
       }
     )
-    const { cipher } = await this.#installImportCipher({
+    return await this.#installImportCipher({
       collectionId,
       descriptor: verified
     })
-    return cipher
   }
 
   /**
    * Reads what the account holds in one app collection, once per run, as
-   * the map {@link importAppCollectionResource} decides against: each held row's
-   * identity to its content cid. An encrypted row's identity is its
-   * decrypted payload's own string `id`, or the payload's content cid when
-   * it carries none. A plaintext row's identity is its resource id. A row
-   * sealed under an epoch the cipher does not know drives the one
-   * unknown-epoch refresh, and the rows are decrypted again under the
-   * rebuilt cipher. A row that still will not decrypt is left out and
-   * logged.
+   * the map {@link importAppCollectionResource} decides against: each held
+   * Resource's identity (see {@link appResourceIdentity}) to its content cid.
+   * A plaintext Resource's identity is its resource id. In an encrypted
+   * collection, a JSON Resource is recorded under its payload's identity,
+   * and a bytes Resource under its resource id with no cid. A bytes Resource
+   * is recognized without reading its content, so a chunked one is never
+   * reassembled here. A Resource sealed under an epoch the cipher does not
+   * know drives the one unknown-epoch refresh, and the Resources are
+   * decrypted again under the rebuilt cipher. One that still will not
+   * decrypt is left out and logged. That includes a pending stub a killed
+   * chunked write left.
    *
    * @param options {object}
    * @param options.collectionId {string}   an app collection this run ensured
    * @param options.encrypted {boolean}
-   * @returns {Promise<HeldAppRows>}
+   * @returns {Promise<HeldAppResources>}
    */
   async snapshotAppCollection({
     collectionId,
@@ -6334,12 +6413,12 @@ export class StorageManager {
   }: {
     collectionId: string
     encrypted: boolean
-  }): Promise<HeldAppRows> {
+  }): Promise<HeldAppResources> {
     const documents = await this.#requireRemote(
       'Importing an app collection'
     ).listCollectionDocuments({ collectionId })
     if (!encrypted) {
-      const held: HeldAppRows = new Map()
+      const held: HeldAppResources = new Map()
       for (const { id, data } of documents) {
         held.set(id, contentCid(data))
       }
@@ -6351,20 +6430,23 @@ export class StorageManager {
         // Fetched inside the read: a refresh drops the cipher.
         const { cipher } = await this.#importCipherFor(collectionId)
         const rows = await Promise.all(
-          documents.map(({ id, data }) =>
-            decryptEnvelope({
+          documents.map(async ({ id, data }) => ({
+            id,
+            ...(await decryptHeldAppResource({
               cipher,
               id,
               envelope: data,
               source: `app collection "${collectionId}"`
-            })
-          )
+            }))
+          }))
         )
-        const held: HeldAppRows = new Map()
-        for (const { value } of rows) {
-          if (value !== undefined) {
+        const held: HeldAppResources = new Map()
+        for (const { id, value, bytes } of rows) {
+          if (bytes) {
+            held.set(appResourceIdentity({ resourceId: id }), null)
+          } else if (value !== undefined) {
             const cid = contentCid(value)
-            held.set(appRowIdentity({ row: value, cid }), cid)
+            held.set(appResourceIdentity({ json: value, cid }), cid)
           }
         }
         return {
@@ -6376,18 +6458,26 @@ export class StorageManager {
   }
 
   /**
-   * Imports one archived app collection row, deduped by its identity (see
-   * {@link snapshotAppCollection}). A held row under the same identity is
-   * `skipped` when its content cid matches, and `conflicting` when it
-   * differs: the archived row lands nowhere and the held row is untouched.
+   * Imports one archived app collection Resource, deduped by its identity
+   * (see {@link snapshotAppCollection}). A held Resource under the same
+   * identity is `skipped` when its content matches, and `conflicting` when it
+   * differs: the archived Resource lands nowhere and the held one is
+   * untouched.
    *
-   * An encrypted row is re-sealed through the collection's import cipher and
-   * written under the fresh content-derived id the envelope takes. A
-   * plaintext row keeps its archived resource id and content type, written
-   * create-if-absent. A JSON row another writer landed there since the
-   * snapshot is `conflicting`. A non-JSON row is not in the snapshot, so an
-   * id already taken is read back: the same bytes are `skipped`, and other
-   * bytes are `conflicting`.
+   * An encrypted JSON Resource is re-sealed through the collection's import
+   * cipher and written under the fresh content-derived id the envelope
+   * takes. An encrypted bytes Resource is sealed under its archived content
+   * type and written at its archived resource id, create-if-absent, as a
+   * chunked document when it is large. A taken id is read back and compared
+   * by bytes, and a pending stub a killed chunked write left there is
+   * removed and the Resource written again. A plaintext Resource keeps its
+   * archived resource id and content type, written create-if-absent. A JSON
+   * one another writer landed there since the snapshot is `conflicting`. A
+   * non-JSON one is not in the snapshot, so an id already taken is read
+   * back: the same bytes are `skipped`, and other bytes are `conflicting`.
+   *
+   * A migration runs one at a time (see `migrateContent`), since a second
+   * run could remove a stub the first is still filling.
    *
    * @param options {object}
    * @param options.collectionId {string}   an app collection this run ensured
@@ -6396,7 +6486,8 @@ export class StorageManager {
    * @param options.contentType {string}   the archived content type
    * @param options.content {{ json: Json } | { bytes: Uint8Array }}   the
    *   decrypted payload or parsed JSON body, or a non-JSON body's raw bytes
-   * @param options.held {HeldAppRows}   the collection's snapshot, updated on
+   *   (for an encrypted collection, a payload that decrypted to a `Blob`)
+   * @param options.held {HeldAppResources}   the collection's snapshot, updated on
    *   accept
    * @returns {Promise<ImportOutcome>}
    */
@@ -6413,18 +6504,37 @@ export class StorageManager {
     resourceId: string
     contentType: string
     content: { json: Json } | { bytes: Uint8Array }
-    held: HeldAppRows
+    held: HeldAppResources
   }): Promise<ImportOutcome> {
     return await this.#importRow({
       what: 'app collection resource',
       write: async (): Promise<ImportOutcome> => {
         const remote = this.#requireRemote('Importing an app collection')
-        if ('bytes' in content) {
-          if (encrypted) {
-            throw new Error(
-              'An encrypted collection row must arrive as a decrypted payload.'
-            )
+        if ('bytes' in content && encrypted) {
+          const { cipher, descriptor } =
+            await this.#importCipherForWrite(collectionId)
+          const { keyAgreementKey, keyResolver } = this.#vaultKeys
+          const written = await remote.putEncryptedResourceBytes({
+            collectionId,
+            resourceId,
+            bytes: content.bytes,
+            contentType,
+            encryption: descriptor,
+            keyAgreementKey,
+            keyResolver,
+            isPendingStub: envelope =>
+              cipher.isPendingStub({ id: resourceId, envelope })
+          })
+          if (written.created) {
+            held.set(appResourceIdentity({ resourceId }), null)
+            return 'accepted'
           }
+          return written.held !== undefined &&
+            equalBytes(written.held, content.bytes)
+            ? 'skipped'
+            : 'conflicting'
+        }
+        if ('bytes' in content) {
           if (held.has(resourceId)) {
             // A JSON row stands under the id this non-JSON row would take.
             return 'conflicting'
@@ -6449,13 +6559,15 @@ export class StorageManager {
 
         const { json } = content
         const cid = contentCid(json)
-        const identity = encrypted ? appRowIdentity({ row: json, cid }) : resourceId
+        const identity = encrypted
+          ? appResourceIdentity({ json, cid })
+          : resourceId
         const stored = held.get(identity)
         if (stored !== undefined) {
           return stored === cid ? 'skipped' : 'conflicting'
         }
         if (encrypted) {
-          const cipher = await this.#importCipherForWrite(collectionId)
+          const { cipher } = await this.#importCipherForWrite(collectionId)
           const { id, envelope, epoch } = await cipher.encrypt({ data: json })
           await remote.putCollectionResource({
             collectionId,

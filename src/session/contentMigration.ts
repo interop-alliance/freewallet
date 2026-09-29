@@ -53,10 +53,26 @@ import { isRememberedSession } from '@/session/persistence'
 import { awaitCollectionsInSync } from '@/stores/syncStatusStore'
 import type { WalletActivity } from '@/stores/storageManager'
 import type { Session } from '@/types/auth'
-import type { HeldAppRows, HeldContent } from '@/types/migration'
+import type { HeldAppResources, HeldContent } from '@/types/migration'
 import type { Json } from '@interop/was-sync'
 
 const log = createLogger('fw:session:migration')
+
+/**
+ * Refuses a content migration started while another is still running in
+ * this tab. Two runs over the same bundle could each find the other's
+ * unfinished chunked write at an id both are importing, and remove it as a
+ * torn write's stub while it is still being filled.
+ */
+export class ContentMigrationInProgressError extends Error {
+  constructor() {
+    super('A content migration is already running.')
+    this.name = 'ContentMigrationInProgressError'
+  }
+}
+
+// Whether a migration is running in this tab. The sink runs one at a time.
+let migrationRunning = false
 
 /**
  * The quota pre-check's finding: the bundle is bigger than the Space has
@@ -174,7 +190,7 @@ function appCollectionsSink({
 }): NonNullable<MigrationSink['appCollections']> {
   const { storage } = session
   const encryptedById = new Map<string, boolean>()
-  const snapshots = new Map<string, Promise<HeldAppRows>>()
+  const snapshots = new Map<string, Promise<HeldAppResources>>()
 
   return {
     async ensureCollection({
@@ -203,7 +219,7 @@ function appCollectionsSink({
         snapshot = storage.snapshotAppCollection({ collectionId, encrypted })
         snapshots.set(collectionId, snapshot)
       }
-      let held: HeldAppRows
+      let held: HeldAppResources
       try {
         held = await snapshot
       } catch (err) {
@@ -390,11 +406,12 @@ function importedCollections(
  * of `migrateBundle` alone, and the walk zeroes what it derived from it when
  * it ends, whether it finished, was aborted, or threw.
  *
- * It refuses nothing of its own. A bundle that cannot be opened, an archive
- * with no account Space, and a secret that opens nothing are the walk's
- * refusals, and they reach the caller as thrown errors it maps through
- * {@link contentMigrationErrorKey}. Past those, every failure is a count in
- * the returned report.
+ * It refuses one thing of its own: a run started while another is still
+ * running in this tab, with `ContentMigrationInProgressError`. A bundle that
+ * cannot be opened, an archive with no account Space, and a secret that
+ * opens nothing are the walk's refusals. All of them reach the caller as
+ * thrown errors it maps through {@link contentMigrationErrorKey}. Past those,
+ * every failure is a count in the returned report.
  *
  * @param options {object}
  * @param options.session {Session}   the account imported INTO
@@ -428,6 +445,45 @@ export async function migrateContent({
     outcome: SinkOutcome | 'unopenable'
   }) => void
 }): Promise<ContentMigrationResult> {
+  if (migrationRunning) {
+    throw new ContentMigrationInProgressError()
+  }
+  migrationRunning = true
+  try {
+    return await runMigration({
+      session,
+      bundle,
+      secret,
+      bundleBytes,
+      signal,
+      onProgress
+    })
+  } finally {
+    migrationRunning = false
+  }
+}
+
+/**
+ * The body of {@link migrateContent}, run once the single-run check has
+ * passed.
+ *
+ * @param options {object}
+ * @param options.session {Session}
+ * @param options.bundle {ByteSource}
+ * @param options.secret {MigrationSecret}
+ * @param [options.bundleBytes] {number}
+ * @param [options.signal] {AbortSignal}
+ * @param [options.onProgress] {function}
+ * @returns {Promise<ContentMigrationResult>}
+ */
+async function runMigration({
+  session,
+  bundle,
+  secret,
+  bundleBytes,
+  signal,
+  onProgress
+}: Parameters<typeof migrateContent>[0]): Promise<ContentMigrationResult> {
   // The login-time mender block can rotate the user key and rebuild every
   // cipher under a Resource in flight, so the walk waits it out. It never
   // rejects.
@@ -520,6 +576,9 @@ export function contentMigrationErrorKey(err: unknown): string {
     // refused.
     case 'QuotaExceededError':
       return 'storage.migration.errors.quotaExceeded'
+    // Another run is still going in this tab.
+    case 'ContentMigrationInProgressError':
+      return 'storage.migration.errors.inProgress'
     default:
       log.error('Content migration failed', { err })
       return 'storage.migration.errors.failed'

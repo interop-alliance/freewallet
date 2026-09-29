@@ -39,9 +39,11 @@ export interface HeldContent {
 
 /**
  * What the account holds in one app collection, read once per run: each held
- * row's identity to its content cid. An encrypted row's identity is its
- * payload's own `id`, or the payload's content cid when it carries none; a
- * plaintext row's is its resource id. The import method adds each row it
- * writes.
+ * Resource's identity to its content cid. In an encrypted collection, a JSON
+ * Resource's identity is its payload's own `id`, or the payload's content cid
+ * when it carries none, and a bytes Resource's is its resource id, mapped to
+ * `null` since its content is never read for the snapshot. A plaintext
+ * Resource's identity is its resource id. The import method adds each
+ * Resource it writes.
  */
-export type HeldAppRows = Map<string, string>
+export type HeldAppResources = Map<string, string | null>

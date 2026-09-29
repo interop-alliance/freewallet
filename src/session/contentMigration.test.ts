@@ -67,6 +67,7 @@ import {
 } from '@/stores/testing/migrationFixtures'
 import type { Session } from '@/types/auth'
 import {
+  ContentMigrationInProgressError,
   contentMigrationErrorKey,
   migrateContent
 } from '@/session/contentMigration'
@@ -728,6 +729,53 @@ describe('migrateContent', () => {
     })
   })
 
+  it('stops the whole walk when a bytes Resource of an app collection fills the Space', async () => {
+    const session = await memorySession()
+    const { storage } = session
+    vi.spyOn(storage, 'canProvisionAppCollections', 'get').mockReturnValue(true)
+    vi.spyOn(storage, 'ensureImportedAppCollection').mockResolvedValue(
+      undefined
+    )
+    vi.spyOn(storage, 'snapshotAppCollection').mockResolvedValue(new Map())
+    const importResource = vi
+      .spyOn(storage, 'importAppCollectionResource')
+      .mockRejectedValue(new QuotaExceededError('The Space is full.'))
+    const { bundle, secret } = await makeBundle([
+      { collectionId: 'app-notes', rows: [{ id: 'a' }, { id: 'b' }] },
+      {
+        collectionId: PRIVATE_CREDENTIALS_COLLECTION,
+        rows: [credentialRow('first')]
+      }
+    ])
+
+    const result = await migrateContent({ session, bundle, secret })
+    expect(result.report.stoppedAt).toEqual({
+      collectionId: 'app-notes',
+      cause: 'QuotaExceededError'
+    })
+    expect(importResource).toHaveBeenCalledTimes(1)
+  })
+
+  it('refuses a second run while one is still going', async () => {
+    const session = await memorySession()
+    const { bundle, secret } = await makeBundle([
+      {
+        collectionId: PRIVATE_CREDENTIALS_COLLECTION,
+        rows: [credentialRow('first')]
+      }
+    ])
+
+    const first = migrateContent({ session, bundle, secret })
+    await expect(
+      migrateContent({ session, bundle, secret })
+    ).rejects.toBeInstanceOf(ContentMigrationInProgressError)
+    await first
+    // Once the first run ends, the next one runs.
+    await expect(
+      migrateContent({ session, bundle, secret })
+    ).resolves.toBeDefined()
+  })
+
   it('writes no import activity when the run is aborted', async () => {
     const session = await memorySession()
     const { bundle, secret } = await makeBundle([
@@ -782,6 +830,9 @@ describe('contentMigrationErrorKey', () => {
     expect(
       contentMigrationErrorKey(new QuotaExceededError('The Space is full.'))
     ).toBe('storage.migration.errors.quotaExceeded')
+    expect(
+      contentMigrationErrorKey(new ContentMigrationInProgressError())
+    ).toBe('storage.migration.errors.inProgress')
     expect(contentMigrationErrorKey(new Error('something else'))).toBe(
       'storage.migration.errors.failed'
     )

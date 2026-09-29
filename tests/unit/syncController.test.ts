@@ -71,6 +71,7 @@ import type { Session } from '@/types/auth'
 function fakeSession({ spaceId }: { spaceId: string }): Session {
   return {
     isGuest: false,
+    persistence: { getWriterId: () => 'writer-profile-1' },
     storage: {
       wasClient: { fake: true },
       spaceId,

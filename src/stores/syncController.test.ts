@@ -80,6 +80,7 @@ interface CoreOptions {
     subscribe: (onOnline: () => void) => () => void
   }
   pollMs: number
+  writerId?: string
 }
 
 /**
@@ -95,13 +96,15 @@ const localCollection = vi.fn((key: string) => ({ localKey: key }))
 
 /**
  * A session shaped just enough for the binding: not a guest, a remote WAS
- * client and space id present, and a local replica behind `localCollection`.
+ * client and space id present, a local replica behind `localCollection`, and
+ * a persistence strategy answering the per-profile `writerId`.
  *
  * @returns {Session}
  */
 function fakeSession(): Session {
   return {
     isGuest: false,
+    persistence: { getWriterId: () => 'writer-profile-1' },
     storage: {
       wasClient: { fake: 'client' },
       spaceId: 'space-1',
@@ -149,6 +152,12 @@ describe('sync binding: the port handed to the core', () => {
       localKey: 'walletActivity'
     })
     expect(localCollection).toHaveBeenCalledWith('walletActivity')
+  })
+
+  it("declares the session persistence's writerId on every push", async () => {
+    await syncController.restart({ session: fakeSession() })
+
+    expect(lastOptions().writerId).toBe('writer-profile-1')
   })
 
   it('writes status keyed on the WAS collection id, not the logical key', async () => {

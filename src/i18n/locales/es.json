@@ -772,7 +772,11 @@
       "causes": {
         "keyUnwrap": "Ninguna clave de esta copia abrió la fila.",
         "unknownEpoch": "La fila nombra una clave que la copia no incluye.",
-        "chunked": "El elemento se guardó en partes y la importación no las vuelve a unir.",
+        "chunked": "El elemento se guardó en partes fuera de una colección de aplicación cifrada, y la importación no las vuelve a unir.",
+        "notFound": "Falta en la copia el elemento o una de sus partes guardadas.",
+        "encryption": "El elemento no coincide con la clave o la ubicación para la que se cifró, o su escritura nunca terminó.",
+        "dataCorrupted": "Una parte guardada del elemento está dañada o fuera de orden.",
+        "error": "No se pudo leer el elemento. Puede que una parte guardada esté dañada o fuera de orden.",
         "logUnreadable": "No se pudo leer el historial de claves de la colección.",
         "quotaExceeded": "El almacenamiento de esta cuenta está lleno.",
         "payloadTooLarge": "El elemento es más grande de lo que acepta este servidor.",
@@ -785,6 +789,7 @@
         "accountArchiveMissing": "Esta copia no contiene datos de cuenta, así que no se puede abrir nada de ella.",
         "secretNotRecipient": "Esa frase de contraseña o ese código no abren esta copia. Un secreto creado después de escribir la copia no puede abrirla.",
         "cancelled": "Importación cancelada. Lo que ya se agregó se conserva.",
+        "inProgress": "Ya hay una importación en curso. Espera a que termine.",
         "quotaExceeded": "El almacenamiento de esta cuenta está lleno, así que la importación se detuvo.",
         "failed": "La importación falló. Inténtalo de nuevo."
       }

@@ -295,6 +295,16 @@ holding a client-key record and by a guest session: the
 `freewallet-session` database, the localStorage caches, the persistent
 `writerId`, and the local replica the sync controller replicates.
 
+A remembered session declares that per-profile `writerId` on the wire: the
+sync controller hands it to every push, which sends it as the WAS
+`Writer-Id` header. Only the browser-local strategy can reach that label.
+The in-memory strategy holds a per-visit label minted in tab memory, so a
+transient session cannot reveal the profile's. It declares no label today,
+since it runs no replication and remote-direct writes send no `Writer-Id` on
+any session kind. A remembered session's own remote-direct writes, the
+CHAPI popup's and the app-key sweep's public-copy retraction, go unlabeled
+too.
+
 An account-management ceremony binds to one of two kinds of account-ceremony
 context, resolved once from the live session. A remembered session resolves
 the enrolled kind: this client's update keys and key agent sign, and every
@@ -415,8 +425,9 @@ its remote WAS Collection counterpart in the background, over
 verbatim and touches no keys. That module is the session binding around the
 package's controller core. It owns the gate: a guest, a deployment with no
 WAS server, and a replica-less session each replicate nothing. It also owns
-the port the core reads the Space and the local collections through, and
-where status and diagnostics go. Every replication, and every
+the port the core reads the Space and the local collections through, where
+status and diagnostics go, and the `writerId` every push declares (the
+session persistence's per-profile label). Every replication, and every
 `WASRemoteStore` request, is signed with the session's root key.
 
 `WASRemoteStore` does not serve credential reads and writes. It keeps the
@@ -480,8 +491,11 @@ descriptor logs of a promoted account to take them, so a guest or a no-WAS
 session leaves them counted as not migrated. An encrypted one is
 provisioned owner-only under its archived `generator`, with a fresh
 governing log and blinded-index key. Its archived index schema is declared
-on it, and each row is re-sealed under the new user key with its blinded
-index entries, under a fresh content-derived id. A plaintext one is created
+on it, and each JSON row is re-sealed under the new user key with its
+blinded index entries, under a fresh content-derived id. A row that decrypts
+to bytes, a chunked one or a small binary or text one, is sealed under its
+archived content type at its archived resource id, create-if-absent, and is
+written in chunks when it is large. A plaintext one is created
 private and then made world-readable when the archived collection policy
 was. Each of its rows keeps its archived resource id and content type. Rows
 are written remote-direct on every session kind. The ensure's own report of
@@ -497,9 +511,18 @@ and schema, and is merged by the same skip-existing rule. It is refused
 when its kind differs from the archive's, when it is encrypted under a
 descriptor no log governs, or when a plaintext archive's public read
 differs from it. An encrypted archive's public read is ignored.
-An encrypted row's identity is its payload's own `id`, or its content cid
-when it has none. A plaintext row's identity is its resource id, and a
-non-JSON row whose id is taken is compared by its bytes.
+An encrypted JSON row's identity is its payload's own `id`, or its content
+cid when it has none. An encrypted bytes row's identity is its resource id.
+When that id is taken, the held copy is read back and compared by its bytes,
+and it is left untouched when they differ. The snapshot of held rows names a
+bytes row by its id and does not reassemble a chunked one. A pending stub a
+killed chunked write left at an id the run is importing is deleted with its
+chunks, and the row is written again. A second run could reap a stub the
+first is still filling, so a tab runs one migration at a time
+(`ContentMigrationInProgressError`). Two tabs or two browsers are not
+held apart. A plaintext row's identity is its resource id, and a non-JSON row
+whose id is taken is compared by its bytes. A full Space during any row
+write, a chunked one included, stops the walk under `QuotaExceededError`.
 
 The backup bundle is the other direction. The Storage page's export action
 (`src/components/storage/BackupExportDialog.tsx`) runs
@@ -675,6 +698,10 @@ built:
   in the registry (invariant
   `registry-passphrase-entry-names-the-standing-credential`). The seedless
   torn-retirement repair cannot clear it (wallet-core's `decisions/0015`).
+- A registered-writers entry past its inactivity window (invariant
+  `no-registered-writer-outlives-its-expiry`). The converger is
+  wallet-core's sweep-on-read, and this wallet does not read the writer
+  roster yet, so nothing here runs it.
 
 Second, a residue whose only mender is a remembered login:
 
@@ -808,7 +835,7 @@ cascades, and the permanent wire-level constants.
   controller core on `/rxdb`; test fixtures on `/testing`, which an eslint
   rule keeps out of production code. Freewallet keeps the three bindings
   around it: the session binding in `stores/syncController.ts` (the gate, the
-  port, the status store, the browser reachability source), the contacts
+  port, the status store, the browser reachability source, the `writerId`), the contacts
   decision closure in `stores/contactsConflictHandler.ts`, and the writer-id
   key prefix and storage in `lib/writerId.ts`. The driver runs no
   unknown-epoch refresh of its own, so the closure reads was-client's
@@ -900,7 +927,11 @@ Containment hierarchy (remote mode): **Space > Collection > Resource**.
   saying which writing agent produced a revision, used to attribute history
   and break last-write-wins ties. It is minted per browser profile in
   `src/lib/writerId.ts` under the `localStorage` key `freewallet:writerId`,
-  derives from no secret, and is not an identity. Avoid: replicaId, device
+  derives from no secret, and is not an identity. A remembered session
+  declares it on the wire as the WAS `Writer-Id` header on every replication
+  push. Only the browser-local persistence strategy can reach it; a
+  transient session holds a per-visit label instead, and declares none,
+  since remote-direct writes send no `Writer-Id`. Avoid: replicaId, device
   id, session id.
 - **Share** -- granting a third party read AND decrypt access to one of the
   wallet's own encrypted collections, asked for with a

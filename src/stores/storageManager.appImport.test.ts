@@ -31,6 +31,7 @@ import {
 import {
   createEdvDocCipher,
   createEdvEncryption,
+  edvIdFromBytes,
   ownerRecipient,
   removeRecipient
 } from '@interop/was-client/edv'
@@ -44,9 +45,17 @@ import {
   inMemorySessionPersistence,
   transientSessionStores
 } from '@/session/persistence'
+import { memoryResourceLogPinStore } from '@interop/vh-resource-log'
+import type { ZcapClient } from '@interop/ezcap'
+import { errorNameOf } from '@interop/wallet-core/menders'
+import {
+  MEMORY_SERVER_URL,
+  memoryWasServer
+} from '../../tests/unit/memoryWasServer'
+import { TEST_SERVICE_DESCRIPTION } from '../../tests/shared/wasServiceFixture'
 import { StorageManager } from './storageManager'
 import { generateVaultKeys } from './testing/vaultKeys'
-import type { WASRemoteStore } from './wasRemoteStore'
+import { WASRemoteStore } from './wasRemoteStore'
 
 type Keys = { keyAgreementKey: IKeyAgreementKey; keyResolver: IKeyResolver }
 
@@ -113,6 +122,20 @@ async function sealSchema({
  * @returns {object}
  */
 function makeFakeRemote(stores: MemoryDescriptorStores) {
+  // A bytes Resource of an encrypted collection is written by a real
+  // WASRemoteStore over an in-memory WAS server, so its envelope, its chunks,
+  // the 412 read-back, and a pending stub are was-client's own. The small
+  // blob limit sends anything over 16 bytes down the chunked path.
+  const server = memoryWasServer()
+  const bytesStore = new WASRemoteStore({
+    serviceDescription: TEST_SERVICE_DESCRIPTION,
+    pinStore: memoryResourceLogPinStore(),
+    storageServerUrl: MEMORY_SERVER_URL,
+    zcapClient: {} as ZcapClient,
+    spaceId: 's-space',
+    controller: 'did:key:test'
+  })
+  bytesStore.was = server.client({ maxBlobBytes: 16, chunkSize: 24 })
   const plaintext = new Set<string>()
   // Collections created bare by a governed ensure, before their log genesis.
   const bare = new Set<string>()
@@ -297,8 +320,14 @@ function makeFakeRemote(stores: MemoryDescriptorStores) {
       return schema
     },
     async listCollectionDocuments({ collectionId }: { collectionId: string }) {
-      return [...rowsOf(collectionId)].map(([id, data]) => ({ id, data }))
+      return [
+        ...[...rowsOf(collectionId)].map(([id, data]) => ({ id, data })),
+        ...server.documentsOf({ spaceId: 's-space', collectionId })
+      ]
     },
+    putEncryptedResourceBytes: (
+      options: Parameters<WASRemoteStore['putEncryptedResourceBytes']>[0]
+    ) => bytesStore.putEncryptedResourceBytes(options),
     async putPlaintextResource({
       collectionId,
       resourceId,
@@ -355,6 +384,7 @@ function makeFakeRemote(stores: MemoryDescriptorStores) {
   } as unknown as WASRemoteStore
   return {
     remoteStore,
+    server,
     governed,
     ensured,
     declared,
@@ -679,6 +709,180 @@ describe('StorageManager app-collection import (encrypted)', () => {
   })
 })
 
+/**
+ * A fresh EDV document id, the shape an archived random-id Resource carries.
+ *
+ * @returns {string}
+ */
+function freshResourceId(): string {
+  return edvIdFromBytes(crypto.getRandomValues(new Uint8Array(16)))
+}
+
+describe('StorageManager app-collection import (encrypted bytes)', () => {
+  // Over the fake server's 16-byte blob limit, so it is written in chunks.
+  const LARGE = new Uint8Array(64).map((_value, index) => (index * 7) % 251)
+  const PNG_A = new Uint8Array([0x89, 0x50, 0x4e, 0x47, 1])
+  const PNG_B = new Uint8Array([0x89, 0x50, 0x4e, 0x47, 2])
+
+  /**
+   * An ensured encrypted app collection, and a helper importing one bytes
+   * Resource into it against a snapshot.
+   *
+   * @returns {Promise<object>}
+   */
+  async function bytesSetup() {
+    const context = await setup()
+    const { storage } = context
+    const ensure = async () => {
+      await storage.ensureImportedAppCollection({
+        collectionId: 'app-photos',
+        encrypted: true
+      })
+      return await storage.snapshotAppCollection({
+        collectionId: 'app-photos',
+        encrypted: true
+      })
+    }
+    const importBytes = ({
+      resourceId,
+      bytes,
+      held
+    }: {
+      resourceId: string
+      bytes: Uint8Array
+      held: Awaited<ReturnType<typeof ensure>>
+    }) =>
+      storage.importAppCollectionResource({
+        collectionId: 'app-photos',
+        encrypted: true,
+        resourceId,
+        contentType: 'image/png',
+        content: { bytes },
+        held
+      })
+    return { ...context, ensure, importBytes }
+  }
+
+  it('writes a small and a chunked Resource at their archived ids, and snapshots them by id', async () => {
+    const { server, ensure, importBytes, storage } = await bytesSetup()
+    const small = freshResourceId()
+    const large = freshResourceId()
+    const first = await ensure()
+
+    expect(
+      await importBytes({ resourceId: small, bytes: PNG_A, held: first })
+    ).toBe('accepted')
+    expect(
+      await importBytes({ resourceId: large, bytes: LARGE, held: first })
+    ).toBe('accepted')
+    expect(
+      [...server.store.keys()].some(path =>
+        path.startsWith(`/space/s-space/app-photos/${large}/chunks/`)
+      )
+    ).toBe(true)
+    // A JSON Resource beside them keeps its payload identity.
+    await storage.importAppCollectionResource({
+      collectionId: 'app-photos',
+      encrypted: true,
+      resourceId: 'r',
+      contentType: 'application/json',
+      content: { json: { id: 'caption-1' } },
+      held: first
+    })
+
+    // The next run's snapshot names both by id without reading a chunk.
+    server.failWhen.test = (_args, path) => path.includes('/chunks/')
+    const held = await ensure()
+    expect(held.get(`resource:${small}`)).toBeNull()
+    expect(held.get(`resource:${large}`)).toBeNull()
+    expect(held.has('id:caption-1')).toBe(true)
+  })
+
+  it('migrates two different small images, skips each on a re-run, and conflicts on other bytes', async () => {
+    const { server, ensure, importBytes } = await bytesSetup()
+    const a = freshResourceId()
+    const b = freshResourceId()
+    const first = await ensure()
+    expect(
+      await importBytes({ resourceId: a, bytes: PNG_A, held: first })
+    ).toBe('accepted')
+    expect(
+      await importBytes({ resourceId: b, bytes: PNG_B, held: first })
+    ).toBe('accepted')
+
+    const held = await ensure()
+    expect(await importBytes({ resourceId: a, bytes: PNG_A, held })).toBe(
+      'skipped'
+    )
+    expect(await importBytes({ resourceId: b, bytes: PNG_B, held })).toBe(
+      'skipped'
+    )
+    const heldEnvelope = server.store.get(`/space/s-space/app-photos/${a}`)
+    expect(await importBytes({ resourceId: a, bytes: PNG_B, held })).toBe(
+      'conflicting'
+    )
+    expect(server.store.get(`/space/s-space/app-photos/${a}`)).toEqual(
+      heldEnvelope
+    )
+  })
+
+  it('skips a chunked Resource on a re-run by comparing its reassembled bytes', async () => {
+    const { ensure, importBytes } = await bytesSetup()
+    const id = freshResourceId()
+    expect(
+      await importBytes({ resourceId: id, bytes: LARGE, held: await ensure() })
+    ).toBe('accepted')
+    const held = await ensure()
+    expect(await importBytes({ resourceId: id, bytes: LARGE, held })).toBe(
+      'skipped'
+    )
+    expect(
+      await importBytes({ resourceId: id, bytes: LARGE.slice(1), held })
+    ).toBe('conflicting')
+  })
+
+  it('rethrows a 507 during a chunked write as QuotaExceededError, which ends the walk', async () => {
+    const { server, ensure, importBytes } = await bytesSetup()
+    const held = await ensure()
+    server.failWhen.status = 507
+    server.failWhen.test = (args, path) =>
+      args.method === 'PUT' && path.endsWith('/chunks/1')
+
+    const failure = await importBytes({
+      resourceId: freshResourceId(),
+      bytes: LARGE,
+      held
+    }).catch((err: unknown) => err)
+    expect(errorNameOf(failure)).toBe('QuotaExceededError')
+  })
+
+  it('removes the pending stub a killed chunked write left, on the next run', async () => {
+    const { server, ensure, importBytes } = await bytesSetup()
+    const id = freshResourceId()
+    const documentPath = `/space/s-space/app-photos/${id}`
+    // The first run is killed mid-write: the second chunk and the cleanup
+    // delete fail, so the stub stays with one chunk.
+    server.failWhen.test = (args, path) =>
+      (args.method === 'PUT' && path.endsWith('/chunks/1')) ||
+      args.method === 'DELETE'
+    expect(
+      await importBytes({ resourceId: id, bytes: LARGE, held: await ensure() })
+    ).toBe('failed')
+    server.failWhen.test = undefined
+    expect(server.store.has(documentPath)).toBe(true)
+
+    // The next run's snapshot leaves the stub out, and the import reaps it.
+    const held = await ensure()
+    expect(held.has(`resource:${id}`)).toBe(false)
+    expect(await importBytes({ resourceId: id, bytes: LARGE, held })).toBe(
+      'accepted'
+    )
+    expect(
+      await importBytes({ resourceId: id, bytes: LARGE, held: await ensure() })
+    ).toBe('skipped')
+  })
+})
+
 describe('StorageManager app-collection import (plaintext)', () => {
   it('ensures the collection with its attribution and public read', async () => {
     const { storage, ensured, governed, publicIds } = await setup()
@@ -723,7 +927,9 @@ describe('StorageManager app-collection import (plaintext)', () => {
     expect(rowsOf('posts').get('post-1')).toEqual({ text: 'one' })
     expect(await importResource('post-1', { text: 'one' })).toBe('skipped')
     expect(await importResource('held-post', { text: 'held' })).toBe('skipped')
-    expect(await importResource('held-post', { text: 'other' })).toBe('conflicting')
+    expect(await importResource('held-post', { text: 'other' })).toBe(
+      'conflicting'
+    )
   })
 
   it('writes a non-JSON Resource as its bytes, skipping the same bytes on a re-run', async () => {

@@ -13,6 +13,14 @@
  * `private-credentials` (content-addressed, immutable), `contacts-history`
  * (append-only).
  *
+ * A second block runs a mixed feed under writer attribution: both replicas
+ * push under their own `writerId`, beside an unlabeled write, a
+ * foreign-labeled one, and tombstones. It checks that the replicas converge
+ * with the SyncEngine side suppressing its own echoes, that the feed echoes
+ * each writer's label (the deleting writer's on a tombstone), and that
+ * suppression skips decrypting only the engine's own held revisions. The
+ * engine's suppression on/off matrix is wallet-core's own sync suite's.
+ *
  * Each replica is assembled from its app's REAL parts wherever the part is on
  * the compatibility surface: the engine, the port (`createWasSyncPort`), the
  * EDV cipher (`createEdvDocCipher`), the LWW rule (`remotePayloadWins`), and
@@ -119,6 +127,131 @@ type ServerModule = {
   FileSystemBackend: new (options: { dataDir: string }) => unknown
 }
 
+/**
+ * Starts the teaching server in process: filesystem backend in a temp dir,
+ * listen on an ephemeral port, then fix up serverUrl to the actual
+ * localhost:port (the teaching server's own test/helpers.ts recipe).
+ *
+ * @returns {Promise<{ fastify: TeachingServer; serverUrl: string; dataDir: string }>}
+ */
+async function startTeachingServer(): Promise<{
+  fastify: TeachingServer
+  serverUrl: string
+  dataDir: string
+}> {
+  const { createApp, FileSystemBackend } = serverModule!
+  const dataDir = await mkdtemp(path.join(tmpdir(), 'was-conformance-'))
+  const fastify = createApp({
+    serverUrl: 'http://localhost',
+    backend: new FileSystemBackend({ dataDir })
+  })
+  await fastify.listen({ port: 0 })
+  const port = (fastify.server.address() as AddressInfo).port
+  const serverUrl = `http://localhost:${port}`
+  fastify.serverUrl = serverUrl
+  return { fastify, serverUrl, dataDir }
+}
+
+/**
+ * A WasClient over one replica's agents, mirroring wasRemoteStore's
+ * codec-bypassing client: a no-op keystore, envelopes move verbatim.
+ *
+ * @param options {object}
+ * @param options.serverUrl {string}
+ * @param options.zcapClient {object}
+ * @returns {WasClient}
+ */
+function wasClientFor({
+  serverUrl,
+  zcapClient
+}: {
+  serverUrl: string
+  zcapClient: ConstructorParameters<typeof WasClient>[0]['zcapClient']
+}): WasClient {
+  return new WasClient({
+    serverUrl,
+    zcapClient,
+    encryption: createEdvEncryption({ resolveKeys: async () => null })
+  })
+}
+
+/**
+ * The SyncEngine lifecycle hooks no conformance case exercises. No timers in
+ * a test: a failed cycle surfaces as status 'error' instead of scheduling a
+ * background retry.
+ */
+const NO_OP_ENGINE_LIFECYCLE = {
+  ensureProvisioned: async () => {},
+  isMigrated: async () => true,
+  runLazyMigration: async () => {},
+  stampMigrated: async () => {},
+  stampLastSynced: async () => {},
+  schedule: () => () => {}
+}
+
+/**
+ * One SyncEngine cycle, throwing when it ends in error.
+ *
+ * @param options {object}
+ * @param options.engine {SyncEngine}
+ * @param options.label {string}
+ * @returns {Promise<void>}
+ */
+async function syncEngineOnce({
+  engine,
+  label
+}: {
+  engine: SyncEngine
+  label: string
+}): Promise<void> {
+  await engine.sync()
+  if (engine.status === 'error') {
+    throw new Error(`dcw engine for "${label}" ended in error`)
+  }
+}
+
+/**
+ * One non-live freewallet replication run to in-sync, throwing the first
+ * error it emitted.
+ *
+ * @param options {object}
+ * @param options.rxCollection {RxCollection<SyncedDoc>}
+ * @param options.wasPort {WasSyncPort}
+ * @param options.replicationIdentifier {string}
+ * @param [options.writerId] {string}
+ * @returns {Promise<void>}
+ */
+async function replicateFwOnce({
+  rxCollection,
+  wasPort,
+  replicationIdentifier,
+  writerId
+}: {
+  rxCollection: RxCollection<SyncedDoc>
+  wasPort: WasSyncPort
+  replicationIdentifier: string
+  writerId?: string
+}): Promise<void> {
+  const state = createWasReplication({
+    rxCollection,
+    wasPort: wasPort as unknown as FwWasSyncPort,
+    replicationIdentifier,
+    live: false,
+    ...(writerId !== undefined && { writerId })
+  })
+  const errors: unknown[] = []
+  const sub = state.error$.subscribe(err => errors.push(err))
+  await state.awaitInitialReplication()
+  await state.awaitInSync()
+  sub.unsubscribe()
+  await state.cancel()
+  if (errors.length > 0) {
+    throw new Error(
+      `fw replication "${replicationIdentifier}" errored: ${String(errors[0])}`
+    )
+  }
+}
+
 let serverModule: ServerModule | undefined
 try {
   serverModule = (await import(
@@ -135,6 +268,7 @@ try {
 interface Row {
   id: string
   version: number
+  etag?: string
   updatedAt: string
   deleted: boolean
   data: Json | null
@@ -144,12 +278,26 @@ interface Row {
 /**
  * In-memory `SyncStore` whose reconciliation mirrors dcw's SQLite layer
  * (`app/model/syncedDoc.ts`); the `projection` map stands in for the decrypted
- * read-model rows.
+ * read-model rows. Each row records the opaque `etag` it was last acked or
+ * pulled at, which `heldRevisions` (the engine's own-writer echo check)
+ * compares against.
  */
 class InMemoryStore implements SyncStore {
   rows = new Map<string, Row>()
   projection = new Map<string, Json>()
   checkpoint: SyncCheckpoint | undefined
+
+  async heldRevisions({
+    documents
+  }: {
+    documents: Array<{ id: string; etag?: string }>
+  }): Promise<Set<string>> {
+    return new Set(
+      documents
+        .filter(({ id, etag }) => this.rows.get(id)?.etag === etag)
+        .map(({ id }) => id)
+    )
+  }
 
   localCreate(id: string, envelope: Json, payload: Json): void {
     this.rows.set(id, {
@@ -185,6 +333,7 @@ class InMemoryStore implements SyncStore {
   overwriteDirty(
     id: string,
     version: number,
+    etag: string | undefined,
     envelope: Json,
     updatedAt: string
   ): void {
@@ -195,6 +344,7 @@ class InMemoryStore implements SyncStore {
     this.rows.set(id, {
       ...row,
       version,
+      etag,
       updatedAt,
       data: envelope,
       deleted: false,
@@ -209,9 +359,10 @@ class InMemoryStore implements SyncStore {
   async getDirtyRows(): Promise<SyncedRow[]> {
     return [...this.rows.values()]
       .filter(r => r.dirty)
-      .map(({ id, version, updatedAt, deleted, data }) => ({
+      .map(({ id, version, etag, updatedAt, deleted, data }) => ({
         id,
         version,
+        etag,
         updatedAt,
         deleted,
         data
@@ -247,6 +398,7 @@ class InMemoryStore implements SyncStore {
         this.rows.set(doc.id, {
           id: doc.id,
           version: doc.version,
+          etag: doc.etag,
           updatedAt: doc.updatedAt,
           deleted: true,
           data: null,
@@ -261,6 +413,7 @@ class InMemoryStore implements SyncStore {
         this.rows.set(doc.id, {
           ...existing,
           version: doc.version,
+          etag: doc.etag,
           updatedAt: doc.updatedAt
         })
         continue
@@ -268,6 +421,7 @@ class InMemoryStore implements SyncStore {
       this.rows.set(doc.id, {
         id: doc.id,
         version: doc.version,
+        etag: doc.etag,
         updatedAt: doc.updatedAt,
         deleted: false,
         data: (doc.data as Json | undefined) ?? null,
@@ -280,10 +434,12 @@ class InMemoryStore implements SyncStore {
 
   async markPushed({
     id,
-    version
+    version,
+    etag
   }: {
     id: string
     version?: number
+    etag?: string
   }): Promise<void> {
     const row = this.rows.get(id)
     if (!row) {
@@ -292,16 +448,19 @@ class InMemoryStore implements SyncStore {
     this.rows.set(id, {
       ...row,
       dirty: false,
-      ...(version !== undefined && { version })
+      ...(version !== undefined && { version }),
+      ...(etag !== undefined && { etag })
     })
   }
 
   async markDeletedPushed({
     id,
-    version
+    version,
+    etag
   }: {
     id: string
     version?: number
+    etag?: string
   }): Promise<void> {
     const row = this.rows.get(id)
     if (!row) {
@@ -312,7 +471,8 @@ class InMemoryStore implements SyncStore {
       deleted: true,
       data: null,
       dirty: false,
-      ...(version !== undefined && { version })
+      ...(version !== undefined && { version }),
+      ...(etag !== undefined && { etag })
     })
   }
 
@@ -330,6 +490,7 @@ class InMemoryStore implements SyncStore {
       this.rows.set(id, {
         id,
         version: row?.version ?? 0,
+        etag: row?.etag,
         updatedAt: row?.updatedAt ?? '',
         deleted: true,
         data: null,
@@ -339,6 +500,7 @@ class InMemoryStore implements SyncStore {
       this.rows.set(id, {
         id,
         version: latest.version,
+        etag: latest.etag,
         updatedAt: latest.updatedAt,
         // A non-null MasterState is never a tombstone (the port folds those
         // into `get` resolving null).
@@ -419,7 +581,13 @@ function makeDcwContactResolve({
       data: local as unknown as Json,
       current: master.data
     })
-    store.overwriteDirty(id, master.version, envelope, local.updatedAt)
+    store.overwriteDirty(
+      id,
+      master.version,
+      master.etag,
+      envelope,
+      local.updatedAt
+    )
   }
 }
 
@@ -466,31 +634,18 @@ describeConformance('cross-replica round-trip conformance', () => {
   let fwDb: Awaited<ReturnType<typeof createRxDatabase>>
 
   async function dcwSync(collectionId: CollectionId): Promise<void> {
-    const engine = dcwEngines[collectionId]
-    await engine.sync()
-    if (engine.status === 'error') {
-      throw new Error(`dcw engine for "${collectionId}" ended in error`)
-    }
+    await syncEngineOnce({
+      engine: dcwEngines[collectionId],
+      label: collectionId
+    })
   }
 
   async function fwSync(collectionId: CollectionId): Promise<void> {
-    const state = createWasReplication({
+    await replicateFwOnce({
       rxCollection: fwCollections[collectionId],
-      wasPort: fwPorts[collectionId] as unknown as FwWasSyncPort,
-      replicationIdentifier: `conformance:${spaceId}:${collectionId}`,
-      live: false
+      wasPort: fwPorts[collectionId],
+      replicationIdentifier: `conformance:${spaceId}:${collectionId}`
     })
-    const errors: unknown[] = []
-    const sub = state.error$.subscribe(err => errors.push(err))
-    await state.awaitInitialReplication()
-    await state.awaitInSync()
-    sub.unsubscribe()
-    await state.cancel()
-    if (errors.length > 0) {
-      throw new Error(
-        `fw replication for "${collectionId}" errored: ${String(errors[0])}`
-      )
-    }
   }
 
   async function syncBoth(collectionId: CollectionId): Promise<void> {
@@ -686,38 +841,20 @@ describeConformance('cross-replica round-trip conformance', () => {
   }
 
   beforeAll(async () => {
-    // The teaching server's own in-process recipe (its test/helpers.ts):
-    // filesystem backend in a temp dir, listen on an ephemeral port, then fix
-    // up serverUrl to the actual localhost:port.
-    const { createApp, FileSystemBackend } = serverModule!
-    dataDir = await mkdtemp(path.join(tmpdir(), 'was-conformance-'))
-    fastify = createApp({
-      serverUrl: 'http://localhost',
-      backend: new FileSystemBackend({ dataDir })
-    })
-    await fastify.listen({ port: 0 })
-    const port = (fastify.server.address() as AddressInfo).port
-    serverUrl = `http://localhost:${port}`
-    fastify.serverUrl = serverUrl
+    ;({ fastify, serverUrl, dataDir } = await startTeachingServer())
 
     // Two wallets, one identity: each replica derives its own agents from the
-    // shared seed and gets its own WasClient (mirroring wasRemoteStore's
-    // codec-bypassing client: a no-op keystore, envelopes move verbatim).
+    // shared seed and gets its own WasClient.
     const dcwAgents = await agentsFromSeed({ seed })
     const fwAgents = await agentsFromSeed({ seed })
     expect(fwAgents.controllerDid).toBe(dcwAgents.controllerDid)
     spaceId = deriveSpaceId(dcwAgents.controllerDid)
 
-    const dcwWas = new WasClient({
+    const dcwWas = wasClientFor({
       serverUrl,
-      zcapClient: dcwAgents.zcapClient,
-      encryption: createEdvEncryption({ resolveKeys: async () => null })
+      zcapClient: dcwAgents.zcapClient
     })
-    const fwWas = new WasClient({
-      serverUrl,
-      zcapClient: fwAgents.zcapClient,
-      encryption: createEdvEncryption({ resolveKeys: async () => null })
-    })
+    const fwWas = wasClientFor({ serverUrl, zcapClient: fwAgents.zcapClient })
 
     // Freewallet created the account; DCW attaches without re-provisioning.
     // The provisioning two-step: declare each collection encrypted, then
@@ -824,14 +961,7 @@ describeConformance('cross-replica round-trip conformance', () => {
           collectionId === CONTACTS_COLLECTION
             ? makeDcwContactResolve({ store, port, cipher })
             : undefined,
-        ensureProvisioned: async () => {},
-        isMigrated: async () => true,
-        runLazyMigration: async () => {},
-        stampMigrated: async () => {},
-        stampLastSynced: async () => {},
-        // No timers in a test: a failed cycle surfaces as status 'error'
-        // instead of scheduling a background retry.
-        schedule: () => () => {}
+        ...NO_OP_ENGINE_LIFECYCLE
       })
     }
   })
@@ -1145,5 +1275,310 @@ describeConformance('cross-replica round-trip conformance', () => {
     expect(
       dcwStores[CONTACTS_HISTORY_COLLECTION].projection.get(fwRevId)
     ).toEqual(fwRevision)
+  })
+})
+
+// --------------------------------------------------------------------------
+// Writer attribution: a mixed feed under echo suppression
+// --------------------------------------------------------------------------
+
+describeConformance('cross-replica writer attribution', () => {
+  const DCW_WRITER_ID = 'dcw-writer'
+  const FW_WRITER_ID = 'fw-writer'
+  const FOREIGN_WRITER_ID = 'foreign-writer'
+  const collectionId = PRIVATE_CREDENTIALS_COLLECTION
+
+  let fastify: TeachingServer
+  let dataDir: string
+  let spaceId: string
+  let dcwCipher: DocCipher
+  let fwCipher: DocCipher
+  let fwPort: WasSyncPort
+  let thirdPort: WasSyncPort
+  let dcwStore: InMemoryStore
+  let dcwEngine: SyncEngine
+  let fwDb: Awaited<ReturnType<typeof createRxDatabase>>
+  let fwCollection: RxCollection<SyncedDoc>
+  // Every id the SyncEngine side's pull handed to its decrypt.
+  const dcwDecrypted: string[] = []
+
+  async function dcwSync(): Promise<void> {
+    await syncEngineOnce({ engine: dcwEngine, label: collectionId })
+  }
+
+  async function fwSync(): Promise<void> {
+    await replicateFwOnce({
+      rxCollection: fwCollection,
+      wasPort: fwPort,
+      replicationIdentifier: `conformance:${spaceId}:${collectionId}`,
+      writerId: FW_WRITER_ID
+    })
+  }
+
+  /**
+   * The whole changes feed from the start, as `id to WireDoc`.
+   *
+   * @returns {Promise<Map<string, WireDoc>>}
+   */
+  async function readFeed(): Promise<Map<string, WireDoc>> {
+    const feed = new Map<string, WireDoc>()
+    let checkpoint: SyncCheckpoint | undefined
+    for (;;) {
+      const page = await thirdPort.query({ checkpoint, limit: 100 })
+      for (const doc of page.documents) {
+        feed.set(doc.id, doc)
+      }
+      if (page.checkpoint === null || page.documents.length === 0) {
+        return feed
+      }
+      checkpoint = page.checkpoint
+    }
+  }
+
+  /**
+   * Writes a credential through a third writer that is neither replica,
+   * straight onto the port, declaring `writerId` or no label at all.
+   *
+   * @param options {object}
+   * @param options.payload {Json}
+   * @param [options.writerId] {string}
+   * @returns {Promise<string>}
+   */
+  async function thirdWriterPut({
+    payload,
+    writerId
+  }: {
+    payload: Json
+    writerId?: string
+  }): Promise<string> {
+    const { id, envelope } = await dcwCipher.encrypt({ data: payload })
+    await thirdPort.putContent({
+      id,
+      data: envelope,
+      ifNoneMatch: true,
+      ...(writerId !== undefined && { writerId })
+    })
+    return id
+  }
+
+  /**
+   * A minimal credential body, distinct per `name`.
+   *
+   * @param name {string}
+   * @returns {Json}
+   */
+  function credential(name: string): Json {
+    return {
+      '@context': ['https://www.w3.org/ns/credentials/v2'],
+      type: ['VerifiableCredential'],
+      credentialSubject: { id: `did:example:${name}`, name }
+    } as unknown as Json
+  }
+
+  /**
+   * dcw's content-addressed write path: a dirty local row keyed by the
+   * cipher-minted id.
+   *
+   * @param name {string}
+   * @returns {Promise<string>} The row id.
+   */
+  async function dcwAddCredential(name: string): Promise<string> {
+    const payload = credential(name)
+    const { id, envelope } = await dcwCipher.encrypt({ data: payload })
+    dcwStore.localCreate(id, envelope, payload)
+    return id
+  }
+
+  /**
+   * `browserStore.#insertEncrypted` with `contentAddressed: true`.
+   *
+   * @param name {string}
+   * @returns {Promise<string>} The row id.
+   */
+  async function fwAddCredential(name: string): Promise<string> {
+    const { id, envelope } = await fwCipher.encrypt({
+      data: credential(name)
+    })
+    await fwCollection.insert({
+      id,
+      updatedAt: new Date().toISOString(),
+      version: 0,
+      data: envelope
+    } as SyncedDoc)
+    return id
+  }
+
+  /**
+   * Decrypted view of a freewallet row (undefined when absent or deleted).
+   *
+   * @param id {string}
+   * @returns {Promise<Json | undefined>}
+   */
+  async function fwRead(id: string): Promise<Json | undefined> {
+    const doc = await fwCollection.findOne(id).exec()
+    if (!doc || doc.deleted) {
+      return undefined
+    }
+    return (await fwCipher.decrypt({
+      id,
+      envelope: doc.toMutableJSON().data as Json
+    })) as Json
+  }
+
+  beforeAll(async () => {
+    let serverUrl: string
+    ;({ fastify, serverUrl, dataDir } = await startTeachingServer())
+
+    // Each case starts its own server, so a fixed seed still gives each
+    // case its own Space and feed.
+    const seed = new Uint8Array(32).fill(11)
+    const dcwAgents = await agentsFromSeed({ seed })
+    const fwAgents = await agentsFromSeed({ seed })
+    spaceId = deriveSpaceId(dcwAgents.controllerDid)
+    const dcwWas = wasClientFor({
+      serverUrl,
+      zcapClient: dcwAgents.zcapClient
+    })
+    const fwWas = wasClientFor({ serverUrl, zcapClient: fwAgents.zcapClient })
+
+    await ensureSpaceAndCollection({
+      was: fwWas,
+      spaceId,
+      controllerDid: fwAgents.controllerDid,
+      collectionId,
+      encryption: 'edv'
+    })
+    const { descriptor } = await ensureFirstEpoch({
+      collection: fwWas.space(spaceId).collection(collectionId),
+      recipients: [
+        ownerRecipient({ keyAgreementKey: fwAgents.keyAgreementKey })
+      ]
+    })
+    dcwCipher = await createEdvDocCipher({
+      keyAgreementKey: dcwAgents.keyAgreementKey,
+      keyResolver: dcwAgents.keyResolver,
+      collectionId,
+      idDerivation: 'content',
+      encryption: descriptor
+    })
+    fwCipher = await createEdvDocCipher({
+      keyAgreementKey: fwAgents.keyAgreementKey,
+      keyResolver: fwAgents.keyResolver,
+      collectionId,
+      idDerivation: 'content',
+      encryption: descriptor
+    })
+    const dcwPort = createWasSyncPort({ was: dcwWas, spaceId, collectionId })
+    fwPort = createWasSyncPort({ was: fwWas, spaceId, collectionId })
+    // The third writer is told apart by its label alone, so it can share
+    // dcw's client.
+    thirdPort = createWasSyncPort({ was: dcwWas, spaceId, collectionId })
+
+    fwDb = await createRxDatabase({
+      name: 'conformance-writer-attribution',
+      storage: getRxStorageMemory(),
+      multiInstance: false
+    })
+    const added = await fwDb.addCollections({
+      privateCredentials: { schema: syncedDocSchema() }
+    })
+    fwCollection = added.privateCredentials as RxCollection<SyncedDoc>
+
+    dcwStore = new InMemoryStore()
+    dcwEngine = new SyncEngine({
+      port: dcwPort,
+      store: dcwStore,
+      decryptDoc: async ({ id, envelope }) => {
+        dcwDecrypted.push(id)
+        return (await dcwCipher.decrypt({ id, envelope })) as Json
+      },
+      writerId: DCW_WRITER_ID,
+      ...NO_OP_ENGINE_LIFECYCLE
+    })
+  })
+
+  afterAll(async () => {
+    dcwEngine?.stop()
+    await fwDb?.close()
+    await fastify?.close()
+    if (dataDir) {
+      await rm(dataDir, { recursive: true, force: true })
+    }
+  })
+
+  it('converges a mixed feed and echoes each writer label', async () => {
+    // Both replicas write with their own labels; a third writer adds one
+    // unlabeled and one foreign-labeled credential.
+    const dcwKept = await dcwAddCredential('dcw-kept')
+    const dcwDeleted = await dcwAddCredential('dcw-deleted')
+    const fwKept = await fwAddCredential('fw-kept')
+    const fwDeleted = await fwAddCredential('fw-deleted')
+    const unlabeled = await thirdWriterPut({
+      payload: credential('unlabeled')
+    })
+    const foreign = await thirdWriterPut({
+      payload: credential('foreign'),
+      writerId: FOREIGN_WRITER_ID
+    })
+
+    await dcwSync()
+    await fwSync()
+    await dcwSync()
+    await fwSync()
+
+    // Each replica deletes one of the other's credentials: a tombstone per
+    // deleting writer.
+    dcwStore.localDelete(fwDeleted)
+    const fwDoc = await fwCollection.findOne(dcwDeleted).exec()
+    if (!fwDoc) {
+      throw new Error(`no fw row ${dcwDeleted}`)
+    }
+    await fwDoc.remove()
+
+    await dcwSync()
+    await fwSync()
+    await dcwSync()
+    await fwSync()
+
+    // (a) Both replicas hold identical content.
+    const live = {
+      [dcwKept]: credential('dcw-kept'),
+      [fwKept]: credential('fw-kept'),
+      [unlabeled]: credential('unlabeled'),
+      [foreign]: credential('foreign')
+    }
+    for (const [id, payload] of Object.entries(live)) {
+      expect(dcwStore.projection.get(id)).toEqual(payload)
+      expect(await fwRead(id)).toEqual(payload)
+    }
+    for (const id of [dcwDeleted, fwDeleted]) {
+      expect(dcwStore.projection.has(id)).toBe(false)
+      expect(dcwStore.rows.get(id)?.deleted).toBe(true)
+      expect(await fwRead(id)).toBeUndefined()
+    }
+    expect([...dcwStore.projection.keys()].sort()).toEqual(
+      Object.keys(live).sort()
+    )
+
+    // (b) The feed carries each writer's own label, a tombstone carrying
+    // the deleting writer's, and no label where none was declared.
+    const feed = await readFeed()
+    expect(feed.get(dcwKept)?.writerId).toBe(DCW_WRITER_ID)
+    expect(feed.get(fwKept)?.writerId).toBe(FW_WRITER_ID)
+    expect(feed.get(unlabeled)?.writerId).toBeUndefined()
+    expect(feed.get(foreign)?.writerId).toBe(FOREIGN_WRITER_ID)
+    expect(feed.get(fwDeleted)?._deleted).toBe(true)
+    expect(feed.get(fwDeleted)?.writerId).toBe(DCW_WRITER_ID)
+    expect(feed.get(dcwDeleted)?._deleted).toBe(true)
+    expect(feed.get(dcwDeleted)?.writerId).toBe(FW_WRITER_ID)
+
+    // (c) The engine never decrypted the echoes of its own held writes,
+    // and decrypted every other live document.
+    for (const id of [fwKept, unlabeled, foreign]) {
+      expect(dcwDecrypted).toContain(id)
+    }
+    for (const id of [dcwKept, dcwDeleted]) {
+      expect(dcwDecrypted).not.toContain(id)
+    }
   })
 })

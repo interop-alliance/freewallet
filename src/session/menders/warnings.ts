@@ -77,5 +77,7 @@ export const MENDER_WARNINGS: Readonly<Record<InvariantId, string>> = {
   'standard-collections-are-provisioned':
     'Could not provision the standard collections; the next login retries',
   'no-auxiliary-space-stands-unnamed':
-    'Could not remove the unnamed auxiliary Space; no converger is built'
+    'Could not remove the unnamed auxiliary Space; no converger is built',
+  'no-registered-writer-outlives-its-expiry':
+    'Could not sweep the expired registered writers; no converger is built'
 }

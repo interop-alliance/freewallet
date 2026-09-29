@@ -17,6 +17,9 @@
  * encrypt and decrypt happen at the storage layer's read and write time, never
  * in the sync path.
  *
+ * Every push declares the session persistence's `writerId` (the per-profile
+ * label) as the WAS writer-attribution label, so the changes feed echoes it.
+ *
  * The core's `stop()` is terminal for an instance, so `restart()` constructs a
  * fresh core per session and this module-scope singleton is a thin shell
  * holding the current one.
@@ -173,7 +176,8 @@ class SessionSyncController {
           setStatus(collectionId, status)
         },
         onlineSource: browserOnlineSource(),
-        pollMs: WAS_SYNC_POLL_MS
+        pollMs: WAS_SYNC_POLL_MS,
+        writerId: session.persistence.getWriterId()
       })
       this.#core = core
       await core.start()

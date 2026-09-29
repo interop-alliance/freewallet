@@ -643,6 +643,20 @@ const DECLARATIONS: ReadonlyArray<
     // A detector would compare the account log's pointer entries with the
     // auxiliary Spaces the host still serves.
     evidence: ['verified-log', 'host-listing']
+  },
+  // 35
+  // converger: wallet-core's `sweepRegisteredWriters`, the writer roster's
+  // sweep-on-read. This wallet does not read the roster yet, so nothing
+  // runs it here; the history view gains it as an `encounter` site.
+  {
+    id: 'no-registered-writer-outlives-its-expiry',
+    statement:
+      'No registered-writers entry stands past its inactivity window, and the roster holds no more than its entry limit once a sweep has run.',
+    standsOn: ['ladder-anchored', 'enrolled'],
+    authority: 'account',
+    triggers: [],
+    ceremonies: [],
+    evidence: ['host-listing', 'local-clock']
   }
 ]
 

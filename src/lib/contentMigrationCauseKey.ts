@@ -20,11 +20,24 @@ const CAUSE_KEYS: Record<string, string> = {
   KeyUnwrapError: 'storage.migration.causes.keyUnwrap',
   // The row names a key epoch the archived roster does not carry.
   UnknownEpochError: 'storage.migration.causes.unknownEpoch',
-  // The archived Resource is chunked, which the walk does not reassemble.
+  // The archived Resource is chunked outside an encrypted app collection,
+  // where the walk does not reassemble it.
   ChunkedResourceUnsupportedError: 'storage.migration.causes.chunked',
+  // A chunked Resource's chunk or chunk directory is missing, or the archive
+  // holds a chunk directory no Resource names.
+  NotFoundError: 'storage.migration.causes.notFound',
+  // A pending stub a killed chunked write left, or a chunk bound to another
+  // Resource or epoch than its envelope.
+  EncryptionError: 'storage.migration.causes.encryption',
+  // A chunk that is corrupted, or moved to another index, fails its decrypt.
+  DataError: 'storage.migration.causes.dataCorrupted',
+  // The same chunk failure as it surfaces in Node, whose AEAD throws a plain
+  // `Error`. Other unnamed failures land here too.
+  Error: 'storage.migration.causes.error',
   // The collection's governing log would not read, so its epochs are unknown.
   CollectionLogUnreadableError: 'storage.migration.causes.logUnreadable',
-  // This account's Space is full; the walk stops rather than retry.
+  // This account's Space is full, a chunked write included; the walk stops
+  // rather than retry.
   QuotaExceededError: 'storage.migration.causes.quotaExceeded',
   // One row is larger than this server accepts.
   PayloadTooLargeError: 'storage.migration.causes.payloadTooLarge',

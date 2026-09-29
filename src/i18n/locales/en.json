@@ -772,7 +772,11 @@
       "causes": {
         "keyUnwrap": "No key from this backup opened the row.",
         "unknownEpoch": "The row names a key the backup does not carry.",
-        "chunked": "The item was stored in parts, which the import does not reassemble.",
+        "chunked": "The item was stored in parts outside an encrypted app collection, which the import does not reassemble.",
+        "notFound": "The item or one of its stored parts is missing from the backup.",
+        "encryption": "The item does not match the key or location it was sealed for, or it was never finished writing.",
+        "dataCorrupted": "A stored part of the item is damaged or out of order.",
+        "error": "The item could not be read. A stored part may be damaged or out of order.",
         "logUnreadable": "The collection's key history could not be read.",
         "quotaExceeded": "This account's storage is full.",
         "payloadTooLarge": "The item is larger than this server accepts.",
@@ -785,6 +789,7 @@
         "accountArchiveMissing": "This backup carries no account data, so nothing in it can be opened.",
         "secretNotRecipient": "That passphrase or code does not open this backup. A secret created after the backup was written cannot open it.",
         "cancelled": "Import cancelled. What was already added stays.",
+        "inProgress": "An import is already running. Wait for it to finish.",
         "quotaExceeded": "This account's storage is full, so the import stopped.",
         "failed": "The import failed. Please try again."
       }

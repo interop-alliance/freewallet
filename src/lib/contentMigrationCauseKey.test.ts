@@ -47,6 +47,10 @@ const CAUSE_NAMES = [
   'KeyUnwrapError',
   'UnknownEpochError',
   'ChunkedResourceUnsupportedError',
+  'NotFoundError',
+  'EncryptionError',
+  'DataError',
+  'Error',
   'CollectionLogUnreadableError',
   'QuotaExceededError',
   'PayloadTooLargeError',
@@ -59,6 +63,7 @@ const ERROR_KEYS = [
   'storage.migration.errors.accountArchiveMissing',
   'storage.migration.errors.secretNotRecipient',
   'storage.migration.errors.cancelled',
+  'storage.migration.errors.inProgress',
   'storage.migration.errors.quotaExceeded',
   'storage.migration.errors.failed'
 ]
@@ -80,6 +85,25 @@ describe('contentMigrationCauseKey', () => {
     expect(contentMigrationCauseKey('QuotaExceededError').key).toBe(
       'storage.migration.causes.quotaExceeded'
     )
+  })
+
+  it('maps the causes a chunked Resource can carry', () => {
+    expect(contentMigrationCauseKey('NotFoundError').key).toBe(
+      'storage.migration.causes.notFound'
+    )
+    expect(contentMigrationCauseKey('EncryptionError').key).toBe(
+      'storage.migration.causes.encryption'
+    )
+    expect(contentMigrationCauseKey('DataError').key).toBe(
+      'storage.migration.causes.dataCorrupted'
+    )
+    // Node's AEAD throws a plain `Error` for the same corrupted chunk.
+    expect(contentMigrationCauseKey('Error').key).toBe(
+      'storage.migration.causes.error'
+    )
+    expect(
+      contentMigrationCauseKey('ChunkedResourceUnsupportedError').key
+    ).toBe('storage.migration.causes.chunked')
   })
 
   it('falls back to the sentence that shows an unknown name raw', () => {

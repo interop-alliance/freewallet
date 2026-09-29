@@ -42,7 +42,13 @@ The browser-local variant is the opt-in one, carried by a login on a browser
 that holds a client-key record and by a guest session. It is the
 `freewallet-session` database, the localStorage caches, and the persistent
 `writerId`. It alone carries the `idb` factory, so code needing that
-database must hold it.
+database must hold it. Its `writerId` is the one label declared on the
+wire. The sync controller sends it on every replication push as the WAS
+`Writer-Id` header. The in-memory variant cannot reach that label. It holds
+a per-visit one minted in tab memory, and declares none today, since it runs
+no replication and remote-direct writes send no `Writer-Id` on any session
+kind. A remembered session's own remote-direct writes (the CHAPI popup, the
+app-key sweep's public-copy retraction) go unlabeled too.
 
 Global UI prefs (theme, language) are not session state and ride a sibling
 seam (`src/lib/prefsStorage.ts`): during a transient session, pref writes
@@ -449,7 +455,33 @@ against that snapshot: `skipped` for the same identity and content,
 `conflicting` for the same identity under other content, and otherwise a
 write. A plaintext Resource keeps its archived content type. A non-JSON one
 arrives as raw bytes and is not in the snapshot, so an id already taken is
-read back and compared by its bytes. App collections are remote-only, so these writes go remote-direct
+read back and compared by its bytes.
+
+An encrypted Resource arrives by what it decrypted to. A JSON one takes the
+route above. One that decrypted to bytes, a chunked Resource or a small
+binary or text one, arrives as raw bytes under its sealed content type. Its
+identity is its archived resource id. `WASRemoteStore.putEncryptedResourceBytes`
+writes it at that id through was-client's `Resource.put` with
+`ifNoneMatch`, on a handle carrying the verified descriptor and the vault
+keys as a per-handle encryption override, since the store's client holds no
+keystore. A payload over the codec's blob limit is written as a chunked
+document. A `412` reads the held copy back, reassembling a chunked one, and
+compares bytes: the same bytes are `skipped`, and other bytes (or a held
+JSON copy) are `conflicting`, with the held copy untouched. When that read
+fails with `EncryptionError`, the raw envelope is read, and a pending stub a
+killed chunked write left is deleted with its chunks through
+`resource.delete()`. The write then runs again. A stub is reaped only at an
+id the run is importing. The snapshot decrypts each held envelope with a
+chunk source that holds nothing, so a complete chunked Resource stops at its
+first chunk with `NotFoundError` and is recorded by id, as a small bytes
+Resource is. No held Resource is reassembled for the snapshot, and a pending
+stub is left out of it. A `507` during a chunked write surfaces as
+`QuotaExceededError`, which ends the walk. `migrateContent` refuses a second
+run while one is going in the same tab (`ContentMigrationInProgressError`),
+since that run could reap a stub the first is still filling. Runs in two tabs
+are not held apart.
+
+App collections are remote-only, so these writes go remote-direct
 on a remembered session too. The app's own recipient entry and grants do
 not travel; the app is admitted again when it reconnects.
 
