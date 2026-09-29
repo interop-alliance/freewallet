@@ -6314,7 +6314,7 @@ export class StorageManager {
 
   /**
    * Reads what the account holds in one app collection, once per run, as
-   * the map {@link importAppCollectionRow} decides against: each held row's
+   * the map {@link importAppCollectionResource} decides against: each held row's
    * identity to its content cid. An encrypted row's identity is its
    * decrypted payload's own string `id`, or the payload's content cid when
    * it carries none. A plaintext row's identity is its resource id. A row
@@ -6392,15 +6392,15 @@ export class StorageManager {
    * @param options {object}
    * @param options.collectionId {string}   an app collection this run ensured
    * @param options.encrypted {boolean}
-   * @param options.resourceId {string}   the row's archived resource id
+   * @param options.resourceId {string}   the Resource's archived resource id
    * @param options.contentType {string}   the archived content type
-   * @param options.content {{ row: Json } | { bytes: Uint8Array }}   the
+   * @param options.content {{ json: Json } | { bytes: Uint8Array }}   the
    *   decrypted payload or parsed JSON body, or a non-JSON body's raw bytes
    * @param options.held {HeldAppRows}   the collection's snapshot, updated on
    *   accept
    * @returns {Promise<ImportOutcome>}
    */
-  async importAppCollectionRow({
+  async importAppCollectionResource({
     collectionId,
     encrypted,
     resourceId,
@@ -6412,11 +6412,11 @@ export class StorageManager {
     encrypted: boolean
     resourceId: string
     contentType: string
-    content: { row: Json } | { bytes: Uint8Array }
+    content: { json: Json } | { bytes: Uint8Array }
     held: HeldAppRows
   }): Promise<ImportOutcome> {
     return await this.#importRow({
-      what: 'app collection row',
+      what: 'app collection resource',
       write: async (): Promise<ImportOutcome> => {
         const remote = this.#requireRemote('Importing an app collection')
         if ('bytes' in content) {
@@ -6447,16 +6447,16 @@ export class StorageManager {
             : 'conflicting'
         }
 
-        const { row } = content
-        const cid = contentCid(row)
-        const identity = encrypted ? appRowIdentity({ row, cid }) : resourceId
+        const { json } = content
+        const cid = contentCid(json)
+        const identity = encrypted ? appRowIdentity({ row: json, cid }) : resourceId
         const stored = held.get(identity)
         if (stored !== undefined) {
           return stored === cid ? 'skipped' : 'conflicting'
         }
         if (encrypted) {
           const cipher = await this.#importCipherForWrite(collectionId)
-          const { id, envelope, epoch } = await cipher.encrypt({ data: row })
+          const { id, envelope, epoch } = await cipher.encrypt({ data: json })
           await remote.putCollectionResource({
             collectionId,
             resourceId: id,
@@ -6467,7 +6467,7 @@ export class StorageManager {
           const { created } = await remote.putPlaintextResource({
             collectionId,
             resourceId,
-            data: row,
+            data: json,
             contentType
           })
           if (!created) {

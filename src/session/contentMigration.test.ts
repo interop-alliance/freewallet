@@ -614,8 +614,8 @@ describe('migrateContent', () => {
     const snapshot = vi
       .spyOn(storage, 'snapshotAppCollection')
       .mockResolvedValue(held)
-    const importRow = vi
-      .spyOn(storage, 'importAppCollectionRow')
+    const importResource = vi
+      .spyOn(storage, 'importAppCollectionResource')
       .mockResolvedValue('accepted')
     const { bundle, secret } = await makeBundle([
       {
@@ -636,8 +636,8 @@ describe('migrateContent', () => {
       collectionId: 'app-notes',
       encrypted: true
     })
-    expect(importRow).toHaveBeenCalledTimes(2)
-    for (const [args] of importRow.mock.calls) {
+    expect(importResource).toHaveBeenCalledTimes(2)
+    for (const [args] of importResource.mock.calls) {
       expect(args).toMatchObject({
         collectionId: 'app-notes',
         encrypted: true,
@@ -645,8 +645,8 @@ describe('migrateContent', () => {
         held
       })
     }
-    expect(importRow.mock.calls.map(([args]) => args.content)).toEqual(
-      expect.arrayContaining([{ row: { id: 'a' } }, { row: { id: 'b' } }])
+    expect(importResource.mock.calls.map(([args]) => args.content)).toEqual(
+      expect.arrayContaining([{ json: { id: 'a' } }, { json: { id: 'b' } }])
     )
     expect(result.report.collections['app-notes']?.accepted).toBe(2)
     const [activity] = await importActivities(session)

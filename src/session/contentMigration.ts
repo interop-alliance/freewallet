@@ -4,7 +4,7 @@
  *
  * `@interop/wallet-backup` owns the reading -- the bundle's outer tar, the
  * old secret's derivation, the archived user key roster, and the decrypt
- * walk -- and pushes one plaintext row at a time at the sink this module
+ * walk -- and pushes one plaintext Resource at a time at the sink this module
  * builds over `StorageManager`'s four import methods. The walk issues no
  * request and the module holds no reference to the secret past the call: it
  * is handed to `migrateBundle`, which zeroes the derived material when it
@@ -25,13 +25,13 @@
  * App collections, the ones a connected app had the old account provision,
  * migrate too when the session can create them (remote storage and the
  * descriptor logs of a promoted account). Each is re-created owner-only
- * under its archived attribution, and its rows are written remote-direct on
+ * under its archived attribution, and its Resources are written remote-direct on
  * every session kind, since no replica holds an app collection. A guest or a
  * no-WAS session leaves them counted as not migrated.
  */
 import { migrateBundle, MIGRATION_WALK_ORDER } from '@interop/wallet-backup'
 import type {
-  AppCollectionRow,
+  AppCollectionResource,
   ByteSource,
   MigrationReport,
   MigrationSecret,
@@ -160,7 +160,7 @@ function targetDidOf(session: Session): string {
 /**
  * The sink's app-collection member, over the session's app-collection import
  * methods. It holds what those methods cannot: whether each collection is
- * encrypted, and each collection's held-row snapshot, read at its first row
+ * encrypted, and each collection's held-Resource snapshot, read at its first Resource
  * and kept current by the writes.
  *
  * @param options {object}
@@ -195,7 +195,7 @@ function appCollectionsSink({
       })
     },
 
-    async importRow(handed: AppCollectionRow): Promise<SinkOutcome> {
+    async importResource(handed: AppCollectionResource): Promise<SinkOutcome> {
       const { collectionId, resourceId, contentType } = handed
       const encrypted = encryptedById.get(collectionId) ?? true
       let snapshot = snapshots.get(collectionId)
@@ -207,8 +207,8 @@ function appCollectionsSink({
       try {
         held = await snapshot
       } catch (err) {
-        // Read again at the next row: one failed listing must not decide
-        // every row behind it.
+        // Read again at the next Resource: one failed listing must not decide
+        // every Resource behind it.
         snapshots.delete(collectionId)
         log.warn('Could not read an app collection before importing into it', {
           collectionId,
@@ -216,7 +216,7 @@ function appCollectionsSink({
         })
         return 'failed'
       }
-      return await storage.importAppCollectionRow({
+      return await storage.importAppCollectionResource({
         collectionId,
         encrypted,
         resourceId,
@@ -224,7 +224,7 @@ function appCollectionsSink({
         content:
           'bytes' in handed
             ? { bytes: handed.bytes }
-            : { row: handed.row as Json },
+            : { json: handed.json as Json },
         held
       })
     }
@@ -237,7 +237,7 @@ function appCollectionsSink({
  * and keep current, what this run did with each archived contact head, and
  * which credentials the account already records a `Create` activity for.
  *
- * The snapshot is read at the first row that needs it, which the walk order
+ * The snapshot is read at the first Resource that needs it, which the walk order
  * puts before any contact or activity write, so a re-run reads the same
  * `Create` set the first run did.
  *
@@ -292,14 +292,14 @@ function migrationSink({ session }: { session: Session }): MigrationSink {
       appCollections: appCollectionsSink({ session })
     }),
 
-    async importCredential({ row }): Promise<SinkOutcome> {
+    async importCredential({ json }): Promise<SinkOutcome> {
       return await storage.importCredential({
-        credential: row as IVerifiableCredential
+        credential: json as IVerifiableCredential
       })
     },
 
-    async importContact({ row }): Promise<SinkOutcome> {
-      const head = row as ContactHeadPayload
+    async importContact({ json }): Promise<SinkOutcome> {
+      const head = json as ContactHeadPayload
       const outcome = await storage.importContactHead({
         head,
         held: await held()
@@ -312,8 +312,8 @@ function migrationSink({ session }: { session: Session }): MigrationSink {
       return outcome === 'seed-twin' ? 'skipped' : outcome
     },
 
-    async importContactRevision({ row }): Promise<SinkOutcome> {
-      const revision = row as ContactRevisionPayload
+    async importContactRevision({ json }): Promise<SinkOutcome> {
+      const revision = json as ContactRevisionPayload
       const outcome = headOutcomes.get(revision.contactId)
       if (outcome === 'failed') {
         // The head may still land on a re-run, and its revisions land with it
@@ -340,8 +340,8 @@ function migrationSink({ session }: { session: Session }): MigrationSink {
       return await storage.importContactRevision({ revision, held: content })
     },
 
-    async importActivity({ row }): Promise<SinkOutcome> {
-      const activity = row as WalletActivity
+    async importActivity({ json }): Promise<SinkOutcome> {
+      const activity = json as WalletActivity
       const info = credentialActivityInfo(activity)
       if (!info) {
         // Everything else records an authority event on the old account --
@@ -403,9 +403,9 @@ function importedCollections(
  *   its recovery code, or the backup credential the bundle carries
  * @param [options.bundleBytes] {number}   the bundle's size, for the quota
  *   pre-check, when the caller knows it without draining a stream
- * @param [options.signal] {AbortSignal}   cancels between rows; an aborted
+ * @param [options.signal] {AbortSignal}   cancels between Resources; an aborted
  *   run writes no Import activity
- * @param [options.onProgress] {function}   called once per row with
+ * @param [options.onProgress] {function}   called once per Resource with
  *   `{ collectionId, index, outcome }`
  * @returns {Promise<ContentMigrationResult>}
  */
@@ -429,7 +429,7 @@ export async function migrateContent({
   }) => void
 }): Promise<ContentMigrationResult> {
   // The login-time mender block can rotate the user key and rebuild every
-  // cipher under a row in flight, so the walk waits it out. It never
+  // cipher under a Resource in flight, so the walk waits it out. It never
   // rejects.
   await session.mends
 
@@ -512,7 +512,7 @@ export function contentMigrationErrorKey(err: unknown): string {
     // wrong passphrase or code, or a secret established after the export.
     case 'BundleRecipientMissingError':
       return 'storage.migration.errors.secretNotRecipient'
-    // The user cancelled. The walk stops between rows, so what landed stays.
+    // The user cancelled. The walk stops between Resources, so what landed stays.
     case 'AbortError':
       return 'storage.migration.errors.cancelled'
     // The Space is full. The walk itself stops on this and reports

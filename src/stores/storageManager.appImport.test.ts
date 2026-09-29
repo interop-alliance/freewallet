@@ -2,7 +2,7 @@
  * Unit tests for StorageManager's app-collection import methods, the ones
  * the content migration re-creates a connected app's collection through:
  * `ensureImportedAppCollection`, `snapshotAppCollection`, and
- * `importAppCollectionRow`, plus the owner-only form of
+ * `importAppCollectionResource`, plus the owner-only form of
  * `provisionEncryptedCollection` they ride.
  *
  * The session is replica-less, since app collections are remote-only on
@@ -535,13 +535,13 @@ describe('StorageManager app-collection import (encrypted)', () => {
       collectionId: 'app-notes',
       encrypted: true
     })
-    const row = { id: 'note-1', type: 'Note', text: 'hello' }
-    const outcome = await storage.importAppCollectionRow({
+    const json = { id: 'note-1', type: 'Note', text: 'hello' }
+    const outcome = await storage.importAppCollectionResource({
       collectionId: 'app-notes',
       encrypted: true,
       resourceId: 'archived-id',
       contentType: 'application/json',
-      content: { row },
+      content: { json },
       held
     })
 
@@ -552,13 +552,13 @@ describe('StorageManager app-collection import (encrypted)', () => {
     expect(
       (envelope as { indexed?: unknown[] }).indexed?.length
     ).toBeGreaterThan(0)
-    // The row opens under the owner's keys and the collection's descriptor.
+    // The Resource opens under the owner's keys and the collection's descriptor.
     const reader = await createEdvDocCipher({
       ...owner,
       collectionId: 'app-notes',
       encryption: stores.descriptorOf('app-notes')!
     })
-    expect(await reader.decrypt({ id: resourceId!, envelope })).toEqual(row)
+    expect(await reader.decrypt({ id: resourceId!, envelope })).toEqual(json)
   })
 
   it('writes rows without index entries when no schema is given', async () => {
@@ -572,12 +572,12 @@ describe('StorageManager app-collection import (encrypted)', () => {
       collectionId: 'app-notes',
       encrypted: true
     })
-    await storage.importAppCollectionRow({
+    await storage.importAppCollectionResource({
       collectionId: 'app-notes',
       encrypted: true,
       resourceId: 'r',
       contentType: 'application/json',
-      content: { row: { id: 'note-1', type: 'Note' } },
+      content: { json: { id: 'note-1', type: 'Note' } },
       held
     })
 
@@ -586,7 +586,7 @@ describe('StorageManager app-collection import (encrypted)', () => {
     expect((envelope as { indexed?: unknown[] }).indexed ?? []).toEqual([])
   })
 
-  it('skips a held row, reports a changed one as conflicting, and dedupes an id-less row by content', async () => {
+  it('skips a held Resource, reports a changed one as conflicting, and dedupes an id-less Resource by content', async () => {
     const { storage, rowsOf } = await setup()
     await storage.ensureImportedAppCollection({
       collectionId: 'app-notes',
@@ -597,13 +597,13 @@ describe('StorageManager app-collection import (encrypted)', () => {
       encrypted: true
     })
     const rows: Json[] = [{ id: 'note-1', text: 'one' }, { text: 'no id' }]
-    for (const row of rows) {
-      await storage.importAppCollectionRow({
+    for (const json of rows) {
+      await storage.importAppCollectionResource({
         collectionId: 'app-notes',
         encrypted: true,
         resourceId: 'r',
         contentType: 'application/json',
-        content: { row },
+        content: { json },
         held: first
       })
     }
@@ -617,22 +617,22 @@ describe('StorageManager app-collection import (encrypted)', () => {
       collectionId: 'app-notes',
       encrypted: true
     })
-    const importRow = (row: Json) =>
-      storage.importAppCollectionRow({
+    const importResource = (json: Json) =>
+      storage.importAppCollectionResource({
         collectionId: 'app-notes',
         encrypted: true,
         resourceId: 'r',
         contentType: 'application/json',
-        content: { row },
+        content: { json },
         held
       })
 
-    expect(await importRow({ id: 'note-1', text: 'one' })).toBe('skipped')
-    expect(await importRow({ id: 'note-1', text: 'changed' })).toBe(
+    expect(await importResource({ id: 'note-1', text: 'one' })).toBe('skipped')
+    expect(await importResource({ id: 'note-1', text: 'changed' })).toBe(
       'conflicting'
     )
-    expect(await importRow({ text: 'no id' })).toBe('skipped')
-    expect(await importRow({ id: 'note-2', text: 'two' })).toBe('accepted')
+    expect(await importResource({ text: 'no id' })).toBe('skipped')
+    expect(await importResource({ id: 'note-2', text: 'two' })).toBe('accepted')
     expect(rowsOf('app-notes').size).toBe(3)
   })
 
@@ -646,33 +646,33 @@ describe('StorageManager app-collection import (encrypted)', () => {
       collectionId: 'app-notes',
       encrypted: true
     })
-    const importRow = (row: Json) =>
-      storage.importAppCollectionRow({
+    const importResource = (json: Json) =>
+      storage.importAppCollectionResource({
         collectionId: 'app-notes',
         encrypted: true,
         resourceId: 'r',
         contentType: 'application/json',
-        content: { row },
+        content: { json },
         held
       })
 
     failPuts(new Error('boom'))
-    expect(await importRow({ id: 'a' })).toBe('failed')
+    expect(await importResource({ id: 'a' })).toBe('failed')
     failPuts(new QuotaExceededError('full'))
-    await expect(importRow({ id: 'b' })).rejects.toMatchObject({
+    await expect(importResource({ id: 'b' })).rejects.toMatchObject({
       name: 'QuotaExceededError'
     })
   })
 
-  it('refuses a row of a collection it has not ensured', async () => {
+  it('refuses a Resource of a collection it has not ensured', async () => {
     const { storage } = await setup()
     expect(
-      await storage.importAppCollectionRow({
+      await storage.importAppCollectionResource({
         collectionId: 'app-notes',
         encrypted: true,
         resourceId: 'r',
         contentType: 'application/json',
-        content: { row: { id: 'a' } },
+        content: { json: { id: 'a' } },
         held: new Map()
       })
     ).toBe('failed')
@@ -709,24 +709,24 @@ describe('StorageManager app-collection import (plaintext)', () => {
       collectionId: 'posts',
       encrypted: false
     })
-    const importRow = (resourceId: string, row: Json) =>
-      storage.importAppCollectionRow({
+    const importResource = (resourceId: string, json: Json) =>
+      storage.importAppCollectionResource({
         collectionId: 'posts',
         encrypted: false,
         resourceId,
         contentType: 'application/json',
-        content: { row },
+        content: { json },
         held
       })
 
-    expect(await importRow('post-1', { text: 'one' })).toBe('accepted')
+    expect(await importResource('post-1', { text: 'one' })).toBe('accepted')
     expect(rowsOf('posts').get('post-1')).toEqual({ text: 'one' })
-    expect(await importRow('post-1', { text: 'one' })).toBe('skipped')
-    expect(await importRow('held-post', { text: 'held' })).toBe('skipped')
-    expect(await importRow('held-post', { text: 'other' })).toBe('conflicting')
+    expect(await importResource('post-1', { text: 'one' })).toBe('skipped')
+    expect(await importResource('held-post', { text: 'held' })).toBe('skipped')
+    expect(await importResource('held-post', { text: 'other' })).toBe('conflicting')
   })
 
-  it('writes a non-JSON row as its bytes, skipping the same bytes on a re-run', async () => {
+  it('writes a non-JSON Resource as its bytes, skipping the same bytes on a re-run', async () => {
     const { storage, blobs } = await setup()
     await storage.ensureImportedAppCollection({
       collectionId: 'media',
@@ -737,7 +737,7 @@ describe('StorageManager app-collection import (plaintext)', () => {
       encrypted: false
     })
     const importBytes = (bytes: Uint8Array) =>
-      storage.importAppCollectionRow({
+      storage.importAppCollectionResource({
         collectionId: 'media',
         encrypted: false,
         resourceId: 'photo',
@@ -852,12 +852,12 @@ describe('StorageManager app-collection import into a standing collection', () =
       encrypted: false
     })
     expect(
-      await storage.importAppCollectionRow({
+      await storage.importAppCollectionResource({
         collectionId: 'posts',
         encrypted: false,
         resourceId: 'q',
         contentType: 'application/json',
-        content: { row: { text: 'new' } },
+        content: { json: { text: 'new' } },
         held
       })
     ).toBe('accepted')
@@ -903,12 +903,12 @@ describe('StorageManager app-collection import into a standing collection', () =
       collectionId: 'app-notes',
       encrypted: true
     })
-    await storage.importAppCollectionRow({
+    await storage.importAppCollectionResource({
       collectionId: 'app-notes',
       encrypted: true,
       resourceId: 'r',
       contentType: 'application/json',
-      content: { row: { id: 'note-1', type: 'Note' } },
+      content: { json: { id: 'note-1', type: 'Note' } },
       held
     })
     const [envelope] = [...rowsOf('app-notes').values()]
@@ -951,12 +951,12 @@ describe('StorageManager app-collection import into a standing collection', () =
     })
     expect(held.has('id:note-1')).toBe(true)
     expect(
-      await storage.importAppCollectionRow({
+      await storage.importAppCollectionResource({
         collectionId: 'app-notes',
         encrypted: true,
         resourceId: 'r',
         contentType: 'application/json',
-        content: { row: { id: 'note-2', text: 'b' } },
+        content: { json: { id: 'note-2', text: 'b' } },
         held
       })
     ).toBe('accepted')
@@ -974,24 +974,24 @@ describe('StorageManager app-collection import into a standing collection', () =
       encrypted: true
     })
     expect(
-      await storage.importAppCollectionRow({
+      await storage.importAppCollectionResource({
         collectionId: '__proto__',
         encrypted: true,
         resourceId: 'r',
         contentType: 'application/json',
-        content: { row: { id: 'a' } },
+        content: { json: { id: 'a' } },
         held
       })
     ).toBe('accepted')
     expect(rowsOf('__proto__').size).toBe(1)
     // Another collection is still refused as not ensured.
     expect(
-      await storage.importAppCollectionRow({
+      await storage.importAppCollectionResource({
         collectionId: 'other',
         encrypted: true,
         resourceId: 'r',
         contentType: 'application/json',
-        content: { row: { id: 'a' } },
+        content: { json: { id: 'a' } },
         held: new Map()
       })
     ).toBe('failed')
@@ -1025,12 +1025,12 @@ describe('StorageManager app-collection import re-runs and races', () => {
       collectionId: 'app-notes',
       encrypted: true
     })
-    await storage.importAppCollectionRow({
+    await storage.importAppCollectionResource({
       collectionId: 'app-notes',
       encrypted: true,
       resourceId: 'r',
       contentType: 'application/json',
-      content: { row: { id: 'note-1', type: 'Note' } },
+      content: { json: { id: 'note-1', type: 'Note' } },
       held
     })
     const [envelope] = [...rowsOf('app-notes').values()]
@@ -1094,12 +1094,12 @@ describe('StorageManager app-collection import re-runs and races', () => {
       encrypted: false
     })
     expect(
-      await storage.importAppCollectionRow({
+      await storage.importAppCollectionResource({
         collectionId: 'posts',
         encrypted: false,
         resourceId: 'p',
         contentType: 'application/json',
-        content: { row: { text: 'one' } },
+        content: { json: { text: 'one' } },
         held
       })
     ).toBe('accepted')
@@ -1221,7 +1221,7 @@ describe('StorageManager app-collection import re-runs and races', () => {
     expect(setPublicCalls()).toBe(0)
   })
 
-  it('seals a row after a mid-run epoch rotation under the new epoch', async () => {
+  it('seals a Resource after a mid-run epoch rotation under the new epoch', async () => {
     const { owner, stores, storage, putEpochs } = await setup()
     const extra = await generateVaultKeys()
     await storage.provisionEncryptedCollection({
@@ -1236,16 +1236,16 @@ describe('StorageManager app-collection import re-runs and races', () => {
       collectionId: 'app-notes',
       encrypted: true
     })
-    const importRow = (id: string) =>
-      storage.importAppCollectionRow({
+    const importResource = (id: string) =>
+      storage.importAppCollectionResource({
         collectionId: 'app-notes',
         encrypted: true,
         resourceId: id,
         contentType: 'application/json',
-        content: { row: { id } },
+        content: { json: { id } },
         held
       })
-    expect(await importRow('note-1')).toBe('accepted')
+    expect(await importResource('note-1')).toBe('accepted')
     const before = stores.descriptorOf('app-notes')!.currentEpoch
 
     // A revocation cascade in another tab rotates the epoch mid-run.
@@ -1260,7 +1260,7 @@ describe('StorageManager app-collection import re-runs and races', () => {
     })
     expect(rotated.currentEpoch).not.toBe(before)
 
-    expect(await importRow('note-2')).toBe('accepted')
+    expect(await importResource('note-2')).toBe('accepted')
     expect(putEpochs).toEqual([before, rotated.currentEpoch])
   })
 })
