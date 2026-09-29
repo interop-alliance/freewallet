@@ -390,7 +390,7 @@ under Settings > Backup credentials.
 **Content migration's app collections** (`src/session/contentMigration.ts`).
 Beside the standard collections, the walk hands the sink every app
 collection in the bundle's account archive, one at a time: an
-`ensureCollection` call, then its rows. The sink carries that member only
+`ensureCollection` call, then its Resources. The sink carries that member only
 when `StorageManager.canProvisionAppCollections` holds (remote storage and
 descriptor logs), so a guest or a no-WAS session leaves app collections in
 the report's not-migrated counts. `ensureImportedAppCollection` reads the
@@ -444,10 +444,10 @@ When they differ, the verified log head is read, and the cipher is rebuilt
 with its schema when that head has moved. A row is therefore sealed under
 the current epoch as of its own write, even after a rotation in another
 tab. `snapshotAppCollection` reads the collection's held rows once per
-run, at its first row, and `importAppCollectionRow` decides each row
+run, at its first Resource, and `importAppCollectionResource` decides each Resource
 against that snapshot: `skipped` for the same identity and content,
 `conflicting` for the same identity under other content, and otherwise a
-write. A plaintext row keeps its archived content type. A non-JSON one
+write. A plaintext Resource keeps its archived content type. A non-JSON one
 arrives as raw bytes and is not in the snapshot, so an id already taken is
 read back and compared by its bytes. App collections are remote-only, so these writes go remote-direct
 on a remembered session too. The app's own recipient entry and grants do

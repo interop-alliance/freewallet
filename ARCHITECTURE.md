@@ -468,8 +468,8 @@ Content migration brings another account's backup bundle into this one. The
 Storage page's "Import from another wallet" action
 (`src/components/storage/ContentMigrationDialog.tsx`) takes the bundle file
 and the old secret, and `src/session/contentMigration.ts` runs the walk.
-`@interop/wallet-backup` reads the bundle and pushes one plaintext row at a
-time at a sink built over `StorageManager`'s import methods, so every row
+`@interop/wallet-backup` reads the bundle and pushes one plaintext Resource at a
+time at a sink built over `StorageManager`'s import methods, so every Resource
 lands on the session's own backend and every session kind may run it. The
 walk contacts no server of the old account: everything it reads comes out of
 the file. The run's counts become one Import activity.

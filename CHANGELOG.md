@@ -111,6 +111,10 @@
 
 ### Changed
 
+- Adapt to `@interop/wallet-backup` 0.5.0's sink rename (`importResource`,
+  `json` payload). `StorageManager.importAppCollectionRow` is now
+  `importAppCollectionResource`, and its `content` takes `{ json }` in place
+  of `{ row }`.
 - A backup export streams into the picked file as it runs: the Space
   exports proceed as the file is written, up to three at a time, and a
   failure part way through errors the save instead of finishing the file.
