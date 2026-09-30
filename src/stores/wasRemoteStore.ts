@@ -1483,7 +1483,7 @@ export class WASRemoteStore {
    * Two conditional-write shapes:
    *
    * - Default (no `ifMatch`): created-if-absent (`If-None-Match: *`). A `412`
-   *   means the identical row already exists (the content-derived id
+   *   means the identical Resource already exists (the content-derived id
    *   collided) and is reported as not-created rather than thrown.
    * - With `ifMatch` (the quoted ETag of the read the new body was built on):
    *   update-in-place, the same `If-Match` convention the replication push
@@ -1499,7 +1499,7 @@ export class WASRemoteStore {
    * @param options {object}
    * @param options.logicalKey {string}
    * @param options.resourceId {string}   the content-derived envelope-hash id
-   *   (or a mutable collection's stable row id)
+   *   (or a mutable collection's stable resource id)
    * @param options.body {Json}   the raw EDV envelope (or plaintext document)
    * @param [options.epoch] {string}   the opaque key-epoch id the envelope was
    *   encrypted under; absent for a plaintext or pre-epoch write

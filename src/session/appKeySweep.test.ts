@@ -1,13 +1,13 @@
 /**
  * The revoke-before-delete half of the login-time app-key sweep: deleting a
- * stranded row removes the app's only listing on the Applications page, so its
- * authority must be retired first, and a revocation that does not fully land
- * leaves the row in place to be retried at the next login. The second half is
- * the orphan pass: a public copy with no private row behind it (a pre-upgrade
- * app key kept through the delete dialog's "keep public copy" choice) is
- * retracted on its own, while a copy that still has a private row is left to
- * that row's delete. The sweep's detection rules have their own suite
- * (`tests/unit/appKeySweep.test.ts`).
+ * stranded Resource removes the app's only listing on the Applications page, so
+ * its authority must be retired first, and a revocation that does not fully
+ * land leaves the Resource in place to be retried at the next login. The second
+ * half is the orphan pass: a public copy with no private Resource behind it (a
+ * pre-upgrade app key kept through the delete dialog's "keep public copy"
+ * choice) is retracted on its own, while a copy that still has a private
+ * Resource is left to that Resource's delete. The sweep's detection rules have
+ * their own suite (`tests/unit/appKeySweep.test.ts`).
  */
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { sweepStrandedAppKeys } from '@/session/appKeySweep'
@@ -63,7 +63,7 @@ function plainCredential(): IVerifiableCredential {
  * @param options {object}
  * @param options.credentials {Array<{ cid: string; vc: IVerifiableCredential }>}
  * @param [options.publicCopies] {Array<{ cid: string; vc: IVerifiableCredential }>}
- *   the world-readable public copies, private row or not
+ *   the world-readable public copies, private Resource or not
  * @returns {StorageManager}
  */
 function storageDouble({
@@ -190,7 +190,7 @@ describe('sweepStrandedAppKeys', () => {
 
   it('skips the delete when the server refuses the grant revocation', async () => {
     // `revokeAppGrants` throws a plain ValidationError for a refused POST
-    // rather than counting it skipped; the row keeps its revocation handle
+    // rather than counting it skipped; the Resource keeps its revocation handle
     // for the next login.
     const storage = storageDouble({
       credentials: [{ cid: 'cid-1', vc: appKeyFixture() }]

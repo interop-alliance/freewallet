@@ -173,6 +173,8 @@ function makeFakeStorage() {
   })
   const storage = {
     ensureUserCollections: vi.fn(() => provisioning),
+    setOnStranded: vi.fn(),
+    strandedCollectionIds: [],
     refreshEncryptedDescriptors: vi.fn(async () => undefined),
     adoptRotatedVaultKeys: vi.fn(async () => undefined),
     // The real manager keeps the keystore promotion it fires rather than

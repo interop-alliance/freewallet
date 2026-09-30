@@ -58,7 +58,7 @@ export function ContactHistoryPage() {
       if (!session?.storage || !contactId) {
         return []
       }
-      // The route param is the row id; revisions are keyed by the LOGICAL
+      // The route param is the resource id; revisions are keyed by the LOGICAL
       // contact id inside the head payload (they differ for mobile-authored
       // contacts), so resolve through the stored contact first.
       const stored = await session.storage.loadContact({ id: contactId })
@@ -85,7 +85,7 @@ export function ContactHistoryPage() {
 
   /**
    * Rewrites the contact with this revision's snapshot, appending a `restore`
-   * revision of its own. The id passed is the ROUTE param -- the row id
+   * revision of its own. The id passed is the ROUTE param -- the resource id
    * `updateContact` addresses, not the logical contact id the revisions are
    * keyed by.
    */

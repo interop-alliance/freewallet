@@ -29,6 +29,7 @@ import {
   mapPopupLoginError
 } from '@/session/completePopupLogin'
 import type { Session } from '@/types/auth'
+import { closeUnenteredSession } from '@/stores/sessionTeardown'
 import { errorNameOf } from '@interop/wallet-core/menders'
 import { credentialTitle } from '@/lib/viewMappers/credentialTitle'
 import { issuerName } from '@/lib/viewMappers/issuerName'
@@ -124,6 +125,20 @@ export function WalletStorePage() {
   const [storeError, setStoreError] = useState<string | null>(null)
   const [storing, setStoring] = useState(false)
   const initialized = useRef(false)
+
+  // The popup's session lives in this page's state and never enters the
+  // auth store, so its teardown is here: a replaced session and the page's
+  // unmount both release the session they drop through the one teardown for
+  // a never-entered session, which aborts its disposal signal and closes
+  // the local database a remembered popup opens and routes past.
+  useEffect(() => {
+    if (!session) {
+      return
+    }
+    return () => {
+      void closeUnenteredSession(session)
+    }
+  }, [session])
 
   useEffect(() => {
     if (initialized.current) {

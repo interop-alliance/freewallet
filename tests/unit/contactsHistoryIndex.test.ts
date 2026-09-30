@@ -23,8 +23,9 @@ const writerId = 'writer-1'
  * A minimal stand-in for the EDV document cipher: it produces bodies that
  * `isEncryptedEnvelope` recognizes (an object `jwe`), mints a content-derived
  * id the way the real content-addressed ciphers do, and counts every decrypt
- * so a test can assert exactly which rows a read had to open. A body whose
- * ciphertext is not decodable throws, standing in for a corrupted row.
+ * so a test can assert exactly which resource replicas a read had to open. A
+ * body whose ciphertext is not decodable throws, standing in for a corrupted
+ * resource replica.
  */
 function createCountingCipher(): DocCipher & {
   decryptCount: number
@@ -97,8 +98,8 @@ describe('contacts-history projection index', () => {
   /**
    * Opens a BrowserStore over the shared memory storage and db prefix -- a
    * second call stands in for a new session on the same local database (RxDB's
-   * memory storage keeps a closed database's rows), with an empty in-memory
-   * decrypt cache.
+   * memory storage keeps a closed database's resource replicas), with an
+   * empty in-memory decrypt cache.
    */
   async function openStore(): Promise<BrowserStore> {
     const opened = new BrowserStore({
@@ -132,14 +133,14 @@ describe('contacts-history projection index', () => {
     expect(loaded?.contactId).toBe(stored.contactId)
     expect(loaded?.contact.displayName).toBe('Ada Lovelace')
 
-    expect(await store.loadContact({ id: 'no-such-row' })).toBeUndefined()
+    expect(await store.loadContact({ id: 'no-such-resource' })).toBeUndefined()
   })
 
   it('returns only the requested contact revisions, most recent first', async () => {
-    // The rows are written in the opposite order to their logical timestamps
-    // (and spaced so their `updatedAt` write stamps, whose resolution is a
-    // millisecond, really do differ), so only the payload timestamp can
-    // produce the expected order.
+    // The revisions are written in the opposite order to their logical
+    // timestamps (and spaced so their `updatedAt` write stamps, whose
+    // resolution is a millisecond, really do differ), so only the payload
+    // timestamp can produce the expected order.
     await store.addContactRevision({
       revision: revisionFor({
         contactId: 'contact-a',
@@ -224,7 +225,7 @@ describe('contacts-history projection index', () => {
     expect(revisions).toHaveLength(2)
     // Lexically, 'not-a-timestamp' sorts after the ISO stamp, so it comes
     // first under a newest-first order -- the point being that the read
-    // returns both rows rather than throwing.
+    // returns both revisions rather than throwing.
     expect(revisions.map(revision => revision.snapshot.displayName)).toEqual([
       'nonsense',
       'parseable'
@@ -250,13 +251,13 @@ describe('contacts-history projection index', () => {
       contactId: 'contact-a'
     })
     expect(revisions).toHaveLength(1)
-    // Only contact-a's single row was opened; neither of contact-b's was.
+    // Only contact-a's single revision was opened; neither of contact-b's was.
     expect(cipher.decryptCount).toBe(1)
     await fresh.close()
   })
 
   it('backfills the index so an unindexed row is decrypted at most once', async () => {
-    // Rows that predate the index: written straight into the history
+    // Revisions that predate the index: written straight into the history
     // collection, so nothing indexed them at write time.
     for (const [contactId, displayName] of [
       ['contact-a', 'A one'],
@@ -274,7 +275,7 @@ describe('contacts-history projection index', () => {
       })
     }
 
-    // The first read has no index to lean on, so it opens every row -- and
+    // The first read has no index to lean on, so it opens every revision -- and
     // backfills each one's true contactId.
     cipher.resetCount()
     expect(
@@ -282,7 +283,8 @@ describe('contacts-history projection index', () => {
     ).toHaveLength(1)
     expect(cipher.decryptCount).toBe(3)
 
-    // A new session (fresh decrypt cache) now pays only for contact-a's row.
+    // A new session (fresh decrypt cache) now pays only for contact-a's
+    // revision.
     const fresh = await openStore()
     cipher.resetCount()
     expect(
@@ -297,7 +299,7 @@ describe('contacts-history projection index', () => {
       revision: revisionFor({ contactId: 'contact-a', displayName: 'A one' })
     })
     await store.rxCollection('contactsHistory').insertIfNotExists({
-      id: 'corrupt-row',
+      id: 'corrupt-resource',
       updatedAt: new Date().toISOString(),
       version: 0,
       data: { jwe: { ciphertext: 'bm90LWpzb24=' } }
@@ -309,8 +311,8 @@ describe('contacts-history projection index', () => {
     expect(revisions).toHaveLength(1)
     expect(warn).toHaveBeenCalled()
 
-    // The bad row stayed unindexed, so a later read retries it rather than
-    // trusting a guessed attribution.
+    // The bad resource replica stayed unindexed, so a later read retries it
+    // rather than trusting a guessed attribution.
     const fresh = await openStore()
     cipher.resetCount()
     expect(

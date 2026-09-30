@@ -211,9 +211,9 @@ function includesWrite(allowedActions: string[]): boolean {
  * grant naming one of these collections is unsatisfiable rather than merely
  * read-only. That also keeps `app-connections` out of `provisionFor`'s
  * recipient roster, since an unsatisfiable grant never reaches provisioning.
- * Confidentiality of the seeds rests elsewhere, on the epoch roster: the rows
- * are EDV envelopes, and a grantee is not an epoch recipient, so it decrypts
- * nothing.
+ * Confidentiality of the seeds rests elsewhere, on the epoch roster: the
+ * Resources are EDV envelopes, and a grantee is not an epoch recipient, so it
+ * decrypts nothing.
  *
  * `key-map` is plaintext on the server. Its user key roster
  * (`user-key.jsonl`) carries a passphrase credential's derived key-agreement
@@ -1100,13 +1100,14 @@ function resolveTargetForm({
 
   if (descriptor?.type === 'https://w3id.org/byoe#shared-wallet-collection') {
     const { name } = descriptor
-    // Both conditions, deliberately. Encryption is necessary -- a share
-    // escrows the reader into a key-epoch roster, and there is no roster
-    // where nothing is encrypted -- but not sufficient: `app-connections`
-    // carries epochs and is never shareable, since its rows are the connected
-    // apps' private seeds, and so does `wallet-activity`, whose rows carry the
-    // account's delegated capabilities verbatim. Everything else -- a plaintext collection, an RP
-    // collection, a made-up name -- has no roster to escrow a reader into.
+    // Both conditions, deliberately. Encryption is necessary -- a share escrows
+    // the reader into a key-epoch roster, and there is no roster where nothing
+    // is encrypted -- but not sufficient: `app-connections` carries epochs and
+    // is never shareable, since its Resources are the connected apps' private
+    // seeds, and so does `wallet-activity`, whose Resources carry the account's
+    // delegated capabilities verbatim. Everything else -- a plaintext
+    // collection, an RP collection, a made-up name -- has no roster to escrow a
+    // reader into.
     const shared = standardCollection(name)
     if (!shared?.encryption || !shared.shareable) {
       return UNSATISFIABLE

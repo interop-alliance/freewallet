@@ -168,10 +168,24 @@ vi.mock('@/session/userKeyCascade', () => ({
 }))
 const { cascadeCollections } = await import('@/session/userKeyCascade')
 
-vi.mock('@/session/userKeyAdoption', () => ({
-  adoptRotatedUserKeyInBand: vi.fn()
-}))
-const { adoptRotatedUserKeyInBand } = await import('@/session/userKeyAdoption')
+vi.mock('@/session/userKeyAdoption', () => {
+  const withOwnUserKeyRotation = vi.fn(
+    async ({ run }: { run: () => Promise<unknown> }) => await run()
+  )
+  return {
+    withOwnUserKeyRotation,
+    heldAsOwnUserKeyRotation:
+      (body: (options: { session: unknown }) => Promise<unknown>) =>
+      async (options: { session: unknown }) =>
+        await withOwnUserKeyRotation({
+          run: () => body(options)
+        }),
+    adoptRotatedUserKeyInBand: vi.fn()
+  }
+})
+const { adoptRotatedUserKeyInBand, withOwnUserKeyRotation } =
+  await import('@/session/userKeyAdoption')
+const { sessionDisposalSignal } = await import('@/session/sessionLifecycle')
 
 vi.mock('@/session/verifiedLog', () => ({
   invalidateVerifiedLog: vi.fn()
@@ -696,6 +710,40 @@ describe('forgetThisBrowser (the ceremony grades)', () => {
     expect(
       vi.mocked(forgetEnrolledClient).mock.calls[0]![0].clientLogStore
     ).toEqual({ webvhIdStore: true })
+  })
+
+  it('aborts the session disposal signal before the local wipe', async () => {
+    const { session } = fakeSession()
+    const disposal = sessionDisposalSignal()
+    ;(session as { disposal: AbortSignal }).disposal = disposal
+    const abortedAtWipe: boolean[] = []
+    vi.mocked(executeLocalWipe).mockImplementation(async () => {
+      abortedAtWipe.push(disposal.aborted)
+      return { failed: [], unverified: [] }
+    })
+    await forgetThisBrowser({ session })
+    expect(abortedAtWipe).toEqual([true])
+  })
+
+  it('runs as its own user key rotation, holding the mark before it reads the epoch pin', async () => {
+    const { session } = fakeSession()
+    const order: string[] = []
+    vi.mocked(withOwnUserKeyRotation).mockImplementation(async ({ run }) => {
+      order.push('held')
+      try {
+        return await run()
+      } finally {
+        order.push('released')
+      }
+    })
+    vi.mocked(session.persistence.epochPins.load).mockImplementation(
+      async () => {
+        order.push('pin')
+        return 'epoch-1'
+      }
+    )
+    await forgetThisBrowser({ session })
+    expect(order).toEqual(['held', 'pin', 'released'])
   })
 
   it('rethrows the last-client refusal without wiping anything', async () => {

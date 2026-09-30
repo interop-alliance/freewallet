@@ -23,16 +23,16 @@
  *
  * Each replica is assembled from its app's REAL parts wherever the part is on
  * the compatibility surface: the engine, the port (`createWasSyncPort`), the
- * EDV cipher (`createEdvDocCipher`), the LWW rule (`remotePayloadWins`), and
- * -- for this wallet -- the whole RxDB driver (`createWasReplication`,
- * `syncedDocSchema`, `contactsConflictHandler`). Only the app-local
- * persistence glue is stood in: DCW's SQLite `SyncStore` becomes an in-memory
- * store with the same reconciliation (mirroring `dcw/app/model/syncedDoc.ts`,
- * kept in step with `dcw/test-node/contactsSyncEngine.test.ts`), and this
- * wallet's `BrowserStore` write paths are reproduced verbatim over a memory
- * RxDB. Both replicas build the contacts cipher per the spec
- * (`idDerivation: 'random'`), key the row with the cipher-minted EDV id, and
- * update in place via `encryptUpdate`.
+ * EDV cipher (`createEdvDocCipher`), the LWW rule (`remotePayloadWins`), and --
+ * for this wallet -- the whole RxDB driver (`createWasReplication`,
+ * `syncedDocSchema`, `contactsConflictHandler`). Only the app-local persistence
+ * glue is stood in: DCW's SQLite `SyncStore` becomes an in-memory store with
+ * the same reconciliation (mirroring `dcw/app/model/syncedDoc.ts`, kept in step
+ * with `dcw/test-node/contactsSyncEngine.test.ts`), and this wallet's
+ * `BrowserStore` write paths are reproduced verbatim over a memory RxDB. Both
+ * replicas build the contacts cipher per the spec (`idDerivation: 'random'`),
+ * key the resource replica with the cipher-minted EDV id, and update in place
+ * via `encryptUpdate`.
  *
  * Divergences this exercise pins down (see
  * `wallet-core/docs/cross-replica-sync-compatibility.md` for the written
@@ -265,7 +265,7 @@ try {
 // DCW replica: an in-memory SyncStore with dcw's reconciliation semantics
 // --------------------------------------------------------------------------
 
-interface Row {
+interface ResourceReplica {
   id: string
   version: number
   etag?: string
@@ -278,12 +278,12 @@ interface Row {
 /**
  * In-memory `SyncStore` whose reconciliation mirrors dcw's SQLite layer
  * (`app/model/syncedDoc.ts`); the `projection` map stands in for the decrypted
- * read-model rows. Each row records the opaque `etag` it was last acked or
- * pulled at, which `heldRevisions` (the engine's own-writer echo check)
- * compares against.
+ * read-model rows. Each resource replica records the opaque `etag` it was last
+ * acked or pulled at, which `heldRevisions` (the engine's own-writer echo
+ * check) compares against.
  */
 class InMemoryStore implements SyncStore {
-  rows = new Map<string, Row>()
+  resources = new Map<string, ResourceReplica>()
   projection = new Map<string, Json>()
   checkpoint: SyncCheckpoint | undefined
 
@@ -294,13 +294,13 @@ class InMemoryStore implements SyncStore {
   }): Promise<Set<string>> {
     return new Set(
       documents
-        .filter(({ id, etag }) => this.rows.get(id)?.etag === etag)
+        .filter(({ id, etag }) => this.resources.get(id)?.etag === etag)
         .map(({ id }) => id)
     )
   }
 
   localCreate(id: string, envelope: Json, payload: Json): void {
-    this.rows.set(id, {
+    this.resources.set(id, {
       id,
       version: 0,
       updatedAt: '',
@@ -312,20 +312,25 @@ class InMemoryStore implements SyncStore {
   }
 
   markDirtyUpdate(id: string, envelope: Json, payload: Json): void {
-    const row = this.rows.get(id)
-    if (!row) {
-      throw new Error(`no row ${id}`)
+    const resource = this.resources.get(id)
+    if (!resource) {
+      throw new Error(`no resource replica ${id}`)
     }
-    this.rows.set(id, { ...row, data: envelope, deleted: false, dirty: true })
+    this.resources.set(id, {
+      ...resource,
+      data: envelope,
+      deleted: false,
+      dirty: true
+    })
     this.projection.set(id, payload)
   }
 
   localDelete(id: string): void {
-    const row = this.rows.get(id)
-    if (!row) {
-      throw new Error(`no row ${id}`)
+    const resource = this.resources.get(id)
+    if (!resource) {
+      throw new Error(`no resource replica ${id}`)
     }
-    this.rows.set(id, { ...row, deleted: true, dirty: true })
+    this.resources.set(id, { ...resource, deleted: true, dirty: true })
     this.projection.delete(id)
   }
 
@@ -337,12 +342,12 @@ class InMemoryStore implements SyncStore {
     envelope: Json,
     updatedAt: string
   ): void {
-    const row = this.rows.get(id)
-    if (!row) {
-      throw new Error(`no row ${id}`)
+    const resource = this.resources.get(id)
+    if (!resource) {
+      throw new Error(`no resource replica ${id}`)
     }
-    this.rows.set(id, {
-      ...row,
+    this.resources.set(id, {
+      ...resource,
       version,
       etag,
       updatedAt,
@@ -357,8 +362,8 @@ class InMemoryStore implements SyncStore {
   }
 
   async getDirtyRows(): Promise<SyncedRow[]> {
-    return [...this.rows.values()]
-      .filter(r => r.dirty)
+    return [...this.resources.values()]
+      .filter(resource => resource.dirty)
       .map(({ id, version, etag, updatedAt, deleted, data }) => ({
         id,
         version,
@@ -393,9 +398,9 @@ class InMemoryStore implements SyncStore {
     projections: Map<string, ProjectionAction>
   }): Promise<void> {
     for (const doc of documents) {
-      const existing = this.rows.get(doc.id)
+      const existing = this.resources.get(doc.id)
       if (doc._deleted) {
-        this.rows.set(doc.id, {
+        this.resources.set(doc.id, {
           id: doc.id,
           version: doc.version,
           etag: doc.etag,
@@ -410,7 +415,7 @@ class InMemoryStore implements SyncStore {
       if (existing?.dirty) {
         // Pending live local write: keep the dirty envelope + projection, only
         // refresh version/updatedAt (the push half settles the winner).
-        this.rows.set(doc.id, {
+        this.resources.set(doc.id, {
           ...existing,
           version: doc.version,
           etag: doc.etag,
@@ -418,7 +423,7 @@ class InMemoryStore implements SyncStore {
         })
         continue
       }
-      this.rows.set(doc.id, {
+      this.resources.set(doc.id, {
         id: doc.id,
         version: doc.version,
         etag: doc.etag,
@@ -441,12 +446,12 @@ class InMemoryStore implements SyncStore {
     version?: number
     etag?: string
   }): Promise<void> {
-    const row = this.rows.get(id)
-    if (!row) {
+    const resource = this.resources.get(id)
+    if (!resource) {
       return
     }
-    this.rows.set(id, {
-      ...row,
+    this.resources.set(id, {
+      ...resource,
       dirty: false,
       ...(version !== undefined && { version }),
       ...(etag !== undefined && { etag })
@@ -462,12 +467,12 @@ class InMemoryStore implements SyncStore {
     version?: number
     etag?: string
   }): Promise<void> {
-    const row = this.rows.get(id)
-    if (!row) {
+    const resource = this.resources.get(id)
+    if (!resource) {
       return
     }
-    this.rows.set(id, {
-      ...row,
+    this.resources.set(id, {
+      ...resource,
       deleted: true,
       data: null,
       dirty: false,
@@ -485,19 +490,19 @@ class InMemoryStore implements SyncStore {
     latest: MasterState | null
     projection: ProjectionAction
   }): Promise<void> {
-    const row = this.rows.get(id)
+    const resource = this.resources.get(id)
     if (latest === null) {
-      this.rows.set(id, {
+      this.resources.set(id, {
         id,
-        version: row?.version ?? 0,
-        etag: row?.etag,
-        updatedAt: row?.updatedAt ?? '',
+        version: resource?.version ?? 0,
+        etag: resource?.etag,
+        updatedAt: resource?.updatedAt ?? '',
         deleted: true,
         data: null,
         dirty: false
       })
     } else {
-      this.rows.set(id, {
+      this.resources.set(id, {
         id,
         version: latest.version,
         etag: latest.etag,
@@ -505,7 +510,7 @@ class InMemoryStore implements SyncStore {
         // A non-null MasterState is never a tombstone (the port folds those
         // into `get` resolving null).
         deleted: false,
-        data: latest.data ?? row?.data ?? null,
+        data: latest.data ?? resource?.data ?? null,
         dirty: false
       })
     }
@@ -655,7 +660,9 @@ describeConformance('cross-replica round-trip conformance', () => {
 
   // ---- freewallet write paths, verbatim from browserStore ----------------
 
-  /** `browserStore.addContact`: cipher-minted random EDV row id, version 0. */
+  /**
+   * `browserStore.addContact`: cipher-minted random EDV resource id, version 0.
+   */
   async function fwAddContact(
     contact: ContactHeadPayload['contact'],
     writerId: string
@@ -681,8 +688,8 @@ describeConformance('cross-replica round-trip conformance', () => {
   /**
    * `browserStore.updateContact`: decrypt the existing head, preserve its
    * `contactId`, re-encrypt in place through `encryptUpdate` (the envelope
-   * stays bound to the row id and its `sequence` advances from the prior
-   * envelope), and patch the row.
+   * stays bound to the resource id and its `sequence` advances from the
+   * prior envelope), and patch the resource replica.
    */
   async function fwUpdateContact(
     id: string,
@@ -692,7 +699,7 @@ describeConformance('cross-replica round-trip conformance', () => {
   ): Promise<ContactHeadPayload> {
     const doc = await fwCollections[CONTACTS_COLLECTION].findOne(id).exec()
     if (!doc) {
-      throw new Error(`no fw contacts row ${id}`)
+      throw new Error(`no fw contacts resource replica ${id}`)
     }
     const current = doc.toMutableJSON().data as Json
     const existing = (await fwCiphers[CONTACTS_COLLECTION].decrypt({
@@ -718,7 +725,7 @@ describeConformance('cross-replica round-trip conformance', () => {
   async function fwDeleteContact(id: string): Promise<void> {
     const doc = await fwCollections[CONTACTS_COLLECTION].findOne(id).exec()
     if (!doc) {
-      throw new Error(`no fw contacts row ${id}`)
+      throw new Error(`no fw contacts resource replica ${id}`)
     }
     await doc.remove()
   }
@@ -726,7 +733,7 @@ describeConformance('cross-replica round-trip conformance', () => {
   /**
    * `browserStore.#insertEncrypted` with `contentAddressed: true` (the
    * `private-credentials` / `contacts-history` path): the cipher's minted id
-   * (this wallet's ciphers derive it from content) becomes the row id.
+   * (this wallet's ciphers derive it from content) becomes the resource id.
    */
   async function fwAddContentDoc(
     collectionId: CollectionId,
@@ -744,7 +751,10 @@ describeConformance('cross-replica round-trip conformance', () => {
     return id
   }
 
-  /** Decrypted view of a freewallet row (undefined when absent or deleted). */
+  /**
+   * Decrypted view of a freewallet resource replica (undefined when absent or
+   * deleted).
+   */
   async function fwRead(
     collectionId: CollectionId,
     id: string
@@ -793,14 +803,14 @@ describeConformance('cross-replica round-trip conformance', () => {
     updatedAt = new Date().toISOString()
   ): Promise<ContactHeadPayload> {
     const store = dcwStores[CONTACTS_COLLECTION]
-    const row = store.rows.get(id)
-    if (!row?.data) {
-      throw new Error(`no dcw contacts row ${id}`)
+    const resource = store.resources.get(id)
+    if (!resource?.data) {
+      throw new Error(`no dcw contacts resource replica ${id}`)
     }
     const cipher = dcwCiphers[CONTACTS_COLLECTION]
     const existing = (await cipher.decrypt({
       id,
-      envelope: row.data
+      envelope: resource.data
     })) as unknown as ContactHeadPayload
     const head: ContactHeadPayload = {
       contactId: existing.contactId ?? id,
@@ -814,7 +824,7 @@ describeConformance('cross-replica round-trip conformance', () => {
     const { envelope } = await cipher.encryptUpdate({
       id,
       data: head as unknown as Json,
-      current: row.data
+      current: resource.data
     })
     store.markDirtyUpdate(id, envelope, head as unknown as Json)
     return head
@@ -1022,14 +1032,15 @@ describeConformance('cross-replica round-trip conformance', () => {
     await fwSync(CONTACTS_COLLECTION)
     await dcwSync(CONTACTS_COLLECTION)
 
-    // DCW applied the edit in place: same row id, no second row.
+    // DCW applied the edit in place: same resource id, no second resource
+    // replica.
     expect(
       dcwStores[CONTACTS_COLLECTION].projection.get(dcwAuthoredId)
     ).toEqual(head)
-    const contactRows = [
-      ...dcwStores[CONTACTS_COLLECTION].rows.values()
-    ].filter(r => !r.deleted)
-    expect(contactRows).toHaveLength(2) // dcw-authored + fw-authored, no dupes
+    const contactResources = [
+      ...dcwStores[CONTACTS_COLLECTION].resources.values()
+    ].filter(resource => !resource.deleted)
+    expect(contactResources).toHaveLength(2) // dcw-authored + fw-authored, no dupes
 
     // Both replicas update through `encryptUpdate`: freewallet advanced the
     // DCW-authored envelope's EDV sequence from 0 to 1. (The server ETag
@@ -1099,9 +1110,11 @@ describeConformance('cross-replica round-trip conformance', () => {
     )) as unknown as ContactHeadPayload
     expect(fwSeen).toEqual(dcwHead)
 
-    // No duplicate row materialized on either side.
+    // No duplicate resource replica materialized on either side.
     expect(
-      [...dcwStores[CONTACTS_COLLECTION].rows.values()].filter(r => !r.deleted)
+      [...dcwStores[CONTACTS_COLLECTION].resources.values()].filter(
+        resource => !resource.deleted
+      )
     ).toHaveLength(2)
     expect(await fwCollections[CONTACTS_COLLECTION].find().exec()).toHaveLength(
       2
@@ -1146,13 +1159,13 @@ describeConformance('cross-replica round-trip conformance', () => {
   })
 
   it('round-trips a DCW in-place edit of a freewallet-authored contact (the once-pinned defect)', async () => {
-    // Formerly pinned as an open defect: freewallet minted uuidv7 row ids that
-    // failed was-client's `assertDocId` multibase check, so DCW's
-    // `encryptUpdate` refused every web-authored contact. Fixed from both
-    // ends -- freewallet's contacts rows are now keyed by the cipher-minted
-    // EDV id (spec `idDerivation: 'random'`), and was-client's update path
-    // accepts a pre-existing resource id verbatim. This exercises the edit
-    // round trip.
+    // Formerly pinned as an open defect: freewallet minted uuidv7 resource ids
+    // that failed was-client's `assertDocId` multibase check, so DCW's
+    // `encryptUpdate` refused every web-authored contact. Fixed from both ends
+    // -- freewallet's contacts resource replicas are now keyed by the
+    // cipher-minted EDV id (spec `idDerivation: 'random'`), and was-client's
+    // update path accepts a pre-existing resource id verbatim. This exercises
+    // the edit round trip.
     const head = await dcwUpdateContact(
       fwAuthoredId,
       {
@@ -1168,9 +1181,11 @@ describeConformance('cross-replica round-trip conformance', () => {
       fwAuthoredId
     )) as unknown as ContactHeadPayload
     expect(seen).toEqual(head)
-    // In place: still exactly the two contact rows on both replicas.
+    // In place: still exactly the two contacts on both replicas.
     expect(
-      [...dcwStores[CONTACTS_COLLECTION].rows.values()].filter(r => !r.deleted)
+      [...dcwStores[CONTACTS_COLLECTION].resources.values()].filter(
+        resource => !resource.deleted
+      )
     ).toHaveLength(2)
     expect(await fwCollections[CONTACTS_COLLECTION].find().exec()).toHaveLength(
       2
@@ -1194,7 +1209,7 @@ describeConformance('cross-replica round-trip conformance', () => {
       dcwStores[CONTACTS_COLLECTION].projection.get(dcwAuthoredId)
     ).toBeUndefined()
     expect(
-      dcwStores[CONTACTS_COLLECTION].rows.get(dcwAuthoredId)?.deleted
+      dcwStores[CONTACTS_COLLECTION].resources.get(dcwAuthoredId)?.deleted
     ).toBe(true)
   })
 
@@ -1376,11 +1391,11 @@ describeConformance('cross-replica writer attribution', () => {
   }
 
   /**
-   * dcw's content-addressed write path: a dirty local row keyed by the
-   * cipher-minted id.
+   * dcw's content-addressed write path: a dirty local resource replica keyed
+   * by the cipher-minted id.
    *
    * @param name {string}
-   * @returns {Promise<string>} The row id.
+   * @returns {Promise<string>} The resource id.
    */
   async function dcwAddCredential(name: string): Promise<string> {
     const payload = credential(name)
@@ -1393,7 +1408,7 @@ describeConformance('cross-replica writer attribution', () => {
    * `browserStore.#insertEncrypted` with `contentAddressed: true`.
    *
    * @param name {string}
-   * @returns {Promise<string>} The row id.
+   * @returns {Promise<string>} The resource id.
    */
   async function fwAddCredential(name: string): Promise<string> {
     const { id, envelope } = await fwCipher.encrypt({
@@ -1409,7 +1424,8 @@ describeConformance('cross-replica writer attribution', () => {
   }
 
   /**
-   * Decrypted view of a freewallet row (undefined when absent or deleted).
+   * Decrypted view of a freewallet resource replica (undefined when absent or
+   * deleted).
    *
    * @param id {string}
    * @returns {Promise<Json | undefined>}
@@ -1531,7 +1547,7 @@ describeConformance('cross-replica writer attribution', () => {
     dcwStore.localDelete(fwDeleted)
     const fwDoc = await fwCollection.findOne(dcwDeleted).exec()
     if (!fwDoc) {
-      throw new Error(`no fw row ${dcwDeleted}`)
+      throw new Error(`no fw resource replica ${dcwDeleted}`)
     }
     await fwDoc.remove()
 
@@ -1553,7 +1569,7 @@ describeConformance('cross-replica writer attribution', () => {
     }
     for (const id of [dcwDeleted, fwDeleted]) {
       expect(dcwStore.projection.has(id)).toBe(false)
-      expect(dcwStore.rows.get(id)?.deleted).toBe(true)
+      expect(dcwStore.resources.get(id)?.deleted).toBe(true)
       expect(await fwRead(id)).toBeUndefined()
     }
     expect([...dcwStore.projection.keys()].sort()).toEqual(

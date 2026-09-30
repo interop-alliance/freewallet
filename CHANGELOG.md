@@ -4,6 +4,11 @@
 
 ### Fixed
 
+- Account deletion from a transient session over a stale-sealed
+  unlock-methods registry unwraps the roster with the standing credential's
+  key rather than the per-visit key, so its in-place repair no longer
+  refuses the deletion. A session behind another client's rotation follows
+  it first and does not seal the registry backward.
 - The shared wipe's failed-stage warn names the `unlock-local-state` family
   rather than the unlock Space id.
 - Content migration lands a small binary or text Resource of an encrypted
@@ -123,8 +128,9 @@
   under `detail.arm` (was `detail.outcome`).
 - A backup export on a session with no remote Space throws
   `BackupRemoteStorageMissingError` (was a plain `Error`).
-- Requires `@interop/wallet-core` 0.88.0 for the ceremony event helpers and
-  the event-emitting mend report accumulator.
+- Requires `@interop/wallet-core` 0.89.0 for the ceremony event helpers, the
+  event-emitting mend report accumulator, and the encounter site's
+  `reachedBy` with `runMenderRegistration`.
 - The account-deletion, wallet-wipe, content-migration, and backup-export
   ceremony ids come from `@interop/wallet-core`'s `CEREMONY_IDS`.
   `src/session/ceremonies.ts` (`APP_CEREMONY_IDS`, `FREEWALLET_CEREMONY_IDS`,
@@ -244,6 +250,27 @@
 
 ### Added
 
+- Mid-visit mending at the point of encounter (`src/session/menders/encounter.ts`).
+  A collection recorded as stranded while a transient or popup session runs
+  is mended with no second login: the session renews its generation
+  delegation, refreshes the account log, re-reads the roster, follows a
+  rotation it is behind, and re-epochs what is still stranded. A stale
+  unlock-methods registry seal found at the Settings mount is mended in
+  place, and Settings disables every action that writes the registry
+  (passphrase, passkey, recovery-code, and backup-credential actions,
+  connecting and disconnecting a wallet, forgetting this browser, and
+  account deletion) until it settles. Each encounter runs behind
+  `registryReady`, once at a time per session and invariant, and a failed
+  one is not re-run in the same session. While this session's own client
+  revocation, credential rotation, recovery-code revocation, forget
+  ceremony, or account deletion runs, a follower adoption stands down, and
+  one whose roster read the visit's epoch pin has since passed writes
+  nothing, so it cannot land an older key on the session or its client-key
+  record.
+- The mender registry declares the `encounter` trigger on invariants 3, 4,
+  7, 16 and 17: the two encounter registrations, and the App Connect grant
+  path's renewal, the deletion walk's renewal and stale-seal repair, and
+  the Settings registry backfill, which keep their own calls.
 - The ceremony event channel's freewallet emit sites. Account deletion, the
   shared wallet wipe, content migration, and backup export each emit
   `'ceremony stage'` events and one `'ceremony outcome'` per run through

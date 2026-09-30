@@ -2,13 +2,13 @@
  * Tests for the connected-applications model: `listConnectedApps` joins the
  * app-key credentials of the dedicated `app-connections` collection with the
  * latest matching App Connect Login activity (name, grants, last-connected
- * timestamp), skipping rows that do not carry the `AppKeyCredential` marker;
- * `deriveGrantsState` reads the recorded delegation signers against the
- * account's current key set (the current-key-set rule), deriving a
- * client-annex signer as unknown rather than orphaned (the revocation-time
- * reading of one grant, `grantRevocationSkip`, is wallet-core's and tested
- * there); `revokeAppAccess` deletes the app key from that collection and
- * records the revocation only once every POST has landed.
+ * timestamp), skipping Resources that do not carry the `AppKeyCredential`
+ * marker; `deriveGrantsState` reads the recorded delegation signers against the
+ * account's current key set (the current-key-set rule), deriving a client-annex
+ * signer as unknown rather than orphaned (the revocation-time reading of one
+ * grant, `grantRevocationSkip`, is wallet-core's and tested there);
+ * `revokeAppAccess` deletes the app key from that collection and records the
+ * revocation only once every POST has landed.
  */
 import { describe, expect, it, vi } from 'vitest'
 import type { StorageManager } from '@/stores/storageManager'
@@ -29,7 +29,7 @@ const APP_URL = 'https://app.example/editor'
 /**
  * A self-issued app-key StoredCredential carrying the `AppKeyCredential`
  * marker type, bound to an origin and to an `appUrl` within it. Omitting the
- * `appUrl` produces a row the listing cannot attribute to an app.
+ * `appUrl` produces a credential the listing cannot attribute to an app.
  */
 function appKeyCredential({
   cid,
@@ -65,12 +65,12 @@ function appKeyCredential({
 }
 
 /**
- * A row in the collection that carries no `AppKeyCredential` marker -- what an
- * opaque resource planted server-side (through a space import, say) looks like
- * to the listing. It must be ignored: the page can neither render nor revoke
- * it.
+ * A Resource in the collection that carries no `AppKeyCredential` marker --
+ * what an opaque resource planted server-side (through a space import, say)
+ * looks like to the listing. It must be ignored: the page can neither render
+ * nor revoke it.
  */
-function unmarkedRow(cid: string): StoredCredential {
+function unmarkedCredential(cid: string): StoredCredential {
   return {
     cid,
     vc: {
@@ -86,7 +86,7 @@ function unmarkedRow(cid: string): StoredCredential {
 }
 
 /**
- * An App Connect Login activity row. Omitting `appUrl` produces a row the
+ * An App Connect Login activity. Omitting `appUrl` produces an activity the
  * listing cannot join to any app key.
  */
 function loginActivity({
@@ -162,7 +162,7 @@ describe('listConnectedApps', () => {
     const origin = 'https://app.example'
     const storage = fakeStorage({
       appKeys: [
-        unmarkedRow('c-plain'),
+        unmarkedCredential('c-plain'),
         appKeyCredential({ cid: 'c-app', origin, appUrl: APP_URL })
       ],
       history: [
@@ -269,7 +269,7 @@ describe('listConnectedApps', () => {
   })
 
   it('never joins a Login activity that recorded no appUrl', async () => {
-    // The `appUrl` is the whole join. A Login row carrying none names no
+    // The `appUrl` is the whole join. A Login activity carrying none names no
     // application, so it cannot lend its grants to a key that shares only the
     // origin.
     const origin = 'https://app.example'
@@ -364,8 +364,9 @@ describe('listConnectedApps', () => {
   })
 
   it('ignores rows without the marker, an origin, or an appUrl', async () => {
-    // The collection holds app keys only, so the row check is the marker type
-    // plus the three members the listing reads (subject DID, origin, appUrl).
+    // The collection holds app keys only, so the check on each Resource is the
+    // marker type plus the three members the listing reads (subject DID,
+    // origin, appUrl).
     const originless = appKeyCredential({
       cid: 'c-originless',
       origin: 'https://app.example',
@@ -377,7 +378,7 @@ describe('listConnectedApps', () => {
       origin: 'https://app.example'
     })
     const storage = fakeStorage({
-      appKeys: [unmarkedRow('c-plain'), originless, urlless],
+      appKeys: [unmarkedCredential('c-plain'), originless, urlless],
       history: []
     })
 
@@ -742,7 +743,7 @@ describe('revokeAppAccess', () => {
 
     const outcome = await revokeAppAccess({ storage, user, app })
 
-    // The row's marker gates nothing here: which recorded grants are POSTed
+    // The app key's marker gates nothing here: which recorded grants are POSTed
     // and which are dead already is `revokeAppGrants`'s reading of the
     // verified document it holds its own resolver for.
     expect(outcome).toEqual({ revoked: 1, skipped: 0, rotated: 0 })

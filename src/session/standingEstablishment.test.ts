@@ -98,10 +98,22 @@ vi.mock('@/session/credentialRotation', () => ({
 vi.mock('@/session/menders/ceremonyTail', () => ({
   reportCeremonyTail: vi.fn()
 }))
-vi.mock('@/session/userKeyAdoption', () => ({
-  adoptRotatedUserKey: vi.fn(),
-  rotationSpaceId: vi.fn(() => 'space-account')
-}))
+vi.mock('@/session/userKeyAdoption', () => {
+  const withOwnUserKeyRotation = vi.fn(
+    async ({ run }: { run: () => Promise<unknown> }) => await run()
+  )
+  return {
+    withOwnUserKeyRotation,
+    heldAsOwnUserKeyRotation:
+      (body: (options: { session: unknown }) => Promise<unknown>) =>
+      async (options: { session: unknown }) =>
+        await withOwnUserKeyRotation({
+          run: () => body(options)
+        }),
+    adoptRotatedUserKey: vi.fn(),
+    rotationSpaceId: vi.fn(() => 'space-account')
+  }
+})
 vi.mock('@interop/wallet-core/clientAnnex', () => ({
   ladderRung: vi.fn(async () => ({ keyMultibase: 'z6MkRung0' }))
 }))

@@ -16,9 +16,9 @@
  * The i18n keys the known cause names map to.
  */
 const CAUSE_KEYS: Record<string, string> = {
-  // No user key generation the old secret opened unwraps this row's epoch.
+  // No user key generation the old secret opened unwraps this Resource's epoch.
   KeyUnwrapError: 'storage.migration.causes.keyUnwrap',
-  // The row names a key epoch the archived roster does not carry.
+  // The Resource names a key epoch the archived roster does not carry.
   UnknownEpochError: 'storage.migration.causes.unknownEpoch',
   // The archived Resource is chunked outside an encrypted app collection,
   // where the walk does not reassemble it.
@@ -39,7 +39,7 @@ const CAUSE_KEYS: Record<string, string> = {
   // This account's Space is full, a chunked write included; the walk stops
   // rather than retry.
   QuotaExceededError: 'storage.migration.causes.quotaExceeded',
-  // One row is larger than this server accepts.
+  // One Resource is larger than this server accepts.
   PayloadTooLargeError: 'storage.migration.causes.payloadTooLarge',
   // The account already holds this app collection in a different shape, so
   // it was left as it is. Minted app-side, in the storage manager.

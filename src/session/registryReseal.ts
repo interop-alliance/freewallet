@@ -12,7 +12,7 @@
  *
  * What makes the repair possible is the roster's escrow rule: every prior user
  * key generation stays wrapped to each enrolled client's own key-agreement
- * key, so this login's verified roster read carries the superseded key that
+ * key, so a verified roster read carries the superseded key that
  * opens the record. Durable state alone suffices, which is what makes this a
  * repair rather than a re-run -- and it is strictly best-effort: a registry
  * that opens under the current key is one read and no write, and a failure
@@ -36,7 +36,10 @@ import {
   UnlockRegistryStaleSealError,
   type UnlockMethodsRecord
 } from '@/session/unlockMethods'
-import { type AccountCeremonyContext } from '@/session/accountCeremonyContext'
+import {
+  rosterUnwrapKey,
+  type AccountCeremonyContext
+} from '@/session/accountCeremonyContext'
 import { createLogger } from '@/lib/log'
 
 const log = createLogger('fw:session:reseal')
@@ -66,8 +69,10 @@ const log = createLogger('fw:session:reseal')
  *
  * @param options {object}
  * @param options.session {Session}
- * @param options.rosterRead {UserKeyRosterReadResult}   this login's verified
- *   roster read
+ * @param options.rosterRead {UserKeyRosterReadResult}   a verified roster
+ *   read, anchored at the session's current log: the login's own read, or a
+ *   fresh one taken behind a log refresh when the repair runs mid-visit. The
+ *   escrowed generations are unwrapped from it
  * @param options.context {AccountCeremonyContext | null}   this session's
  *   ceremony context: its invoker (the generation delegation on the ladder
  *   branch) and, there, the standing key the escrows unwrap with. `null`
@@ -98,10 +103,7 @@ export async function repairStaleUnlockRegistrySeal({
   // The key the escrowed generations are wrapped to: an enrolled client's own
   // identity key-agreement key, or the credential's standing key on the
   // ladder branch (escrowed into every epoch, so it opens every generation).
-  const unwrapKey =
-    context?.kind === 'ladder'
-      ? context.standingKeyAgreementKey
-      : session.profile.clientKeyAgreementKey
+  const unwrapKey = rosterUnwrapKey({ session })
   if (
     !WAS_SERVER_URL ||
     !context ||
@@ -203,9 +205,17 @@ export async function resealRegistryFromEscrow({
     clientKeyAgreementKey: unwrapKey
   })
   // Oldest first from the roster; the superseded generation a lost rotation
-  // left the seal on is the newest of them.
+  // left the seal on is the newest of them. Only generations older than the
+  // key the record is re-sealed to are candidates, so a re-seal only ever
+  // moves the registry forward.
+  // A key the roster does not list has no older generations at all.
+  const epochIds = (descriptor.epochs ?? []).map(epoch => epoch.id)
+  const keyIndex = epochIds.indexOf(userKey.id)
   const superseded = generations
-    .filter(generation => generation.id !== userKey.id)
+    .filter(generation => {
+      const index = epochIds.indexOf(generation.id)
+      return index !== -1 && index < keyIndex
+    })
     .reverse()
   for (const generation of superseded) {
     try {

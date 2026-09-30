@@ -12,7 +12,7 @@
  * The second half covers that collection's surface: `addMintedAppKey` /
  * `listAppKeys` / `deleteAppKey`, their idempotence on the credential's
  * content cid, and the two separations that keep an app's seed out of the
- * credential-wide surfaces (no row among the credentials, no
+ * credential-wide surfaces (no Resource among the credentials, no
  * credential-created activity).
  *
  * The manager runs over a real BrowserStore on memory RxDB with real EDV
@@ -164,7 +164,7 @@ describe('StorageManager app-key collection surface', () => {
   })
 
   it('is idempotent on a re-store of the same app key (content cid)', async () => {
-    // JWE encryption is nondeterministic, so the row id cannot carry
+    // JWE encryption is nondeterministic, so the resource id cannot carry
     // idempotence -- the credential's content cid does.
     const { storage } = await makeStorage()
     const { credential } = await mintAppKeyCredential({ app, origin })

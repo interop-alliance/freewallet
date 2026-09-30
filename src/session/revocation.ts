@@ -68,7 +68,8 @@ import {
 import { assertNoPendingPassphraseEntry } from '@/session/forget'
 import {
   adoptRotatedUserKey,
-  adoptRotatedUserKeyInBand
+  adoptRotatedUserKeyInBand,
+  heldAsOwnUserKeyRotation
 } from '@/session/userKeyAdoption'
 import {
   cascadeCollections,
@@ -182,7 +183,14 @@ async function unlockRegistry({
  * @param [options.label] {string}   a display label for the history record
  * @returns {Promise<RevocationOutcome>}
  */
-export async function revokeEnrolledClient({
+export const revokeEnrolledClient = heldAsOwnUserKeyRotation(
+  revokeEnrolledClientHeld
+)
+
+/**
+ * The body of {@link revokeEnrolledClient}, run with the own-rotation mark held.
+ */
+async function revokeEnrolledClientHeld({
   session,
   context: supplied,
   client,

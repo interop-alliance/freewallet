@@ -38,6 +38,29 @@ roster; the session proceeds on it and the login page shows
 start, so the adoption callback's throw propagates rather than being
 swallowed.
 
+Mid-visit, a session can fall behind the roster when another client rotates
+the user key. Two encounter sites catch up: the stranded-collection mend and
+the Settings stale-seal mend (`src/session/menders/encounterSites.ts`). Each
+refreshes the verified-log memo first, since the roster store resolves its
+controller from the memo and would refuse an entry anchored past it. The
+refresh keeps the old document visible until the new one verifies. The
+roster is then re-read with the key this session holds a wrap for
+(`rosterUnwrapKey`: an enrolled client's own key, or the standing
+credential's key on a transient session) and the visit's epoch pin. The
+follower adoption (`adoptFollowerUserKey`) moves the session only when its
+key sits behind the roster's current epoch in the roster's own epoch list.
+It saves the pin, persists the key on a remembered session, then moves the
+profile and rebuilds the ciphers, recording a collection whose epochs name
+no recipient of the new key as stranded rather than throwing. It makes no
+registry re-seal, since the rotator already sealed the registry forward.
+While one of this session's own rotating ceremonies (or an account
+deletion) runs, an adoption asked for stands down. Before its record write
+and again before the session moves, it re-checks the visit's epoch pin
+against its read, and stands down when the pin has moved past it. Either
+way it cannot land an older key after a newer one. A stale-seal re-seal
+from the escrow only tries generations older than the session's key, so it
+only moves the registry forward.
+
 Three client-side guards are load-bearing against a tampering host.
 
 First, the resource log. Roster state is adopted only from a verified head.
@@ -84,7 +107,8 @@ share grantee or a connected app already holds covers the log, with no
 second grant and no capability over the account's `key-map` collection.
 Being a sub-resource rather than a Resource keeps the log out of listings
 and the changes feed, and outside the encrypted collection's envelope rule,
-so it stays plaintext JSON Lines and replication never ships it as a row.
+so it stays plaintext JSON Lines and replication never copies it into a
+local replica.
 
 **The wallet writes the log alone.** The server derives the Collection
 Metadata object's `encryption` member from the log head. No ceremony writes

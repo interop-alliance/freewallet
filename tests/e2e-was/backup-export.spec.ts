@@ -227,8 +227,8 @@ function packedCredentialOf(bundle: OpenedBundle): Record<string, unknown> {
 }
 
 /**
- * A sink that accepts every row and records what it was handed, so a cell can
- * assert which collections opened.
+ * A sink that accepts every Resource and records what it was handed, so a cell
+ * can assert which collections opened.
  *
  * @returns {MigrationSink & { calls: Array<{ collectionId: string }> }}
  */
@@ -479,7 +479,7 @@ test.describe.serial('The backup export from a transient session', () => {
       for (const [collectionId, counts] of Object.entries(report.collections)) {
         expect(
           counts.unopenable,
-          `${collectionId} left rows the secret could not open`
+          `${collectionId} left resources the secret could not open`
         ).toBe(0)
       }
     }

@@ -119,18 +119,18 @@ function makeFakeEpochCipher(epoch: string): DocCipher {
 }
 
 /**
- * A reversible fake DocCipher for a mutable random-id collection (the
- * contacts head): `encrypt` mints a fresh row id like {@link makeFakeCipher},
- * and `encryptUpdate` keeps the caller's id verbatim while advancing the
- * envelope `sequence` from the prior envelope -- the contract the real EDV
- * update path provides. An optional fixed `epoch` mimics a multi-recipient
- * cipher's `Key-Epoch` surfacing.
+ * A reversible fake DocCipher for a mutable random-id collection (the contacts
+ * head): `encrypt` mints a fresh resource id like {@link makeFakeCipher}, and
+ * `encryptUpdate` keeps the caller's id verbatim while advancing the envelope
+ * `sequence` from the prior envelope -- the contract the real EDV update path
+ * provides. An optional fixed `epoch` mimics a multi-recipient cipher's
+ * `Key-Epoch` surfacing.
  */
 function makeFakeContactsCipher(epoch?: string): DocCipher {
   return {
     async encrypt({ data }: { data: Json }) {
       fakeCipherCounter += 1
-      const id = `z6FakeContactRow${fakeCipherCounter}`
+      const id = `z6FakeContactResource${fakeCipherCounter}`
       return {
         id,
         envelope: {
@@ -170,8 +170,8 @@ function makeFakeContactsCipher(epoch?: string): DocCipher {
 
 /**
  * A reversible fake DocCipher whose id is derived from the plaintext (a
- * stand-in for the real content-derived envelope-hash id), so re-encrypting
- * the identical document converges on the same row id -- what the
+ * stand-in for the real content-derived envelope-hash id), so re-encrypting the
+ * identical document converges on the same resource id -- what the
  * append-idempotence of `contacts-history` rides on.
  */
 function makeFakeContentCipher(): DocCipher {
@@ -286,9 +286,9 @@ describe('BrowserStore (local active replica)', () => {
       .findOne(cid)
       .exec()
     expect(doc).not.toBeNull()
-    const row = doc!.toMutableJSON()
-    expect(row.version).toBe(0)
-    expect(Date.parse(row.updatedAt)).not.toBeNaN()
+    const resource = doc!.toMutableJSON()
+    expect(resource.version).toBe(0)
+    expect(Date.parse(resource.updatedAt)).not.toBeNaN()
   })
 
   it('supports the share / unshare / re-share cycle on public-credentials', async () => {
@@ -304,7 +304,8 @@ describe('BrowserStore (local active replica)', () => {
     await localStore.removePublicCredential({ cid })
     expect(await localStore.hasPublicCredential({ cid })).toBe(false)
 
-    // Re-share revives the soft-deleted row (insert over a tombstone).
+    // Re-share revives the soft-deleted resource replica (insert over a
+    // tombstone).
     await localStore.addPublicCredential({ cid, credential })
     expect(await localStore.hasPublicCredential({ cid })).toBe(true)
   })
@@ -344,15 +345,16 @@ describe('BrowserStore (encrypted collections)', () => {
 
     await localStore.addCredential({ cid, credential })
 
-    // The stored row is an envelope keyed by the cipher-minted id, not the cid.
-    const rows = await localStore
+    // The stored resource replica is an envelope keyed by the cipher-minted id,
+    // not the cid.
+    const resources = await localStore
       .rxCollection('privateCredentials')
       .find()
       .exec()
-    expect(rows).toHaveLength(1)
-    const row = rows[0].toMutableJSON()
-    expect(row.id).not.toBe(cid)
-    expect((row.data as { jwe?: unknown }).jwe).toBeDefined()
+    expect(resources).toHaveLength(1)
+    const resource = resources[0].toMutableJSON()
+    expect(resource.id).not.toBe(cid)
+    expect((resource.data as { jwe?: unknown }).jwe).toBeDefined()
 
     // The read paths decrypt and key by content cid.
     const listed = await localStore.listCredentials()
@@ -368,11 +370,11 @@ describe('BrowserStore (encrypted collections)', () => {
     await localStore.addCredential({ cid, credential })
     await localStore.addCredential({ cid, credential })
 
-    const rows = await localStore
+    const resources = await localStore
       .rxCollection('privateCredentials')
       .find()
       .exec()
-    expect(rows).toHaveLength(1)
+    expect(resources).toHaveLength(1)
     expect(await localStore.listCredentials()).toHaveLength(1)
   })
 
@@ -418,9 +420,9 @@ describe('BrowserStore (encrypted collections)', () => {
     const credential = makeCredential('Alice')
     const cid = await cidFrom({ doc: credential })
 
-    // Seed two rows carrying the same credential under different ids -- the
-    // shape a legacy random-id envelope replicated from remote takes next to
-    // a re-keyed local copy.
+    // Seed two resource replicas carrying the same credential under different
+    // ids -- the shape a legacy random-id envelope replicated from remote takes
+    // next to a re-keyed local copy.
     const collection = localStore.rxCollection('privateCredentials')
     for (let copy = 0; copy < 2; copy++) {
       const { id, envelope } = await ciphers.privateCredentials.encrypt({
@@ -451,10 +453,13 @@ describe('BrowserStore (encrypted collections)', () => {
 
     // Stored as an envelope under the cipher-minted id, read back by content
     // cid, and invisible to every credential-wide surface.
-    const rows = await localStore.rxCollection('appConnections').find().exec()
-    expect(rows).toHaveLength(1)
+    const resources = await localStore
+      .rxCollection('appConnections')
+      .find()
+      .exec()
+    expect(resources).toHaveLength(1)
     expect(
-      (rows[0].toMutableJSON().data as { jwe?: unknown }).jwe
+      (resources[0].toMutableJSON().data as { jwe?: unknown }).jwe
     ).toBeDefined()
     expect(await localStore.listAppKeys()).toEqual([{ cid, vc: appKey }])
     expect(await localStore.listCredentials()).toEqual([])
@@ -483,8 +488,8 @@ describe('BrowserStore (encrypted collections)', () => {
     const otherCid = await cidFrom({ doc: other })
     await localStore.addAppKey({ cid: otherCid, credential: other })
 
-    // Two rows carrying the same app key under different ids -- a legacy copy
-    // replicated from remote beside a locally re-keyed one.
+    // Two resource replicas carrying the same app key under different ids -- a
+    // legacy copy replicated from remote beside a locally re-keyed one.
     const collection = localStore.rxCollection('appConnections')
     for (let copy = 0; copy < 2; copy++) {
       const { id, envelope } = await ciphers.appConnections.encrypt({
@@ -512,9 +517,9 @@ describe('BrowserStore (encrypted collections)', () => {
   })
 
   it('counts the app-key rows it skipped, and purges only the poisoned one', async () => {
-    // A cipher standing in for a session that holds no key for the
-    // collection's current epoch: a well-formed row raises KeyUnwrapError,
-    // while a poisoned row still fails as ordinary garbage.
+    // A cipher standing in for a session that holds no key for the collection's
+    // current epoch: a well-formed resource replica raises KeyUnwrapError,
+    // while a poisoned one still fails as ordinary garbage.
     const skippingCipher: DocCipher = {
       async encrypt({ data }: { data: Json }) {
         fakeCipherCounter += 1
@@ -551,16 +556,17 @@ describe('BrowserStore (encrypted collections)', () => {
       version: 0,
       data: envelope
     })
-    await insertUndecryptableRow(localStore, 'appConnections', 'z6Poison')
+    await insertUndecryptableResource(localStore, 'appConnections', 'z6Poison')
 
-    // Nothing lists, and the two skipped rows are counted on their own axes.
+    // Nothing lists, and the two skipped resource replicas are counted on their
+    // own axes.
     expect(await localStore.listAppKeys()).toEqual([])
     expect(localStore.noEpochKeyAppKeys).toBe(1)
     expect(localStore.undecryptableAppKeys).toBe(1)
     expect(localStore.unknownEpochAppKeys).toBe(0)
 
-    // The purge takes the poisoned row only: the no-epoch-key row is an app's
-    // real identity and must survive.
+    // The purge takes the poisoned resource replica only: the no-epoch-key one
+    // is an app's real identity and must survive.
     expect(await localStore.purgeUndecryptableAppKeys()).toBe(1)
     expect(localStore.undecryptableAppKeys).toBe(0)
     const remaining = await collection.find().exec()
@@ -579,9 +585,14 @@ describe('BrowserStore (encrypted collections)', () => {
       activity: { id: 'second', summary: 'two' }
     })
 
-    const rows = await localStore.rxCollection('walletActivity').find().exec()
-    for (const row of rows) {
-      expect((row.toMutableJSON().data as { jwe?: unknown }).jwe).toBeDefined()
+    const resources = await localStore
+      .rxCollection('walletActivity')
+      .find()
+      .exec()
+    for (const resource of resources) {
+      expect(
+        (resource.toMutableJSON().data as { jwe?: unknown }).jwe
+      ).toBeDefined()
     }
 
     const { entries: items } = await localStore.listHistoryItems()
@@ -591,8 +602,9 @@ describe('BrowserStore (encrypted collections)', () => {
 
   it('reads legacy plaintext rows through the tolerant read paths', async () => {
     const { localStore } = await initLocalStore({ ciphers: encryptedCiphers() })
-    // A plaintext activity row pulled from a pre-encryption-descriptor remote
-    // collection: server revision >= 1, plaintext data.
+    // A plaintext activity resource replica pulled from a
+    // pre-encryption-descriptor remote collection: server revision >= 1,
+    // plaintext data.
     await localStore.rxCollection('walletActivity').insert({
       id: 'legacy-activity',
       updatedAt: new Date().toISOString(),
@@ -610,22 +622,26 @@ describe('BrowserStore (encrypted collections)', () => {
   })
 
   /**
-   * Inserts a poisoned envelope row directly: it looks like an EDV envelope
-   * (its `jwe` is an object, so `isEncryptedEnvelope` accepts it) but its
-   * ciphertext is not valid JSON, so the fake cipher's `decrypt` throws --
-   * standing in for a row corrupted, replicated verbatim from another
-   * identity, or written under a mismatched KAK.
+   * Inserts a poisoned envelope resource replica directly: it looks like an EDV
+   * envelope (its `jwe` is an object, so `isEncryptedEnvelope` accepts it) but
+   * its ciphertext is not valid JSON, so the fake cipher's `decrypt` throws --
+   * standing in for a resource replica corrupted, replicated verbatim from
+   * another identity, or written under a mismatched KAK.
    */
-  async function insertUndecryptableRow(
+  async function insertUndecryptableResource(
     localStore: BrowserStore,
     logicalKey: string,
-    rowId: string
+    resourceId: string
   ) {
     await localStore.rxCollection(logicalKey).insert({
-      id: rowId,
+      id: resourceId,
       updatedAt: new Date().toISOString(),
       version: 0,
-      data: { id: rowId, sequence: 0, jwe: { ciphertext: 'not-json{' } } as Json
+      data: {
+        id: resourceId,
+        sequence: 0,
+        jwe: { ciphertext: 'not-json{' }
+      } as Json
     })
   }
 
@@ -637,13 +653,18 @@ describe('BrowserStore (encrypted collections)', () => {
       const credential = makeCredential('Alice')
       const cid = await cidFrom({ doc: credential })
       await localStore.addCredential({ cid, credential })
-      await insertUndecryptableRow(localStore, 'privateCredentials', 'z6Poison')
+      await insertUndecryptableResource(
+        localStore,
+        'privateCredentials',
+        'z6Poison'
+      )
 
       const listed = await localStore.listCredentials()
 
       expect(listed).toEqual([{ cid, vc: credential }])
       expect(localStore.undecryptableCredentials).toBe(1)
-      // The good credential still loads and the poisoned row does not throw.
+      // The good credential still loads and the poisoned resource replica does
+      // not throw.
       expect(await localStore.loadCredential({ cid })).toEqual(credential)
     })
 
@@ -654,12 +675,16 @@ describe('BrowserStore (encrypted collections)', () => {
       const credential = makeCredential('Alice')
       const cid = await cidFrom({ doc: credential })
       await localStore.addCredential({ cid, credential })
-      await insertUndecryptableRow(localStore, 'privateCredentials', 'z6Poison')
+      await insertUndecryptableResource(
+        localStore,
+        'privateCredentials',
+        'z6Poison'
+      )
 
       await localStore.deleteCredential({ cid })
 
       expect(await localStore.listCredentials()).toHaveLength(0)
-      // The poisoned row survives (it carries no recoverable cid).
+      // The poisoned resource replica survives (it carries no recoverable cid).
       expect(
         await localStore.rxCollection('privateCredentials').find().exec()
       ).toHaveLength(1)
@@ -672,7 +697,11 @@ describe('BrowserStore (encrypted collections)', () => {
       const credential = makeCredential('Alice')
       const cid = await cidFrom({ doc: credential })
       await localStore.addCredential({ cid, credential })
-      await insertUndecryptableRow(localStore, 'privateCredentials', 'z6Poison')
+      await insertUndecryptableResource(
+        localStore,
+        'privateCredentials',
+        'z6Poison'
+      )
       await localStore.listCredentials()
       expect(localStore.undecryptableCredentials).toBe(1)
 
@@ -680,7 +709,8 @@ describe('BrowserStore (encrypted collections)', () => {
 
       expect(removed).toBe(1)
       expect(localStore.undecryptableCredentials).toBe(0)
-      // The good credential is untouched; only the poisoned row is gone.
+      // The good credential is untouched; only the poisoned resource replica is
+      // gone.
       expect(await localStore.listCredentials()).toEqual([
         { cid, vc: credential }
       ])
@@ -693,9 +723,13 @@ describe('BrowserStore (encrypted collections)', () => {
       const { localStore } = await initLocalStore({
         ciphers: encryptedCiphers()
       })
-      await insertUndecryptableRow(localStore, 'privateCredentials', 'z6Poison')
+      await insertUndecryptableResource(
+        localStore,
+        'privateCredentials',
+        'z6Poison'
+      )
 
-      await localStore.deleteCredentialByRowId({ rowId: 'z6Poison' })
+      await localStore.deleteCredentialByResourceId({ resourceId: 'z6Poison' })
 
       expect(
         await localStore.rxCollection('privateCredentials').find().exec()
@@ -710,7 +744,11 @@ describe('BrowserStore (encrypted collections)', () => {
         resourceId: 'first',
         activity: { id: 'first', summary: 'one' }
       })
-      await insertUndecryptableRow(localStore, 'walletActivity', 'z6Poison')
+      await insertUndecryptableResource(
+        localStore,
+        'walletActivity',
+        'z6Poison'
+      )
 
       const { entries: items } = await localStore.listHistoryItems()
 
@@ -759,9 +797,10 @@ function foreignRealmError(name: string): Error {
 
 /**
  * A fake cipher whose `decrypt` always throws `UnknownEpochError` -- standing
- * in for a row stamped with a key epoch this cipher's cached descriptor has never
- * seen (a rekey emits no change-feed entry). `encrypt` still produces a normal
- * fake envelope, so a caller can seed rows with it.
+ * in for a resource replica stamped with a key epoch this cipher's cached
+ * descriptor has never seen (a rekey emits no change-feed entry). `encrypt`
+ * still produces a normal fake envelope, so a caller can seed resource replicas
+ * with it.
  *
  * @param [options.foreignRealm] {boolean}   raise the refusal from a second
  *   copy of the package instead of this one
@@ -795,9 +834,9 @@ function makeUnknownEpochCipher({ foreignRealm = false } = {}): DocCipher {
 
 /**
  * A fake cipher whose `decrypt` always throws `KeyUnwrapError` -- standing in
- * for a row whose key epoch IS on the collection's descriptor but which this
- * wallet holds no key for (it was never a recipient, or was removed and the
- * epoch rotated). `encrypt` still produces a normal fake envelope.
+ * for a resource replica whose key epoch IS on the collection's descriptor but
+ * which this wallet holds no key for (it was never a recipient, or was removed
+ * and the epoch rotated). `encrypt` still produces a normal fake envelope.
  *
  * @param [options.foreignRealm] {boolean}   raise the refusal from a second
  *   copy of the package instead of this one
@@ -831,7 +870,7 @@ function makeNoEpochKeyCipher({ foreignRealm = false } = {}): DocCipher {
  * A fake cipher whose `decrypt` always throws `IntegrityError` -- standing in
  * for the host serving one resource's body under another resource's id (or a
  * body that will not authenticate). `encrypt` still produces a normal fake
- * envelope, so a caller can seed rows with it.
+ * envelope, so a caller can seed resource replicas with it.
  *
  * @param [options.foreignRealm] {boolean}   raise the refusal from a second
  *   copy of the package instead of this one
@@ -899,8 +938,9 @@ describe('BrowserStore (misbound envelopes)', () => {
   })
 
   it('counts a misbound app-key row apart from undecryptable and never purges it', async () => {
-    // The app-key half: a misbound row read as absent would mint a second
-    // identity for the app, so it is counted rather than silently skipped.
+    // The app-key half: a misbound resource replica read as absent would mint a
+    // second identity for the app, so it is counted rather than silently
+    // skipped.
     const { localStore } = await initLocalStore({
       ciphers: {
         privateCredentials: makeFakeCipher(),
@@ -962,9 +1002,11 @@ describe('BrowserStore (misbound envelopes)', () => {
 
     const logged = JSON.stringify(capture.events)
     expect(logged).toContain(
-      'Refusing a contacts row whose body failed its integrity check'
+      'Refusing a contacts resource replica whose body failed its integrity check'
     )
-    expect(logged).not.toContain('Skipping undecryptable contacts row')
+    expect(logged).not.toContain(
+      'Skipping undecryptable contacts resource replica'
+    )
   })
 
   it('refuses a misbound contactsHistory row under its own warning', async () => {
@@ -996,16 +1038,18 @@ describe('BrowserStore (misbound envelopes)', () => {
 
     const logged = JSON.stringify(capture.events)
     expect(logged).toContain(
-      'Refusing a contactsHistory row whose body failed its integrity check'
+      'Refusing a contactsHistory resource replica whose body failed its integrity check'
     )
-    expect(logged).not.toContain('Skipping undecryptable contactsHistory row')
+    expect(logged).not.toContain(
+      'Skipping undecryptable contactsHistory resource replica'
+    )
   })
 
   it('classifies the refusal raised from a second copy of the package', async () => {
     // Matched by `err.name`, for the same reason the epoch refusals are: a
     // wallet whose `@interop/was-client` resolves twice throws a class this
-    // file never imported, and a miss here drops the row into the purgeable
-    // bucket.
+    // file never imported, and a miss here drops the resource replica into the
+    // purgeable bucket.
     const { localStore } = await initLocalStore({
       ciphers: {
         privateCredentials: makeMisboundCipher({ foreignRealm: true }),
@@ -1043,23 +1087,25 @@ describe('BrowserStore (key epochs)', () => {
 
     await localStore.addCredential({ cid, credential })
 
-    const rows = await localStore
+    const resources = await localStore
       .rxCollection('privateCredentials')
       .find()
       .exec()
-    expect(rows).toHaveLength(1)
-    expect(rows[0].toMutableJSON().epoch).toBe('did:key:z6EpochOne')
+    expect(resources).toHaveLength(1)
+    expect(resources[0].toMutableJSON().epoch).toBe('did:key:z6EpochOne')
 
     // A history write carries its epoch too.
     await localStore.addHistoryItem({
       resourceId: 'act-1',
       activity: { id: 'act-1', summary: 'one' }
     })
-    const activityRows = await localStore
+    const activityResources = await localStore
       .rxCollection('walletActivity')
       .find()
       .exec()
-    expect(activityRows[0].toMutableJSON().epoch).toBe('did:key:z6EpochOne')
+    expect(activityResources[0].toMutableJSON().epoch).toBe(
+      'did:key:z6EpochOne'
+    )
   })
 
   it('counts an unknown-epoch row separately from undecryptable and skips it', async () => {
@@ -1083,8 +1129,8 @@ describe('BrowserStore (key epochs)', () => {
 
     const listed = await localStore.listCredentials()
 
-    // The row is skipped, counted as unknown-epoch (fresh data behind a stale
-    // descriptor), and NOT as undecryptable garbage.
+    // The resource replica is skipped, counted as unknown-epoch (fresh data
+    // behind a stale descriptor), and NOT as undecryptable garbage.
     expect(listed).toHaveLength(0)
     expect(localStore.unknownEpochCredentials).toBe(1)
     expect(localStore.undecryptableCredentials).toBe(0)
@@ -1159,8 +1205,9 @@ describe('BrowserStore (key epochs)', () => {
 
     const listed = await localStore.listCredentials()
 
-    // The row is skipped and counted on its own axis: it is another reader's
-    // data, so it is neither purgeable garbage nor a descriptor-refresh signal.
+    // The resource replica is skipped and counted on its own axis: it is
+    // another reader's data, so it is neither purgeable garbage nor a
+    // descriptor-refresh signal.
     expect(listed).toHaveLength(0)
     expect(localStore.noEpochKeyCredentials).toBe(1)
     expect(localStore.undecryptableCredentials).toBe(0)
@@ -1172,7 +1219,8 @@ describe('BrowserStore (key epochs)', () => {
       await localStore.rxCollection('privateCredentials').find().exec()
     ).toHaveLength(1)
 
-    // A later key grant (a wider cipher) makes the same row readable.
+    // A later key grant (a wider cipher) makes the same resource replica
+    // readable.
     localStore.setCiphers({
       privateCredentials: makeFakeCipher(),
       walletActivity: makeFakeCipher()
@@ -1182,7 +1230,7 @@ describe('BrowserStore (key epochs)', () => {
   })
 
   it('setCiphers swaps the injected cipher for a subsequent read', async () => {
-    // Start with a cipher that cannot route the row's epoch.
+    // Start with a cipher that cannot route the resource replica's epoch.
     const { localStore } = await initLocalStore({
       ciphers: {
         privateCredentials: makeUnknownEpochCipher(),
@@ -1202,11 +1250,11 @@ describe('BrowserStore (key epochs)', () => {
       } as Json
     })
 
-    // Under the stale cipher the row is invisible (unknown epoch).
+    // Under the stale cipher the resource replica is invisible (unknown epoch).
     expect(await localStore.listCredentials()).toHaveLength(0)
     expect(localStore.unknownEpochCredentials).toBe(1)
 
-    // Swap in a cipher that decrypts it; the same row now reads.
+    // Swap in a cipher that decrypts it; the same resource replica now reads.
     localStore.setCiphers({
       privateCredentials: makeFakeCipher(),
       walletActivity: makeFakeCipher()
@@ -1230,25 +1278,26 @@ describe('BrowserStore (contacts encryption)', () => {
       contact: { givenName: 'Bob' } as never,
       writerId: 'writer-1'
     })
-    const contactRow = (await localStore
+    const contactResource = (await localStore
       .rxCollection('contacts')
       .findOne(stored.id)
       .exec())!.toMutableJSON()
     // Previously the contact writers dropped the epoch; it is now stamped.
-    expect(contactRow.epoch).toBe('did:key:z6EpochOne')
-    expect((contactRow.data as { jwe?: unknown }).jwe).toBeDefined()
+    expect(contactResource.epoch).toBe('did:key:z6EpochOne')
+    expect((contactResource.data as { jwe?: unknown }).jwe).toBeDefined()
 
-    // An in-place edit re-stamps the epoch (the row keeps its stable id).
+    // An in-place edit re-stamps the epoch (the resource replica keeps its
+    // stable id).
     await localStore.updateContact({
       id: stored.id,
       contact: { givenName: 'Bobby' } as never,
       writerId: 'writer-1'
     })
-    const updatedRow = (await localStore
+    const updatedResource = (await localStore
       .rxCollection('contacts')
       .findOne(stored.id)
       .exec())!.toMutableJSON()
-    expect(updatedRow.epoch).toBe('did:key:z6EpochOne')
+    expect(updatedResource.epoch).toBe('did:key:z6EpochOne')
     expect((await localStore.loadContact({ id: stored.id }))!.contact).toEqual({
       givenName: 'Bobby'
     })
@@ -1260,10 +1309,10 @@ describe('BrowserStore (contacts encryption)', () => {
         snapshot: { givenName: 'Bob' }
       } as never
     })
-    const revisionRow = (
+    const revisionResource = (
       await localStore.rxCollection('contactsHistory').find().exec()
     )[0].toMutableJSON()
-    expect(revisionRow.epoch).toBe('did:key:z6EpochOne')
+    expect(revisionResource.epoch).toBe('did:key:z6EpochOne')
     const revisions = await localStore.listContactRevisions({
       contactId: stored.contactId
     })
@@ -1277,10 +1326,11 @@ describe('BrowserStore (contacts encryption)', () => {
         contactsHistory: makeFakeContentCipher()
       }
     })
-    // A head row written before the contacts collection was encrypted. A
-    // fresh encrypt would bind its own minted id as `was.resource` while the
-    // write goes to this row id, so the update refuses rather than writing an
-    // envelope a Collection-handle read would reject as swapped.
+    // A head resource replica written before the contacts collection was
+    // encrypted. A fresh encrypt would bind its own minted id as `was.resource`
+    // while the write goes to this resource id, so the update refuses rather
+    // than writing an envelope a Collection-handle read would reject as
+    // swapped.
     const plaintextHead = {
       contactId: 'c-legacy',
       updatedAt: '2026-01-01T00:00:00.000Z',
@@ -1302,13 +1352,13 @@ describe('BrowserStore (contacts encryption)', () => {
       })
     ).rejects.toThrow(/not an encrypted envelope/)
 
-    // The row is untouched.
-    const row = (await localStore
+    // The resource replica is untouched.
+    const resource = (await localStore
       .rxCollection('contacts')
       .findOne('legacy-plaintext-head')
       .exec())!.toMutableJSON()
-    expect(row.data).toEqual(plaintextHead)
-    expect(row.version).toBe(1)
+    expect(resource.data).toEqual(plaintextHead)
+    expect(resource.version).toBe(1)
   })
 
   it('tolerates an unknown-epoch contact row rather than throwing', async () => {
@@ -1329,8 +1379,8 @@ describe('BrowserStore (contacts encryption)', () => {
       } as Json
     })
 
-    // The unified read skeleton skips the unroutable row (it is not garbage),
-    // so the list read succeeds with the row simply omitted.
+    // The unified read skeleton skips the unroutable resource replica (it is
+    // not garbage), so the list read succeeds with it simply omitted.
     expect(await localStore.listContacts()).toHaveLength(0)
   })
 })
@@ -1730,7 +1780,8 @@ describe('StorageManager (remote-direct popup mode)', () => {
     const cid = await cidFrom({ doc: credential })
 
     await storage.addCredential({ credential, user })
-    // A re-add dedupes against the remote contents (no second envelope row).
+    // A re-add dedupes against the remote contents (no second envelope
+    // Resource).
     await storage.addCredential({ credential, user })
 
     expect(collections.get('privateCredentials')!.size).toBe(1)
@@ -1802,10 +1853,12 @@ describe('StorageManager (remote-direct popup mode)', () => {
     await storage.addCredential({ credential: makeCredential('Alice'), user })
 
     // The single written resource in each collection carries its cipher's epoch.
-    const [credRow] = [...collections.get('privateCredentials')!.keys()]
-    expect(epochs.get('privateCredentials')!.get(credRow)).toBe('epoch-cred')
-    const [histRow] = [...collections.get('walletActivity')!.keys()]
-    expect(epochs.get('walletActivity')!.get(histRow)).toBe('epoch-hist')
+    const [credResourceId] = [...collections.get('privateCredentials')!.keys()]
+    expect(epochs.get('privateCredentials')!.get(credResourceId)).toBe(
+      'epoch-cred'
+    )
+    const [histResourceId] = [...collections.get('walletActivity')!.keys()]
+    expect(epochs.get('walletActivity')!.get(histResourceId)).toBe('epoch-hist')
   })
 
   it('routes deleteCredential to the remote backend (not the empty local store)', async () => {
@@ -1828,7 +1881,8 @@ describe('StorageManager (remote-direct popup mode)', () => {
 
     await storage.deleteCredential({ cid })
 
-    // The remote row is gone; nothing ever touched the local partitioned store.
+    // The remote Resource is gone; nothing ever touched the local partitioned
+    // store.
     expect(collections.get('privateCredentials')!.size).toBe(0)
     expect(await storage.listCredentials()).toHaveLength(0)
   })
@@ -1863,12 +1917,14 @@ describe('RemoteDirectStore', () => {
       ciphers: { privateCredentials: stale, walletActivity: makeFakeCipher() }
     })
 
-    // The unknown-epoch row is skipped (not undecryptable) and counted apart.
+    // The unknown-epoch Resource is skipped (not undecryptable) and counted
+    // apart.
     expect(await store.listCredentials()).toHaveLength(0)
     expect(store.unknownEpochCredentials).toBe(1)
     expect(store.undecryptableCredentials).toBe(0)
 
-    // A descriptor refresh swaps in a cipher that can decrypt it; the row re-reads.
+    // A descriptor refresh swaps in a cipher that can decrypt it; the Resource
+    // re-reads.
     store.setCiphers({
       privateCredentials: good,
       walletActivity: makeFakeCipher()
@@ -2001,7 +2057,7 @@ describe('RemoteDirectStore', () => {
 describe('RemoteDirectStore contacts', () => {
   /**
    * A store over the fake remote with contacts-shaped ciphers (mutable
-   * random-id heads, content-derived history rows).
+   * random-id heads, content-derived history Resources).
    */
   function makeContactsStore({ epoch }: { epoch?: string } = {}) {
     const fake = makeFakeRemoteStore()
@@ -2027,7 +2083,7 @@ describe('RemoteDirectStore contacts', () => {
     expect(stored.contactId).toBeTruthy()
     expect(stored.contactId).not.toBe(stored.id)
 
-    // Exactly one remote head row, stamped with the cipher's epoch.
+    // Exactly one remote head Resource, stamped with the cipher's epoch.
     expect(collections.get('contacts')!.size).toBe(1)
     expect(epochs.get('contacts')!.get(stored.id)).toBe('epoch-contacts')
 
@@ -2051,7 +2107,7 @@ describe('RemoteDirectStore contacts', () => {
       writerId: 'writer-b'
     })
 
-    // Same row, same logical identity, fresh content and advanced version.
+    // Same Resource, same logical identity, fresh content and advanced version.
     expect(updated.id).toBe(stored.id)
     expect(updated.contactId).toBe(stored.contactId)
     expect(collections.get('contacts')!.size).toBe(1)
@@ -2108,7 +2164,7 @@ describe('RemoteDirectStore contacts', () => {
       writerId: 'writer-b'
     })
 
-    // The edit converged on the fresh head: same row and identity, this
+    // The edit converged on the fresh head: same Resource and identity, this
     // client's content on top (the replication driver's LWW outcome), and the
     // version advanced past the concurrent writer's.
     expect(updated.id).toBe(stored.id)
@@ -2174,7 +2230,8 @@ describe('RemoteDirectStore contacts', () => {
       })
     ).rejects.toThrow(/not an encrypted envelope/)
 
-    // Nothing was written: the head is still the plaintext row at its version.
+    // Nothing was written: the head is still the plaintext Resource at its
+    // version.
     expect(collections.get('contacts')!.get('legacy-plaintext-head')).toEqual(
       plaintextHead
     )
@@ -2183,9 +2240,9 @@ describe('RemoteDirectStore contacts', () => {
 
   it('treats a transport-retried create reported as 412 as its own successful write', async () => {
     // The http client retries an idempotent PUT whose success response was
-    // lost; the retry hits `If-None-Match: *` on the row the first attempt
-    // already created and surfaces `created: false`. The add re-reads the row
-    // and recognizes its own freshly minted contactId as success.
+    // lost; the retry hits `If-None-Match: *` on the Resource the first attempt
+    // already created and surfaces `created: false`. The add re-reads the
+    // Resource and recognizes its own freshly minted contactId as success.
     const { store, remoteStore, collections } = makeContactsStore()
     const rawPut = remoteStore.putSyncedResource.bind(remoteStore)
     remoteStore.putSyncedResource = (async (options: {
@@ -2210,7 +2267,7 @@ describe('RemoteDirectStore contacts', () => {
   })
 
   it("refuses a create collision that is not this call's own write", async () => {
-    // `created: false` with no row (or another writer's row) behind it is a
+    // `created: false` with no Resource (or another writer's) behind it is a
     // genuinely lost create, not a transport retry: it must throw.
     const { store, remoteStore } = makeContactsStore()
     remoteStore.putSyncedResource = (async () => ({
@@ -2245,9 +2302,9 @@ describe('RemoteDirectStore contacts', () => {
       writerId: 'writer-a'
     })
 
-    // A concurrent writer rewrites the head between this client's read and
-    // its conditional DELETE exactly once: the first If-Match delete answers
-    // 412, the re-read picks up the fresh ETag, and the retry removes the row.
+    // A concurrent writer rewrites the head between this client's read and its
+    // conditional DELETE exactly once: the first If-Match delete answers 412,
+    // the re-read picks up the fresh ETag, and the retry removes the Resource.
     const rawDelete = remoteStore.deleteSyncedResource.bind(remoteStore)
     let raced = false
     remoteStore.deleteSyncedResource = (async (options: {
@@ -2302,13 +2359,13 @@ describe('RemoteDirectStore contacts', () => {
     } as unknown as ContactRevisionPayload
 
     await store.addContactRevision({ revision })
-    // The identical revision converges on the identical content-derived id:
-    // the re-append is a no-op, never a duplicate row and never an error.
+    // The identical revision converges on the identical content-derived id: the
+    // re-append is a no-op, never a duplicate Resource and never an error.
     await store.addContactRevision({ revision })
 
     expect(collections.get('contactsHistory')!.size).toBe(1)
-    const [rowId] = [...collections.get('contactsHistory')!.keys()]
-    expect(epochs.get('contactsHistory')!.has(rowId)).toBe(true)
+    const [resourceId] = [...collections.get('contactsHistory')!.keys()]
+    expect(epochs.get('contactsHistory')!.has(resourceId)).toBe(true)
   })
 
   it("lists one contact's revisions newest first, filtering and tolerating bad rows", async () => {
@@ -2351,7 +2408,7 @@ describe('RemoteDirectStore contacts', () => {
         writerId: 'writer-a'
       } as unknown as ContactRevisionPayload
     })
-    // A poisoned history row must not brick the whole listing.
+    // A poisoned history Resource must not brick the whole listing.
     collections.get('contactsHistory')!.set('z6Poison', {
       id: 'z6Poison',
       sequence: 0,

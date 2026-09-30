@@ -22,6 +22,7 @@ vi.mock('@interop/wallet-core/menders', async importOriginal => ({
 
 import { runMenderBlock } from '@interop/wallet-core/menders'
 import { startLoginMenderBlock } from '@/session/menders/run'
+import { armEncounterGate } from '@/session/sessionLifecycle'
 import { TRANSIENT_REGISTRATIONS } from '@/session/menders'
 import { captureCeremonyEvents } from './ceremonyEventCapture'
 
@@ -103,6 +104,59 @@ describe('the block starter', () => {
     expect((await session.mends)!.map(entry => entry.invariant)).toEqual([
       'did-web-projection-matches-the-log'
     ])
+  })
+})
+
+describe('the encounter gate', () => {
+  /**
+   * Whether a promise has settled, read after the pending microtasks run.
+   *
+   * @param promise {Promise<unknown>}
+   * @returns {Promise<boolean>}
+   */
+  async function hasSettled(promise: Promise<unknown>): Promise<boolean> {
+    let settled = false
+    void promise.then(() => {
+      settled = true
+    })
+    await new Promise(resolve => setTimeout(resolve, 0))
+    return settled
+  }
+
+  it('stays shut while the block runs and opens behind registryReady', async () => {
+    let finish: () => void = () => undefined
+    vi.mocked(runMenderBlock).mockReturnValue(
+      new Promise(resolve => {
+        finish = () => resolve([])
+      })
+    )
+    // A ladder-held session, so the transient chain's registry writers are
+    // admitted and `registryReady` waits on them.
+    const session = {
+      profile: { ladderSeed: new Uint8Array(32), standingUnlock: {} }
+    } as unknown as Session
+    // Armed at construction, before the block exists: a mend raised then
+    // waits for the block rather than running at once.
+    armEncounterGate({ session, blockFollows: true })
+    expect(await hasSettled(session.encounterGate)).toBe(false)
+
+    startLoginMenderBlock({
+      accumulator: mendReportAccumulator<CeremonyId>(),
+      route: { popup: false },
+      deps: fakeDeps(session)
+    })
+    expect(await hasSettled(session.registryReady!)).toBe(false)
+    expect(await hasSettled(session.encounterGate)).toBe(false)
+
+    finish()
+    await session.registryReady
+    await expect(session.encounterGate).resolves.toBeUndefined()
+  })
+
+  it('opens at construction on a session that starts no block', async () => {
+    const session = fakeSession()
+    armEncounterGate({ session, blockFollows: false })
+    expect(await hasSettled(session.encounterGate)).toBe(true)
   })
 })
 

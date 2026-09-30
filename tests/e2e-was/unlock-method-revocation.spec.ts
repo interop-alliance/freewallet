@@ -172,7 +172,7 @@ async function revokeOnlyRecoveryCode(page: Page): Promise<void> {
   await expect(revokeButton).toHaveCount(1, { timeout: 30_000 })
   await expect(revokeButton).toBeEnabled({ timeout: 30_000 })
   await revokeButton.click()
-  // A success is the row leaving the registry; a failed management invocation
+  // A success is the entry leaving the registry; a failed management invocation
   // would instead surface the revoke error alert.
   await expect(
     page.getByText('No recovery codes have been generated yet.')

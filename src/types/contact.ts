@@ -10,13 +10,13 @@ import type { ContactData } from '@interop/social-core'
 /**
  * A contact as returned by the storage layer. Two identifiers, deliberately
  * distinct (matching Freewallet mobile, which mints them separately): `id` is
- * the stable row id -- the WAS resourceId of the `contacts` head document, a
- * transport-level key used for row addressing (routes, update/delete) --
- * while `contactId` is the logical contact identity carried inside the head
- * payload (`head.contactId`, mobile's local `_id`), the key every
- * `contacts-history` revision refers to. Only `contactId` is meaningful
- * across replicas; conflating the two breaks history for mobile-authored
- * contacts, whose resourceId differs from their `contactId`.
+ * the stable resource id -- the WAS resourceId of the `contacts` head document,
+ * a transport-level key used for addressing (routes, update/delete) -- while
+ * `contactId` is the logical contact identity carried inside the head payload
+ * (`head.contactId`, mobile's local `_id`), the key every `contacts-history`
+ * revision refers to. Only `contactId` is meaningful across replicas;
+ * conflating the two breaks history for mobile-authored contacts, whose
+ * resourceId differs from their `contactId`.
  */
 export interface StoredContact {
   id: string

@@ -146,7 +146,9 @@ remote-direct backend as every transient session does. A remembered popup
 session gets there by routing: every synced-collection operation goes to a
 `RemoteDirectStore` (`src/stores/remoteDirectStore.ts`, selected via
 `remoteDirect`, threaded from the `popup` option) rather than to the local
-`BrowserStore`, which it still constructs with nothing routed to it.
+`BrowserStore`, which it still constructs and opens with nothing routed to
+it. The popup page releases it with `closeUnenteredSession` when the session
+is replaced or the page unmounts, so the handle does not outlive the session.
 
 That backend serves credential, history, and public-link reads and writes
 straight over the remote WAS collections, with the same per-collection
@@ -160,8 +162,8 @@ EDV envelope under its content-derived envelope-hash id, created with
 drives the same one-time descriptor refresh the local backend uses, so a
 fresh-epoch credential is never dropped.
 
-Contacts are reachable in the popup over the same path. Head rows are
-mutable and updated in place under `If-Match` compare-and-swap, with ids and
+Contacts are reachable in the popup over the same path. Head Resources
+are mutable and updated in place under `If-Match` compare-and-swap, with ids and
 epoch stamps matching what replication would have pushed, so a local replica
 pulls the popup's contact edits cleanly. A delete leaves the server's own
 tombstone, which the pull side maps to a removal like any other.

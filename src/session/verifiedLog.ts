@@ -25,6 +25,11 @@
  * freshness every other cached account read has. When in doubt, invalidate:
  * an extra verification costs a fetch, a missed one shows a stale document.
  *
+ * A reader that needs another client's entries mid-visit (a roster entry
+ * anchored past the memo) calls `refreshVerifiedAccountLog`. It re-verifies
+ * without blanking the memo, so a surface that only peeks keeps seeing the
+ * old document until the new one lands, and keeps it if the refresh fails.
+ *
  * Ceremonies that verify a log for an account this session is not (the
  * `/recover` page before a session exists, the enrollee's cold-client
  * verify) call `verifyAccountLog` directly -- there is no session profile to
@@ -50,6 +55,9 @@ export interface VerifiedLogCache {
     pointer: AccountLogPointer
     verified: VerifiedAccountLog
   }) => void
+  refresh: (options: {
+    pointer: AccountLogPointer
+  }) => Promise<VerifiedAccountLog>
   invalidate: () => void
 }
 
@@ -87,43 +95,69 @@ export function createVerifiedLogCache({
   // ask what this session has already verified. Set only on success, cleared
   // wherever `pending` is.
   let settled: VerifiedAccountLog | undefined
-  return {
-    get({ pointer }) {
-      const wanted = pointerKey({ pointer })
-      if (pending && key === wanted) {
-        return pending
-      }
-      key = wanted
-      settled = undefined
-      const verification = verifyAccountLog({
-        did: pointer.did,
-        spaceId: pointer.spaceId,
-        host: pointer.host,
-        // The account-log chain-head pin: a served log that forks, rolls
-        // back, or switches identity against it is refused here, before
-        // anything downstream reads the memo.
-        pinStore
+  // The in-flight re-verification `refresh` started, shared by concurrent
+  // refreshers. It never replaces `pending` or `settled` until it lands.
+  let refreshing: Promise<VerifiedAccountLog> | undefined
+  // Bumped whenever the memo is replaced or dropped (a new verification, a
+  // prime, an invalidation), so a refresh that lands after one of those does
+  // not overwrite what replaced the value it was refreshing.
+  let generation = 0
+  /**
+   * Verifies the log a pointer names under the account-log chain-head pin:
+   * a served log that forks, rolls back, or switches identity against it is
+   * refused here, before anything downstream reads the memo.
+   *
+   * @param options {object}
+   * @param options.pointer {AccountLogPointer}
+   * @returns {Promise<VerifiedAccountLog>}
+   */
+  function verify({
+    pointer
+  }: {
+    pointer: AccountLogPointer
+  }): Promise<VerifiedAccountLog> {
+    return verifyAccountLog({
+      did: pointer.did,
+      spaceId: pointer.spaceId,
+      host: pointer.host,
+      pinStore
+    })
+  }
+  function get({
+    pointer
+  }: {
+    pointer: AccountLogPointer
+  }): Promise<VerifiedAccountLog> {
+    const wanted = pointerKey({ pointer })
+    if (pending && key === wanted) {
+      return pending
+    }
+    key = wanted
+    settled = undefined
+    generation += 1
+    const verification = verify({ pointer })
+      .then(verified => {
+        if (key === wanted) {
+          settled = verified
+        }
+        return verified
       })
-        .then(verified => {
-          if (key === wanted) {
-            settled = verified
-          }
-          return verified
-        })
-        .catch(err => {
-          // A failed verification is never the cached answer: drop it so the
-          // next caller re-reads (an unreachable host is transient; a
-          // genuinely broken log fails again, loudly, at the same place).
-          if (key === wanted) {
-            key = undefined
-            pending = undefined
-            settled = undefined
-          }
-          throw err
-        })
-      pending = verification
-      return verification
-    },
+      .catch(err => {
+        // A failed verification is never the cached answer: drop it so the
+        // next caller re-reads (an unreachable host is transient; a
+        // genuinely broken log fails again, loudly, at the same place).
+        if (key === wanted) {
+          key = undefined
+          pending = undefined
+          settled = undefined
+        }
+        throw err
+      })
+    pending = verification
+    return verification
+  }
+  return {
+    get,
     peek({ pointer }) {
       return key === pointerKey({ pointer }) ? settled : undefined
     },
@@ -131,11 +165,43 @@ export function createVerifiedLogCache({
       key = pointerKey({ pointer })
       pending = Promise.resolve(verified)
       settled = verified
+      generation += 1
+    },
+    refresh({ pointer }) {
+      // Nothing settled for this pointer yet: there is no old value to keep
+      // visible, so a refresh is an ordinary read (joining one in flight).
+      if (key !== pointerKey({ pointer }) || settled === undefined) {
+        return get({ pointer })
+      }
+      if (refreshing) {
+        return refreshing
+      }
+      const startedAt = generation
+      const verification = verify({ pointer })
+        .then(verified => {
+          // The memo and the pin advance together: the pin moved inside the
+          // verification, and the memo moves here, unless something replaced
+          // or dropped the memo while this ran.
+          if (generation === startedAt) {
+            pending = Promise.resolve(verified)
+            settled = verified
+            generation += 1
+          }
+          return verified
+        })
+        .finally(() => {
+          if (refreshing === verification) {
+            refreshing = undefined
+          }
+        })
+      refreshing = verification
+      return verification
     },
     invalidate() {
       key = undefined
       pending = undefined
       settled = undefined
+      generation += 1
     }
   }
 }
@@ -177,6 +243,42 @@ export async function verifiedAccountLog({
     pinStore: persistence.logPins
   })
   return await profile.verifiedLog.get({
+    pointer: { did: target.did, spaceId: target.spaceId, host: target.host }
+  })
+}
+
+/**
+ * Re-verifies the account log and advances the memo to the result, for a
+ * reader that must see entries another client appended since the memo was
+ * taken. Unlike {@link reprimeVerifiedAccountLog} it never blanks the memo:
+ * {@link peekVerifiedAccountLog} keeps answering with the old document until
+ * the new verification lands, and a failed refresh leaves the old document in
+ * place and rethrows. The memo and the chain-head pin advance together, as on
+ * every other verification. Concurrent refreshes share one verification. A
+ * memo with nothing settled for the pointer is simply read, as
+ * {@link verifiedAccountLog} reads it.
+ *
+ * @param options {object}
+ * @param options.session {object}   the live session's profile and
+ *   persistence strategy
+ * @returns {Promise<VerifiedAccountLog>}   the freshly verified log
+ */
+export async function refreshVerifiedAccountLog({
+  session: { profile, persistence }
+}: {
+  session: SessionCore
+}): Promise<VerifiedAccountLog> {
+  const target = profile.accountPointer
+  if (!target?.did) {
+    throw new Error(
+      'Refreshing the account log needs an account pointer naming a DID; ' +
+        'this session holds none.'
+    )
+  }
+  profile.verifiedLog ??= createVerifiedLogCache({
+    pinStore: persistence.logPins
+  })
+  return await profile.verifiedLog.refresh({
     pointer: { did: target.did, spaceId: target.spaceId, host: target.host }
   })
 }

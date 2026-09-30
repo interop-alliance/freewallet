@@ -1,5 +1,5 @@
 /**
- * The archived rows the content-migration tests feed the import methods:
+ * The archived Resources the content-migration tests feed the import methods:
  * a credential, a contact head, a contact revision, and the two activity
  * shapes the walk classifies. They are shared between the store-level tests
  * and the ceremony's, so both sides argue about the same bodies.
@@ -13,7 +13,7 @@ import type {
 import type { WalletActivity } from '@/stores/storageManager'
 
 /**
- * The timestamp every fixture row carries unless it is given another.
+ * The timestamp every fixture carries unless it is given another.
  */
 export const FIXTURE_TIMESTAMP = '2024-03-04T05:06:07.000Z'
 
@@ -23,7 +23,7 @@ export const FIXTURE_TIMESTAMP = '2024-03-04T05:06:07.000Z'
  * @param name {string}
  * @returns {IVerifiableCredential}
  */
-export function credentialRow(name: string): IVerifiableCredential {
+export function credentialResource(name: string): IVerifiableCredential {
   return {
     '@context': ['https://www.w3.org/2018/credentials/v1'],
     type: ['VerifiableCredential'],
@@ -42,7 +42,7 @@ export function credentialRow(name: string): IVerifiableCredential {
  * @param [options.writerId] {string}
  * @returns {ContactHeadPayload}
  */
-export function headRow({
+export function headResource({
   contactId,
   displayName,
   updatedAt = FIXTURE_TIMESTAMP,
@@ -70,7 +70,7 @@ export function headRow({
  * @param [options.timestamp] {string}
  * @returns {ContactRevisionPayload}
  */
-export function revisionRow({
+export function revisionResource({
   contactId,
   displayName,
   timestamp = FIXTURE_TIMESTAMP
@@ -96,7 +96,7 @@ export function revisionRow({
  * @param options.summary {string}
  * @returns {WalletActivity}
  */
-export function activityRow({
+export function activityResource({
   id,
   summary
 }: {
@@ -121,7 +121,7 @@ export function activityRow({
  * @param options.cid {string}
  * @returns {WalletActivity}
  */
-export function credentialActivityRow({
+export function credentialActivityResource({
   id,
   type,
   cid
@@ -149,7 +149,7 @@ export function credentialActivityRow({
  * @param options.type {string}
  * @returns {WalletActivity}
  */
-export function authorityActivityRow({
+export function authorityActivityResource({
   id,
   type
 }: {

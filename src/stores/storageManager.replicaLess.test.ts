@@ -61,7 +61,9 @@ import {
   inMemorySessionPersistence,
   transientSessionStores
 } from '@/session/persistence'
-import type { ControllerProfile, User } from '@/types/auth'
+import type { ControllerProfile, Session, User } from '@/types/auth'
+import { mintUserKey, userKeyVaultKeys } from '@interop/wallet-core/keys'
+import { adoptFollowerUserKey } from '@/session/userKeyAdoption'
 import { BrowserStore } from './browserStore'
 import { StorageManager, type DescriptorLogs } from './storageManager'
 import { WASRemoteStore } from './wasRemoteStore'
@@ -595,7 +597,7 @@ describe('replica-less remote-direct StorageManager', () => {
       expect(await storage.listContacts()).toEqual([stored])
       expect(await storage.loadContact({ id: stored.id })).toEqual(stored)
 
-      // Update rewrites the same row in place, preserving the identity.
+      // Update rewrites the same Resource in place, preserving the identity.
       const updated = await storage.updateContact({
         id: stored.id,
         contact: { displayName: 'Alicia' }
@@ -699,8 +701,8 @@ describe('replica-less remote-direct StorageManager', () => {
         firstEpoch,
         freshEpoch
       ])
-      // ...and the pre-rotation row still reads, the rotated key having been
-      // escrowed into the epoch it was sealed under.
+      // ...and the pre-rotation Resource still reads, the rotated key having
+      // been escrowed into the epoch it was sealed under.
       const listed = await storage.listCredentials()
       expect(listed.map(({ vc }) => vc)).toEqual(
         expect.arrayContaining([before, after])
@@ -812,6 +814,133 @@ describe('replica-less remote-direct StorageManager', () => {
       await storage.addCredential({ credential, user })
       const listed = await storage.listCredentials()
       expect(listed.map(({ vc }) => vc)).toEqual([credential])
+    } finally {
+      initClientSpy.mockRestore()
+    }
+  })
+
+  it('tells the stranded callback once when a rebuild records a strand, and not before it is set', async () => {
+    const retired = await generateKey()
+    const { remoteStore, descriptorLogs, provision, rotate } = makeFakeRemote()
+    await provision(retired)
+    const current = await generateKey()
+
+    const persistence = inMemorySessionPersistence({
+      stores: transientSessionStores(),
+      clientAnnex: {
+        clientAnnexDid: 'did:webvh:example:annex',
+        invocationCapability: {} as IZcap
+      }
+    })
+    const user: User = { id: 'did:key:z6MkTestClient' }
+    const profile = {
+      zcapClient: {} as ZcapClient,
+      keyAgreementKey: current.keyAgreementKey,
+      keyResolver: current.keyResolver
+    } as ControllerProfile
+
+    const initClientSpy = vi
+      .spyOn(WASRemoteStore, 'initClient')
+      .mockResolvedValue({ remoteStore })
+    try {
+      const { storage } = await StorageManager.initStorageClients({
+        user,
+        session: { profile, persistence },
+        descriptorLogs
+      })
+      // The construction-time strands are there to read; nothing was told,
+      // since no callback existed yet.
+      expect(storage.strandedCollectionIds.length).toBeGreaterThan(0)
+      const onStranded = vi.fn()
+      storage.setOnStranded(onStranded)
+      await new Promise(resolve => setTimeout(resolve, 0))
+      expect(onStranded).not.toHaveBeenCalled()
+
+      // A refresh that leaves the collections stranded tells it once, with
+      // no argument.
+      await storage.refreshEncryptedDescriptors()
+      await new Promise(resolve => setTimeout(resolve, 0))
+      expect(onStranded).toHaveBeenCalledTimes(1)
+      expect(onStranded).toHaveBeenCalledWith()
+
+      // A refresh past the fan-out records no strand and tells nothing.
+      await rotate({ from: retired, to: current })
+      await storage.refreshEncryptedDescriptors()
+      await new Promise(resolve => setTimeout(resolve, 0))
+      expect(storage.strandedCollectionIds).toEqual([])
+      expect(onStranded).toHaveBeenCalledTimes(1)
+    } finally {
+      initClientSpy.mockRestore()
+    }
+  })
+
+  it('records a collection the follower adoption reaches before the fan-out as stranded, without throwing', async () => {
+    const k1 = await mintUserKey()
+    const k2 = await mintUserKey()
+    const k1Vault = userKeyVaultKeys({ userKey: k1 })
+    const { remoteStore, descriptorLogs, provision } = makeFakeRemote()
+    // Another client rotated the roster to K2 and its fan-out tore before
+    // reaching any collection: every collection still names K1 alone.
+    await provision(k1Vault)
+
+    const persistence = inMemorySessionPersistence({
+      stores: transientSessionStores(),
+      clientAnnex: {
+        clientAnnexDid: 'did:webvh:example:annex',
+        invocationCapability: {} as IZcap
+      }
+    })
+    const user: User = { id: 'did:key:z6MkTestClient' }
+    const profile = {
+      zcapClient: {} as ZcapClient,
+      keyAgreementKey: k1Vault.keyAgreementKey,
+      keyResolver: k1Vault.keyResolver,
+      userKey: k1,
+      accountPointer: {
+        did: 'did:webvh:QmScid:was.example:space:s-space',
+        spaceId: 's-space',
+        host: 'https://was.example'
+      }
+    } as ControllerProfile
+
+    const initClientSpy = vi
+      .spyOn(WASRemoteStore, 'initClient')
+      .mockResolvedValue({ remoteStore })
+    try {
+      const { storage } = await StorageManager.initStorageClients({
+        user,
+        session: { profile, persistence },
+        descriptorLogs
+      })
+      expect(storage.strandedCollectionIds).toEqual([])
+      const session = {
+        user,
+        profile,
+        storage,
+        persistence,
+        isGuest: false,
+        disposal: new AbortController().signal,
+        encounterGate: Promise.resolve()
+      } as Session
+      const roster = {
+        scheme: 'edv',
+        currentEpoch: k2.id,
+        epochs: [
+          { id: k1.id, recipients: [] },
+          { id: k2.id, recipients: [] }
+        ]
+      } as unknown as CollectionEncryption
+
+      const result = await adoptFollowerUserKey({
+        session,
+        read: { descriptor: roster, userKey: k2, latestEpochId: k2.id }
+      })
+
+      expect(result).toEqual({ adopted: true, position: 'current' })
+      expect(session.profile.userKey).toBe(k2)
+      expect([...storage.strandedCollectionIds].sort()).toEqual(
+        [...ENCRYPTED_COLLECTION_IDS].sort()
+      )
     } finally {
       initClientSpy.mockRestore()
     }

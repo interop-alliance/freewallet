@@ -1,15 +1,16 @@
 /**
  * The one classifier over a failed envelope decrypt. Every store that reads
- * encrypted rows sorts a decrypt failure into the same four buckets, and each
- * bucket has its own handling: an unknown-epoch row is skipped uncached and
- * drives a descriptor refresh, a row this wallet holds no epoch key for is
- * skipped but is real data no refresh can reach, a row that fails its integrity
- * check is skipped and never collected, and anything else is purgeable garbage.
+ * encrypted Resources sorts a decrypt failure into the same four buckets, and
+ * each bucket has its own handling: an unknown-epoch Resource is skipped
+ * uncached and drives a descriptor refresh, a Resource this wallet holds no
+ * epoch key for is skipped but is real data no refresh can reach, a Resource
+ * that fails its integrity check is skipped and never collected, and anything
+ * else is purgeable garbage.
  *
- * The integrity bucket narrows what is left in the purgeable one. A row sealed
- * under a KAK this wallet holds no key for raises `KeyUnwrapError`, and a body
- * that fails to authenticate or was served under an id it was not sealed for
- * raises `IntegrityError`, so `undecryptable` now names structural garbage
+ * The integrity bucket narrows what is left in the purgeable one. A Resource
+ * sealed under a KAK this wallet holds no key for raises `KeyUnwrapError`, and
+ * a body that fails to authenticate or was served under an id it was not sealed
+ * for raises `IntegrityError`, so `undecryptable` now names structural garbage
  * alone: an envelope that will not parse or decode at all.
  */
 import {

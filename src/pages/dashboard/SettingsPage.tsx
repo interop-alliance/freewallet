@@ -66,6 +66,11 @@ import { RecoveryCodesSection } from '@/components/RecoveryCodesSection'
 import { BackupCredentialsSection } from '@/components/BackupCredentialsSection'
 import { EnrolledClientsSection } from '@/components/EnrolledClientsSection'
 import { useAsyncLoad } from '@/hooks/useAsyncLoad'
+import {
+  encounterLostRosterWrap,
+  mendUnlockRegistrySeal,
+  rosterWrapLostCopyKey
+} from '@/session/menders/encounterSites'
 import { dashboardStyles } from '@/styles/appStyles'
 import { type ReactNode, useEffect, useState } from 'react'
 import { useAuthStore } from '@/stores/authStore'
@@ -330,6 +335,20 @@ export function SettingsPage() {
   // re-seal repair mends it -- so it gets copy that says so rather than the
   // generic "could not load".
   const [registryStaleSeal, setRegistryStaleSeal] = useState(false)
+  // A stale seal found at mount is mended in place: the session follows a
+  // rotation another client made, or the registry is re-sealed from the
+  // roster's escrow. While that runs, everything that writes the registry or
+  // tears the session down waits.
+  const [registryRepairing, setRegistryRepairing] = useState(false)
+  // The last stale-seal mend stood down because this session holds no wrap
+  // of the current user key, so the next login does not repair it.
+  const [registryWrapLost, setRegistryWrapLost] = useState(false)
+  let staleSealCopyKey = ladderBranch
+    ? 'settings.passkeyRegistryStaleSealTransient'
+    : 'settings.passkeyRegistryStaleSeal'
+  if (registryWrapLost && session) {
+    staleSealCopyKey = rosterWrapLostCopyKey({ session })
+  }
   // Inline passkey-label editing: one row edits at a time, keyed by the
   // passkey's credentialId.
   const [editingCredentialId, setEditingCredentialId] = useState<string | null>(
@@ -573,22 +592,39 @@ export function SettingsPage() {
         if (isCancelled()) {
           return
         }
-        const record = await loadUnlockRegistry({ session })
+        let record: UnlockMethodsRecord | null
+        try {
+          record = await loadUnlockRegistry({ session })
+        } catch (err) {
+          if (!(err instanceof UnlockRegistryStaleSealError) || isCancelled()) {
+            throw err
+          }
+          // Mended in place, then read again. The mend settles whatever
+          // happens, and a mend that could not land leaves the second read
+          // to throw the stale seal again.
+          setRegistryRepairing(true)
+          const entries = await mendUnlockRegistrySeal({ session })
+          if (isCancelled()) {
+            return
+          }
+          setRegistryWrapLost(encounterLostRosterWrap({ entries }))
+          record = await loadUnlockRegistry({ session })
+        }
         if (!isCancelled()) {
           setUnlockRegistry(record)
           setRegistryLoaded(true)
           setRegistryLoadError(false)
           setRegistryStaleSeal(false)
+          setRegistryWrapLost(false)
+          setRegistryRepairing(false)
         }
       } catch (err) {
         log.error('Could not load the unlock methods', { err })
         if (!isCancelled()) {
           setRegistryLoaded(true)
           setRegistryLoadError(true)
-          setRegistryStaleSeal(
-            err instanceof UnlockRegistryStaleSealError ||
-              (err as { name?: string }).name === 'UnlockRegistryStaleSealError'
-          )
+          setRegistryStaleSeal(err instanceof UnlockRegistryStaleSealError)
+          setRegistryRepairing(false)
         }
       }
     },
@@ -854,7 +890,12 @@ export function SettingsPage() {
         <Divider />
 
         <Stack direction="row" sx={dashboardStyles.settingsRow}>
-          <Button variant="contained" color="error" onClick={openDeleteDialog}>
+          <Button
+            variant="contained"
+            color="error"
+            disabled={registryRepairing}
+            onClick={openDeleteDialog}
+          >
             {t('settings.deleteAccount')}
           </Button>
           <Typography
@@ -943,7 +984,7 @@ export function SettingsPage() {
                         variant="contained"
                         sx={{ alignSelf: 'flex-start' }}
                         loading={addingPassphrase}
-                        disabled={!addPassphraseValid}
+                        disabled={!addPassphraseValid || registryRepairing}
                         onClick={handleAddPassphrase}
                       >
                         {t('settings.addPassphrase')}
@@ -996,6 +1037,7 @@ export function SettingsPage() {
                     sx={{ alignSelf: 'flex-start' }}
                     disabled={
                       changingPassphrase ||
+                      registryRepairing ||
                       oldPassphrase.length === 0 ||
                       !newPassphraseValid
                     }
@@ -1059,13 +1101,16 @@ export function SettingsPage() {
 
               {canListUnlockMethods && (
                 <Stack sx={{ gap: 2, mt: 1, alignItems: 'flex-start' }}>
+                  {registryRepairing && (
+                    <Alert severity="info" sx={{ alignSelf: 'stretch' }}>
+                      {t('settings.passkeyRegistryRepairing')}
+                    </Alert>
+                  )}
                   {registryLoadError && (
                     <Alert severity="warning" sx={{ alignSelf: 'stretch' }}>
-                      {!registryStaleSeal
-                        ? t('settings.passkeyLoadError')
-                        : ladderBranch
-                          ? t('settings.passkeyRegistryStaleSealTransient')
-                          : t('settings.passkeyRegistryStaleSeal')}
+                      {registryStaleSeal
+                        ? t(staleSealCopyKey)
+                        : t('settings.passkeyLoadError')}
                     </Alert>
                   )}
                   {passkeyEntries.length > 0 && (
@@ -1126,7 +1171,10 @@ export function SettingsPage() {
                                     variant="contained"
                                     size="small"
                                     loading={labelSaving}
-                                    disabled={labelDraft.trim().length === 0}
+                                    disabled={
+                                      labelDraft.trim().length === 0 ||
+                                      registryRepairing
+                                    }
                                     onClick={() => handleSaveLabel(entry)}
                                   >
                                     {t('common.save')}
@@ -1188,7 +1236,9 @@ export function SettingsPage() {
                                     alignSelf: 'flex-start'
                                   }}
                                   disabled={
-                                    isLastUnlockMethod || actingCredential
+                                    isLastUnlockMethod ||
+                                    actingCredential ||
+                                    registryRepairing
                                   }
                                   onClick={() => openRemoveDialog(entry)}
                                 >
@@ -1228,6 +1278,7 @@ export function SettingsPage() {
                       <Button
                         variant="contained"
                         loading={addingPasskey}
+                        disabled={registryRepairing}
                         onClick={handleAddPasskey}
                       >
                         {t('settings.addPasskey')}
@@ -1263,11 +1314,20 @@ export function SettingsPage() {
               !isWebvhDid(session.profile.accountPointer?.did) && (
                 <Alert severity="info">{t('settings.unpromotedAccount')}</Alert>
               )}
-            <EnrolledClientsSection session={session} />
+            <EnrolledClientsSection
+              session={session}
+              registryRepairing={registryRepairing}
+            />
             <Divider />
-            <RecoveryCodesSection session={session} />
+            <RecoveryCodesSection
+              session={session}
+              registryRepairing={registryRepairing}
+            />
             <Divider />
-            <BackupCredentialsSection session={session} />
+            <BackupCredentialsSection
+              session={session}
+              registryRepairing={registryRepairing}
+            />
           </>
         )}
 

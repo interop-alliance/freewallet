@@ -1,14 +1,13 @@
 /**
  * Unit tests for the content-migration ceremony: the sink's merge rules over
- * real bundles, and the run record it writes afterwards.
- *
- * Every bundle here is genuinely encrypted -- a user key roster wrapped to a
- * recovery code's identity, one epoch per collection wrapped to that user key,
- * and real envelopes over was-client's own cipher -- packed by
- * `@interop/space-archive` and `@interop/wallet-backup`'s own writers. The
- * account side is a `StorageManager` over a memory-RxDB `BrowserStore` with
- * real ciphers, so a row really round-trips through encrypt and decrypt and no
- * dedupe can be masked by a plaintext store's idempotent insert.
+ * real bundles, and the run record it writes afterwards. Every bundle here is
+ * genuinely encrypted -- a user key roster wrapped to a recovery code's
+ * identity, one epoch per collection wrapped to that user key, and real
+ * envelopes over was-client's own cipher -- packed by `@interop/space-archive`
+ * and `@interop/wallet-backup`'s own writers. The account side is a
+ * `StorageManager` over a memory-RxDB `BrowserStore` with real ciphers, so a
+ * Resource really round-trips through encrypt and decrypt and no dedupe can be
+ * masked by a plaintext store's idempotent insert.
  *
  * A recovery code is the secret throughout: it derives through HKDF where a
  * passphrase would pay Argon2id per test for nothing this file asserts.
@@ -59,11 +58,11 @@ import {
   memorySession
 } from '@/stores/testing/memoryStorageManager'
 import {
-  authorityActivityRow,
-  credentialActivityRow,
-  credentialRow,
-  headRow,
-  revisionRow
+  authorityActivityResource,
+  credentialActivityResource,
+  credentialResource,
+  headResource,
+  revisionResource
 } from '@/stores/testing/migrationFixtures'
 import type { Session } from '@/types/auth'
 import { captureCeremonyEvents } from '../../tests/unit/ceremonyEventCapture'
@@ -156,19 +155,19 @@ function logBody(descriptor: CollectionEncryption): string {
 }
 
 /**
- * One fixture collection: the rows it carries, sealed under an epoch of its
- * own.
+ * One fixture collection: the Resources it carries, sealed under an epoch of
+ * its own.
  */
 interface FixtureCollection {
   collectionId: string
-  rows: unknown[]
+  resources: unknown[]
   metadata?: unknown
 }
 
 /**
  * Builds one fixture bundle: a user key roster wrapped to a fresh recovery
  * code's identity, one epoch per collection wrapped to that user key, and
- * every row sealed under it.
+ * every Resource sealed under it.
  *
  * @param collections {FixtureCollection[]}
  * @returns {Promise<{ bundle: Uint8Array; secret: MigrationSecret }>}
@@ -215,7 +214,7 @@ async function makeBundle(
       ]
     })
   ]
-  for (const { collectionId, rows, metadata } of collections) {
+  for (const { collectionId, resources, metadata } of collections) {
     const { epochId, secret } = await mintEpoch()
     const encryption: CollectionEncryption = {
       scheme: 'edv',
@@ -247,9 +246,9 @@ async function makeBundle(
         }
       })
     ]
-    for (const row of rows) {
+    for (const resource of resources) {
       const { id, envelope } = await cipher.encrypt({
-        data: row as Parameters<typeof cipher.encrypt>[0]['data']
+        data: resource as Parameters<typeof cipher.encrypt>[0]['data']
       })
       files.push(
         jsonFile({
@@ -288,7 +287,7 @@ async function makeBundle(
 }
 
 /**
- * The account's Import activity rows, newest read order first.
+ * The account's Import activities, newest read order first.
  *
  * @param session {Session}
  * @returns {Promise<WalletActivity[]>}
@@ -306,7 +305,7 @@ describe('migrateContent', () => {
     const { bundle, secret } = await makeBundle([
       {
         collectionId: PRIVATE_CREDENTIALS_COLLECTION,
-        rows: [credentialRow('first'), credentialRow('second')]
+        resources: [credentialResource('first'), credentialResource('second')]
       }
     ])
 
@@ -320,9 +319,9 @@ describe('migrateContent', () => {
       second.report.collections[PRIVATE_CREDENTIALS_COLLECTION]
     ).toMatchObject({ accepted: 0, skipped: 2 })
 
-    const rows = await importActivities(session)
-    expect(rows).toHaveLength(1)
-    const object = rows[0].object as {
+    const activities = await importActivities(session)
+    expect(activities).toHaveLength(1)
+    const object = activities[0].object as {
       collections: Record<string, { accepted: number; skipped: number }>
       provenance: string
     }
@@ -339,18 +338,26 @@ describe('migrateContent', () => {
     const { bundle, secret } = await makeBundle([
       {
         collectionId: PRIVATE_CREDENTIALS_COLLECTION,
-        rows: [credentialRow('first'), credentialRow('second')]
+        resources: [credentialResource('first'), credentialResource('second')]
       },
       {
         collectionId: WALLET_ACTIVITY_COLLECTION,
-        rows: [
-          credentialActivityRow({ id: 'act-1', type: 'Create', cid: 'cid-1' }),
-          credentialActivityRow({ id: 'act-2', type: 'Create', cid: 'cid-2' })
+        resources: [
+          credentialActivityResource({
+            id: 'act-1',
+            type: 'Create',
+            cid: 'cid-1'
+          }),
+          credentialActivityResource({
+            id: 'act-2',
+            type: 'Create',
+            cid: 'cid-2'
+          })
         ]
       }
     ])
 
-    // Killed once the credentials are in and before any activity row lands.
+    // Killed once the credentials are in and before any activity lands.
     const controller = new AbortController()
     await expect(
       migrateContent({
@@ -377,7 +384,7 @@ describe('migrateContent', () => {
   it('drops an archived Create only when the account already records one for that cid', async () => {
     const session = await memorySession()
     await session.storage.importActivity({
-      activity: credentialActivityRow({
+      activity: credentialActivityResource({
         id: 'held-create',
         type: 'Create',
         cid: 'cid-held'
@@ -388,13 +395,13 @@ describe('migrateContent', () => {
     const { bundle, secret } = await makeBundle([
       {
         collectionId: WALLET_ACTIVITY_COLLECTION,
-        rows: [
-          credentialActivityRow({
+        resources: [
+          credentialActivityResource({
             id: 'archived-held',
             type: 'Create',
             cid: 'cid-held'
           }),
-          credentialActivityRow({
+          credentialActivityResource({
             id: 'archived-fresh',
             type: 'Create',
             cid: 'cid-fresh'
@@ -419,14 +426,30 @@ describe('migrateContent', () => {
     const { bundle, secret } = await makeBundle([
       {
         collectionId: WALLET_ACTIVITY_COLLECTION,
-        rows: [
-          credentialActivityRow({ id: 'a-1', type: 'Create', cid: 'cid-1' }),
-          credentialActivityRow({ id: 'a-2', type: 'Delete', cid: 'cid-1' }),
-          credentialActivityRow({ id: 'a-3', type: 'Share', cid: 'cid-1' }),
-          credentialActivityRow({ id: 'a-4', type: 'Unshare', cid: 'cid-1' }),
-          authorityActivityRow({ id: 'a-5', type: 'Login' }),
-          authorityActivityRow({ id: 'a-6', type: 'Revoke' }),
-          authorityActivityRow({ id: 'a-7', type: 'CollectionShare' })
+        resources: [
+          credentialActivityResource({
+            id: 'a-1',
+            type: 'Create',
+            cid: 'cid-1'
+          }),
+          credentialActivityResource({
+            id: 'a-2',
+            type: 'Delete',
+            cid: 'cid-1'
+          }),
+          credentialActivityResource({
+            id: 'a-3',
+            type: 'Share',
+            cid: 'cid-1'
+          }),
+          credentialActivityResource({
+            id: 'a-4',
+            type: 'Unshare',
+            cid: 'cid-1'
+          }),
+          authorityActivityResource({ id: 'a-5', type: 'Login' }),
+          authorityActivityResource({ id: 'a-6', type: 'Revoke' }),
+          authorityActivityResource({ id: 'a-7', type: 'CollectionShare' })
         ]
       }
     ])
@@ -451,13 +474,18 @@ describe('migrateContent', () => {
     const { bundle, secret } = await makeBundle([
       {
         collectionId: CONTACTS_COLLECTION,
-        rows: [headRow({ contactId: 'contact-1', displayName: 'Ada' })]
+        resources: [
+          headResource({ contactId: 'contact-1', displayName: 'Ada' })
+        ]
       },
       {
         collectionId: CONTACTS_HISTORY_COLLECTION,
-        rows: [
-          revisionRow({ contactId: 'contact-1', displayName: 'Ada' }),
-          revisionRow({ contactId: 'contact-orphan', displayName: 'Nobody' })
+        resources: [
+          revisionResource({ contactId: 'contact-1', displayName: 'Ada' }),
+          revisionResource({
+            contactId: 'contact-orphan',
+            displayName: 'Nobody'
+          })
         ]
       }
     ])
@@ -482,21 +510,21 @@ describe('migrateContent', () => {
     const { bundle, secret } = await makeBundle([
       {
         collectionId: CONTACTS_COLLECTION,
-        rows: [
-          headRow({ contactId: 'contact-bad', displayName: 'Ada' }),
-          headRow({ contactId: 'contact-good', displayName: 'Grace' })
+        resources: [
+          headResource({ contactId: 'contact-bad', displayName: 'Ada' }),
+          headResource({ contactId: 'contact-good', displayName: 'Grace' })
         ]
       },
       {
         collectionId: CONTACTS_HISTORY_COLLECTION,
-        rows: [
+        resources: [
           ...Array.from({ length: 12 }, (_, index) =>
-            revisionRow({
+            revisionResource({
               contactId: 'contact-bad',
               displayName: `Ada ${index}`
             })
           ),
-          revisionRow({ contactId: 'contact-good', displayName: 'Grace' })
+          revisionResource({ contactId: 'contact-good', displayName: 'Grace' })
         ]
       }
     ])
@@ -516,12 +544,14 @@ describe('migrateContent', () => {
 
   it('holds a head this run wrote for a duplicated copy behind it', async () => {
     const session = await memorySession()
-    const head = headRow({ contactId: 'contact-1', displayName: 'Ada' })
+    const head = headResource({ contactId: 'contact-1', displayName: 'Ada' })
     const { bundle, secret } = await makeBundle([
-      { collectionId: CONTACTS_COLLECTION, rows: [head, head] },
+      { collectionId: CONTACTS_COLLECTION, resources: [head, head] },
       {
         collectionId: CONTACTS_HISTORY_COLLECTION,
-        rows: [revisionRow({ contactId: 'contact-1', displayName: 'Ada' })]
+        resources: [
+          revisionResource({ contactId: 'contact-1', displayName: 'Ada' })
+        ]
       }
     ])
 
@@ -543,11 +573,15 @@ describe('migrateContent', () => {
     const { bundle, secret } = await makeBundle([
       {
         collectionId: CONTACTS_COLLECTION,
-        rows: [headRow({ contactId: 'contact-1', displayName: 'Ada' })]
+        resources: [
+          headResource({ contactId: 'contact-1', displayName: 'Ada' })
+        ]
       },
       {
         collectionId: CONTACTS_HISTORY_COLLECTION,
-        rows: [revisionRow({ contactId: 'contact-1', displayName: 'Ada' })]
+        resources: [
+          revisionResource({ contactId: 'contact-1', displayName: 'Ada' })
+        ]
       }
     ])
 
@@ -570,11 +604,14 @@ describe('migrateContent', () => {
     const { bundle, secret } = await makeBundle([
       {
         collectionId: APP_CONNECTIONS_COLLECTION,
-        rows: [credentialRow('an app key'), credentialRow('another app key')]
+        resources: [
+          credentialResource('an app key'),
+          credentialResource('another app key')
+        ]
       },
       {
         collectionId: PRIVATE_CREDENTIALS_COLLECTION,
-        rows: [credentialRow('a real credential')]
+        resources: [credentialResource('a real credential')]
       }
     ])
 
@@ -591,7 +628,7 @@ describe('migrateContent', () => {
     const session = await memorySession()
     expect(session.storage.canProvisionAppCollections).toBe(false)
     const { bundle, secret } = await makeBundle([
-      { collectionId: 'app-notes', rows: [{ id: 'a' }, { id: 'b' }] }
+      { collectionId: 'app-notes', resources: [{ id: 'a' }, { id: 'b' }] }
     ])
 
     const result = await migrateContent({ session, bundle, secret })
@@ -622,7 +659,7 @@ describe('migrateContent', () => {
     const { bundle, secret } = await makeBundle([
       {
         collectionId: 'app-notes',
-        rows: [{ id: 'a' }, { id: 'b' }],
+        resources: [{ id: 'a' }, { id: 'b' }],
         metadata: { id: 'app-notes', generator }
       }
     ])
@@ -666,17 +703,21 @@ describe('migrateContent', () => {
   it('carries on past a failed row and ends a collection after ten consecutive failures', async () => {
     const session = await memorySession()
     const credentials = Array.from({ length: 12 }, (_unused, index) =>
-      credentialRow(`credential-${index}`)
+      credentialResource(`credential-${index}`)
     )
     const { bundle, secret } = await makeBundle([
       {
         collectionId: PRIVATE_CREDENTIALS_COLLECTION,
-        rows: credentials
+        resources: credentials
       },
       {
         collectionId: WALLET_ACTIVITY_COLLECTION,
-        rows: [
-          credentialActivityRow({ id: 'act-1', type: 'Create', cid: 'cid-1' })
+        resources: [
+          credentialActivityResource({
+            id: 'act-1',
+            type: 'Create',
+            cid: 'cid-1'
+          })
         ]
       }
     ])
@@ -699,12 +740,16 @@ describe('migrateContent', () => {
     const { bundle, secret } = await makeBundle([
       {
         collectionId: PRIVATE_CREDENTIALS_COLLECTION,
-        rows: [credentialRow('first')]
+        resources: [credentialResource('first')]
       },
       {
         collectionId: WALLET_ACTIVITY_COLLECTION,
-        rows: [
-          credentialActivityRow({ id: 'act-1', type: 'Create', cid: 'cid-1' })
+        resources: [
+          credentialActivityResource({
+            id: 'act-1',
+            type: 'Create',
+            cid: 'cid-1'
+          })
         ]
       }
     ])
@@ -720,10 +765,10 @@ describe('migrateContent', () => {
     })
     expect(importActivity).not.toHaveBeenCalled()
 
-    const rows = await importActivities(session)
-    expect(rows).toHaveLength(1)
+    const activities = await importActivities(session)
+    expect(activities).toHaveLength(1)
     expect(
-      (rows[0].object as { stoppedAt?: { cause: string } }).stoppedAt
+      (activities[0].object as { stoppedAt?: { cause: string } }).stoppedAt
     ).toEqual({
       collectionId: PRIVATE_CREDENTIALS_COLLECTION,
       cause: 'QuotaExceededError'
@@ -742,10 +787,10 @@ describe('migrateContent', () => {
       .spyOn(storage, 'importAppCollectionResource')
       .mockRejectedValue(new QuotaExceededError('The Space is full.'))
     const { bundle, secret } = await makeBundle([
-      { collectionId: 'app-notes', rows: [{ id: 'a' }, { id: 'b' }] },
+      { collectionId: 'app-notes', resources: [{ id: 'a' }, { id: 'b' }] },
       {
         collectionId: PRIVATE_CREDENTIALS_COLLECTION,
-        rows: [credentialRow('first')]
+        resources: [credentialResource('first')]
       }
     ])
 
@@ -762,7 +807,7 @@ describe('migrateContent', () => {
     const { bundle, secret } = await makeBundle([
       {
         collectionId: PRIVATE_CREDENTIALS_COLLECTION,
-        rows: [credentialRow('first')]
+        resources: [credentialResource('first')]
       }
     ])
 
@@ -782,7 +827,7 @@ describe('migrateContent', () => {
     const { bundle, secret } = await makeBundle([
       {
         collectionId: PRIVATE_CREDENTIALS_COLLECTION,
-        rows: [credentialRow('first'), credentialRow('second')]
+        resources: [credentialResource('first'), credentialResource('second')]
       }
     ])
     const controller = new AbortController()
@@ -799,7 +844,7 @@ describe('migrateContent', () => {
     const { bundle, secret } = await makeBundle([
       {
         collectionId: PRIVATE_CREDENTIALS_COLLECTION,
-        rows: [credentialRow('first')]
+        resources: [credentialResource('first')]
       }
     ])
 
@@ -834,7 +879,7 @@ describe('content-migration ceremony events', () => {
     const { bundle, secret } = await makeBundle([
       {
         collectionId: PRIVATE_CREDENTIALS_COLLECTION,
-        rows: [credentialRow('first'), credentialRow('second')]
+        resources: [credentialResource('first'), credentialResource('second')]
       }
     ])
 
@@ -868,7 +913,7 @@ describe('content-migration ceremony events', () => {
     const { bundle, secret } = await makeBundle([
       {
         collectionId: PRIVATE_CREDENTIALS_COLLECTION,
-        rows: [credentialRow('first')]
+        resources: [credentialResource('first')]
       }
     ])
     vi.spyOn(session.storage, 'importCredential').mockRejectedValue(
@@ -890,7 +935,7 @@ describe('content-migration ceremony events', () => {
     const { bundle, secret } = await makeBundle([
       {
         collectionId: PRIVATE_CREDENTIALS_COLLECTION,
-        rows: [credentialRow('first')]
+        resources: [credentialResource('first')]
       }
     ])
     vi.spyOn(
@@ -915,7 +960,7 @@ describe('content-migration ceremony events', () => {
     const { bundle, secret } = await makeBundle([
       {
         collectionId: PRIVATE_CREDENTIALS_COLLECTION,
-        rows: [credentialRow('first')]
+        resources: [credentialResource('first')]
       }
     ])
 
@@ -944,7 +989,7 @@ describe('content-migration ceremony events', () => {
     const { bundle, secret } = await makeBundle([
       {
         collectionId: PRIVATE_CREDENTIALS_COLLECTION,
-        rows: [credentialRow('first')]
+        resources: [credentialResource('first')]
       }
     ])
     const controller = new AbortController()

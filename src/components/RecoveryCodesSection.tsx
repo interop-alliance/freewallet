@@ -39,7 +39,21 @@ import { createLogger } from '@/lib/log'
 
 const log = createLogger('fw:ui:recovery')
 
-export function RecoveryCodesSection({ session }: { session: Session }) {
+/**
+ * The Recovery codes panel.
+ *
+ * @param options {object}
+ * @param options.session {Session}
+ * @param [options.registryRepairing] {boolean}   Settings is mending the
+ *   unlock-methods registry; issuing and revoking a code wait
+ */
+export function RecoveryCodesSection({
+  session,
+  registryRepairing = false
+}: {
+  session: Session
+  registryRepairing?: boolean
+}) {
   const { t, i18n } = useTranslation()
   const canManage = canIssueRecoveryCode({ session })
   const [entries, setEntries] = useState<RecoveryCodeUnlockMethod[] | null>(
@@ -187,7 +201,9 @@ export function RecoveryCodesSection({ session }: { session: Session }) {
               <IconButton
                 size="small"
                 aria-label={t('settings.recovery.remove')}
-                disabled={!canManage || revokingKid !== null}
+                disabled={
+                  !canManage || revokingKid !== null || registryRepairing
+                }
                 onClick={() => void handleRevoke(entry)}
               >
                 <MdDeleteOutline />
@@ -213,7 +229,7 @@ export function RecoveryCodesSection({ session }: { session: Session }) {
           variant="outlined"
           size="small"
           sx={{ textTransform: 'none', borderRadius: 2, whiteSpace: 'nowrap' }}
-          disabled={!canManage || entries === null}
+          disabled={!canManage || entries === null || registryRepairing}
           onClick={handleGenerate}
         >
           {t('settings.recovery.generate')}
@@ -254,6 +270,7 @@ export function RecoveryCodesSection({ session }: { session: Session }) {
           <Button
             variant="contained"
             loading={isSaving}
+            disabled={registryRepairing}
             onClick={() => void handleConfirm()}
           >
             {t('settings.recovery.confirmSaved')}

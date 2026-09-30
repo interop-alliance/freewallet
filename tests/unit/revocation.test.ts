@@ -112,6 +112,7 @@ import {
   revokeEnrolledClient,
   type RevokedClientKeys
 } from '@/session/revocation'
+import { adoptFollowerUserKey } from '@/session/userKeyAdoption'
 import type { Session } from '@/types/auth'
 
 const POINTER = {
@@ -749,5 +750,74 @@ describe('the generation-delegation re-mint stage', () => {
     )
     expect(outcome.rotated).toBe(true)
     warn.mockRestore()
+  })
+})
+
+describe('a follower adoption in flight', () => {
+  it('is joined before the revocation reads its pin, so the session ends on the revocation key', async () => {
+    const session = sessionWith()
+    const MID_USER_KEY = {
+      id: 'did:key:z6LSMidUserKey',
+      secret: new Uint8Array(32).fill(3)
+    }
+    ;(
+      session.storage as unknown as {
+        refreshEncryptedDescriptors: () => Promise<void>
+      }
+    ).refreshEncryptedDescriptors = vi.fn(async () => {
+      state.calls.push('refreshEncryptedDescriptors')
+    })
+    let release: () => void = () => undefined
+    const held = new Promise<void>(resolve => {
+      release = resolve
+    })
+    vi.mocked(session.profile.persistClientKeys!).mockImplementationOnce(
+      async () => {
+        state.calls.push('persistClientKeys:follower')
+        await held
+      }
+    )
+
+    // Another client rotated OLD to MID; this session is catching up.
+    const adoption = adoptFollowerUserKey({
+      session,
+      read: {
+        descriptor: {
+          scheme: 'edv',
+          currentEpoch: MID_USER_KEY.id,
+          epochs: [
+            { id: OLD_USER_KEY.id, recipients: [] },
+            { id: MID_USER_KEY.id, recipients: [] }
+          ]
+        } as never,
+        userKey: MID_USER_KEY,
+        latestEpochId: MID_USER_KEY.id
+      }
+    })
+    const revocation = revokeEnrolledClient({ session, client: REVOKED })
+    await new Promise(resolve => setTimeout(resolve, 0))
+    expect(vi.mocked(revokeAccountClient)).not.toHaveBeenCalled()
+    // The adoption itself re-reads the pin before its record write; the
+    // revocation has not read it yet.
+    const loadsBeforeRelease = epochPinLoad.mock.calls.length
+
+    release()
+    await expect(adoption).resolves.toEqual({
+      adopted: true,
+      position: 'current'
+    })
+    await revocation
+
+    expect(session.profile.userKey).toBe(FRESH_USER_KEY)
+    const calls = state.calls
+    expect(epochPinLoad.mock.calls.length).toBeGreaterThan(loadsBeforeRelease)
+    // The revocation's own pin read is the last one, after the adoption
+    // moved the session.
+    expect(calls.indexOf('refreshEncryptedDescriptors')).toBeLessThan(
+      calls.lastIndexOf('loadUserKeyEpochPin')
+    )
+    expect(calls.lastIndexOf('loadUserKeyEpochPin')).toBeLessThan(
+      calls.indexOf('revokeAccountClient')
+    )
   })
 })

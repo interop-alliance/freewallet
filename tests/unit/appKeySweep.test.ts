@@ -3,7 +3,7 @@
  * Unit tests for the login-time app-key sweep (`src/session/appKeySweep.ts`):
  * app keys now live in their own `app-connections` collection, so any left in
  * `private-credentials` by an earlier version are deleted -- never moved,
- * since a row there stays reachable from the credential-wide surfaces (a
+ * since a credential there stays reachable from the credential-wide surfaces (a
  * world-readable public link, a share of the credentials collection). Two
  * detection rules, deliberately both: the `AppKeyCredential` marker every
  * minted key carries, and the pre-marker shape (self-issued, claiming an
@@ -91,14 +91,14 @@ function selfIssuedWithOrigin(): IVerifiableCredential {
 
 /**
  * A storage stub over `private-credentials` whose deletes really remove the
- * row, so a second sweep sees the post-sweep state.
+ * credential, so a second sweep sees the post-sweep state.
  */
 function fakeStorage(stored: StoredCredential[]) {
-  const rows = [...stored]
+  const held = [...stored]
   const storage = {
-    listCredentials: vi.fn(async () => [...rows]),
+    listCredentials: vi.fn(async () => [...held]),
     // The sweep retires a stranded key's live authority before deleting its
-    // row; the revoke-before-delete ordering has its own suite
+    // credential; the revoke-before-delete ordering has its own suite
     // (`src/session/appKeySweep.test.ts`), so here they just succeed.
     listHistoryItems: vi.fn(async () => ({ entries: [], unreadable: 0 })),
     listCollections: vi.fn(async () => []),
@@ -113,18 +113,18 @@ function fakeStorage(stored: StoredCredential[]) {
     listPublicCredentials: vi.fn(async () => []),
     retractPublicCopy: vi.fn(async () => {}),
     deleteCredential: vi.fn(async ({ cid }: { cid: string }) => {
-      const index = rows.findIndex(row => row.cid === cid)
+      const index = held.findIndex(credential => credential.cid === cid)
       if (index >= 0) {
-        rows.splice(index, 1)
+        held.splice(index, 1)
       }
     })
   }
-  return { storage: storage as unknown as StorageManager, rows, calls: storage }
+  return { storage: storage as unknown as StorageManager, held, calls: storage }
 }
 
 describe('sweepStrandedAppKeys', () => {
   it('deletes a marker-typed and a legacy-shaped app key, keeping the rest', async () => {
-    const { storage, rows, calls } = fakeStorage([
+    const { storage, held, calls } = fakeStorage([
       { cid: 'c-marked', vc: markedAppKey() },
       { cid: 'c-legacy', vc: await legacyAppKey() },
       { cid: 'c-diploma', vc: credential() }
@@ -142,7 +142,7 @@ describe('sweepStrandedAppKeys', () => {
       cid: 'c-legacy',
       consultRemote: true
     })
-    expect(rows.map(({ cid }) => cid)).toEqual(['c-diploma'])
+    expect(held.map(({ cid }) => cid)).toEqual(['c-diploma'])
   })
 
   it('leaves an ordinary credential that merely claims an origin', async () => {
@@ -163,28 +163,28 @@ describe('sweepStrandedAppKeys', () => {
     // The legacy rule needs the seed-to-subject binding too: without it an
     // ordinary self-issued credential that happens to claim an origin would
     // be deleted permanently, and it was never an app key.
-    const { storage, rows, calls } = fakeStorage([
+    const { storage, held, calls } = fakeStorage([
       { cid: 'c-membership', vc: selfIssuedWithOrigin() }
     ])
 
     expect((await sweepStrandedAppKeys({ storage })).deleted).toBe(0)
     expect(calls.deleteCredential).not.toHaveBeenCalled()
-    expect(rows.map(({ cid }) => cid)).toEqual(['c-membership'])
+    expect(held.map(({ cid }) => cid)).toEqual(['c-membership'])
   })
 
   it('deletes a genuine legacy app key whose seed derives its subject', async () => {
-    const { storage, rows } = fakeStorage([
+    const { storage, held } = fakeStorage([
       { cid: 'c-legacy', vc: await legacyAppKey() }
     ])
 
     expect((await sweepStrandedAppKeys({ storage })).deleted).toBe(1)
-    expect(rows).toEqual([])
+    expect(held).toEqual([])
   })
 
   it('keeps sweeping after a delete fails, reporting only what was deleted', async () => {
     // One unretractable public copy (or a network failure) must not strand
     // every later seed until some future login.
-    const { storage, rows, calls } = fakeStorage([
+    const { storage, held, calls } = fakeStorage([
       { cid: 'c-stuck', vc: markedAppKey() },
       { cid: 'c-marked', vc: markedAppKey() }
     ])
@@ -198,7 +198,7 @@ describe('sweepStrandedAppKeys', () => {
 
     expect((await sweepStrandedAppKeys({ storage })).deleted).toBe(1)
     expect(calls.deleteCredential).toHaveBeenCalledTimes(2)
-    expect(rows.map(({ cid }) => cid)).toEqual(['c-stuck'])
+    expect(held.map(({ cid }) => cid)).toEqual(['c-stuck'])
   })
 
   it('writes nothing on a clean store', async () => {

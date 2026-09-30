@@ -13,6 +13,8 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { addSink, captureSink } from '@interop/logger'
 import { CapabilityAgent } from '@interop/capability-agent'
 import type { ZcapClient } from '@interop/ezcap'
+import { mendReportAccumulator } from '@interop/wallet-core/menders'
+import type { CeremonyId } from '@interop/wallet-core'
 
 /**
  * Asserts the value is a ZcapClient by shape (constructor name plus the
@@ -79,7 +81,9 @@ async function expectedDid(seed: Uint8Array): Promise<string> {
 function makeFakeStorage() {
   return {
     isFakeStorage: true,
-    ensureUserCollections: vi.fn().mockResolvedValue(undefined)
+    ensureUserCollections: vi.fn().mockResolvedValue(undefined),
+    setOnStranded: vi.fn(),
+    strandedCollectionIds: []
   } as unknown as StorageManager
 }
 let fakeStorage = makeFakeStorage()
@@ -217,6 +221,28 @@ describe('initSessionFromSeed', () => {
     })
     expect(fakeStorage.ensureUserCollections).not.toHaveBeenCalled()
     expect(session.storageReady).toBeUndefined()
+  })
+
+  it('opens the encounter gate at construction when no block follows', async () => {
+    const { session } = await initSessionFromSeed({
+      seed: randomSeed(),
+      provisionStorage: false
+    })
+    await expect(session.encounterGate).resolves.toBeUndefined()
+    expect(session.disposal.aborted).toBe(false)
+  })
+
+  it('keeps the encounter gate shut for a caller that starts a block', async () => {
+    const { session } = await initSessionFromSeed({
+      seed: randomSeed(),
+      mends: mendReportAccumulator<CeremonyId>()
+    })
+    let opened = false
+    void session.encounterGate.then(() => {
+      opened = true
+    })
+    await new Promise(resolve => setTimeout(resolve, 0))
+    expect(opened).toBe(false)
   })
 
   it('reports userExists for a returning identity', async () => {

@@ -28,7 +28,21 @@ import { createLogger } from '@/lib/log'
 
 const log = createLogger('fw:ui:backup-credentials')
 
-export function BackupCredentialsSection({ session }: { session: Session }) {
+/**
+ * The Backup credentials panel.
+ *
+ * @param options {object}
+ * @param options.session {Session}
+ * @param [options.registryRepairing] {boolean}   Settings is mending the
+ *   unlock-methods registry; removing a backup credential waits
+ */
+export function BackupCredentialsSection({
+  session,
+  registryRepairing = false
+}: {
+  session: Session
+  registryRepairing?: boolean
+}) {
   const { t, i18n } = useTranslation()
   const [removingSpaceId, setRemovingSpaceId] = useState<string | null>(null)
   const [errorKey, setErrorKey] = useState<string | null>(null)
@@ -94,7 +108,7 @@ export function BackupCredentialsSection({ session }: { session: Session }) {
               <IconButton
                 size="small"
                 aria-label={t('settings.backupCredentials.remove')}
-                disabled={removingSpaceId !== null}
+                disabled={removingSpaceId !== null || registryRepairing}
                 onClick={() => void handleRemove(entry)}
               >
                 <MdDeleteOutline />

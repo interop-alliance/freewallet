@@ -249,7 +249,7 @@ export interface RecoveryCodeUnlockMethod {
  * in the bundle alone, so nothing here can re-derive it. `unlockSpaceId` is
  * the entry's identity. The entry is written BEFORE the establishment, with
  * the standing fields derivable in memory and a pre-minted
- * `manageCapability`, so a row left by a torn export is removable from
+ * `manageCapability`, so an entry left by a torn export is removable from
  * Settings with no secret in hand; the delegation fields join it once the
  * establishment completes. `label` is the export date.
  */

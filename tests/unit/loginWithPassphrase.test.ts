@@ -128,7 +128,9 @@ const POINTER: AccountPointer = {
 function makeFakeStorage() {
   return {
     isFakeStorage: true,
-    ensureUserCollections: vi.fn().mockResolvedValue(undefined)
+    ensureUserCollections: vi.fn().mockResolvedValue(undefined),
+    setOnStranded: vi.fn(),
+    strandedCollectionIds: []
   } as unknown as StorageManager
 }
 let fakeStorage = makeFakeStorage()

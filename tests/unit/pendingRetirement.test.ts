@@ -99,16 +99,28 @@ vi.mock('@/session/credentialRotation', () => ({
   })
 }))
 
-vi.mock('@/session/userKeyAdoption', () => ({
-  adoptRotatedUserKey: vi.fn(async () => {
-    state.calls.push('adoptRotatedUserKey')
-  }),
-  // The real helper: the account pointer's Space id, else the storage's.
-  rotationSpaceId: vi.fn(
-    ({ session }: { session: Session }) =>
-      session.profile.accountPointer?.spaceId ?? session.storage.spaceId
+vi.mock('@/session/userKeyAdoption', () => {
+  const withOwnUserKeyRotation = vi.fn(
+    async ({ run }: { run: () => Promise<unknown> }) => await run()
   )
-}))
+  return {
+    withOwnUserKeyRotation,
+    heldAsOwnUserKeyRotation:
+      (body: (options: { session: unknown }) => Promise<unknown>) =>
+      async (options: { session: unknown }) =>
+        await withOwnUserKeyRotation({
+          run: () => body(options)
+        }),
+    adoptRotatedUserKey: vi.fn(async () => {
+      state.calls.push('adoptRotatedUserKey')
+    }),
+    // The real helper: the account pointer's Space id, else the storage's.
+    rotationSpaceId: vi.fn(
+      ({ session }: { session: Session }) =>
+        session.profile.accountPointer?.spaceId ?? session.storage.spaceId
+    )
+  }
+})
 
 vi.mock('@/session/standingUnlock', () => ({
   standingFieldsOfKeyringHit: vi.fn(async () => ({

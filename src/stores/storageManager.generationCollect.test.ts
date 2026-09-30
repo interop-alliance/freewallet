@@ -1,10 +1,10 @@
 /**
- * Unit test for `StorageManager.addHistoryGenerationCollected`: annex
- * GC's owner-side digest write. Unlike every other `addHistory*` method it
- * does not mint a `uuidv7` -- the generation id IS the activity id and the
- * record's resource id, which is what collapses a torn re-run's second row at
- * read time. The synced-collection backend is a structural fake, so the
- * assertion sits exactly at the seam the method writes through.
+ * Unit test for `StorageManager.addHistoryGenerationCollected`: annex GC's
+ * owner-side digest write. Unlike every other `addHistory*` method it does not
+ * mint a `uuidv7` -- the generation id IS the activity id and the record's
+ * resource id, which is what collapses a torn re-run's second Resource at read
+ * time. The synced-collection backend is a structural fake, so the assertion
+ * sits exactly at the seam the method writes through.
  *
  * @vitest-environment node
  */

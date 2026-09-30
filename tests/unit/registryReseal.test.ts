@@ -125,7 +125,11 @@ function makeSession({ userKey }: { userKey: UserKey }): Session {
     profile: {
       keyAgreementKey: vaultKeys.keyAgreementKey,
       keyResolver: vaultKeys.keyResolver,
+      // The enrolled kind's key material: the escrow unwrap key is this
+      // session's roster unwrap key.
+      clientWebvhKeys: {},
       clientKeyAgreementKey: { id: 'did:key:z6LSclient#z6LSclient' },
+      keyAgent: {},
       userKey,
       zcapClient: {},
       accountPointer: {
@@ -192,7 +196,18 @@ function sampleRecord(): UnlockMethodsRecord {
  */
 function rosterReadFor({ userKey }: { userKey: UserKey }) {
   return {
-    descriptor: { currentEpoch: userKey.id, epochs: [] },
+    // The epochs in roster order, oldest first, as the mocked escrow
+    // unwrap hands them back: the repair picks candidates older than the
+    // session's key by this order.
+    descriptor: {
+      currentEpoch: userKey.id,
+      get epochs() {
+        return wasState.generations.map(generation => ({
+          id: generation.id,
+          recipients: []
+        }))
+      }
+    },
     userKey,
     rotated: false,
     latestEpochId: userKey.id
@@ -301,6 +316,27 @@ describe('the login-time re-seal repair', () => {
     expect(outcome).toBe('repaired')
     // The whole point: the registry opens under the current key afterwards.
     await expect(getUnlockMethods({ session })).resolves.toEqual(sampleRecord())
+  })
+
+  it('never re-seals backward from a generation newer than the session key', async () => {
+    const olderKey = await mintUserKey()
+    const newerKey = await mintUserKey()
+    // Another client rotated to the newer key and sealed the registry to
+    // it; this session is still on the older one.
+    const session = makeSession({ userKey: newerKey })
+    await seedRegistry({ session, record: sampleRecord() })
+    swapVaultKeys({ session, userKey: olderKey })
+    wasState.generations = [olderKey, newerKey]
+    const sealed = wasState.records.get(SPACE_ID)
+
+    const outcome = await repairStaleUnlockRegistrySeal({
+      session,
+      rosterRead: rosterReadFor({ userKey: newerKey }),
+      context: enrolledContext()
+    })
+
+    expect(outcome).toBe('unrepaired')
+    expect(wasState.records.get(SPACE_ID)).toBe(sealed)
   })
 
   it('is a no-op read on a registry the current key already opens', async () => {

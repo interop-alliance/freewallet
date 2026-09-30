@@ -242,6 +242,7 @@ function makeFakeStorage({
   const holdRotatedVaultKeys = vi.fn(() => undefined)
   const storage = {
     ensureUserCollections: vi.fn(() => provisioning),
+    setOnStranded: vi.fn(),
     refreshEncryptedDescriptors,
     adoptRotatedVaultKeys,
     holdRotatedVaultKeys,

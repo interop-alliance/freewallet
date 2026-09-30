@@ -1,9 +1,9 @@
 /**
  * Unit tests for how the replica-less backend buckets a misbound envelope: a
  * body the host served under an id it was not sealed for. The purge on this
- * backend DELETEs the remote resource outright, so a misbound row landing in
- * the purgeable bucket would let a host present authentic data as garbage and
- * have the wallet destroy it on the server.
+ * backend DELETEs the remote resource outright, so a misbound Resource
+ * landing in the purgeable bucket would let a host present authentic data as
+ * garbage and have the wallet destroy it on the server.
  *
  * @vitest-environment node
  */
@@ -52,7 +52,7 @@ function misboundCipher(): DocCipher {
 
 /**
  * A remote store holding one envelope resource per collection, recording every
- * delete so a purge that reaches the misbound row is visible.
+ * delete so a purge that reaches the misbound Resource is visible.
  *
  * @param options {object}
  * @param options.resourceId {string}

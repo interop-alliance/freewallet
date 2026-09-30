@@ -99,21 +99,31 @@ import { deleteUnlockLocalState } from '@/lib/sessionKey'
 import { syncController } from '@/stores/syncController'
 import {
   accountCeremonyContext,
+  rosterUnwrapKey,
   type AccountCeremonyContext,
   type LadderDeleter
 } from '@/session/accountCeremonyContext'
 import { documentListsCredential } from '@/session/pendingRetirement'
 import { establishEntryFirstStandingCredential } from '@/session/standingEstablishment'
 import { executeLocalWipe, snapshotWipeTargets } from '@/session/wipe'
+import { disposeSession } from '@/session/sessionLifecycle'
 import {
   isUnclaimedLadderVmRefusal,
   preflightCredentialRetirement,
   rotateOffUnlockCredential
 } from '@/session/credentialRotation'
 import { reportCeremonyTail } from '@/session/menders/ceremonyTail'
-import { adoptRotatedUserKey, rotationSpaceId } from '@/session/userKeyAdoption'
+import {
+  adoptFollowerUserKey,
+  adoptRotatedUserKey,
+  rotationSpaceId,
+  userKeyRosterPosition,
+  withOwnUserKeyRotation
+} from '@/session/userKeyAdoption'
+import { joinEncounter } from '@/session/menders/encounter'
 import {
   invalidateVerifiedLog,
+  refreshVerifiedAccountLog,
   verifiedAccountLog
 } from '@/session/verifiedLog'
 import { findLoginCredential, loginHandleOf } from '@/lib/loginCredential'
@@ -1950,10 +1960,18 @@ export async function deleteAccount({
     log,
     refusals: ACCOUNT_DELETION_REFUSALS
   })
-  return await events.run(
-    () => runAccountDeletion({ session, passphrase, onPhase, signal, events }),
-    accountDeletionOutcomeEvent
-  )
+  // Held like a rotating ceremony: a follower adoption stands down beside
+  // the deletion rather than moving the session under it. The walk's own
+  // stale-seal repair adopts as the holder.
+  return await withOwnUserKeyRotation({
+    session,
+    run: async () =>
+      await events.run(
+        () =>
+          runAccountDeletion({ session, passphrase, onPhase, signal, events }),
+        accountDeletionOutcomeEvent
+      )
+  })
 }
 
 /**
@@ -2074,6 +2092,13 @@ async function runAccountDeletion({
     // under: a dead or GC-swapped generation delegation comes back as the
     // server's masked 404, which the registry read maps to `null`.
     await renewVisitDelegation()
+    // A Settings stale-seal mend in flight lands first, so this read sees
+    // the registry it left. The walk's own repair below runs whatever that
+    // mend's budget says.
+    await joinEncounter({
+      session,
+      invariant: 'unlock-registry-opens-under-the-current-user-key'
+    })
     try {
       registry = await getUnlockMethods({ session })
     } catch (err) {
@@ -2803,6 +2828,13 @@ async function runAccountDeletion({
     })
   }
 
+  // Every run that reaches here goes on to the local wipe, so the session is
+  // done with. Its disposal signal is aborted before any local state goes,
+  // (b6)'s unlock-local state included, so work still running for it (a
+  // user key adoption about to persist the client-key record) cannot write
+  // that state back afterward.
+  disposeSession({ session })
+
   // (b6) The acting credential's own unlock Space: a root invocation under
   // the credential's own unlock identity, which needs nothing the account
   // held. Past the pivot, so it reports rather than refuses -- and never
@@ -2922,8 +2954,15 @@ function targetHost({ target }: { target?: string }): string | undefined {
  * The deletion walk's in-place stale-seal repair: the login-time repair's
  * core, run from whichever session type is deleting. A transient session's
  * escrow unwrap key is the credential's own standing key-agreement key rather
- * than an enrolled client's, and every request rides the visit's generation
- * delegation.
+ * than an enrolled client's (`rosterUnwrapKey`), and every request rides the
+ * visit's generation delegation.
+ *
+ * A session behind the roster is the other cause of a stale seal: another
+ * client rotated the user key and re-sealed the registry forward. The walk
+ * then follows the rotation first, with no re-seal, since re-sealing from the
+ * older key would seal the registry backward. The registry is read again
+ * once the session is current, and the escrow re-seal runs only if it still
+ * does not open.
  *
  * @param options {object}
  * @param options.session {Session}
@@ -2939,22 +2978,61 @@ async function repairRegistrySealForDeletion({
   // earlier in the walk replaced it in place on the profile.
   const capability = profile.invocationCapability
   const spaceId = session.storage.spaceId
-  const { userKey } = profile
-  const unwrapKey =
-    profile.clientKeyAgreementKey ??
-    profile.standingUnlock?.standingClient?.agents?.keyAgreementKey
-  if (!spaceId || !userKey || !unwrapKey) {
+  const unwrapKey = rosterUnwrapKey({ session })
+  const accountDid = profile.accountPointer?.did
+  if (!spaceId || !profile.userKey || !unwrapKey || !accountDid) {
     return 'unrepaired'
   }
+  // The roster store resolves its controller from the verified-log memo, and
+  // a roster entry another client anchored past it would be refused. The
+  // memo is refreshed first, keeping the old document until the new one
+  // verifies.
+  await refreshVerifiedAccountLog({ session })
   const rosterRead = await readUserKeyRoster({
     store: sessionRosterStore({
       serviceDescription: await wasServiceDescription(),
       session,
       ...(capability ? { capability } : {})
     }),
-    clientKeyAgreementKey: unwrapKey
+    clientKeyAgreementKey: unwrapKey,
+    // The visit's epoch pin: a roster served behind what this visit already
+    // saw is refused rather than re-sealed from.
+    pinnedEpochId: await session.persistence.epochPins.load({ accountDid })
   })
   if (!rosterRead) {
+    return 'unrepaired'
+  }
+  const position = userKeyRosterPosition({
+    session,
+    descriptor: rosterRead.descriptor
+  })
+  // A session whose key the roster does not place, or places after its
+  // current epoch, has nothing it may re-seal to: refused rather than
+  // sealing the registry to a key the roster does not stand behind.
+  if (position === 'unplaced' || position === 'ahead') {
+    return 'unrepaired'
+  }
+  if (position === 'behind') {
+    const { adopted } = await adoptFollowerUserKey({
+      session,
+      read: rosterRead,
+      holdsOwnRotation: true
+    })
+    if (!adopted) {
+      return 'unrepaired'
+    }
+    try {
+      await getUnlockMethods({ session })
+      return 'repaired'
+    } catch (err) {
+      if (!(err instanceof UnlockRegistryStaleSealError)) {
+        throw err
+      }
+    }
+  }
+  // Read after any adoption above: the key the record is re-sealed to.
+  const userKey = profile.userKey
+  if (!userKey) {
     return 'unrepaired'
   }
   return await resealRegistryFromEscrow({

@@ -19,6 +19,11 @@
  * (`adoptRotatedUserKey`) is what rebuilds the storage ciphers, on the
  * descriptors the fan-out has moved onto the fresh key.
  *
+ * The follower form (`adoptFollowerUserKey`) is the other direction: this
+ * session did not rotate, another client did, and the session catches up to
+ * the roster's current key mid-visit. It makes no registry re-seal, since the
+ * rotator already re-sealed the registry forward.
+ *
  * Neutral by design: both the revocation cascade and the recovery ceremonies
  * call in here, and the recovery module is itself imported by the revocation
  * one (the delegation re-mint), so a helper living in either would close a
@@ -27,9 +32,12 @@
 import type { IZcap } from '@interop/data-integrity-core'
 import type { ZcapClient } from '@interop/ezcap'
 import { userKeyVaultKeys, type UserKey } from '@interop/wallet-core/keys'
+import type { CollectionEncryption } from '@interop/was-client'
 import { WAS_SERVER_URL } from '@/app.config'
 import type { Session } from '@/types/auth'
 import { rewrapUnlockMethodsRecord } from '@/session/unlockMethods'
+import { isSessionDisposed } from '@/session/sessionLifecycle'
+import { epochPinWriteAllowed } from '@/session/persistence'
 import { createLogger } from '@/lib/log'
 
 const log = createLogger('fw:session:userkey')
@@ -335,4 +343,377 @@ export async function adoptRotatedUserKey({
       { err }
     )
   }
+}
+
+/**
+ * Where a session's user key sits against a user key roster's current epoch
+ * (see {@link userKeyRosterPosition}).
+ */
+type RosterPosition = 'current' | 'behind' | 'ahead' | 'unplaced'
+
+/**
+ * What a follower adoption resolves to: whether it moved the session, and
+ * where the session's key sits against the read afterward.
+ */
+interface FollowerAdoptionResult {
+  adopted: boolean
+  position: RosterPosition
+}
+
+/**
+ * The roster read a follower adoption is handed.
+ */
+interface FollowerRosterRead {
+  descriptor: CollectionEncryption
+  userKey: UserKey
+  latestEpochId: string
+}
+
+/**
+ * Where a session's user key sits in a user key roster's epoch list, against
+ * the roster's current epoch: `current` when it is the current epoch,
+ * `behind` when it is an earlier one, `ahead` when it is a later one (the
+ * roster read is older than the session's own rotation), and `unplaced` when
+ * the session holds no user key or the list does not carry it or the current
+ * epoch. Each roster epoch's id is its user key's id.
+ *
+ * @param options {object}
+ * @param options.session {Session}
+ * @param options.descriptor {CollectionEncryption}   the roster descriptor
+ * @returns {'current' | 'behind' | 'ahead' | 'unplaced'}
+ */
+export function userKeyRosterPosition({
+  session,
+  descriptor
+}: {
+  session: Session
+  descriptor: CollectionEncryption
+}): RosterPosition {
+  const keyId = session.profile.userKey?.id
+  const epochIds = (descriptor.epochs ?? []).map(epoch => epoch.id)
+  const currentIndex = descriptor.currentEpoch
+    ? epochIds.indexOf(descriptor.currentEpoch)
+    : -1
+  const keyIndex = keyId ? epochIds.indexOf(keyId) : -1
+  if (currentIndex === -1 || keyIndex === -1) {
+    return 'unplaced'
+  }
+  if (keyIndex === currentIndex) {
+    return 'current'
+  }
+  return keyIndex < currentIndex ? 'behind' : 'ahead'
+}
+
+/**
+ * The follower adoptions in flight, per session and then per roster epoch.
+ * Module state rather than a session member, so the session type carries no
+ * flag for it.
+ */
+const followerAdoptions = new WeakMap<
+  Session,
+  Map<string, Promise<FollowerAdoptionResult>>
+>()
+
+/**
+ * The rotating ceremonies of this session's own that are running, as a
+ * count per session: while one runs, a follower adoption stands down.
+ */
+const ownRotations = new WeakMap<Session, number>()
+
+/**
+ * Whether a ceremony of this session's own that rotates the user key is
+ * running. A follower adoption stands down while one is.
+ *
+ * @param options {object}
+ * @param options.session {Session}
+ * @returns {boolean}
+ */
+export function ownUserKeyRotationInProgress({
+  session
+}: {
+  session: Session
+}): boolean {
+  return (ownRotations.get(session) ?? 0) > 0
+}
+
+/**
+ * Runs a ceremony of this session's own that rotates the user key (client
+ * revocation, credential rotation, recovery-code revocation, the forget
+ * ceremony), or the account deletion walk, beside which no adoption may
+ * move the session either. It marks the rotation as running, waits out any
+ * follower adoption already in flight, runs the ceremony, and clears the
+ * mark however
+ * the ceremony ends.
+ *
+ * The mark closes the window a join alone leaves open. An adoption that
+ * starts after the join may hold a roster read taken before this ceremony
+ * rotated, so it would move the session and persist the client-key record
+ * onto the older key after the ceremony persisted the newer one. An
+ * adoption asked for while the mark is held stands down with no write.
+ *
+ * @param options {object}
+ * @param options.session {Session}
+ * @param options.run {Function}   `() => Promise<T>`, the ceremony
+ * @returns {Promise<T>}   what the ceremony returns
+ */
+export async function withOwnUserKeyRotation<T>({
+  session,
+  run
+}: {
+  session: Session
+  run: () => Promise<T>
+}): Promise<T> {
+  ownRotations.set(session, (ownRotations.get(session) ?? 0) + 1)
+  try {
+    await joinFollowerAdoption({ session })
+    return await run()
+  } finally {
+    const remaining = (ownRotations.get(session) ?? 1) - 1
+    if (remaining > 0) {
+      ownRotations.set(session, remaining)
+    } else {
+      ownRotations.delete(session)
+    }
+  }
+}
+
+/**
+ * Wraps a ceremony body so each call runs as this session's own user key
+ * rotation ({@link withOwnUserKeyRotation}), with the session taken from the
+ * call's options. No follower adoption then lands an older key beside the
+ * ceremony.
+ *
+ * @param body {Function}   `(options) => Promise<T>`, the ceremony body
+ * @returns {Function}   `(options) => Promise<T>`, the held ceremony
+ */
+export function heldAsOwnUserKeyRotation<
+  Options extends { session: Session },
+  T
+>(body: (options: Options) => Promise<T>): (options: Options) => Promise<T> {
+  return async options =>
+    await withOwnUserKeyRotation({
+      session: options.session,
+      run: () => body(options)
+    })
+}
+
+/**
+ * Waits for every follower adoption in flight on this session to settle,
+ * whatever each one's result. {@link withOwnUserKeyRotation} calls it before
+ * running a ceremony of this session's own that rotates the user key, so an
+ * adoption onto an older key cannot land after the ceremony moved the
+ * session onto a newer one. Never rejects.
+ *
+ * @param options {object}
+ * @param options.session {Session}
+ * @returns {Promise<void>}
+ */
+export async function joinFollowerAdoption({
+  session
+}: {
+  session: Session
+}): Promise<void> {
+  const flights = followerAdoptions.get(session)
+  if (!flights || flights.size === 0) {
+    return
+  }
+  await Promise.allSettled([...flights.values()])
+}
+
+/**
+ * The follower adoption: moves a live session that is behind the user key
+ * roster onto the roster's current key, after another client rotated it.
+ * Shared by every site that finds the session behind.
+ *
+ * The caller reads the roster first, after refreshing the account log, and
+ * hands the read over. That read did the unwrap: it ran with the key
+ * this session holds a roster wrap for (a remembered session's
+ * `profile.clientKeyAgreementKey`, a transient one's
+ * `standingKeyAgreementKey`) and the visit's epoch pin. Then, in order:
+ *
+ * 1. It adopts only when the session's key sits BEHIND the roster's current
+ *    epoch in the roster's own epoch list. It does not compare against the
+ *    epoch pin, since the pin can already be ahead of the session's key (an
+ *    in-band adoption saves the pin whatever its re-seal result).
+ * 2. The epoch pin advances (forward-only already) and a remembered session
+ *    persists the key to its client-key record, in the in-band order. A
+ *    failed record write is logged and the session still moves, as at login:
+ *    the next login re-reads the roster.
+ * 3. The key position is checked again, and the session moves only if it is
+ *    still behind. The profile takes the key material
+ *    (`holdSessionVaultKeys`) and the storage refetches its descriptors and
+ *    rebuilds its ciphers, refusing a collection whose epochs name no
+ *    recipient of the new key. Such a collection is recorded as stranded
+ *    rather than thrown on, so the rest of the session moves.
+ * 4. It makes no registry re-seal. The rotator re-sealed the registry to the
+ *    new key already, and a re-seal from the session's old key would fail.
+ *
+ * The disposal signal is checked before each write and before the session
+ * moves: a session torn down mid-adoption (a logout, a forget ceremony about
+ * to wipe this browser) writes nothing further. The epoch pin and the
+ * client-key record are the writes that would be wrong after teardown. An
+ * adoption asked for while a rotating ceremony of this session's own runs
+ * ({@link withOwnUserKeyRotation}) stands down at once, so it cannot land an
+ * older key after that ceremony's own. One already in flight when the
+ * ceremony began runs to its end, since the ceremony waits for it.
+ *
+ * The visit's epoch pin is checked again before the client-key record
+ * write and before the session moves. A pin that has moved past the read (a
+ * rotation of this session's persisted a newer key since the read was
+ * taken) stands the adoption down, so an older key never overwrites a newer
+ * record.
+ *
+ * Single-flight per session and roster epoch: a second call for the same
+ * epoch while one runs joins it, then re-checks the key position rather than
+ * assuming the first one moved the session. A joiner never adopts itself.
+ *
+ * @param options {object}
+ * @param options.session {Session}
+ * @param options.read {object}   the fresh roster read
+ * @param options.read.descriptor {CollectionEncryption}   the roster
+ *   descriptor
+ * @param options.read.userKey {UserKey}   the roster's current user key,
+ *   unwrapped
+ * @param options.read.latestEpochId {string}   the roster's current epoch id
+ * @param [options.holdsOwnRotation] {boolean}   the caller is the ceremony
+ *   holding this session's own-rotation mark (the account deletion walk's
+ *   stale-seal repair), so the mark does not stand this adoption down
+ * @returns {Promise<{ adopted: boolean, position: string }>}   whether this
+ *   call moved the session, and where the session's key sits against the
+ *   read afterward (see {@link userKeyRosterPosition})
+ */
+export async function adoptFollowerUserKey({
+  session,
+  read,
+  holdsOwnRotation = false
+}: {
+  session: Session
+  read: FollowerRosterRead
+  holdsOwnRotation?: boolean
+}): Promise<FollowerAdoptionResult> {
+  let flights = followerAdoptions.get(session)
+  if (!flights) {
+    flights = new Map()
+    followerAdoptions.set(session, flights)
+  }
+  // A rotating ceremony of this session's own owns the key while it runs.
+  // It waited out every adoption already in flight when it began, so only
+  // one starting now must stand down, and this check and the registration
+  // below run with no await between them.
+  if (!holdsOwnRotation && ownUserKeyRotationInProgress({ session })) {
+    return {
+      adopted: false,
+      position: userKeyRosterPosition({ session, descriptor: read.descriptor })
+    }
+  }
+  const epochId = read.latestEpochId
+  const running = flights.get(epochId)
+  if (running) {
+    await Promise.allSettled([running])
+    return {
+      adopted: false,
+      position: userKeyRosterPosition({ session, descriptor: read.descriptor })
+    }
+  }
+  const run = runFollowerAdoption({ session, read })
+  flights.set(epochId, run)
+  try {
+    return await run
+  } finally {
+    if (flights.get(epochId) === run) {
+      flights.delete(epochId)
+    }
+  }
+}
+
+/**
+ * The body of {@link adoptFollowerUserKey}, run once per session and epoch.
+ *
+ * @param options {object}
+ * @param options.session {Session}
+ * @param options.read {object}
+ * @param options.read.descriptor {CollectionEncryption}
+ * @param options.read.userKey {UserKey}
+ * @param options.read.latestEpochId {string}
+ * @returns {Promise<{ adopted: boolean, position: string }>}
+ */
+async function runFollowerAdoption({
+  session,
+  read: { descriptor, userKey, latestEpochId }
+}: {
+  session: Session
+  read: FollowerRosterRead
+}): Promise<FollowerAdoptionResult> {
+  const position = userKeyRosterPosition({ session, descriptor })
+  if (position !== 'behind') {
+    return { adopted: false, position }
+  }
+  if (userKey.id !== descriptor.currentEpoch || latestEpochId !== userKey.id) {
+    throw new Error(
+      "The follower adoption was handed a user key that is not the roster's " +
+        'current epoch.'
+    )
+  }
+  const accountDid = session.profile.accountPointer?.did
+  if (!accountDid) {
+    throw new Error(
+      'The follower adoption needs an account pointer naming a DID; this ' +
+        'session holds none.'
+    )
+  }
+  // A torn-down session writes nothing further.
+  const standDown = (): boolean => isSessionDisposed({ session })
+  if (standDown()) {
+    return { adopted: false, position }
+  }
+  await session.persistence.epochPins.saveFromDescriptor({
+    accountDid,
+    epochId: latestEpochId,
+    descriptor
+  })
+  // The read's continuity was checked when it was taken. Another rotation
+  // of this session's since (a ceremony that persisted a newer key and then
+  // threw before moving the session, or a second adoption holding a later
+  // read) has moved the pin past this read. The read's key is then older
+  // than the record's, and nothing more may be written from it. The pin
+  // still stands while it is absent, or at or before the read's current
+  // epoch in the read's epoch order: the test `readUserKeyRoster` applies
+  // when the read is taken, applied again later.
+  const epochIds = (descriptor.epochs ?? []).map(epoch => epoch.id)
+  const pinStands = async (): Promise<boolean> =>
+    epochPinWriteAllowed({
+      stored: await session.persistence.epochPins.load({ accountDid }),
+      epochId: latestEpochId,
+      epochIds
+    })
+  // Checked again right before the client-key record write: the pin write
+  // let other work of this session run.
+  if (
+    !(await pinStands()) ||
+    standDown() ||
+    userKeyRosterPosition({ session, descriptor }) !== 'behind'
+  ) {
+    return {
+      adopted: false,
+      position: userKeyRosterPosition({ session, descriptor })
+    }
+  }
+  try {
+    await session.profile.persistClientKeys?.({ userKey })
+  } catch (err) {
+    log.warn(
+      'Could not persist the adopted user key; this session moves onto it and the next login adopts it again',
+      { err }
+    )
+  }
+  // The awaits above let another stage of this session run. Move the
+  // session only if its key is still the one this adoption found behind.
+  const pinStillStands = await pinStands()
+  const recheck = userKeyRosterPosition({ session, descriptor })
+  if (recheck !== 'behind' || !pinStillStands || standDown()) {
+    return { adopted: false, position: recheck }
+  }
+  holdSessionVaultKeys({ session, userKey })
+  await session.storage.refreshEncryptedDescriptors()
+  return { adopted: true, position: 'current' }
 }

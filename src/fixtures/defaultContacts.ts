@@ -8,7 +8,7 @@
  * social-core.
  *
  * The duplication with the mobile wallet is deliberate and load-bearing.
- * Convergence-critical: every replica seeds these rows under its own fresh
+ * Convergence-critical: every replica seeds these contacts under its own fresh
  * random id, so a wallet linking into an established space pulls the space's
  * copies alongside its own, and the pull path recognizes a pulled seed by its
  * EXACT display name. The two wallets must therefore hold these strings
@@ -25,12 +25,12 @@ import {
 const INTEROP_ALLIANCE_TEAM_NAME = 'Interop Alliance Team'
 
 /**
- * Runs a seed literal through `normalizeContact`, so the stored row has the
+ * Runs a seed literal through `normalizeContact`, so the stored contact has the
  * exact shape every other write path produces (e.g. `phoneNumbers` /
  * `emailAddresses` always present as `[]`) -- a consumer must never meet a
- * looser shape on this row than on any imported or hand-entered one, and an
- * unchanged save (or a merge from the other replica) must not rewrite the row
- * and churn a revision.
+ * looser shape on this contact than on any imported or hand-entered one, and an
+ * unchanged save (or a merge from the other replica) must not rewrite the
+ * contact and churn a revision.
  *
  * @param contact {ContactData}
  * @returns {ContactData}
@@ -60,7 +60,8 @@ export const interopAllianceTeamContact: ContactData = normalizedSeed({
  * `seedNames` argument social-core's `isUnlinkedSeedTwin` matches on. A
  * migrated contact carrying one of these names is the bundle's copy of a seed
  * the new account already planted, so it is skipped rather than landing beside
- * it (unless the local row has been customized, which disqualifies the match).
+ * it (unless the local contact has been customized, which disqualifies the
+ * match).
  */
 export const SEED_CONTACT_NAMES: string[] = [
   INTEROP_ALLIANCE_TEAM_NAME,

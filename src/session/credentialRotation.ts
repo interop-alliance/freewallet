@@ -65,7 +65,10 @@ import {
 } from '@/session/accountCeremonyContext'
 import { sessionRosterStore } from '@/session/rosterStore'
 import { sessionCollectionStores } from '@/session/collectionLogStore'
-import { adoptRotatedUserKeyInBand } from '@/session/userKeyAdoption'
+import {
+  adoptRotatedUserKeyInBand,
+  heldAsOwnUserKeyRotation
+} from '@/session/userKeyAdoption'
 import {
   cascadeCollections,
   type UserKeyCascadeResult
@@ -200,7 +203,14 @@ function annexInventoryEntry(
  *   while its ladder VM still stands, which is the whole state the gate
  *   exists to keep out
  */
-export async function rotateOffUnlockCredential({
+export const rotateOffUnlockCredential = heldAsOwnUserKeyRotation(
+  rotateOffUnlockCredentialHeld
+)
+
+/**
+ * The body of {@link rotateOffUnlockCredential}, run with the own-rotation mark held.
+ */
+async function rotateOffUnlockCredentialHeld({
   session,
   context: supplied,
   method,

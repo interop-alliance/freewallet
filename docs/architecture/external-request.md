@@ -122,8 +122,8 @@ which is the step that escrows the agent into a key epoch. A failed persist
 fails the request with nothing escrowed. A provisioning failure after the
 persist fails the request and leaves a Login naming a grant the collection
 may not list. The rotation skips such a collection, since its current epoch
-does not list the agent. A history row lost later still leaves the agent a
-recipient with nothing to find it by.
+does not list the agent. A Login activity lost later still leaves the agent
+a recipient with nothing to find it by.
 
 A grant delegated from a transient session chains under the session's
 generation delegation (`profile.invocationCapability`) rather than the Space

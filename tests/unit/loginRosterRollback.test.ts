@@ -92,6 +92,8 @@ beforeEach(() => {
   vi.mocked(StorageManager.initStorageClients).mockResolvedValue({
     storage: {
       ensureUserCollections: vi.fn(async () => undefined),
+      setOnStranded: vi.fn(),
+      strandedCollectionIds: [],
       get remoteStore() {
         return undefined
       }

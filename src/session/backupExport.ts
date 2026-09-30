@@ -55,8 +55,8 @@
  * The pivot is the credential's establishment, the ceremony's one durable
  * write. A run torn after it has COMPLETED leaves an ordinary labeled backup
  * credential, listed and removable under Settings > Backup credentials like
- * any other, so the mender is a re-run. A tear INSIDE it leaves the row its
- * entry-first write recorded, whose Remove converges whatever the
+ * any other, so the mender is a re-run. A tear INSIDE it leaves the registry
+ * entry its entry-first write recorded, whose Remove converges whatever the
  * establishment reached (`backupCredential.ts`).
  */
 import { BUNDLE_ROLE, exportBundle } from '@interop/wallet-backup'

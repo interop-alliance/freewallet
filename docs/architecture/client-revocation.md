@@ -99,7 +99,7 @@ then a stranded collection is not opened with the retired key. A collection
 is stranded when no key epoch on it names the current user key. Its cipher
 is built refusing, so the session serves every other collection and writes
 nothing under the epoch being retired. The refusal is a `KeyUnwrapError`,
-so a list read skips the collection's rows and never offers them for
+so a list read skips the collection's Resources and never offers them for
 removal. The fan-out rebuilds the ciphers whenever the session holds a
 stranded one, even when it rotated nothing itself, and the dashboard
 re-reads its credentials once `registryReady` settles. The post-rotation

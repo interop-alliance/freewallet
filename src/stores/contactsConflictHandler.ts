@@ -1,11 +1,11 @@
 /**
- * The RxDB binding for the mutable `contacts` collection's conflict rule.
- * Every other synced collection is immutable and content-addressed, so a
- * write-write conflict is impossible there and RxDB's default handler (always
- * keep the remote master) is never exercised. A contact head document is
- * genuinely overwritten in place under a stable row id, so two replicas CAN
- * race on the same row -- and the default handler would silently drop one
- * side's edit.
+ * The RxDB binding for the mutable `contacts` collection's conflict rule. Every
+ * other synced collection is immutable and content-addressed, so a write-write
+ * conflict is impossible there and RxDB's default handler (always keep the
+ * remote master) is never exercised. A contact head document is genuinely
+ * overwritten in place under a stable resource id, so two replicas CAN race on
+ * the same Resource -- and the default handler would silently drop one side's
+ * edit.
  *
  * The rule itself lives in `@interop/wallet-core/sync`, so both replicas
  * decide a race identically; the RxDB shape around it comes from
@@ -16,19 +16,20 @@
  * fails) is reported by `makeConflictHandler` too, through was-sync's logging
  * seam (the same `sync` namespace), before it propagates.
  *
- * Each side's envelope is addressed with the contested row's own id, so a body
+ * Each side's envelope is addressed with the contested resource id, so a body
  * sealed for another resource is refused rather than compared. Both directions
  * fail the replication cycle: a misbound remote side and a misbound local side
  * are refused alike, no winner is returned, and the queued local edit stays
  * queued rather than being dropped. The refusal is logged here first, on the
- * `sync` namespace, naming the row and the side the binding check refused, and
- * is then rethrown unchanged.
+ * `sync` namespace, naming the resource replica and the side the binding check
+ * refused, and is then rethrown unchanged.
  *
- * Equality is the whole-row `deepEqual`, not the package's `statesEqual`
- * (which compares the revision and body members alone): the feed echo of a
- * row this replica just pushed carries the server-managed `createdBy` and
- * `updatedAt`, and a handler that called the two states equal would let RxDB
- * skip writing them into the local row.
+ * Equality is a `deepEqual` over the whole resource replica, not the
+ * package's `statesEqual` (which compares the revision and body members
+ * alone): the feed echo of a resource replica this client just pushed
+ * carries the server-managed `createdBy` and `updatedAt`, and a handler that
+ * called the two states equal would let RxDB skip writing them into the
+ * local resource replica.
  */
 import { makeConflictHandler, type ConflictHandler } from '@interop/was-sync'
 import { resolveContactHeadConflict } from '@interop/wallet-core/sync'

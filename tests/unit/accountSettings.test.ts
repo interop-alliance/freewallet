@@ -193,6 +193,10 @@ interface UnlockRecord {
 
 const FRESH_USER_KEY = { id: 'did:key:z6LSFreshUserKey' }
 const LADDER_SEED = new Uint8Array(32).fill(11)
+// A transient session's standing credential key-agreement key, which the
+// roster wraps to; the session's own `clientKeyAgreementKey` is the per-visit
+// key, which it does not.
+const STANDING_KAK = { id: 'did:key:z6LSStandingKak' }
 const LADDER_DID_KEY = 'did:key:zLadderVm'
 const NEW_LADDER_SEED = new Uint8Array(32).fill(7)
 const OLD_LADDER_SEED = new Uint8Array(32).fill(3)
@@ -271,17 +275,41 @@ vi.mock('@/session/credentialRotation', () => ({
   )
 }))
 
-vi.mock('@/session/userKeyAdoption', () => ({
-  adoptRotatedUserKey: vi.fn(async () => {
-    state.calls.push('adoptRotatedUserKey')
-  }),
-  // The real helper: the account pointer's Space id, else the storage's,
-  // which is what the adoption assertions below name.
-  rotationSpaceId: vi.fn(
-    ({ session }: { session: Session }) =>
-      session.profile.accountPointer?.spaceId ?? session.storage.spaceId
-  )
+vi.mock('@/session/menders/encounter', () => ({
+  // A Settings stale-seal mend the walk joins before its registry read.
+  joinEncounter: vi.fn(async () => undefined)
 }))
+
+vi.mock('@/session/userKeyAdoption', () => {
+  const withOwnUserKeyRotation = vi.fn(
+    async ({ run }: { run: () => Promise<unknown> }) => await run()
+  )
+  return {
+    withOwnUserKeyRotation,
+    heldAsOwnUserKeyRotation:
+      (body: (options: { session: unknown }) => Promise<unknown>) =>
+      async (options: { session: unknown }) =>
+        await withOwnUserKeyRotation({
+          run: () => body(options)
+        }),
+    adoptRotatedUserKey: vi.fn(async () => {
+      state.calls.push('adoptRotatedUserKey')
+    }),
+    // The deletion walk's follower path: the session is current on the roster
+    // unless a test says otherwise.
+    userKeyRosterPosition: vi.fn(() => 'current'),
+    adoptFollowerUserKey: vi.fn(async () => {
+      state.calls.push('adoptFollowerUserKey')
+      return { adopted: true, position: 'current' }
+    }),
+    // The real helper: the account pointer's Space id, else the storage's,
+    // which is what the adoption assertions below name.
+    rotationSpaceId: vi.fn(
+      ({ session }: { session: Session }) =>
+        session.profile.accountPointer?.spaceId ?? session.storage.spaceId
+    )
+  }
+})
 
 vi.mock('@/session/standingUnlock', () => ({
   establishStandingUnlock: vi.fn(
@@ -736,6 +764,11 @@ vi.mock('@interop/wallet-core/webvh', async importOriginal => ({
 
 vi.mock('@/session/verifiedLog', () => ({
   invalidateVerifiedLog: vi.fn(),
+  // The deletion repair's memo refresh before its roster read.
+  refreshVerifiedAccountLog: vi.fn(async () => {
+    state.calls.push('refreshVerifiedAccountLog')
+    return { doc: state.accountDoc, log: [] }
+  }),
   verifiedAccountLog: vi.fn(async () => {
     if (state.accountLogMissing) {
       const err = new Error('the account log answered 404')
@@ -944,7 +977,11 @@ vi.mock('@/session/pendingRetirement', () => ({
   )
 }))
 
-vi.mock('@/session/accountCeremonyContext', () => ({
+vi.mock('@/session/accountCeremonyContext', async importOriginal => ({
+  // The real key choice: which key this session holds a roster wrap for.
+  rosterUnwrapKey: (
+    await importOriginal<typeof import('@/session/accountCeremonyContext')>()
+  ).rosterUnwrapKey,
   // The live-rides thunk: the ceremonies read the invocation capability off
   // the context each time they spread it, so the mock must expose it too.
   ceremonyRides:
@@ -1092,11 +1129,20 @@ const {
 const { deleteSpaceWithCapability } =
   await import('@interop/wallet-core/clientAnnex')
 const { deleteUnlockLocalState } = await import('@/lib/sessionKey')
+const { sessionDisposalSignal } = await import('@/session/sessionLifecycle')
 const { invalidateVerifiedLog } = await import('@/session/verifiedLog')
 const { resealRegistryFromEscrow } = await import('@/session/registryReseal')
 const { preflightCredentialRetirement, rotateOffUnlockCredential } =
   await import('@/session/credentialRotation')
-const { adoptRotatedUserKey } = await import('@/session/userKeyAdoption')
+const {
+  adoptFollowerUserKey,
+  adoptRotatedUserKey,
+  userKeyRosterPosition,
+  withOwnUserKeyRotation
+} = await import('@/session/userKeyAdoption')
+const { refreshVerifiedAccountLog } = await import('@/session/verifiedLog')
+const { readUserKeyRoster } = await import('@interop/wallet-core/keys')
+const { joinEncounter } = await import('@/session/menders/encounter')
 const {
   revokeUnlockMethod,
   revokeUnlockMethodByCeremony,
@@ -1233,6 +1279,9 @@ function makeSession({
       },
       standingUnlock: {
         unlockSpaceId: passkey ? PASSKEY_SPACE : ACTING_SPACE,
+        // The standing credential's own key-agreement key: the one the
+        // roster wraps to on a transient session.
+        standingClient: { agents: { keyAgreementKey: STANDING_KAK } },
         // A standing credential always carries the sibling delegation (the
         // generation-delegation renewal needs it), so it is always present.
         // Its DEFAULT target is on another host, so it contributes no annex
@@ -1456,6 +1505,29 @@ describe('deleteAccount (the transient walk)', () => {
       'snapshotWipeTargets',
       'executeLocalWipe'
     ])
+  })
+
+  it('aborts the session disposal signal past the pivot, before any local state goes', async () => {
+    const session = makeSession({ transient: true })
+    const disposal = sessionDisposalSignal()
+    ;(session as { disposal: AbortSignal }).disposal = disposal
+    const abortedAt: boolean[] = []
+    vi.mocked(deleteUnlockLocalState).mockImplementationOnce(async () => {
+      abortedAt.push(disposal.aborted)
+    })
+    const outcome = await deleteAccount({ session, passphrase: PASSPHRASE })
+    expect(outcome.result).toBe('deleted')
+    expect(abortedAt).toEqual([true])
+  })
+
+  it('leaves the disposal signal alone on a run refused before the pivot', async () => {
+    const session = makeSession({ transient: true })
+    const disposal = sessionDisposalSignal()
+    ;(session as { disposal: AbortSignal }).disposal = disposal
+    state.verifyFails = 'wrong'
+    const outcome = await deleteAccount({ session, passphrase: 'wrong' })
+    expect(outcome.result).toBe('wrong-passphrase')
+    expect(disposal.aborted).toBe(false)
   })
 
   it('mints each DELETE-only capability immediately before its own request', async () => {
@@ -1713,6 +1785,99 @@ describe('deleteAccount (the (a2) refusals)', () => {
       .invocationCallOrder
     expect(repair).toBeGreaterThan(firstRead!)
     expect(secondRead).toBeGreaterThan(repair!)
+  })
+
+  it('reads the roster with the standing key on a transient session, not the per-visit key', async () => {
+    state.registryStaleSeal = true
+    state.resealResult = 'repaired'
+    state.rosterRead = { descriptor: { epochs: [] } }
+    const outcome = await deleteAccount({
+      session: makeSession({ transient: true }),
+      passphrase: PASSPHRASE
+    })
+    expect(outcome.result).toBe('deleted')
+    expect(vi.mocked(readUserKeyRoster)).toHaveBeenCalledWith(
+      expect.objectContaining({ clientKeyAgreementKey: STANDING_KAK })
+    )
+    expect(vi.mocked(resealRegistryFromEscrow)).toHaveBeenCalledWith(
+      expect.objectContaining({ unwrapKey: STANDING_KAK })
+    )
+  })
+
+  it('follows a rotation it is behind and re-seals nothing when the registry then opens', async () => {
+    state.registryStaleSeal = true
+    state.resealResult = 'repaired'
+    state.rosterRead = { descriptor: { epochs: [] } }
+    vi.mocked(userKeyRosterPosition).mockReturnValueOnce('behind')
+    // Once the session follows the rotation, the registry opens under the
+    // key it moved onto.
+    vi.mocked(adoptFollowerUserKey).mockImplementationOnce(async () => {
+      state.calls.push('adoptFollowerUserKey')
+      state.registryStaleSeal = false
+      return { adopted: true, position: 'current' }
+    })
+    const outcome = await deleteAccount({
+      session: makeSession({ transient: true }),
+      passphrase: PASSPHRASE
+    })
+    expect(outcome.result).toBe('deleted')
+    expect(state.calls).toContain('adoptFollowerUserKey')
+    expect(state.calls).not.toContain('resealRegistryFromEscrow')
+  })
+
+  it('joins a stale-seal mend in flight before its registry read', async () => {
+    const session = makeSession({ transient: true })
+    vi.mocked(getUnlockMethods).mockClear()
+    const outcome = await deleteAccount({ session, passphrase: PASSPHRASE })
+    expect(outcome.result).toBe('deleted')
+    expect(vi.mocked(joinEncounter)).toHaveBeenCalledWith({
+      session,
+      invariant: 'unlock-registry-opens-under-the-current-user-key'
+    })
+    const [join] = vi.mocked(joinEncounter).mock.invocationCallOrder
+    const [read] = vi.mocked(getUnlockMethods).mock.invocationCallOrder
+    expect(join).toBeLessThan(read!)
+  })
+
+  it('refreshes the account log memo before the repair reads the roster', async () => {
+    state.registryStaleSeal = true
+    state.resealResult = 'repaired'
+    state.rosterRead = { descriptor: { epochs: [] } }
+    const outcome = await deleteAccount({
+      session: makeSession({ transient: true }),
+      passphrase: PASSPHRASE
+    })
+    expect(outcome.result).toBe('deleted')
+    const [refresh] = vi.mocked(refreshVerifiedAccountLog).mock
+      .invocationCallOrder
+    const [read] = vi.mocked(readUserKeyRoster).mock.invocationCallOrder
+    expect(refresh).toBeLessThan(read!)
+  })
+
+  it('refuses rather than re-sealing when the roster does not place the session key', async () => {
+    state.registryStaleSeal = true
+    state.resealResult = 'repaired'
+    state.rosterRead = { descriptor: { epochs: [] } }
+    for (const position of ['unplaced', 'ahead'] as const) {
+      vi.mocked(userKeyRosterPosition).mockReturnValueOnce(position)
+      state.calls = []
+      const outcome = await deleteAccount({
+        session: makeSession({ transient: true }),
+        passphrase: PASSPHRASE
+      })
+      expect(outcome.result).toBe('refused')
+      expect(outcome.refusal).toBe('registry-stale-seal')
+      expect(state.calls).not.toContain('resealRegistryFromEscrow')
+    }
+  })
+
+  it('runs as its own user key rotation, so encounters stand down beside it', async () => {
+    const session = makeSession({ transient: true })
+    const outcome = await deleteAccount({ session, passphrase: PASSPHRASE })
+    expect(outcome.result).toBe('deleted')
+    expect(vi.mocked(withOwnUserKeyRotation)).toHaveBeenCalledWith(
+      expect.objectContaining({ session })
+    )
   })
 
   it('refuses when the stale seal cannot be repaired', async () => {

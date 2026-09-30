@@ -58,7 +58,8 @@ function makeCredential(name: string): IVerifiableCredential {
  * map, recording the calls the retraction makes.
  *
  * @param options {object}
- * @param [options.resources] {Record<string, Json>}   the remote rows, by cid
+ * @param [options.resources] {Record<string, Json>}   the remote Resources, by
+ *   cid
  * @returns {object}
  */
 function makeFakeRemote({
@@ -66,22 +67,22 @@ function makeFakeRemote({
 }: {
   resources?: Record<string, Json>
 } = {}) {
-  const rows = new Map<string, Json>(Object.entries(resources))
+  const held = new Map<string, Json>(Object.entries(resources))
   const fake = {
     spaceId: 's-space',
     listSyncedDocuments: vi.fn(async () =>
-      [...rows].map(([id, data]) => ({ id, data }))
+      [...held].map(([id, data]) => ({ id, data }))
     ),
     getSyncedResource: vi.fn(async ({ resourceId }: { resourceId: string }) =>
-      rows.get(resourceId)
+      held.get(resourceId)
     ),
     deleteSyncedResource: vi.fn(
       async ({ resourceId }: { resourceId: string }) => {
-        rows.delete(resourceId)
+        held.delete(resourceId)
       }
     )
   }
-  return { fake, rows }
+  return { fake, held }
 }
 
 /**
@@ -119,7 +120,7 @@ async function makeStorage(
 
 describe('StorageManager.retractPublicCopy', () => {
   it('deletes a remote public copy the local replica has not pulled', async () => {
-    const { fake, rows } = makeFakeRemote({
+    const { fake, held } = makeFakeRemote({
       resources: { 'cid-1': makeCredential('Alice') as unknown as Json }
     })
     const storage = await makeStorage(fake as unknown as WASRemoteStore)
@@ -130,7 +131,7 @@ describe('StorageManager.retractPublicCopy', () => {
       logicalKey: 'publicCredentials',
       resourceId: 'cid-1'
     })
-    expect(rows.has('cid-1')).toBe(false)
+    expect(held.has('cid-1')).toBe(false)
   })
 
   it('refuses the delete when the remote probe throws', async () => {
@@ -160,7 +161,9 @@ describe('StorageManager.retractPublicCopy', () => {
     await expect(
       storage.deleteCredential({ cid, consultRemote: true })
     ).rejects.toThrow(PublicCopyRetractionError)
-    expect((await storage.listCredentials()).map(row => row.cid)).toEqual([cid])
+    expect(
+      (await storage.listCredentials()).map(credential => credential.cid)
+    ).toEqual([cid])
   })
 
   it('decides on the local replica alone without consultRemote', async () => {
@@ -216,8 +219,8 @@ describe('StorageManager.listPublicCredentials', () => {
     })
 
     expect(listed.map(({ cid }) => cid)).toEqual(['cid-remote'])
-    // One page walk, no per-resource GET: the skipped cid's private row's
-    // delete retracts it.
+    // One page walk, no per-resource GET: the skipped cid's private
+    // credential's delete retracts it.
     expect(fake.listSyncedDocuments).toHaveBeenCalledTimes(1)
     expect(fake.getSyncedResource).not.toHaveBeenCalled()
   })

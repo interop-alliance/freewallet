@@ -15,8 +15,8 @@
  * revision whose head is nowhere, the activity filter (only a credential's
  * own activities migrate), and the drop rule for an archived `Create` the
  * account already records. The walk's report then becomes the one Import
- * activity the run writes, replacing any earlier run's row for the same
- * bundle.
+ * activity the run writes, replacing any earlier run's Import activity for
+ * the same bundle.
  *
  * Every session kind may run it, a guest included: every import method
  * routes to the session's own backend, so a transient session writes
@@ -655,7 +655,7 @@ async function runMigration({
   // The run record, written whenever the walk ended by its own rules (its
   // tail, a quota refusal, or a collection's consecutive-failure stop) and
   // never on an abort, which throws past this line. It replaces an earlier
-  // run's row for the same bundle rather than standing beside it.
+  // run's Import activity for the same bundle rather than standing beside it.
   await session.storage.putHistoryItemReplacingOthers({
     activity: addHistoryContentImported({
       targetDid: targetDidOf(session),

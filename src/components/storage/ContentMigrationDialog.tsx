@@ -79,7 +79,7 @@ type SecretKind = 'passphrase' | 'recoveryCode' | 'packedCredential'
 
 /**
  * How often the per-collection counters are pushed into React state. The walk
- * reports every row and a large bundle carries thousands, so the counts
+ * reports every Resource and a large bundle carries thousands, so the counts
  * accumulate in a ref and land on screen at this interval instead.
  */
 const PROGRESS_FLUSH_MS = 200
@@ -90,8 +90,8 @@ const PROGRESS_FLUSH_MS = 200
  * @param options {object}
  * @param options.session {Session}   the account imported INTO
  * @param options.onClose {Function}   closes the dialog
- * @param options.onImported {Function}   called once a run has written rows,
- *   so the page can re-list what it shows
+ * @param options.onImported {Function}   called once a run has written
+ *   Resources, so the page can re-list what it shows
  * @returns {JSX.Element}
  */
 export function ContentMigrationDialog({
@@ -214,7 +214,7 @@ export function ContentMigrationDialog({
     } finally {
       abortRef.current = null
       setRunning(false)
-      // An aborted or refused run may still have written rows before it
+      // An aborted or refused run may still have written Resources before it
       // stopped, so the page re-lists either way.
       onImported()
     }

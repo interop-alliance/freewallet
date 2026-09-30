@@ -2794,7 +2794,7 @@ describe('StorageManager.revokeAppCollectionRecipients', () => {
       })
     }
     await recordAppGrant(storage, { user, origin: APP_ORIGIN, grantee: app })
-    // The co-reader's one admission lands in a row this session cannot
+    // The co-reader's one admission lands in a Resource this session cannot
     // decrypt: sealed under a key epoch this account never held.
     const stranger = await generateKey()
     const strangerCiphers = await buildCiphers(stranger, {})
@@ -2808,13 +2808,13 @@ describe('StorageManager.revokeAppCollectionRecipients', () => {
       }),
       { user, origin: 'https://other.example', grantee: other }
     )
-    for (const row of await strangerStore
+    for (const resource of await strangerStore
       .rxCollection('walletActivity')
       .find()
       .exec()) {
       await localStore
         .rxCollection('walletActivity')
-        .insert(row.toMutableJSON())
+        .insert(resource.toMutableJSON())
     }
     const capture = captureSink()
     const removeSink = addSink(capture.sink)
@@ -2835,7 +2835,7 @@ describe('StorageManager.revokeAppCollectionRecipients', () => {
       const warnings = capture.events.filter(
         event =>
           event.level === 'warn' &&
-          event.msg.includes('history with unreadable rows')
+          event.msg.includes('history with unreadable resources')
       )
       expect(warnings).toHaveLength(1)
       expect(warnings[0].data).toMatchObject({
@@ -2870,10 +2870,10 @@ describe('StorageManager.revokeAppCollectionRecipients', () => {
       recipient: app.recipient
     })
     await recordAppGrant(storage, { user, origin: APP_ORIGIN, grantee: app })
-    // The history the caller read, before any unreadable row existed.
+    // The history the caller read, before any unreadable Resource existed.
     const items = await storage.listHistoryItems()
     expect(items.unreadable).toBe(0)
-    // A later read skips a row this session cannot decrypt.
+    // A later read skips a Resource this session cannot decrypt.
     const stranger = await generateKey()
     const strangerCiphers = await buildCiphers(stranger, {})
     const { localStore: strangerStore } = await initLocalStore(strangerCiphers)
@@ -2886,13 +2886,13 @@ describe('StorageManager.revokeAppCollectionRecipients', () => {
       }),
       { user, origin: 'https://other.example', grantee: app }
     )
-    for (const row of await strangerStore
+    for (const resource of await strangerStore
       .rxCollection('walletActivity')
       .find()
       .exec()) {
       await localStore
         .rxCollection('walletActivity')
-        .insert(row.toMutableJSON())
+        .insert(resource.toMutableJSON())
     }
     expect((await storage.listHistoryItems()).unreadable).toBe(1)
     const capture = captureSink()
@@ -2910,7 +2910,7 @@ describe('StorageManager.revokeAppCollectionRecipients', () => {
         capture.events.filter(
           event =>
             event.level === 'warn' &&
-            event.msg.includes('history with unreadable rows')
+            event.msg.includes('history with unreadable resources')
         )
       ).toHaveLength(0)
     } finally {
@@ -3961,7 +3961,8 @@ describe('StorageManager unknown-epoch refresh', () => {
     })
 
     // The remote-direct listCredentials refreshes the descriptor, rebuilds the
-    // backend's cipher via setCiphers, and re-reads -- returning the fresh row.
+    // backend's cipher via setCiphers, and re-reads -- returning the fresh
+    // credential.
     const listed = await storage.listCredentials()
     expect(listed).toEqual([{ cid, vc: credential }])
   })

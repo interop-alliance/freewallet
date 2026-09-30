@@ -193,6 +193,7 @@ import {
 import {
   adoptRotatedUserKey,
   adoptRotatedUserKeyInBand,
+  heldAsOwnUserKeyRotation,
   rewrapUnlockRegistryToUserKey
 } from '@/session/userKeyAdoption'
 import { deleteUnlockLocalState } from '@/lib/sessionKey'
@@ -527,7 +528,7 @@ async function requireRecoveryContext({
  * @param options.context {AccountCeremonyContext}
  * @returns {IKeyAgreementKey}
  */
-function rosterUnwrapKey({
+function contextRosterUnwrapKey({
   context
 }: {
   context: AccountCeremonyContext
@@ -631,7 +632,7 @@ export async function issueRecoveryCode({
         id: client.recipientKid,
         publicKeyMultibase: client.keyAgreementKeyMultibase
       },
-      ownerKeyAgreementKey: rosterUnwrapKey({ context })
+      ownerKeyAgreementKey: contextRosterUnwrapKey({ context })
     })
   }
 
@@ -3222,7 +3223,14 @@ export async function updateRegistryAfterRecovery({
  *   be attributed, so the revocation refused before publishing anything.
  *   Matched by NAME everywhere in this repo
  */
-export async function revokeRecoveryCode({
+export const revokeRecoveryCode = heldAsOwnUserKeyRotation(
+  revokeRecoveryCodeHeld
+)
+
+/**
+ * The body of {@link revokeRecoveryCode}, run with the own-rotation mark held.
+ */
+async function revokeRecoveryCodeHeld({
   session,
   entry,
   idb
@@ -3244,7 +3252,7 @@ export async function revokeRecoveryCode({
     keyAgreementKeyMultibase: entry.keyAgreementKeyMultibase,
     updateKeyMultibase: entry.updateKeyMultibase
   }
-  const unwrapKey = rosterUnwrapKey({ context })
+  const unwrapKey = contextRosterUnwrapKey({ context })
 
   // 1. The retirement gate, read-only: a code whose ladder VM this account's
   // log does not attribute refuses here, before anything is written.

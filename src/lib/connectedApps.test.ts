@@ -1,7 +1,7 @@
 /**
  * @vitest-environment node
  *
- * The agent half of the connected-grantee model: which activity rows list as
+ * The agent half of the connected-grantee model: which activities list as
  * a connected agent (`listConnectedAgents` -- the Login predicate, the Revoke
  * join, the all-expired rule (drop, or keep while a granted collection's
  * current key epoch lists the agent), and the name / key-fingerprint fallback), and
@@ -452,8 +452,8 @@ describe('listConnectedAgents', () => {
 })
 
 describe('findKnownAgents', () => {
-  const items = (rows: unknown[]) =>
-    ({ entries: rows, unreadable: 0 }) as Parameters<
+  const items = (entries: unknown[]) =>
+    ({ entries, unreadable: 0 }) as Parameters<
       typeof findKnownAgents
     >[0]['items']
 

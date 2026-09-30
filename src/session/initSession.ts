@@ -104,6 +104,12 @@ import type {
 } from '@/session/keyring'
 import { createLogger } from '@/lib/log'
 import { wasServiceDescriptionIfReachable } from '@/lib/wasService'
+import { bindStrandedCollectionEncounter } from '@/session/menders/encounterSites'
+import {
+  armEncounterGate,
+  openEncounterGate,
+  sessionDisposalSignal
+} from '@/session/sessionLifecycle'
 
 const log = createLogger('fw:session:init')
 
@@ -473,7 +479,21 @@ export async function initSessionFromSeed({
   // the session below references the same profile.
   profile.keystoreAgent = keystoreAgent
 
-  const session = { user, profile, storage, persistence, isGuest } as Session
+  const session = {
+    user,
+    profile,
+    storage,
+    persistence,
+    isGuest,
+    disposal: sessionDisposalSignal()
+  } as Session
+  // A caller that supplies the login's report accumulator starts the login
+  // mender block on this session (or opens the gate itself when it decides
+  // to start none); every other caller gets a gate open at once.
+  armEncounterGate({ session, blockFollows: !!accumulator })
+  // A collection the storage records as stranded is mended mid-visit, behind
+  // the gate above.
+  bindStrandedCollectionEncounter({ session })
   bound.session = session
   if (userKeyPersistFailed) {
     session.userKeyPersistFailed = true
@@ -1410,6 +1430,7 @@ async function sessionFromKeyringHit({
     // entries are all of it.
     session.mends = mends.settled
     mends.settle()
+    openEncounterGate({ session })
     return { session, userExists }
   }
   const { context, refreshContext } = blockCeremonyContext({ session })

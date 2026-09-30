@@ -859,7 +859,7 @@ describe('resolveInvocationTarget', () => {
     // Plaintext standard collection, the `id` / `key-map` collections, an RP
     // collection, a made-up name, a missing name -- none has an epoch roster.
     // `app-connections` and `wallet-activity` do have one and are refused all
-    // the same: their rows are the connected apps' private seeds and the
+    // the same: their Resources are the connected apps' private seeds and the
     // account's grant history.
     for (const name of [
       'public-credentials',
@@ -2102,7 +2102,7 @@ describe('processZcaps', () => {
   })
 
   it('skips a share of wallet-activity on the App Connect path', async () => {
-    // The activity rows carry every delegated zcap verbatim, so a share of the
+    // The activities carry every delegated zcap verbatim, so a share of the
     // collection would hand one reader the account's whole grant history.
     delegated.length = 0
     shareCalls.length = 0

@@ -2,7 +2,7 @@
  * Tests for the share surface's two collection sets. The roster's `shareable`
  * flag is the allowlist a new share may name. It is narrower than the
  * encrypted set -- `app-connections` and `wallet-activity` carry key-epoch
- * rosters and are deliberately never shareable, since their rows are the
+ * rosters and are deliberately never shareable, since their Resources are the
  * connected apps' private seeds and the account's grant history. The shares
  * listing (`listSharedCollections` in `src/session/shares.ts`) reads the whole
  * encrypted set instead, so a reader escrowed into a collection that is not

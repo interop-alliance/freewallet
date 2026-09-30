@@ -117,10 +117,10 @@ export const WAS_SYNC_RETRY_MS = env.VITE_WAS_SYNC_RETRY_MS
 export const WAS_SYNC_BATCH_SIZE = env.VITE_WAS_SYNC_BATCH_SIZE
   ? Number(env.VITE_WAS_SYNC_BATCH_SIZE)
   : undefined
-// `VITE_WAS_SYNC_POLL_MS` -- interval between background pull polls
-// (`reSync()` across the running replications), so rows another wallet
-// pushes mid-session land without a re-login. `0` disables polling. An
-// interim measure until server-side live streaming (`pull.stream$`) exists.
+// `VITE_WAS_SYNC_POLL_MS` -- interval between background pull polls (`reSync()`
+// across the running replications), so Resources another wallet pushes
+// mid-session land without a re-login. `0` disables polling. An interim measure
+// until server-side live streaming (`pull.stream$`) exists.
 export const WAS_SYNC_POLL_MS = env.VITE_WAS_SYNC_POLL_MS
   ? Number(env.VITE_WAS_SYNC_POLL_MS)
   : 30_000
@@ -153,17 +153,17 @@ export const WALLET_STANDARD_COLLECTIONS: Array<{
   // Whether a new share may name the collection (the
   // `https://w3id.org/byoe#shared-wallet-collection` grant allowlist). The
   // shares listing does not consult it, so an existing reader of a collection
-  // that is no longer shareable stays removable. Projected verbatim from the spec: it is a
-  // narrower predicate than `encryption`, since a collection can carry a key
-  // epoch roster and still never be shareable (`app-connections`, whose rows
-  // are the connected apps' private seeds, and `wallet-activity`, whose rows
-  // are the account's grant history).
+  // that is no longer shareable stays removable. Projected verbatim from the
+  // spec: it is a narrower predicate than `encryption`, since a collection can
+  // carry a key epoch roster and still never be shareable (`app-connections`,
+  // whose Resources are the connected apps' private seeds, and
+  // `wallet-activity`, whose Resources are the account's grant history).
   shareable: boolean
   // How the collection's cipher mints a document id, from the collection spec:
-  // 'content' (content-addressed, immutable) or 'random' (the mutable
-  // stable-id head model -- `contacts`). Only meaningful on an encrypted
-  // collection; the ciphers are built with it so the minted ids follow the
-  // spec (a `'random'` mint becomes the row id, see `browserStore.addContact`).
+  // 'content' (content-addressed, immutable) or 'random' (the mutable stable-id
+  // head model -- `contacts`). Only meaningful on an encrypted collection; the
+  // ciphers are built with it so the minted ids follow the spec (a `'random'`
+  // mint becomes the resource id, see `browserStore.addContact`).
   idDerivation?: 'content' | 'random'
 }> = WALLET_SPACE_SYNCED_SPECS.map(spec => {
   const key = RXDB_KEY_BY_COLLECTION_ID[spec.collectionId]
@@ -207,7 +207,7 @@ export const ENCRYPTED_STANDARD_COLLECTIONS =
 // `public-credentials` plaintext (keyed by credential cid), the encrypted ones
 // as EDV envelopes (keyed by a hash of the JWE ciphertext) -- and the adapter
 // ships the stored bodies verbatim either way. `contacts` is the one mutable
-// exception: a stable, randomly-derived row id whose body is genuinely
+// exception: a stable, randomly-derived resource id whose body is genuinely
 // overwritten in place (see `CONTACTS_COLLECTION_SPEC` in
 // `@interop/social-core`), matching Freewallet mobile's SQLite head-document
 // row. The push handler already supports an in-place content update

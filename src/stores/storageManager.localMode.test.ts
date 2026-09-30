@@ -259,7 +259,8 @@ describe('StorageManager.initStorageClients in local mode', () => {
     const second = await initLocalSession({ user, owner, isGuest: false })
     openSessions.push(second)
     // The descriptors came back out of the cache rather than being re-minted;
-    // a re-mint would seal a fresh epoch and strand the rows written above.
+    // a re-mint would seal a fresh epoch and strand the resource replicas
+    // written above.
     expect(localStorageBacking).toEqual(cachedDescriptors)
 
     const credentials = await second.listCredentials()

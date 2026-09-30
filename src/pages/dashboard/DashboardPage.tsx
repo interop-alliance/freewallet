@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from 'react'
+import { useState, useEffect, useCallback, useSyncExternalStore } from 'react'
 import Alert from '@mui/material/Alert'
 import Box from '@mui/material/Box'
 import IconButton from '@mui/material/IconButton'
@@ -32,6 +32,12 @@ import type { WalletInputOutcome } from '@/lib/resolveWalletInput'
 import { externalRequestPath } from '@/lib/walletRequest/externalRequest'
 import type { StoredCredential } from '@/types/credential'
 import { createLogger } from '@/lib/log'
+import {
+  encounterLostRosterWrap,
+  rosterWrapLostCopyKey,
+  strandedCollectionMend,
+  subscribeStrandedCollectionMend
+} from '@/session/menders/encounterSites'
 
 const log = createLogger('fw:ui:dashboard')
 
@@ -61,16 +67,16 @@ export function DashboardPage() {
   const [scanQrOpen, setScanQrOpen] = useState(false)
   // Covers a failed load and a failed purge alike; a successful load clears it.
   const [loadError, setLoadError] = useState(false)
-  // Rows the vault is unlocked for but that still would not decrypt (corrupted
-  // or written under a mismatched KAK). Skipped by the list read; surfaced here
-  // so the user can see and clear them rather than one poisoned row hanging the
-  // page.
+  // Resources the vault is unlocked for but that still would not decrypt
+  // (corrupted or written under a mismatched KAK). Skipped by the list read;
+  // surfaced here so the user can see and clear them rather than one poisoned
+  // Resource hanging the page.
   const [undecryptableCount, setUndecryptableCount] = useState(0)
-  // Rows whose body failed its integrity check: the storage server returned
-  // data that does not verify against the id it was read under. Surfaced on
-  // its own, with no remove affordance -- producing such a row takes no keys,
-  // so offering to delete it would let a host present recoverable data as
-  // garbage and have the wallet destroy the evidence.
+  // Resources whose body failed its integrity check: the storage server
+  // returned data that does not verify against the id it was read under.
+  // Surfaced on its own, with no remove affordance -- producing such a Resource
+  // takes no keys, so offering to delete it would let a host present
+  // recoverable data as garbage and have the wallet destroy the evidence.
   const [integrityCount, setIntegrityCount] = useState(0)
   // Dismissing the passkey-safety notice hides it for this visit only.
   const [noticeDismissed, setNoticeDismissed] = useState(false)
@@ -134,9 +140,9 @@ export function DashboardPage() {
     }
   )
 
-  // Background replication lands rows after the mount read (on a fresh
-  // browser the first pull of `private-credentials` completes moments after
-  // the dashboard rendered its empty list), so re-read when that pull
+  // Background replication lands resource replicas after the mount read (on a
+  // fresh browser the first pull of `private-credentials` completes moments
+  // after the dashboard rendered its empty list), so re-read when that pull
   // settles.
   const reloadAfterPull = useCallback(() => {
     loadCredentials().catch((err: unknown) => {
@@ -205,6 +211,62 @@ export function DashboardPage() {
     }
   )
 
+  // A collection recorded as stranded mid-visit (another client rotated the
+  // user key) is mended by the stranded-collection encounter. The page
+  // follows the current or latest run: a clean run re-lists the credentials,
+  // and a run that could not mend `private-credentials` shows why the list
+  // is empty.
+  const subscribeStranded = useCallback(
+    (listener: () => void) =>
+      session
+        ? subscribeStrandedCollectionMend({ session, listener })
+        : () => undefined,
+    [session]
+  )
+  const strandedRun = useSyncExternalStore(subscribeStranded, () =>
+    session ? strandedCollectionMend({ session }) : undefined
+  )
+  const [strandedUnmended, setStrandedUnmended] = useState<
+    'failed' | 'no-roster-wrap' | undefined
+  >()
+  useAsyncLoad(
+    async ({ isCancelled }) => {
+      // Never rejects.
+      const entries = (await strandedRun) ?? []
+      if (isCancelled() || entries.length === 0 || !session) {
+        return
+      }
+      const mended = entries.every(
+        entry => entry.outcome === 'clean' || entry.outcome === 'noop'
+      )
+      const unmended =
+        !mended &&
+        session.storage.strandedCollectionIds.includes(
+          PRIVATE_CREDENTIALS_COLLECTION
+        )
+      if (!unmended) {
+        setStrandedUnmended(undefined)
+      } else {
+        setStrandedUnmended(
+          encounterLostRosterWrap({ entries }) ? 'no-roster-wrap' : 'failed'
+        )
+      }
+      if (mended) {
+        await loadCredentials(isCancelled)
+      }
+    },
+    [strandedRun, loadCredentials, session],
+    {
+      enabled: Boolean(strandedRun),
+      // The initial load's error handling owns the loadError banner.
+      onError: err => {
+        log.error('Could not reload credentials after a stranded mend', {
+          err
+        })
+      }
+    }
+  )
+
   // The passkey-only safety notice: present when this wallet was created with a
   // single passkey and no second unlock method has been added yet. Drives a
   // recurring "add a second login method" prompt.
@@ -225,6 +287,9 @@ export function DashboardPage() {
     }
   )
   const passkeySafetyNotice = noticeDismissed ? null : (loadedNotice ?? null)
+  const rosterWrapLostKey = session
+    ? rosterWrapLostCopyKey({ session })
+    : 'common.rosterWrapLostRemembered'
 
   async function handleSync() {
     setSyncing(true)
@@ -291,6 +356,14 @@ export function DashboardPage() {
       {loadError && (
         <Alert severity="error" sx={{ mb: 2 }}>
           {t('dashboard.loadError')}
+        </Alert>
+      )}
+
+      {strandedUnmended && (
+        <Alert severity="warning" sx={{ mb: 2 }}>
+          {strandedUnmended === 'failed'
+            ? t('dashboard.strandedUnmended')
+            : t(rosterWrapLostKey)}
         </Alert>
       )}
 

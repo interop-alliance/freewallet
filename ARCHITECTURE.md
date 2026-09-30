@@ -93,9 +93,12 @@ src/session/        Session bootstrap and the account ceremonies -- the
                     credentialCoverage.ts
   Menders           menders/ -- the mender registry: the invariant table,
                     the two chains' registration lists, the runner that
-                    executes one, and the gap allowlist
+                    executes one, the gap allowlist, and the encounter
+                    runner and its session bindings (encounter.ts,
+                    encounterSites.ts)
   Shared parts      rosterStore.ts, collectionLogStore.ts, annexReach.ts,
-                    recordEnvelope.ts,
+                    recordEnvelope.ts, sessionLifecycle.ts (the disposal
+                    signal and the encounter gate),
                     accountCeremonyContext.ts, completeAppLogin.ts (the
                     page-level post-login sequence), completePopupLogin.ts,
                     walletLoginActivity.ts
@@ -401,17 +404,17 @@ The encrypted collections, all of the above except `public-credentials`,
 store **EDV envelopes**: encrypted at rest locally and opaque to the server.
 A per-collection document cipher (`createEdvDocCipher` from
 `@interop/was-client/edv`, built from the session's vault KAK) encrypts at
-write time and decrypts at read time. The row id is a hash of the JWE
+write time and decrypts at read time. The resource id is a hash of the JWE
 ciphertext, so it is identical on every replica. Every decrypt names the id
 the body was read under, and a body sealed for some other resource is refused
 rather than opened, so a host cannot answer one resource with another's
-envelope. Such a row is counted in its own bucket, apart from the purgeable
+envelope. Such a Resource is counted in its own bucket, apart from the purgeable
 one: producing it takes no keys, so a host that could have it collected as
 garbage could have the wallet destroy recoverable data. The dashboard reports
 it and offers no removal. Page-facing identity stays the credential `cid` or activity `id`,
 recovered by decrypting at read time.
 JWE encryption is nondeterministic, so dedupe keys on that content identity
-rather than on the row id. `public-credentials` is plaintext and keyed
+rather than on the resource id. `public-credentials` is plaintext and keyed
 directly by `cid`. Each encrypted collection's key epochs come from the
 verified head of its own governing log rather than from a metadata member
 the host serves (see "Per-collection descriptor logs" in docs/architecture/keys-and-descriptor-logs.md).
@@ -488,41 +491,42 @@ the file. The run's counts become one Import activity.
 The walk also carries app collections, the collections a connected app had
 the old account provision. The session needs remote storage and the
 descriptor logs of a promoted account to take them, so a guest or a no-WAS
-session leaves them counted as not migrated. An encrypted one is
-provisioned owner-only under its archived `generator`, with a fresh
-governing log and blinded-index key. Its archived index schema is declared
-on it, and each JSON row is re-sealed under the new user key with its
-blinded index entries, under a fresh content-derived id. A row that decrypts
-to bytes, a chunked one or a small binary or text one, is sealed under its
+session leaves them counted as not migrated. An encrypted one is provisioned
+owner-only under its archived `generator`, with a fresh governing log and
+blinded-index key. Its archived index schema is declared on it, and each
+JSON Resource is re-sealed under the new user key with its blinded index
+entries, under a fresh content-derived id. A Resource that decrypts to
+bytes, a chunked one or a small binary or text one, is sealed under its
 archived content type at its archived resource id, create-if-absent, and is
-written in chunks when it is large. A plaintext one is created
-private and then made world-readable when the archived collection policy
-was. Each of its rows keeps its archived resource id and content type. Rows
-are written remote-direct on every session kind. The ensure's own report of
+written in chunks when it is large. A plaintext one is created private and
+then made world-readable when the archived collection policy was. Each of
+its Resources keeps its archived resource id and content type. Resources are
+written remote-direct on every session kind. The ensure's own report of
 whether it created the collection decides what the run sets up, not an
 earlier read. The public read and the index schema travel only to a
 collection the run creates, or to its own torn create. A standing collection
-counts as that when it holds no rows and carries the archived `generator`.
-An unattributed archive never counts, since an interaction-URL grant also
-leaves an unattributed collection. A re-run finishes such a collection, so
-a run torn between its create and its settings converges. Any other
-collection the account already holds keeps its attribution, public read,
-and schema, and is merged by the same skip-existing rule. It is refused
-when its kind differs from the archive's, when it is encrypted under a
-descriptor no log governs, or when a plaintext archive's public read
-differs from it. An encrypted archive's public read is ignored.
-An encrypted JSON row's identity is its payload's own `id`, or its content
-cid when it has none. An encrypted bytes row's identity is its resource id.
-When that id is taken, the held copy is read back and compared by its bytes,
-and it is left untouched when they differ. The snapshot of held rows names a
-bytes row by its id and does not reassemble a chunked one. A pending stub a
-killed chunked write left at an id the run is importing is deleted with its
-chunks, and the row is written again. A second run could reap a stub the
-first is still filling, so a tab runs one migration at a time
-(`ContentMigrationInProgressError`). Two tabs or two browsers are not
-held apart. A plaintext row's identity is its resource id, and a non-JSON row
-whose id is taken is compared by its bytes. A full Space during any row
-write, a chunked one included, stops the walk under `QuotaExceededError`.
+counts as that when it holds no Resources and carries the archived
+`generator`. An unattributed archive never counts, since an interaction-URL
+grant also leaves an unattributed collection. A re-run finishes such a
+collection, so a run torn between its create and its settings converges. Any
+other collection the account already holds keeps its attribution, public
+read, and schema, and is merged by the same skip-existing rule. It is
+refused when its kind differs from the archive's, when it is encrypted under
+a descriptor no log governs, or when a plaintext archive's public read
+differs from it. An encrypted archive's public read is ignored. An encrypted
+JSON Resource's identity is its payload's own `id`, or its content cid when
+it has none. An encrypted bytes Resource's identity is its resource id. When
+that id is taken, the held copy is read back and compared by its bytes, and
+it is left untouched when they differ. The snapshot of held Resources names
+a bytes Resource by its id and does not reassemble a chunked one. A pending
+stub a killed chunked write left at an id the run is importing is deleted
+with its chunks, and the Resource is written again. A second run could reap
+a stub the first is still filling, so a tab runs one migration at a time
+(`ContentMigrationInProgressError`). Two tabs or two browsers are not held
+apart. A plaintext Resource's identity is its resource id, and a non-JSON
+Resource whose id is taken is compared by its bytes. A full Space during any
+Resource write, a chunked one included, stops the walk under
+`QuotaExceededError`.
 
 The backup bundle is the other direction. The Storage page's export action
 (`src/components/storage/BackupExportDialog.tsx`) runs
@@ -619,7 +623,12 @@ mender is also declared as an invariant in the mender registry
 The declarations are data and the registrations are code
 (`src/session/menders/registrations.ts`): the runner executes one chain's
 list in order and reports each entry into `session.mends`, and a routing or
-ceremony-tail entry reports from its own call site instead. Every ceremony
+ceremony-tail entry reports from its own call site instead. Two
+registrations run mid-visit, through the encounter runner, where a session
+meets the evidence: a collection the storage records as stranded, and a
+stale registry seal found at the Settings mount. Their entries go to the
+page that asked and to the event channel. `session.mends` does not carry
+them. Every ceremony
 and every reported mend entry also emits on the ceremony event channel
 (wallet-core's `ceremonyEvents` and `menderEvent`), which the debug-logs
 skill documents.
@@ -840,18 +849,19 @@ cascades, and the permanent wire-level constants.
   controller core on `/rxdb`; test fixtures on `/testing`, which an eslint
   rule keeps out of production code. Freewallet keeps the three bindings
   around it: the session binding in `stores/syncController.ts` (the gate, the
-  port, the status store, the browser reachability source, the `writerId`), the contacts
-  decision closure in `stores/contactsConflictHandler.ts`, and the writer-id
-  key prefix and storage in `lib/writerId.ts`. The driver runs no
-  unknown-epoch refresh of its own, so the closure reads was-client's
+  port, the status store, the browser reachability source, the `writerId`),
+  the contacts decision closure in `stores/contactsConflictHandler.ts`, and
+  the writer-id key prefix and storage in `lib/writerId.ts`. The driver runs
+  no unknown-epoch refresh of its own, so the closure reads was-client's
   self-refreshing cipher (`stores/refreshingCollectionCipher.ts`). A conflict
   side sealed under an epoch another client rotated to is re-read once before
   it counts as undecryptable. The closure hands the resolver the contested
-  row's own id beside the two bodies, so each side's envelope is opened under
-  the id it was read from. A body sealed for some other resource is refused
-  there, and that refusal leaves the resolver and fails the replication cycle
-  rather than counting as one more unreadable side. The closure logs it on the
-  `sync` namespace first, naming the row and which side was misbound.
+  resource replica's own id beside the two bodies, so each side's envelope is
+  opened under the id it was read from. A body sealed for some other resource
+  is refused there, and that refusal leaves the resolver and fails the
+  replication cycle rather than counting as one more unreadable side. The
+  closure logs it on the `sync` namespace first, naming the resource replica
+  and which side was misbound.
 - **`@interop/vh-resource-log`** -- the Resource Log Profile's generic
   client side: chain verification, the chain-head pin port
   (`ResourceLogPinStore`, `ResourceLogHeadPin`, `memoryResourceLogPinStore`)
@@ -1040,7 +1050,7 @@ base64url(SHA-256(unlock did:key))` (a discovery convention).
   within a session". Avoid: continuity prior.
 - **Content migration** -- bringing a backup bundle's content into a
   DIFFERENT account, through `StorageManager`'s import methods, which skip
-  a row the account already holds by its content identity. Contrast the
+  a Resource the account already holds by its content identity. Contrast the
   restore, which puts a bundle back into the account it came from, and the
   move, which carries an account's identity across. Only content travels: no
   DID, no grant, no share, no public link.
@@ -1059,7 +1069,9 @@ base64url(SHA-256(unlock did:key))` (a discovery convention).
   and converging it is mending. Each declaration names one authority
   (`none`, `account`, `enrolled`, or `ladder`) and the triggers that check
   the predicate today (`remembered-login-chain`, `transient-login-chain`,
-  `login-routing`, `ceremony-tail`). A session holds `none` always, plus
+  `login-routing`, `ceremony-tail`, `encounter`). An `encounter` site runs
+  inside a live session, at the read or write that meets the evidence, and
+  names the session kinds that reach it. A session holds `none` always, plus
   `account` and the resolved kind whenever an account-ceremony context
   resolves, and an entry is satisfied when the held set contains its
   authority. The id names the predicate rather than the code, so moving a
@@ -1070,7 +1082,10 @@ base64url(SHA-256(unlock did:key))` (a discovery convention).
   table. Declarations are data and registrations are code. The registry
   describes the ceremonies from the outside and executes no stage order.
   Registration order within a list is execution order, and there is no
-  dependency graph. Its gap allowlist declares the residues nothing
+  dependency graph. An encounter registration is run by the encounter
+  runner (`src/session/menders/encounter.ts`): an authority check, a wait
+  behind `registryReady`, one run per session and invariant at a time, and
+  a once-per-session budget on a failed run. Its gap allowlist declares the residues nothing
   converges today, in two kinds: `none`, where no registration reports the
   invariant at all, and `unreachable`, where one reports it on triggers a
   credential-only visit cannot fire. Avoid: saga, state machine, mender
@@ -1189,6 +1204,13 @@ base64url(SHA-256(unlock did:key))` (a discovery convention).
 - **BrowserStore** -- the local active replica of a session that has one,
   over RxDB / IndexedDB (Dexie), holding every standard wallet collection on
   the generic synced-doc schema. A transient session constructs none.
+- **Resource replica** -- the local replica's copy of one remote Resource:
+  one synced document (`{ id, updatedAt, version, data }`) in a
+  `BrowserStore` collection. Its `id` is the Resource's id, and `data` holds
+  the stored body verbatim, an EDV envelope on an encrypted collection.
+  Replication keeps it in step with the Resource in both directions. A
+  replica-less session holds none and reads the Resource directly. Avoid:
+  row, local row, doc.
 - **WASRemoteStore** -- remote storage client, speaking the WAS protocol via
   `ZcapClient`. Handles the Space lifecycle, the storage-browser
   read-through over arbitrary collections and resources, export/import, and

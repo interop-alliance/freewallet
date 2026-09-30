@@ -14,18 +14,28 @@
  * decides whether a session is built at all, and the did:web projection
  * mend, which a transient visit fires before its chain and in the CHAPI
  * popup. Those are data (`RegistrationSite`) rather than registrations, so
- * nothing can run them out of their own order.
+ * nothing can run them out of their own order. The encounter sites that keep
+ * their own call are data too.
+ *
+ * Two encounter registrations run mid-visit, after the chain has settled,
+ * through the encounter runner (`encounter.ts`): the stranded-collection
+ * mend and the registry stale-seal mend.
  */
-import type {
-  InvariantId,
-  MendOutcome,
-  Registration,
-  RegistrationSite
+import {
+  errorNameOf,
+  type InvariantId,
+  type MendOutcome,
+  type MendReportEntry,
+  type Registration,
+  type RegistrationSite
 } from '@interop/wallet-core/menders'
-import type {
-  UserKeyCascadeResult,
-  UserKeyRosterReadResult
+import {
+  readUserKeyRoster,
+  type UserKey,
+  type UserKeyCascadeResult,
+  type UserKeyRosterReadResult
 } from '@interop/wallet-core/keys'
+import type { CollectionEncryption } from '@interop/was-client'
 import type { SealableEncryptionDescriptorStore } from '@interop/wallet-core/keys'
 import type { IZcap } from '@interop/data-integrity-core'
 import type { PublishedKeyDocument } from '@interop/wallet-core/webvh'
@@ -36,7 +46,12 @@ import type {
   TransientKeyringFetchResult,
   UnlockCredential
 } from '@/session/keyring'
-import type { AccountCeremonyContext } from '@/session/accountCeremonyContext'
+import {
+  accountCeremonyContext,
+  rosterUnwrapKey,
+  type AccountCeremonyContext,
+  type LadderCeremonyContext
+} from '@/session/accountCeremonyContext'
 import {
   backfillRegistryPass,
   barePasskeyPass,
@@ -47,7 +62,17 @@ import {
   type BlockRegistryRead,
   type SharedRegistryPassOptions
 } from '@/session/registryPasses'
-import { verifiedAccountLog } from '@/session/verifiedLog'
+import {
+  refreshVerifiedAccountLog,
+  verifiedAccountLog
+} from '@/session/verifiedLog'
+import {
+  adoptFollowerUserKey,
+  ownUserKeyRotationInProgress,
+  userKeyRosterPosition
+} from '@/session/userKeyAdoption'
+import { repairStaleUnlockRegistrySeal } from '@/session/registryReseal'
+import { isSessionDisposed } from '@/session/sessionLifecycle'
 import { sweepUserKeyToDocument } from '@/session/userKeySweep'
 import { cascadeCollectionsToUserKey } from '@/session/userKeyCascade'
 import {
@@ -609,7 +634,7 @@ const GENERATION_DELEGATION_HEAL: Registration<LoginMenderDeps, CeremonyId> = {
  * registry-writing entries, so it settles under `session.mends` alone, and
  * ahead of the keystore report, so it does not queue behind a KMS round
  * trip. The verified document's reading is handed along as a thunk the sweep
- * reads best-effort, and only once a row needs revoking, so a stranded key
+ * reads best-effort, and only once a Resource needs revoking, so a stranded key
  * whose grants are dead already (an orphaned signer, a rotted generation
  * delegation)
  * is deleted rather than left behind a revocation the server would refuse at
@@ -723,6 +748,59 @@ const TRANSIENT_MANAGE_ZCAP_REFRESH: Registration<LoginMenderDeps, CeremonyId> =
   }
 
 /**
+ * The collection half of a ladder-kind session's fan-out: every candidate
+ * collection whose current epoch still names a retired user key generation
+ * is re-epoch'd onto the roster's current key, each append signed by the
+ * credential's ladder VM, and the session's ciphers are rebuilt when that
+ * moved anything or a collection is recorded as stranded. The body of the
+ * transient chain's collection fan-out, and of any site that re-epochs a
+ * known candidate set mid-visit.
+ *
+ * @param options {object}
+ * @param options.session {Session}
+ * @param options.context {LadderCeremonyContext}   the session's resolved
+ *   ladder-kind context
+ * @param options.rosterRead {object}   the roster read the fan-out rotates
+ *   onto
+ * @param options.rosterRead.descriptor {CollectionEncryption}
+ * @param options.rosterRead.userKey {UserKey}   the roster's current key
+ * @param [options.collectionIds] {string[]}   the candidates; every encrypted
+ *   standard collection plus every listed one when omitted
+ * @returns {Promise<UserKeyCascadeResult>}
+ */
+export async function cascadeLadderCollections({
+  session,
+  context,
+  rosterRead,
+  collectionIds
+}: {
+  session: Session
+  context: LadderCeremonyContext
+  rosterRead: { descriptor: CollectionEncryption; userKey: UserKey }
+  collectionIds?: string[]
+}): Promise<UserKeyCascadeResult> {
+  const cascade = await cascadeCollectionsToUserKey({
+    remoteStore: context.remoteStore,
+    storeFor: context.collectionStore,
+    rosterDescriptor: rosterRead.descriptor,
+    clientKeyAgreementKey: context.standingKeyAgreementKey,
+    userKey: rosterRead.userKey,
+    ...(collectionIds ? { collectionIds } : {})
+  })
+  if (
+    anyCollectionRotated({ cascade }) ||
+    session.storage.strandedCollectionIds.length > 0
+  ) {
+    // The rotated descriptors are refetched and the ciphers rebuilt on
+    // them, so this visit's next writes seal under the fresh epochs. A
+    // collection built stranded is rebuilt even when this run rotated
+    // nothing: another client may have re-epoched it since.
+    await session.storage.refreshEncryptedDescriptors()
+  }
+  return cascade
+}
+
+/**
  * The transient chain's collection fan-out: every encrypted collection whose
  * current epoch still names a retired user key generation is re-epoch'd onto
  * the roster's current one. It completes a rotation torn mid-fan-out on a
@@ -777,23 +855,11 @@ const TRANSIENT_COLLECTION_CASCADE: Registration<LoginMenderDeps, CeremonyId> =
           }
         ]
       }
-      const cascade = await cascadeCollectionsToUserKey({
-        remoteStore: resolved.remoteStore,
-        storeFor: resolved.collectionStore,
-        rosterDescriptor: rosterRead.descriptor,
-        clientKeyAgreementKey: resolved.standingKeyAgreementKey,
-        userKey: rosterRead.userKey
+      const cascade = await cascadeLadderCollections({
+        session,
+        context: resolved,
+        rosterRead
       })
-      if (
-        anyCollectionRotated({ cascade }) ||
-        session.storage.strandedCollectionIds.length > 0
-      ) {
-        // The rotated descriptors are refetched and the ciphers rebuilt on
-        // them, so this visit's next writes seal under the fresh epochs. A
-        // collection built stranded is rebuilt even when this run rotated
-        // nothing: another client may have re-epoched it since.
-        await session.storage.refreshEncryptedDescriptors()
-      }
       return [
         collectionEpochsEntry({ cascade }),
         {
@@ -814,6 +880,279 @@ const TRANSIENT_COLLECTION_CASCADE: Registration<LoginMenderDeps, CeremonyId> =
       ]
     }
   }
+
+/**
+ * The fresh roster read an encounter decides on. On the ladder kind the
+ * generation delegation is renewed first, since every request of a
+ * transient session rides it and a delegation the rotation struck comes back
+ * as the server's masked 404. The account log is then re-verified through
+ * the memo, so a roster entry another client anchored past the login's view
+ * is read rather than refused. The read unwraps with the key this session
+ * holds a roster wrap for and checks the visit's epoch pin.
+ *
+ * @param options {object}
+ * @param options.session {Session}
+ * @param options.context {AccountCeremonyContext}
+ * @returns {Promise<UserKeyRosterReadResult | null | 'revoked'>}   the read,
+ *   `null` when no roster head answered, or `revoked` when the current epoch
+ *   carries no wrap this session can open
+ */
+async function encounterRosterRead({
+  session,
+  context
+}: {
+  session: Session
+  context: AccountCeremonyContext
+}): Promise<UserKeyRosterReadResult | null | 'revoked'> {
+  if (context.kind === 'ladder') {
+    await context.renew()
+  }
+  await refreshVerifiedAccountLog({ session })
+  const unwrapKey = rosterUnwrapKey({ session })
+  if (!unwrapKey) {
+    return null
+  }
+  const accountDid = context.pointer.did
+  try {
+    return await readUserKeyRoster({
+      store: context.rosterStore,
+      clientKeyAgreementKey: unwrapKey,
+      ...(session.profile.userKey ? { userKey: session.profile.userKey } : {}),
+      pinnedEpochId: await session.persistence.epochPins.load({ accountDid })
+    })
+  } catch (err) {
+    // Both "no wrap for this session" and "a wrap that would not open":
+    // either way this session cannot follow the roster, and standing down
+    // writes nothing. Matched by name, since the raising copy of the package
+    // can differ from this one's.
+    if (errorNameOf(err) === 'UserKeyRosterUnwrapError') {
+      return 'revoked'
+    }
+    throw err
+  }
+}
+
+/**
+ * The roster-following preamble both encounter registrations share. It reads
+ * the roster behind a log refresh and grades the reads a converger cannot go
+ * on from: no roster head (`failed`), no wrap this session can open
+ * (`refused`), an adoption that did not land (`failed`, or `noop` when a
+ * rotating ceremony of this session's own owns the key), and a position
+ * other than behind or current (`failed`). Behind the roster, it follows the
+ * rotation first.
+ *
+ * @param options {object}
+ * @param options.session {Session}
+ * @param options.context {AccountCeremonyContext}
+ * @returns {Promise<{ stop: MendOutcome } | { read: UserKeyRosterReadResult,
+ *   adopted: boolean, wasBehind: boolean }>}   the outcome to stop on, or the
+ *   roster read the session is now current against, whether this call
+ *   adopted a newer key, and whether the session was behind before it
+ */
+async function followRosterForEncounter({
+  session,
+  context
+}: {
+  session: Session
+  context: AccountCeremonyContext
+}): Promise<
+  | { stop: MendOutcome }
+  | { read: UserKeyRosterReadResult; adopted: boolean; wasBehind: boolean }
+> {
+  const read = await encounterRosterRead({ session, context })
+  if (read === null) {
+    return { stop: { outcome: 'failed', detail: { reason: 'no-roster' } } }
+  }
+  if (read === 'revoked') {
+    return {
+      stop: { outcome: 'refused', detail: { reason: 'no-roster-wrap' } }
+    }
+  }
+  const position = userKeyRosterPosition({
+    session,
+    descriptor: read.descriptor
+  })
+  if (position === 'behind') {
+    const adoption = await adoptFollowerUserKey({ session, read })
+    if (!adoption.adopted && adoption.position !== 'current') {
+      // A rotating ceremony of this session's own owns the key while it
+      // runs, and finishes what the converger would (rebuilding the ciphers,
+      // re-sealing the registry) itself when it lands. Nothing was written.
+      if (ownUserKeyRotationInProgress({ session })) {
+        return {
+          stop: {
+            outcome: 'noop',
+            detail: { reason: 'own-rotation-in-progress' }
+          }
+        }
+      }
+      return { stop: { outcome: 'failed', detail: { reason: 'not-adopted' } } }
+    }
+    return { read, adopted: adoption.adopted, wasBehind: true }
+  }
+  if (position !== 'current') {
+    return { stop: { outcome: 'failed', detail: { reason: position } } }
+  }
+  return { read, adopted: false, wasBehind: false }
+}
+
+/**
+ * The stranded-collection encounter: a collection whose key epochs name no
+ * recipient of the session's user key reads empty and refuses writes. The
+ * storage manager reports each such collection as its ciphers are rebuilt,
+ * and the session binding (`encounterSites.ts`) runs this. It reports
+ * invariant 3 alone; sealing the descriptor logs behind a membership change
+ * stays on the login chains.
+ *
+ * The candidates are read at run time, so a collection recorded after the
+ * run began is the next run's. A transient session renews its delegation,
+ * refreshes the account log, and re-reads the roster. Behind the roster, it
+ * follows the rotation (no registry re-seal) and cascades only what is still
+ * stranded after that. Current, it cascades the candidates onto its key.
+ * A candidate still stranded after the cascade is graded `failed`, so the
+ * session's budget stops the next strand report of it from re-running this.
+ * Any other session kind returns `noop`: a remembered session is mended by
+ * its login's roster sweep.
+ */
+export const STRANDED_COLLECTION_ENCOUNTER: Registration<
+  { session: Session },
+  CeremonyId
+> = {
+  trigger: 'encounter',
+  reports: ['collection-epochs-name-the-current-user-key'],
+  reachedBy: ['transient'],
+  async converge({ session }) {
+    const invariant = 'collection-epochs-name-the-current-user-key' as const
+    const graded = (outcome: MendOutcome) => [{ invariant, ...outcome }]
+    const stranded = (): string[] => session.storage.strandedCollectionIds
+    if (stranded().length === 0) {
+      return graded({ outcome: 'noop', detail: { reason: 'nothing-stranded' } })
+    }
+    const context = await accountCeremonyContext({ session })
+    if (context?.kind !== 'ladder') {
+      return graded({
+        outcome: 'noop',
+        detail: { reason: 'no-ladder-context' }
+      })
+    }
+    const followed = await followRosterForEncounter({ session, context })
+    if ('stop' in followed) {
+      return graded(followed.stop)
+    }
+    const { read, adopted } = followed
+    if (followed.wasBehind && stranded().length === 0) {
+      return graded({ outcome: 'clean', detail: { adopted } })
+    }
+    if (isSessionDisposed({ session })) {
+      return graded({ outcome: 'noop', detail: { reason: 'session-disposed' } })
+    }
+    // A rotating ceremony of this session's own (or an account deletion)
+    // began after the read above: the key it names is about to be retired,
+    // and the ceremony moves the collections itself.
+    if (ownUserKeyRotationInProgress({ session })) {
+      return graded({
+        outcome: 'noop',
+        detail: { reason: 'own-rotation-in-progress' }
+      })
+    }
+    const candidates = stranded()
+    const cascade = await cascadeLadderCollections({
+      session,
+      context,
+      rosterRead: read,
+      collectionIds: candidates
+    })
+    const entry: MendReportEntry<CeremonyId> = collectionEpochsEntry({
+      cascade
+    })
+    const left = candidates.filter(id => stranded().includes(id))
+    if (left.length > 0) {
+      // The evidence still stands: grade it so the budget holds. This run's
+      // own rebuild re-reported the collection, and a `partial` would let
+      // that report start the same run again.
+      return graded({
+        outcome: 'failed',
+        detail: {
+          reason: 'still-stranded',
+          strandedCollections: left.length,
+          ...entry.detail
+        }
+      })
+    }
+    return graded({
+      outcome: entry.outcome,
+      ...(entry.detail || adopted
+        ? { detail: { ...entry.detail, ...(adopted ? { adopted } : {}) } }
+        : {})
+    })
+  }
+}
+
+/**
+ * The stale-seal encounter: the unlock-methods registry does not open under
+ * the session's user key. Settings runs this at mount when its read throws
+ * `UnlockRegistryStaleSealError`, then reloads the registry.
+ *
+ * A stale seal has two causes, and the direction of the fix differs. When
+ * another client rotated the user key, this session is behind: it follows
+ * the rotation first, since re-sealing from its older key would seal the
+ * registry backward and could let a revoked party read it again. Once the
+ * session is current, or when it already was, the login pass's repair reads
+ * the registry and, when it still does not open, re-seals it forward from
+ * the roster's escrow, on a roster read taken fresh behind a log refresh.
+ * That covers a rotator whose own re-seal tore.
+ */
+export const REGISTRY_SEAL_ENCOUNTER: Registration<
+  { session: Session },
+  CeremonyId
+> = {
+  trigger: 'encounter',
+  reports: ['unlock-registry-opens-under-the-current-user-key'],
+  reachedBy: ['remembered', 'transient'],
+  async converge({ session }) {
+    const invariant =
+      'unlock-registry-opens-under-the-current-user-key' as const
+    const graded = (outcome: MendOutcome) => [{ invariant, ...outcome }]
+    const context = await accountCeremonyContext({ session })
+    if (!context) {
+      return graded({ outcome: 'noop', detail: { reason: 'no-context' } })
+    }
+    // Once current after following a rotation, the rotator's own re-seal may
+    // have torn, leaving the registry on a generation older still, so it is
+    // read again below and re-sealed forward when it still does not open.
+    const followed = await followRosterForEncounter({ session, context })
+    if ('stop' in followed) {
+      return graded(followed.stop)
+    }
+    const { read, adopted } = followed
+    if (isSessionDisposed({ session })) {
+      return graded({
+        outcome: 'noop',
+        detail: { reason: 'session-disposed' }
+      })
+    }
+    const repaired = await repairStaleUnlockRegistrySeal({
+      session,
+      rosterRead: read,
+      context
+    })
+    if (repaired === 'ok') {
+      return adopted
+        ? graded({ outcome: 'clean', detail: { adopted } })
+        : graded({ outcome: 'noop' })
+    }
+    if (repaired === 'repaired') {
+      return graded({
+        outcome: 'clean',
+        ...(adopted ? { detail: { adopted } } : {})
+      })
+    }
+    return graded({
+      outcome: 'failed',
+      detail: { reason: repaired, ...(adopted ? { adopted } : {}) }
+    })
+  }
+}
 
 /**
  * The remembered block's registry-writing registrations, in execution order.
@@ -922,17 +1261,62 @@ const REPORTING_SITES: ReadonlyArray<RegistrationSite> = [
     trigger: 'login-routing',
     reports: ['recovery-spend-is-completed'],
     guardedBy: 'client-key-record'
+  },
+  // The encounter sites that keep their own call, since the caller needs a
+  // return value or a thrown refusal back. None is run through the encounter
+  // runner, and none evaluates a declaration's `when`.
+  //
+  // The App Connect grant path's generation-delegation renewal
+  // (`src/lib/walletRequest/processZcaps.ts`), which throws
+  // `GenerationDelegationStaleError` when it cannot renew.
+  {
+    trigger: 'encounter',
+    reports: ['generation-delegation-is-current'],
+    reachedBy: ['transient']
+  },
+  // The account deletion walk's `renewVisitDelegation`
+  // (`src/session/accountSettings.ts`).
+  {
+    trigger: 'encounter',
+    reports: ['generation-delegation-is-current'],
+    reachedBy: ['transient']
+  },
+  // The Settings mount's `loadUnlockRegistry`
+  // (`src/session/accountSettings.ts`): the passphrase-entry backfill on
+  // either session kind, and on a transient session the acting credential's
+  // management-zcap refresh inside the same call. Two sites, since the two
+  // reach different session kinds.
+  {
+    trigger: 'encounter',
+    reports: ['registry-lists-the-passphrase-method'],
+    reachedBy: ['remembered', 'transient']
+  },
+  {
+    trigger: 'encounter',
+    reports: ['acting-credential-manage-zcap-is-current'],
+    reachedBy: ['transient']
+  },
+  // The account deletion walk's in-place stale-seal repair
+  // (`src/session/accountSettings.ts`), which refuses the deletion when the
+  // repair does not land.
+  {
+    trigger: 'encounter',
+    reports: ['unlock-registry-opens-under-the-current-user-key'],
+    reachedBy: ['remembered', 'transient']
   }
 ]
 
 /**
  * Every registration site the registry indexes: both blocks in execution
- * order (the seed first), then the sites that report from their own call
- * sites. The audit's derived sets read this list.
+ * order (the seed first), the two encounter registrations the encounter
+ * runner runs, then the sites that report from their own call sites. The
+ * audit's derived sets read this list.
  */
 export const MENDER_SITES: ReadonlyArray<RegistrationSite> = [
   REMEMBERED_SEED,
   ...REMEMBERED_REGISTRATIONS,
   ...TRANSIENT_REGISTRATIONS,
+  STRANDED_COLLECTION_ENCOUNTER,
+  REGISTRY_SEAL_ENCOUNTER,
   ...REPORTING_SITES
 ]

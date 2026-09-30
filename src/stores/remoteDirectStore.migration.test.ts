@@ -3,7 +3,7 @@
  * import methods: the verbatim contact-head write and its head listing, the
  * whole-collection revision read the held-content snapshot takes, the
  * by-inner-id activity lookup the import activity's replace needs, and the
- * row-id delete its put-then-delete-others write ends with.
+ * resource-id delete its put-then-delete-others write ends with.
  *
  * @vitest-environment node
  */
@@ -31,7 +31,7 @@ function fakeCipher(): DocCipher {
   return {
     async encrypt({ data }: { data: Json }) {
       counter += 1
-      const id = `row-${counter}`
+      const id = `resource-${counter}`
       return {
         id,
         envelope: {
@@ -52,22 +52,22 @@ function fakeCipher(): DocCipher {
 /**
  * An in-memory WAS remote: one resource map per logical collection.
  *
- * @returns {{ remote: WASRemoteStore; rows: Map<string, Map<string, Json>> }}
+ * @returns {{ remote: WASRemoteStore; resources: Map<string, Map<string, Json>> }}
  */
 function fakeRemote(): {
   remote: WASRemoteStore
-  rows: Map<string, Map<string, Json>>
+  resources: Map<string, Map<string, Json>>
 } {
-  const rows = new Map<string, Map<string, Json>>()
+  const resources = new Map<string, Map<string, Json>>()
   /**
    * @param logicalKey {string}
    * @returns {Map<string, Json>}
    */
   function collection(logicalKey: string): Map<string, Json> {
-    let held = rows.get(logicalKey)
+    let held = resources.get(logicalKey)
     if (!held) {
       held = new Map<string, Json>()
-      rows.set(logicalKey, held)
+      resources.set(logicalKey, held)
     }
     return held
   }
@@ -99,20 +99,20 @@ function fakeRemote(): {
       collection(logicalKey).delete(resourceId)
     }
   } as unknown as WASRemoteStore
-  return { remote, rows }
+  return { remote, resources }
 }
 
 /**
  * A backend over the in-memory remote, with a cipher for each collection the
  * migration writes.
  *
- * @returns {{ store: RemoteDirectStore; rows: Map<string, Map<string, Json>> }}
+ * @returns {{ store: RemoteDirectStore; resources: Map<string, Map<string, Json>> }}
  */
 function makeStore(): {
   store: RemoteDirectStore
-  rows: Map<string, Map<string, Json>>
+  resources: Map<string, Map<string, Json>>
 } {
-  const { remote, rows } = fakeRemote()
+  const { remote, resources } = fakeRemote()
   const store = new RemoteDirectStore({
     remoteStore: remote,
     ciphers: {
@@ -121,7 +121,7 @@ function makeStore(): {
       walletActivity: fakeCipher()
     }
   })
-  return { store, rows }
+  return { store, resources }
 }
 
 const HEAD: ContactHeadPayload = {
@@ -156,9 +156,10 @@ describe('RemoteDirectStore contact-head import', () => {
     expect(heads[0].head.updatedAt).toBe('2024-03-04T05:06:07.000Z')
     expect(heads[0].head.writerId).toBe('old-writer')
     expect(heads[0].head.contact.displayName).toBe('Ada')
-    // The listing's projection keeps addressing the row by its row id.
+    // The listing's projection keeps addressing the Resource by its resource
+    // id.
     const contacts = await store.listContacts()
-    expect(contacts[0].id).toBe(heads[0].rowId)
+    expect(contacts[0].id).toBe(heads[0].resourceId)
     expect(contacts[0].contactId).toBe('contact-1')
   })
 })
@@ -202,7 +203,7 @@ describe('RemoteDirectStore.listAllContactRevisions', () => {
 describe('RemoteDirectStore activity row lookups', () => {
   it('finds every row carrying one activity id, where the listing collapses them', async () => {
     const { store } = makeStore()
-    const firstRow = await store.addHistoryItem({
+    const firstResourceId = await store.addHistoryItem({
       resourceId: 'activity-1',
       activity: makeActivity('first')
     })
@@ -214,7 +215,7 @@ describe('RemoteDirectStore activity row lookups', () => {
     expect((await store.listHistoryItems()).entries).toHaveLength(1)
     const held = await store.findHistoryItemsByInnerId({ id: 'activity-1' })
     expect(held).toHaveLength(2)
-    expect(held.map(({ rowId }) => rowId)).toContain(firstRow)
+    expect(held.map(({ resourceId }) => resourceId)).toContain(firstResourceId)
     expect(held.map(({ doc }) => doc.summary).sort()).toEqual([
       'first',
       'second'
@@ -223,7 +224,7 @@ describe('RemoteDirectStore activity row lookups', () => {
 
   it('deletes one row by its row id and leaves the rest', async () => {
     const { store } = makeStore()
-    const firstRow = await store.addHistoryItem({
+    const firstResourceId = await store.addHistoryItem({
       resourceId: 'activity-1',
       activity: makeActivity('first')
     })
@@ -232,7 +233,7 @@ describe('RemoteDirectStore activity row lookups', () => {
       activity: makeActivity('second')
     })
 
-    await store.deleteHistoryItemByRowId({ rowId: firstRow })
+    await store.deleteHistoryItemByResourceId({ resourceId: firstResourceId })
 
     const held = await store.findHistoryItemsByInnerId({ id: 'activity-1' })
     expect(held).toHaveLength(1)

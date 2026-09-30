@@ -27,13 +27,14 @@
  * `If-None-Match: *`, stamped with the same `Key-Epoch`) and the main app's
  * replication pulls popup writes cleanly.
  *
- * Contacts (and their revisions) are served remote-direct too: the head rows
- * ride the mutable `contacts` collection (stable row ids, `If-Match`
- * compare-and-swap on update/delete with a bounded re-read retry, so a lost
- * race against a concurrent writer re-applies on the fresh head instead of
- * silently clobbering it), and revisions are direct content-addressed appends
- * to `contacts-history` -- both byte-identical to what background replication
- * would have pushed, so local replicas pull transient contact edits cleanly.
+ * Contacts (and their revisions) are served remote-direct too: the head
+ * Resources ride the mutable `contacts` collection (stable resource ids,
+ * `If-Match` compare-and-swap on update/delete with a bounded re-read retry, so
+ * a lost race against a concurrent writer re-applies on the fresh head instead
+ * of silently clobbering it), and revisions are direct content-addressed
+ * appends to `contacts-history` -- both byte-identical to what background
+ * replication would have pushed, so local replicas pull transient contact edits
+ * cleanly.
  */
 import type { IVerifiableCredential } from '@interop/data-integrity-core'
 import {
@@ -74,9 +75,10 @@ const CONTACT_CAS_ATTEMPTS = 3
  * envelope/id/encryption logic lives in the injected {@link DocCipher} each
  * backend shares.
  *
- * The unknown-epoch counters and `setCiphers` are the descriptor-refresh contract:
- * after a read reports unknown-epoch rows the facade rebuilds the ciphers under
- * a freshly fetched descriptor, swaps them in via `setCiphers`, and re-reads.
+ * The unknown-epoch counters and `setCiphers` are the descriptor-refresh
+ * contract: after a read reports unknown-epoch Resources the facade rebuilds
+ * the ciphers under a freshly fetched descriptor, swaps them in via
+ * `setCiphers`, and re-reads.
  */
 export interface SyncedCollectionStore {
   addCredential(options: {
@@ -142,13 +144,13 @@ export interface SyncedCollectionStore {
   }): Promise<Array<ContactRevisionPayload>>
   listAllContactRevisions(): Promise<Array<ContactRevisionPayload>>
   listContactHeads(): Promise<
-    Array<{ rowId: string; head: ContactHeadPayload }>
+    Array<{ resourceId: string; head: ContactHeadPayload }>
   >
   putContactHead(options: { head: ContactHeadPayload }): Promise<void>
   findHistoryItemsByInnerId(options: {
     id: string
-  }): Promise<Array<{ rowId: string; doc: WalletActivity }>>
-  deleteHistoryItemByRowId(options: { rowId: string }): Promise<void>
+  }): Promise<Array<{ resourceId: string; doc: WalletActivity }>>
+  deleteHistoryItemByResourceId(options: { resourceId: string }): Promise<void>
   setCiphers(ciphers: Record<string, DocCipher>): void
 }
 
@@ -196,13 +198,13 @@ export class RemoteDirectStore implements SyncedCollectionStore {
     vc: IVerifiableCredential
   }> = []
   #credentialCidIndex = new Map<string, Set<string>>()
-  // The resource ids of undecryptable rows from the most recent scan, so
+  // The resource ids of undecryptable Resources from the most recent scan, so
   // `purgeUndecryptableCredentials` can remove them without a second scan.
-  #undecryptableCredentialRowIds: string[] = []
+  #undecryptableCredentialResourceIds: string[] = []
   // The same list for the most recent app-key scan, so
   // `purgeUndecryptableAppKeys` can remove those resources without a second
   // scan.
-  #undecryptableAppKeyRowIds: string[] = []
+  #undecryptableAppKeyResourceIds: string[] = []
 
   constructor({
     remoteStore,
@@ -234,7 +236,7 @@ export class RemoteDirectStore implements SyncedCollectionStore {
   }
 
   /**
-   * Records a `(cid, resourceId)` pair in a cid -> live-row-ids index.
+   * Records a `(cid, resourceId)` pair in a cid -> live-resource-ids index.
    *
    * @param options {object}
    * @param options.index {Map<string, Set<string>>}
@@ -251,24 +253,25 @@ export class RemoteDirectStore implements SyncedCollectionStore {
     cid: string
     resourceId: string
   }): void {
-    let rowIds = index.get(cid)
-    if (!rowIds) {
-      rowIds = new Set<string>()
-      index.set(cid, rowIds)
+    let resourceIds = index.get(cid)
+    if (!resourceIds) {
+      resourceIds = new Set<string>()
+      index.set(cid, resourceIds)
     }
-    rowIds.add(resourceId)
+    resourceIds.add(resourceId)
   }
 
   /**
    * Reads every resource of one content-addressed encrypted collection and
    * resolves each to its content cid + decrypted document, mirroring
-   * `BrowserStore.#credentialEntries` (decrypt envelope rows, pass legacy
-   * plaintext rows through keyed by their resource id) and its tolerant
-   * bucketing: a row whose envelope will not decrypt under the current KAK is
-   * collected as undecryptable (purgeable), a row naming an unknown key epoch
-   * is counted separately so a descriptor refresh can pick it up, a row this
-   * wallet holds no key for is counted apart from both (no refresh can help,
-   * and it is another reader's data), and a row whose body failed its
+   * `BrowserStore.#credentialEntries` (decrypt envelope resource replicas,
+   * pass legacy plaintext ones through keyed by their resource id) and its
+   * tolerant bucketing: a Resource whose envelope will not decrypt under the
+   * current KAK is collected as undecryptable (purgeable), a Resource naming
+   * an unknown key epoch is counted separately so a descriptor refresh can
+   * pick it up, a Resource this wallet holds no key for is counted apart from
+   * both (no refresh can help, and it is another reader's data), and a
+   * Resource whose body failed its
    * integrity check is counted apart from all three (never collected, since a
    * purge here deletes from the server). The per-resource GETs and the
    * decrypts run in parallel; the fold walks them in list order, so the entry
@@ -281,7 +284,7 @@ export class RemoteDirectStore implements SyncedCollectionStore {
    * @param options {object}
    * @param options.logicalKey {string}   'privateCredentials' | 'appConnections'
    * @returns {Promise<{ entries: Array<{ resourceId: string; cid: string;
-   *   vc: IVerifiableCredential }>; undecryptableRowIds: string[];
+   *   vc: IVerifiableCredential }>; undecryptableResourceIds: string[];
    *   unknownEpoch: number; noEpochKey: number; integrity: number }>}
    */
   async #scanContentCollection({
@@ -294,7 +297,7 @@ export class RemoteDirectStore implements SyncedCollectionStore {
       cid: string
       vc: IVerifiableCredential
     }>
-    undecryptableRowIds: string[]
+    undecryptableResourceIds: string[]
     unknownEpoch: number
     noEpochKey: number
     integrity: number
@@ -306,7 +309,7 @@ export class RemoteDirectStore implements SyncedCollectionStore {
       cid: string
       vc: IVerifiableCredential
     }> = []
-    const undecryptableRowIds: string[] = []
+    const undecryptableResourceIds: string[] = []
     let unknownEpoch = 0
     let noEpochKey = 0
     let integrity = 0
@@ -362,13 +365,14 @@ export class RemoteDirectStore implements SyncedCollectionStore {
           )
           integrity += 1
         } else {
-          // One undecryptable remote row must not brick the whole popup list.
+          // One undecryptable remote Resource must not brick the whole popup
+          // list.
           log.warn('Skipping undecryptable remote resource', {
             logicalKey,
             resourceId,
             err
           })
-          undecryptableRowIds.push(resourceId)
+          undecryptableResourceIds.push(resourceId)
         }
         continue
       }
@@ -378,7 +382,13 @@ export class RemoteDirectStore implements SyncedCollectionStore {
       const cid = fromEnvelope ? await cidFrom({ doc: vc }) : resourceId
       entries.push({ resourceId, cid, vc })
     }
-    return { entries, undecryptableRowIds, unknownEpoch, noEpochKey, integrity }
+    return {
+      entries,
+      undecryptableResourceIds,
+      unknownEpoch,
+      noEpochKey,
+      integrity
+    }
   }
 
   /**
@@ -391,7 +401,7 @@ export class RemoteDirectStore implements SyncedCollectionStore {
   async #loadCredentialEntries(): Promise<void> {
     const {
       entries,
-      undecryptableRowIds,
+      undecryptableResourceIds,
       unknownEpoch,
       noEpochKey,
       integrity
@@ -402,8 +412,8 @@ export class RemoteDirectStore implements SyncedCollectionStore {
     }
     this.#credentialEntries = entries
     this.#credentialCidIndex = index
-    this.#undecryptableCredentialRowIds = undecryptableRowIds
-    this.#undecryptableCredentials = undecryptableRowIds.length
+    this.#undecryptableCredentialResourceIds = undecryptableResourceIds
+    this.#undecryptableCredentials = undecryptableResourceIds.length
     this.#unknownEpochCredentials = unknownEpoch
     this.#noEpochKeyCredentials = noEpochKey
     this.#integrityCredentials = integrity
@@ -485,11 +495,11 @@ export class RemoteDirectStore implements SyncedCollectionStore {
 
   async deleteCredential({ cid }: { cid: string }): Promise<void> {
     await this.#ensureCredentialsLoaded()
-    const rowIds = this.#credentialCidIndex.get(cid)
-    if (!rowIds) {
+    const resourceIds = this.#credentialCidIndex.get(cid)
+    if (!resourceIds) {
       return
     }
-    for (const resourceId of rowIds) {
+    for (const resourceId of resourceIds) {
       await this.#remote.deleteSyncedResource({
         logicalKey: 'privateCredentials',
         resourceId
@@ -504,11 +514,11 @@ export class RemoteDirectStore implements SyncedCollectionStore {
   /**
    * Adds an app-key credential to the remote `app-connections` collection,
    * idempotent on the credential's content cid (encryption is
-   * nondeterministic, so the row id cannot carry idempotence). Returns whether
-   * a row was actually created.
+   * nondeterministic, so the resource id cannot carry idempotence). Returns
+   * whether a Resource was actually created.
    *
-   * The collection is scanned per call rather than cached for the session:
-   * it holds one row per connected app, and an App Connect popup performs at
+   * The collection is scanned per call rather than cached for the session: it
+   * holds one Resource per connected app, and an App Connect popup performs at
    * most one add.
    *
    * @param options {object}
@@ -545,7 +555,7 @@ export class RemoteDirectStore implements SyncedCollectionStore {
   async listAppKeys(): Promise<Array<StoredCredential>> {
     const {
       entries,
-      undecryptableRowIds,
+      undecryptableResourceIds,
       unknownEpoch,
       noEpochKey,
       integrity
@@ -555,8 +565,8 @@ export class RemoteDirectStore implements SyncedCollectionStore {
     this.#unknownEpochAppKeys = unknownEpoch
     this.#noEpochKeyAppKeys = noEpochKey
     this.#integrityAppKeys = integrity
-    this.#undecryptableAppKeyRowIds = undecryptableRowIds
-    this.#undecryptableAppKeys = undecryptableRowIds.length
+    this.#undecryptableAppKeyResourceIds = undecryptableResourceIds
+    this.#undecryptableAppKeys = undecryptableResourceIds.length
     const seen = new Set<string>()
     const appKeys: StoredCredential[] = []
     for (const { cid, vc } of entries) {
@@ -611,14 +621,14 @@ export class RemoteDirectStore implements SyncedCollectionStore {
   async purgeUndecryptableAppKeys(): Promise<number> {
     // A fresh scan collects the current undecryptable resource ids.
     await this.listAppKeys()
-    for (const resourceId of this.#undecryptableAppKeyRowIds) {
+    for (const resourceId of this.#undecryptableAppKeyResourceIds) {
       await this.#remote.deleteSyncedResource({
         logicalKey: 'appConnections',
         resourceId
       })
     }
-    const removed = this.#undecryptableAppKeyRowIds.length
-    this.#undecryptableAppKeyRowIds = []
+    const removed = this.#undecryptableAppKeyResourceIds.length
+    this.#undecryptableAppKeyResourceIds = []
     this.#undecryptableAppKeys = 0
     return removed
   }
@@ -645,23 +655,23 @@ export class RemoteDirectStore implements SyncedCollectionStore {
     // no key for, and resources whose body failed its integrity check stay on
     // the server.
     await this.#loadCredentialEntries()
-    for (const resourceId of this.#undecryptableCredentialRowIds) {
+    for (const resourceId of this.#undecryptableCredentialResourceIds) {
       await this.#remote.deleteSyncedResource({
         logicalKey: 'privateCredentials',
         resourceId
       })
     }
-    const removed = this.#undecryptableCredentialRowIds.length
-    this.#undecryptableCredentialRowIds = []
+    const removed = this.#undecryptableCredentialResourceIds.length
+    this.#undecryptableCredentialResourceIds = []
     this.#undecryptableCredentials = 0
     return removed
   }
 
   /**
    * Appends one entry to the remote `wallet-activity` collection, and returns
-   * the row id it landed under -- which the put-then-delete-others write of
-   * the migration's import activity needs, to tell the row it just wrote from
-   * the ones it is replacing.
+   * the resource id it landed under -- which the put-then-delete-others write
+   * of the migration's import activity needs, to tell the Resource it just
+   * wrote from the ones it is replacing.
    *
    * @param options {object}
    * @param options.resourceId {string}
@@ -675,8 +685,8 @@ export class RemoteDirectStore implements SyncedCollectionStore {
     activity: WalletActivity
   }): Promise<string> {
     // The caller's `resourceId` lives on only as the activity's own `id` inside
-    // the encrypted document (mirroring the local store); the row is keyed by
-    // the cipher's content-derived envelope-hash id.
+    // the encrypted document (mirroring the local store); the Resource is keyed
+    // by the cipher's content-derived envelope-hash id.
     const cipher = this.#cipherFor('walletActivity')
     const { id, envelope, epoch } = await cipher.encrypt({
       data: activity as Json
@@ -692,26 +702,26 @@ export class RemoteDirectStore implements SyncedCollectionStore {
 
   /**
    * Reads every remote `wallet-activity` resource, decrypting each with the
-   * per-row tolerance the other scans apply (an unknown-epoch row is counted
-   * for the facade's descriptor refresh; a no-epoch-key, integrity-failing, or
-   * otherwise unreadable row is warned and skipped), and pairs each readable
-   * activity with the row id it was read under. The counts describe this
-   * same read: `unknownEpoch` for the facade's descriptor refresh, and
-   * `unreadable` for every row skipped for any reason, the unknown-epoch rows
-   * included.
+   * per-Resource tolerance the other scans apply (an unknown-epoch Resource is
+   * counted for the facade's descriptor refresh; a no-epoch-key,
+   * integrity-failing, or otherwise unreadable Resource is warned and
+   * skipped), and pairs each readable activity with the resource id it was
+   * read under. The counts describe this same read: `unknownEpoch` for the
+   * facade's descriptor refresh, and `unreadable` for every Resource skipped
+   * for any reason, the unknown-epoch Resources included.
    *
    * The shared half of {@link listHistoryItems} (which collapses duplicates by
    * the activity's own id) and {@link findHistoryItemsByInnerId} (which keeps
-   * every row, since the import path deletes the extras).
+   * every Resource, since the import path deletes the extras).
    *
    * @returns {Promise<{
-   *   entries: Array<{ rowId: string; activity: WalletActivity }>,
+   *   entries: Array<{ resourceId: string; activity: WalletActivity }>,
    *   unknownEpoch: number,
    *   unreadable: number
    * }>}
    */
   async #historyEntries(): Promise<{
-    entries: Array<{ rowId: string; activity: WalletActivity }>
+    entries: Array<{ resourceId: string; activity: WalletActivity }>
     unknownEpoch: number
     unreadable: number
   }> {
@@ -719,7 +729,7 @@ export class RemoteDirectStore implements SyncedCollectionStore {
     const resources = await this.#remote.listSyncedDocuments({
       logicalKey: 'walletActivity'
     })
-    const entries: Array<{ rowId: string; activity: WalletActivity }> = []
+    const entries: Array<{ resourceId: string; activity: WalletActivity }> = []
     let unknownEpoch = 0
     let unreadable = 0
     // Same shape as the credential scan: decrypt in parallel, fold in order.
@@ -777,7 +787,7 @@ export class RemoteDirectStore implements SyncedCollectionStore {
       if (activity === undefined) {
         continue
       }
-      entries.push({ rowId: resourceId, activity })
+      entries.push({ resourceId: resourceId, activity })
     }
     return { entries, unknownEpoch, unreadable }
   }
@@ -790,8 +800,8 @@ export class RemoteDirectStore implements SyncedCollectionStore {
     const { entries, unknownEpoch, unreadable } = await this.#historyEntries()
     const seen = new Set<string>()
     const items: Array<{ id: string; doc: WalletActivity }> = []
-    for (const { rowId, activity } of entries) {
-      const id = activity.id ?? rowId
+    for (const { resourceId, activity } of entries) {
+      const id = activity.id ?? resourceId
       if (seen.has(id)) {
         continue
       }
@@ -802,40 +812,45 @@ export class RemoteDirectStore implements SyncedCollectionStore {
   }
 
   /**
-   * Every `wallet-activity` row carrying one activity id, row ids included --
+   * Every `wallet-activity` Resource carrying one activity id, resource ids
+   * included --
    * the write-side lookup the migration import needs, where
    * {@link listHistoryItems} collapses duplicates and hides them. The activity
    * id lives inside the encrypted body, so this is a decrypt scan (FW-545
    * tracks a stored index that would replace it).
    *
    * @param options {object}
-   * @param options.id {string}   the activity's own id, not a row id
-   * @returns {Promise<Array<{ rowId: string; doc: WalletActivity }>>}
+   * @param options.id {string}   the activity's own id, not a resource id
+   * @returns {Promise<Array<{ resourceId: string; doc: WalletActivity }>>}
    */
   async findHistoryItemsByInnerId({
     id
   }: {
     id: string
-  }): Promise<Array<{ rowId: string; doc: WalletActivity }>> {
+  }): Promise<Array<{ resourceId: string; doc: WalletActivity }>> {
     const { entries } = await this.#historyEntries()
     return entries
-      .filter(({ rowId, activity }) => (activity.id ?? rowId) === id)
-      .map(({ rowId, activity }) => ({ rowId, doc: activity }))
+      .filter(({ resourceId, activity }) => (activity.id ?? resourceId) === id)
+      .map(({ resourceId, activity }) => ({ resourceId, doc: activity }))
   }
 
   /**
-   * Removes one `wallet-activity` resource by its row id -- the remote twin of
-   * the local store's row-id delete, and the second half of the import
-   * activity's put-then-delete-others write.
+   * Removes one `wallet-activity` resource by its resource id -- the remote
+   * twin of the local store's resource-id delete, and the second half of the
+   * import activity's put-then-delete-others write.
    *
    * @param options {object}
-   * @param options.rowId {string}
+   * @param options.resourceId {string}
    * @returns {Promise<void>}
    */
-  async deleteHistoryItemByRowId({ rowId }: { rowId: string }): Promise<void> {
+  async deleteHistoryItemByResourceId({
+    resourceId
+  }: {
+    resourceId: string
+  }): Promise<void> {
     await this.#remote.deleteSyncedResource({
       logicalKey: 'walletActivity',
-      resourceId: rowId
+      resourceId: resourceId
     })
   }
 
@@ -895,17 +910,17 @@ export class RemoteDirectStore implements SyncedCollectionStore {
   }
 
   /**
-   * Decrypts one remote `contacts` row body to its head payload, mirroring
-   * the local store's per-row tolerance: a plaintext (legacy) body passes
-   * through, and a decrypt failure is reported with its bucket, so an
-   * unknown-epoch row (which a descriptor refresh may pick up) and a
-   * no-epoch-key row (which no refresh can reach) stay apart from a row that
+   * Decrypts one remote `contacts` Resource body to its head payload,
+   * mirroring the local store's per-replica tolerance: a plaintext (legacy)
+   * body passes through, and a decrypt failure is reported with its bucket, so
+   * an unknown-epoch Resource (which a descriptor refresh may pick up) and a
+   * no-epoch-key Resource (which no refresh can reach) stay apart from one that
    * is genuinely unreadable. Every readable head passes through the idempotent
    * `upgradeContactHeadPayload` read-side upgrade.
    *
    * @param options {object}
-   * @param options.id {string}   the resource id the row was read under, which
-   *   the decrypt verifies the stored envelope against
+   * @param options.id {string}   the resource id the Resource was read under,
+   *   which the decrypt verifies the stored envelope against
    * @param options.data {Json | undefined}   the raw stored body
    * @returns {Promise<{ head?: ContactHeadPayload; failure?: DecryptFailure;
    *   err?: unknown }>}
@@ -942,19 +957,20 @@ export class RemoteDirectStore implements SyncedCollectionStore {
 
   /**
    * Reads the remote `contacts` collection as head payloads, decrypting each
-   * row with the local store's tolerance (an unknown-epoch row is skipped and
-   * counted for the facade's descriptor refresh; an unreadable row is warned
-   * and skipped), paired with the row id it was read under.
+   * Resource with the local store's tolerance (an unknown-epoch Resource is
+   * skipped and counted for the facade's descriptor refresh; an unreadable
+   * Resource is warned and skipped), paired with the resource id it was read
+   * under.
    *
    * The shared half of {@link listContacts} and the existence lookup the
    * migration import needs: a head's `writerId` and its exact payload, which
    * the {@link StoredContact} projection drops, are what the import's content
    * check compares.
    *
-   * @returns {Promise<Array<{ rowId: string; head: ContactHeadPayload }>>}
+   * @returns {Promise<Array<{ resourceId: string; head: ContactHeadPayload }>>}
    */
   async listContactHeads(): Promise<
-    Array<{ rowId: string; head: ContactHeadPayload }>
+    Array<{ resourceId: string; head: ContactHeadPayload }>
   > {
     const resources = await this.#remote.listSyncedDocuments({
       logicalKey: 'contacts'
@@ -962,40 +978,47 @@ export class RemoteDirectStore implements SyncedCollectionStore {
     const decrypted = await Promise.all(
       resources.map(({ id, data }) => this.#decryptContactHead({ id, data }))
     )
-    const heads: Array<{ rowId: string; head: ContactHeadPayload }> = []
+    const heads: Array<{ resourceId: string; head: ContactHeadPayload }> = []
     let unknownEpoch = 0
     for (let position = 0; position < resources.length; position++) {
-      const { id: rowId } = resources[position]
+      const { id: resourceId } = resources[position]
       const { head, failure, err } = decrypted[position]
       if (err) {
         if (failure === 'unknown-epoch') {
           // Possibly-fresh data behind a stale descriptor: skip it so a
           // descriptor refresh can pick it up.
-          log.warn('Skipping unknown-epoch remote contacts row', { rowId, err })
+          log.warn('Skipping unknown-epoch remote contacts resource', {
+            resourceId,
+            err
+          })
           unknownEpoch += 1
         } else if (failure === 'no-epoch-key') {
-          // Not a recipient of this row's key epoch: skip it, and keep it out
-          // of the refresh signal -- a descriptor refresh cannot grant a key.
+          // Not a recipient of this Resource's key epoch: skip it, and keep it
+          // out of the refresh signal -- a descriptor refresh cannot grant a
+          // key.
           log.warn(
-            'Skipping remote contacts row: this wallet is not a recipient ' +
+            'Skipping remote contacts resource: this wallet is not a recipient ' +
               'of its key epoch',
-            { rowId, err }
+            { resourceId, err }
           )
         } else if (failure === 'integrity') {
           log.warn(
-            'Refusing a remote contacts row whose body failed its integrity ' +
+            'Refusing a remote contacts resource whose body failed its integrity ' +
               'check',
-            { readUnderRowId: rowId, err }
+            { readUnderResourceId: resourceId, err }
           )
         } else {
-          log.warn('Skipping unreadable remote contacts row', { rowId, err })
+          log.warn('Skipping unreadable remote contacts resource', {
+            resourceId,
+            err
+          })
         }
         continue
       }
       if (!head) {
         continue
       }
-      heads.push({ rowId, head })
+      heads.push({ resourceId, head })
     }
     this.#unknownEpochContacts = unknownEpoch
     return heads
@@ -1003,27 +1026,27 @@ export class RemoteDirectStore implements SyncedCollectionStore {
 
   /**
    * Lists the remote `contacts` collection, mapping each readable head to a
-   * {@link StoredContact} with the same legacy `contactId ?? rowId` fallback
+   * {@link StoredContact} with the same legacy `contactId ?? resourceId` fallback
    * the local reads apply.
    *
    * @returns {Promise<Array<StoredContact>>}
    */
   async listContacts(): Promise<Array<StoredContact>> {
     const heads = await this.listContactHeads()
-    return heads.map(({ rowId, head }) => ({
-      id: rowId,
-      // Legacy heads written before the row-id / contact-id split carry no
-      // usable distinction; fall back to the row id for those.
-      contactId: head.contactId ?? rowId,
+    return heads.map(({ resourceId, head }) => ({
+      id: resourceId,
+      // Legacy heads written before the resource-id / contact-id split carry
+      // no usable distinction; fall back to the resource id for those.
+      contactId: head.contactId ?? resourceId,
       contact: head.contact,
       updatedAt: head.updatedAt
     }))
   }
 
   /**
-   * Loads one contact by row id -- a single remote GET plus at most one
-   * decrypt. Mirrors the scan's per-row tolerance: a missing row, or one
-   * whose envelope will not decrypt under the current keys, resolves to
+   * Loads one contact by resource id -- a single remote GET plus at most one
+   * decrypt. Mirrors the scan's per-Resource tolerance: a missing Resource, or
+   * one whose envelope will not decrypt under the current keys, resolves to
    * `undefined` exactly as the scan would have skipped it.
    *
    * @param options {object}
@@ -1041,7 +1064,7 @@ export class RemoteDirectStore implements SyncedCollectionStore {
     })
     const { head, err } = await this.#decryptContactHead({ id, data })
     if (err) {
-      log.warn('Skipping unreadable remote contacts row', { id, err })
+      log.warn('Skipping unreadable remote contacts resource', { id, err })
       return undefined
     }
     if (!head) {
@@ -1057,17 +1080,17 @@ export class RemoteDirectStore implements SyncedCollectionStore {
 
   /**
    * Adds a contact to the remote `contacts` collection under the cipher's
-   * freshly minted stable row id (the collection spec's
+   * freshly minted stable resource id (the collection spec's
    * `idDerivation: 'random'`), with the same head payload and epoch stamp the
    * local store's write would replicate -- so a local replica pulls this
-   * transient add verbatim. Created with `If-None-Match: *`; the row id is
-   * fresh randomness, so `created: false` normally cannot happen -- except
-   * when the transport retried a PUT whose success response was lost (the
-   * underlying http client retries idempotent methods), and the retry hit the
-   * server's `412` on the row the first attempt already created. So a
-   * not-created outcome re-reads the row: one that carries the contactId this
-   * call just minted IS this call's own write and reports success; anything
-   * else is a genuine collision and throws.
+   * transient add verbatim. Created with `If-None-Match: *`; the resource id is
+   * fresh randomness, so `created: false` normally cannot happen -- except when
+   * the transport retried a PUT whose success response was lost (the underlying
+   * http client retries idempotent methods), and the retry hit the server's
+   * `412` on the Resource the first attempt already created. So a not-created
+   * outcome re-reads the Resource: one that carries the contactId this call
+   * just minted IS this call's own write and reports success; anything else is
+   * a genuine collision and throws.
    *
    * @param options {object}
    * @param options.contact {ContactData}
@@ -1108,9 +1131,9 @@ export class RemoteDirectStore implements SyncedCollectionStore {
         ? await this.#decryptContactHead({ id, data: found.data })
         : { head: undefined }
       if (storedHead?.contactId !== contactId) {
-        throw new Error(`Remote "contacts" row "${id}" already exists.`)
+        throw new Error(`Remote "contacts" resource "${id}" already exists.`)
       }
-      // The transport's retried create: the stored row is this call's own
+      // The transport's retried create: the stored Resource is this call's own
       // write, so the add succeeded.
     }
     return { id, contactId, contact, updatedAt }
@@ -1126,7 +1149,7 @@ export class RemoteDirectStore implements SyncedCollectionStore {
    * One PUT, no compare-and-swap: {@link updateContact}'s three-attempt CAS
    * loop and prior-head refusal are the interactive edit path, and the caller
    * ({@link StorageManager.importContactHead}) has already decided this
-   * `contactId` is not held. The row id is fresh cipher randomness, so a
+   * `contactId` is not held. The resource id is fresh cipher randomness, so a
    * not-created outcome is the transport's retry of a PUT whose success
    * response was lost, and the write stands.
    *
@@ -1148,16 +1171,16 @@ export class RemoteDirectStore implements SyncedCollectionStore {
   }
 
   /**
-   * Rewrites a contact's remote head row in place under its existing id, as a
-   * compare-and-swap on the ETag of the read the new head was built on, with
-   * a bounded re-read retry: a `412` (a concurrent writer got there first)
+   * Rewrites a contact's remote head Resource in place under its existing id,
+   * as a compare-and-swap on the ETag of the read the new head was built on,
+   * with a bounded re-read retry: a `412` (a concurrent writer got there first)
    * re-reads the fresh head and re-applies this edit on it, matching the
    * replication driver's last-write-wins outcome (the fresh `updatedAt` wins)
    * without silently clobbering the concurrent write mid-flight. The logical
-   * `contactId` sealed in the existing head is preserved verbatim. Throws
-   * when the existing head is unreachable (missing row, undecryptable
-   * envelope, no served ETag): rewriting it blind would sever the contact
-   * from its history.
+   * `contactId` sealed in the existing head is preserved verbatim. Throws when
+   * the existing head is unreachable (missing Resource, undecryptable envelope,
+   * no served ETag): rewriting it blind would sever the contact from its
+   * history.
    *
    * @param options {object}
    * @param options.id {string}
@@ -1183,7 +1206,7 @@ export class RemoteDirectStore implements SyncedCollectionStore {
         resourceId: id
       })
       if (!found) {
-        throw new Error(`No remote "contacts" row "${id}" to update.`)
+        throw new Error(`No remote "contacts" resource "${id}" to update.`)
       }
       const { data, etag } = found
       if (etag === undefined) {
@@ -1213,16 +1236,16 @@ export class RemoteDirectStore implements SyncedCollectionStore {
         contact
       }
       // Re-encrypt in place through the cipher's update path: it keeps the
-      // row's existing id verbatim and advances the EDV `sequence` from the
+      // Resource's existing id verbatim and advances the EDV `sequence` from the
       // prior envelope. A plaintext (legacy) prior body is refused: a fresh
       // `encrypt` would mint its own id and bind it as `was.resource` while
-      // the write goes to this row id, an envelope a Collection-handle read
+      // the write goes to this resource id, an envelope a Collection-handle read
       // refuses as swapped.
       if (!cipher.encryptUpdate || !isEncryptedEnvelope(data)) {
         throw new Error(
           `Cannot update contact "${id}": its stored head is not an ` +
             'encrypted envelope, so it cannot be re-encrypted under its own ' +
-            'row id.'
+            'resource id.'
         )
       }
       const { envelope: body, epoch } = await cipher.encryptUpdate({
@@ -1255,10 +1278,10 @@ export class RemoteDirectStore implements SyncedCollectionStore {
   }
 
   /**
-   * Hard-deletes a contact's remote head row (the server keeps a tombstone
+   * Hard-deletes a contact's remote head Resource (the server keeps a tombstone
    * its `changes` feed serves, so local replicas pull the removal), as a
    * compare-and-swap on the ETag of the read that decided the delete: a `412`
-   * re-reads and retries (bounded), and a row already gone -- a `404`, or a
+   * re-reads and retries (bounded), and a Resource already gone -- a `404`, or a
    * fresh read finding nothing -- counts as deleted. A read served without an
    * ETag fails closed rather than degrading to an unconditional delete (the
    * no-ETag rule the update path applies).
@@ -1331,11 +1354,11 @@ export class RemoteDirectStore implements SyncedCollectionStore {
   }
 
   /**
-   * Reads every remote `contacts-history` row as a revision payload. The
-   * remote-direct backend has no plaintext row-to-contact index (that is a
-   * local-replica read accelerator), so every history row is fetched and
-   * decrypted, with the usual per-row tolerance: an unknown-epoch,
-   * no-epoch-key, or otherwise unreadable row is warned and skipped.
+   * Reads every remote `contacts-history` Resource as a revision payload. The
+   * remote-direct backend has no plaintext resource-to-contact index (that is
+   * a local-replica read accelerator), so every history Resource is fetched
+   * and decrypted, with the usual per-Resource tolerance: an unknown-epoch,
+   * no-epoch-key, or otherwise unreadable Resource is warned and skipped.
    *
    * The shared half of {@link listContactRevisions} and
    * {@link listAllContactRevisions}.
@@ -1371,26 +1394,27 @@ export class RemoteDirectStore implements SyncedCollectionStore {
           // for the facade's descriptor refresh, so a later read past that
           // refresh can pick it up.
           unknownEpoch += 1
-          log.warn('Skipping unknown-epoch remote contacts-history row', {
+          log.warn('Skipping unknown-epoch remote contacts-history resource', {
             resourceId,
             err
           })
         } else if (failure === 'no-epoch-key') {
-          // Not a recipient of this row's key epoch: skip it, and keep it out
-          // of the refresh signal -- a descriptor refresh cannot grant a key.
+          // Not a recipient of this Resource's key epoch: skip it, and keep it
+          // out of the refresh signal -- a descriptor refresh cannot grant a
+          // key.
           log.warn(
-            'Skipping remote contacts-history row: this wallet is not a ' +
+            'Skipping remote contacts-history resource: this wallet is not a ' +
               'recipient of its key epoch',
             { resourceId, err }
           )
         } else if (failure === 'integrity') {
           log.warn(
-            'Refusing a remote contacts-history row whose body failed its ' +
+            'Refusing a remote contacts-history resource whose body failed its ' +
               'integrity check',
             { readUnderResourceId: resourceId, err }
           )
         } else {
-          log.warn('Skipping unreadable remote contacts-history row', {
+          log.warn('Skipping unreadable remote contacts-history resource', {
             resourceId,
             err
           })
@@ -1412,7 +1436,7 @@ export class RemoteDirectStore implements SyncedCollectionStore {
    * Lists a single contact's revision history, most recent first, ordered by
    * the logical `timestamp` each payload carries (`writerId` descending
    * breaks a tie) -- the shared {@link compareContactRevisionsNewestFirst}.
-   * Every history row is decrypted and filtered by its TRUE `contactId`.
+   * Every history Resource is decrypted and filtered by its TRUE `contactId`.
    *
    * @param options {object}
    * @param options.contactId {string}
@@ -1443,9 +1467,9 @@ export class RemoteDirectStore implements SyncedCollectionStore {
 
   setCiphers(ciphers: Record<string, DocCipher>): void {
     this.#ciphers = ciphers
-    // A wider cipher set can reveal rows the last scan skipped as unknown-epoch,
-    // so the session cache is no longer known-complete; force the next read to
-    // rescan.
+    // A wider cipher set can reveal Resources the last scan skipped as
+    // unknown-epoch, so the session cache is no longer known-complete; force
+    // the next read to rescan.
     this.#credentialsLoaded = false
   }
 }

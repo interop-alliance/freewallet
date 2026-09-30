@@ -10,8 +10,8 @@
  * in-memory descriptor stores (each collection's governing log, with real
  * create-if-absent semantics), the stored `/meta` values, and the raw
  * resource bodies per collection. Its index declaration seals the schema
- * with was-client's own EDV codec, so the row cipher really installs it, and
- * the ciphers are real EDV codecs over freshly generated X25519 keys.
+ * with was-client's own EDV codec, so the collection's cipher really installs
+ * it, and the ciphers are real EDV codecs over freshly generated X25519 keys.
  *
  * @vitest-environment node
  */
@@ -167,13 +167,13 @@ function makeFakeRemote(stores: MemoryDescriptorStores) {
     indexes: Array<{ attribute: string | string[]; unique?: boolean }>
   }> = []
   let putFailure: Error | undefined
-  const rowsOf = (collectionId: string): Map<string, Json> => {
-    let rows = resources.get(collectionId)
-    if (!rows) {
-      rows = new Map()
-      resources.set(collectionId, rows)
+  const resourcesOf = (collectionId: string): Map<string, Json> => {
+    let held = resources.get(collectionId)
+    if (!held) {
+      held = new Map()
+      resources.set(collectionId, held)
     }
-    return rows
+    return held
   }
   const stands = (collectionId: string): boolean =>
     stores.descriptorOf(collectionId) !== undefined ||
@@ -233,10 +233,14 @@ function makeFakeRemote(stores: MemoryDescriptorStores) {
           publicIds.add(collectionId)
         },
         async list() {
-          return { items: [...rowsOf(collectionId).keys()].map(id => ({ id })) }
+          return {
+            items: [...resourcesOf(collectionId).keys()].map(id => ({ id }))
+          }
         },
         async *listPages() {
-          yield { items: [...rowsOf(collectionId).keys()].map(id => ({ id })) }
+          yield {
+            items: [...resourcesOf(collectionId).keys()].map(id => ({ id }))
+          }
         }
       }
     },
@@ -321,7 +325,7 @@ function makeFakeRemote(stores: MemoryDescriptorStores) {
     },
     async listCollectionDocuments({ collectionId }: { collectionId: string }) {
       return [
-        ...[...rowsOf(collectionId)].map(([id, data]) => ({ id, data })),
+        ...[...resourcesOf(collectionId)].map(([id, data]) => ({ id, data })),
         ...server.documentsOf({ spaceId: 's-space', collectionId })
       ]
     },
@@ -339,14 +343,14 @@ function makeFakeRemote(stores: MemoryDescriptorStores) {
       data: Json | Uint8Array
       contentType: string
     }) {
-      const rows = rowsOf(collectionId)
-      if (rows.has(resourceId) || blobs.has(`${collectionId}/${resourceId}`)) {
+      const held = resourcesOf(collectionId)
+      if (held.has(resourceId) || blobs.has(`${collectionId}/${resourceId}`)) {
         return { created: false }
       }
       if (data instanceof Uint8Array) {
         blobs.set(`${collectionId}/${resourceId}`, { bytes: data, contentType })
       } else {
-        rows.set(resourceId, data)
+        held.set(resourceId, data)
       }
       return { created: true }
     },
@@ -374,11 +378,11 @@ function makeFakeRemote(stores: MemoryDescriptorStores) {
       if (putFailure) {
         throw putFailure
       }
-      const rows = rowsOf(collectionId)
-      if (rows.has(resourceId)) {
+      const held = resourcesOf(collectionId)
+      if (held.has(resourceId)) {
         return { created: false }
       }
-      rows.set(resourceId, body)
+      held.set(resourceId, body)
       return { created: true }
     }
   } as unknown as WASRemoteStore
@@ -388,7 +392,7 @@ function makeFakeRemote(stores: MemoryDescriptorStores) {
     governed,
     ensured,
     declared,
-    rowsOf,
+    resourcesOf,
     blobs,
     publicIds,
     putEpochs,
@@ -404,18 +408,18 @@ function makeFakeRemote(stores: MemoryDescriptorStores) {
     seedPlaintext({
       collectionId,
       isPublic = false,
-      rows = {}
+      held = {}
     }: {
       collectionId: string
       isPublic?: boolean
-      rows?: Record<string, Json>
+      held?: Record<string, Json>
     }) {
       plaintext.add(collectionId)
       if (isPublic) {
         publicIds.add(collectionId)
       }
-      for (const [id, row] of Object.entries(rows)) {
-        rowsOf(collectionId).set(id, row)
+      for (const [id, body] of Object.entries(held)) {
+        resourcesOf(collectionId).set(id, body)
       }
     },
     failPuts(err: Error) {
@@ -549,7 +553,7 @@ describe('StorageManager.provisionEncryptedCollection with no grantee', () => {
 
 describe('StorageManager app-collection import (encrypted)', () => {
   it('declares the archived index schema and writes rows carrying blinded entries', async () => {
-    const { owner, stores, storage, declared, rowsOf } = await setup()
+    const { owner, stores, storage, declared, resourcesOf } = await setup()
 
     await storage.ensureImportedAppCollection({
       collectionId: 'app-notes',
@@ -576,7 +580,7 @@ describe('StorageManager app-collection import (encrypted)', () => {
     })
 
     expect(outcome).toBe('accepted')
-    const [[resourceId, envelope]] = [...rowsOf('app-notes')]
+    const [[resourceId, envelope]] = [...resourcesOf('app-notes')]
     // A fresh content-derived id, not the archived one.
     expect(resourceId).not.toBe('archived-id')
     expect(
@@ -592,7 +596,7 @@ describe('StorageManager app-collection import (encrypted)', () => {
   })
 
   it('writes rows without index entries when no schema is given', async () => {
-    const { storage, declared, rowsOf } = await setup()
+    const { storage, declared, resourcesOf } = await setup()
 
     await storage.ensureImportedAppCollection({
       collectionId: 'app-notes',
@@ -612,12 +616,12 @@ describe('StorageManager app-collection import (encrypted)', () => {
     })
 
     expect(declared).toEqual([])
-    const [envelope] = [...rowsOf('app-notes').values()]
+    const [envelope] = [...resourcesOf('app-notes').values()]
     expect((envelope as { indexed?: unknown[] }).indexed ?? []).toEqual([])
   })
 
   it('skips a held Resource, reports a changed one as conflicting, and dedupes an id-less Resource by content', async () => {
-    const { storage, rowsOf } = await setup()
+    const { storage, resourcesOf } = await setup()
     await storage.ensureImportedAppCollection({
       collectionId: 'app-notes',
       encrypted: true
@@ -626,8 +630,8 @@ describe('StorageManager app-collection import (encrypted)', () => {
       collectionId: 'app-notes',
       encrypted: true
     })
-    const rows: Json[] = [{ id: 'note-1', text: 'one' }, { text: 'no id' }]
-    for (const json of rows) {
+    const payloads: Json[] = [{ id: 'note-1', text: 'one' }, { text: 'no id' }]
+    for (const json of payloads) {
       await storage.importAppCollectionResource({
         collectionId: 'app-notes',
         encrypted: true,
@@ -663,7 +667,7 @@ describe('StorageManager app-collection import (encrypted)', () => {
     )
     expect(await importResource({ text: 'no id' })).toBe('skipped')
     expect(await importResource({ id: 'note-2', text: 'two' })).toBe('accepted')
-    expect(rowsOf('app-notes').size).toBe(3)
+    expect(resourcesOf('app-notes').size).toBe(3)
   })
 
   it('reports a failed write as failed, and rethrows a full Space', async () => {
@@ -903,12 +907,12 @@ describe('StorageManager app-collection import (plaintext)', () => {
   })
 
   it('keeps the archived resource id, and skips or conflicts on a held one', async () => {
-    const { storage, rowsOf } = await setup()
+    const { storage, resourcesOf } = await setup()
     await storage.ensureImportedAppCollection({
       collectionId: 'posts',
       encrypted: false
     })
-    rowsOf('posts').set('held-post', { text: 'held' })
+    resourcesOf('posts').set('held-post', { text: 'held' })
     const held = await storage.snapshotAppCollection({
       collectionId: 'posts',
       encrypted: false
@@ -924,7 +928,7 @@ describe('StorageManager app-collection import (plaintext)', () => {
       })
 
     expect(await importResource('post-1', { text: 'one' })).toBe('accepted')
-    expect(rowsOf('posts').get('post-1')).toEqual({ text: 'one' })
+    expect(resourcesOf('posts').get('post-1')).toEqual({ text: 'one' })
     expect(await importResource('post-1', { text: 'one' })).toBe('skipped')
     expect(await importResource('held-post', { text: 'held' })).toBe('skipped')
     expect(await importResource('held-post', { text: 'other' })).toBe(
@@ -978,7 +982,7 @@ describe('StorageManager app-collection import into a standing collection', () =
   it('refuses a standing private collection when the archive is public, leaving it private', async () => {
     const { storage, ensured, publicIds, setPublicCalls, seedPlaintext } =
       await setup()
-    seedPlaintext({ collectionId: 'posts', rows: { p: { text: 'held' } } })
+    seedPlaintext({ collectionId: 'posts', held: { p: { text: 'held' } } })
 
     await expect(
       storage.ensureImportedAppCollection({
@@ -1022,7 +1026,7 @@ describe('StorageManager app-collection import into a standing collection', () =
 
   it('refuses a standing plaintext collection holding rows for an encrypted archive', async () => {
     const { storage, stores, seedPlaintext } = await setup()
-    seedPlaintext({ collectionId: 'notes', rows: { p: { text: 'held' } } })
+    seedPlaintext({ collectionId: 'notes', held: { p: { text: 'held' } } })
 
     await expect(
       storage.ensureImportedAppCollection({
@@ -1034,12 +1038,12 @@ describe('StorageManager app-collection import into a standing collection', () =
   })
 
   it('adopts a matching standing plaintext collection, changing none of its settings', async () => {
-    const { storage, ensured, seedPlaintext, rowsOf, setPublicCalls } =
+    const { storage, ensured, seedPlaintext, resourcesOf, setPublicCalls } =
       await setup()
     seedPlaintext({
       collectionId: 'posts',
       isPublic: true,
-      rows: { p: { text: 'held' } }
+      held: { p: { text: 'held' } }
     })
 
     await storage.ensureImportedAppCollection({
@@ -1067,11 +1071,11 @@ describe('StorageManager app-collection import into a standing collection', () =
         held
       })
     ).toBe('accepted')
-    expect(rowsOf('posts').size).toBe(2)
+    expect(resourcesOf('posts').size).toBe(2)
   })
 
   it('refuses an empty collection a torn encrypted provision left, for a plaintext archive', async () => {
-    const { storage, remoteStore, rowsOf, stores } = await setup()
+    const { storage, remoteStore, resourcesOf, stores } = await setup()
     // App Connect created the collection bare and tore before its log.
     await remoteStore.ensureGovernedCollection({ id: 'notes' })
 
@@ -1081,7 +1085,7 @@ describe('StorageManager app-collection import into a standing collection', () =
         encrypted: false
       })
     ).rejects.toMatchObject({ name: 'AppCollectionMismatchError' })
-    expect(rowsOf('notes').size).toBe(0)
+    expect(resourcesOf('notes').size).toBe(0)
 
     // An encrypted archive finishes the provision instead.
     await storage.ensureImportedAppCollection({
@@ -1092,7 +1096,7 @@ describe('StorageManager app-collection import into a standing collection', () =
   })
 
   it('declares the archived index schema on a created collection only', async () => {
-    const { storage, declared, rowsOf } = await setup()
+    const { storage, declared, resourcesOf } = await setup()
     await storage.provisionEncryptedCollection({ collectionId: 'app-notes' })
 
     await storage.ensureImportedAppCollection({
@@ -1117,12 +1121,12 @@ describe('StorageManager app-collection import into a standing collection', () =
       content: { json: { id: 'note-1', type: 'Note' } },
       held
     })
-    const [envelope] = [...rowsOf('app-notes').values()]
+    const [envelope] = [...resourcesOf('app-notes').values()]
     expect((envelope as { indexed?: unknown[] }).indexed ?? []).toEqual([])
   })
 
   it('refreshes a rotated epoch for the snapshot and seals later rows under it', async () => {
-    const { owner, stores, storage, rowsOf, putEpochs } = await setup()
+    const { owner, stores, storage, resourcesOf, putEpochs } = await setup()
     const extra = await generateVaultKeys()
     await storage.provisionEncryptedCollection({
       collectionId: 'app-notes',
@@ -1133,7 +1137,8 @@ describe('StorageManager app-collection import into a standing collection', () =
       encrypted: true
     })
 
-    // Another client rotates the epoch and writes a row under the new one.
+    // Another client rotates the epoch and writes a Resource under the new
+    // one.
     const rotated = await removeRecipient({
       store: stores.storeFor('app-notes'),
       recipientId: extra.keyAgreementKey.id!,
@@ -1149,7 +1154,7 @@ describe('StorageManager app-collection import into a standing collection', () =
       encryption: rotated
     })
     const sealed = await writer.encrypt({ data: { id: 'note-1', text: 'a' } })
-    rowsOf('app-notes').set(sealed.id, sealed.envelope)
+    resourcesOf('app-notes').set(sealed.id, sealed.envelope)
 
     const held = await storage.snapshotAppCollection({
       collectionId: 'app-notes',
@@ -1170,7 +1175,7 @@ describe('StorageManager app-collection import into a standing collection', () =
   })
 
   it('handles a bundle-supplied __proto__ collection id', async () => {
-    const { storage, rowsOf } = await setup()
+    const { storage, resourcesOf } = await setup()
     await storage.ensureImportedAppCollection({
       collectionId: '__proto__',
       encrypted: true
@@ -1189,7 +1194,7 @@ describe('StorageManager app-collection import into a standing collection', () =
         held
       })
     ).toBe('accepted')
-    expect(rowsOf('__proto__').size).toBe(1)
+    expect(resourcesOf('__proto__').size).toBe(1)
     // Another collection is still refused as not ensured.
     expect(
       await storage.importAppCollectionResource({
@@ -1206,7 +1211,7 @@ describe('StorageManager app-collection import into a standing collection', () =
 
 describe('StorageManager app-collection import re-runs and races', () => {
   it('declares the archived schema on a re-run after a tear before the declaration', async () => {
-    const { storage, declared, rowsOf, failNextDeclare } = await setup()
+    const { storage, declared, resourcesOf, failNextDeclare } = await setup()
     failNextDeclare(new Error('torn'))
     await expect(
       storage.ensureImportedAppCollection({
@@ -1239,7 +1244,7 @@ describe('StorageManager app-collection import re-runs and races', () => {
       content: { json: { id: 'note-1', type: 'Note' } },
       held
     })
-    const [envelope] = [...rowsOf('app-notes').values()]
+    const [envelope] = [...resourcesOf('app-notes').values()]
     expect(
       (envelope as { indexed?: unknown[] }).indexed?.length
     ).toBeGreaterThan(0)
@@ -1285,7 +1290,7 @@ describe('StorageManager app-collection import re-runs and races', () => {
   })
 
   it('proceeds into its own empty private plaintext collection on a re-run', async () => {
-    const { storage, rowsOf } = await setup()
+    const { storage, resourcesOf } = await setup()
     const ensure = () =>
       storage.ensureImportedAppCollection({
         collectionId: 'posts',
@@ -1293,7 +1298,7 @@ describe('StorageManager app-collection import re-runs and races', () => {
         generator: GENERATOR
       })
     await ensure()
-    // The first run tore before any row landed.
+    // The first run tore before any Resource landed.
     await ensure()
     const held = await storage.snapshotAppCollection({
       collectionId: 'posts',
@@ -1309,7 +1314,7 @@ describe('StorageManager app-collection import re-runs and races', () => {
         held
       })
     ).toBe('accepted')
-    expect(rowsOf('posts').size).toBe(1)
+    expect(resourcesOf('posts').size).toBe(1)
   })
 
   it('refuses an empty private plaintext collection carrying a different attribution', async () => {
@@ -1348,7 +1353,7 @@ describe('StorageManager app-collection import re-runs and races', () => {
       publicIds
     } = await setup()
     rivalCreates(() => {
-      seedPlaintext({ collectionId: 'posts', rows: { r: { text: 'rival' } } })
+      seedPlaintext({ collectionId: 'posts', held: { r: { text: 'rival' } } })
       attribute('posts', OTHER_GENERATOR)
     })
 

@@ -14,10 +14,10 @@
  * What the cells assert is what migrates and what does not. Content travels:
  * B lists A's credential and A's contact. Nothing else does: the walk reads
  * the file alone, so no request reaches A's Space while it runs, and no
- * `Login` or `CollectionShare` row lands, so the importing account's
+ * `Login` or `CollectionShare` activity lands, so the importing account's
  * Applications page names no app of A's and its shares dialog names no reader
  * of A's. The importing account's own disconnect and unshare still complete
- * afterwards, which is the check that the migrated rows did not poison the
+ * afterwards, which is the check that the migrated Resources did not poison the
  * grant and share harvesters.
  *
  * A's app collection is re-created in the importing account's Space, and
@@ -459,7 +459,7 @@ async function addContact({
 /**
  * Opens the Applications page and waits for a row to appear, remounting the
  * page (dashboard and back -- never `reload()`, which logs out) until
- * replication has pulled the popup-written rows in.
+ * replication has pulled the popup-written Resources in.
  *
  * @param options {object}
  * @param options.page {Page}
@@ -633,7 +633,8 @@ test.describe.serial('Content migration from a backup bundle', () => {
         timeout: 90_000
       })
 
-      // The disconnect completes too: no migrated row reaches its harvester.
+      // The disconnect completes too: no migrated Resource reaches its
+      // harvester.
       await page.goto('/#/applications')
       await page.getByText(APP_B.name, { exact: true }).click()
       await expect(

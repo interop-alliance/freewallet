@@ -252,6 +252,18 @@ export interface Session {
   // `registryReady` rather than with it. In memory only, scalar detail
   // only, and it never rejects.
   mends?: Promise<MendReport<CeremonyId>>
+  // Aborted once this session is torn down (`src/session/sessionLifecycle.ts`):
+  // a logout or account switch, a CHAPI popup page's teardown, a
+  // never-entered session released, and the forget and account-deletion
+  // ceremonies just before their local wipe. Work still running for the
+  // session checks it before each browser-local write and before it mutates
+  // the session. Minted at construction; only `disposeSession` aborts it.
+  disposal: AbortSignal
+  // Opens once a mend raised at a read may run: behind `registryReady` on a
+  // session whose composition starts a login mender block, and at
+  // construction on one that starts none (signup, the lobby, a guest). It
+  // never rejects. Stamped at construction by `armEncounterGate`.
+  encounterGate: Promise<void>
   // Settles when the credential-anchored signup's best-effort
   // welcome-content seeding finishes (success, failure, or timeout -- it
   // never rejects); the dashboard shows a "generating welcome credentials"

@@ -17,18 +17,25 @@ vi.mock('@/app.config', async importOriginal => ({
 
 const logState = vi.hoisted(() => ({
   verifications: 0,
-  failWith: undefined as unknown
+  failWith: undefined as unknown,
+  // When set, a verification waits on it before answering, so a test can
+  // observe the memo while the verification is in flight.
+  hold: undefined as Promise<void> | undefined
 }))
 
 vi.mock('@interop/wallet-core/webvh', async importOriginal => ({
   ...(await importOriginal<typeof import('@interop/wallet-core/webvh')>()),
   verifyAccountLog: vi.fn(async ({ did }: { did: string }) => {
     logState.verifications += 1
+    const version = logState.verifications
+    if (logState.hold) {
+      await logState.hold
+    }
     if (logState.failWith) {
       throw logState.failWith
     }
     return {
-      doc: { id: did, verificationMethod: [] },
+      doc: { id: did, verificationMethod: [], version },
       log: [],
       updateKeys: [],
       nextKeyHashes: []
@@ -65,6 +72,7 @@ import {
   invalidateVerifiedLog,
   invalidateVerifiedLogForPublish,
   peekVerifiedAccountLog,
+  refreshVerifiedAccountLog,
   verifiedAccountLog
 } from '@/session/verifiedLog'
 import { listAccountClients, renameAccountClient } from '@/session/clients'
@@ -107,6 +115,7 @@ function sessionWith({ pointer = POINTER } = {}): Session {
 beforeEach(() => {
   logState.verifications = 0
   logState.failWith = undefined
+  logState.hold = undefined
   sharedState.listings = 0
   sharedState.lastVerifiedLog = undefined
   sharedState.labelWrites = 0
@@ -209,6 +218,92 @@ describe('the verified-log memo', () => {
         }
       })
     ).rejects.toThrow(/account pointer/)
+  })
+})
+
+describe('the verified-log refresh', () => {
+  /**
+   * The version the mock stamped on the document a memo holds.
+   *
+   * @param session {Session}
+   * @returns {unknown}
+   */
+  function peekedVersion(session: Session): unknown {
+    return (
+      peekVerifiedAccountLog({ profile: session.profile })?.doc as
+        { version?: number } | undefined
+    )?.version
+  }
+
+  it('keeps the old memo visible to a peek until the new verification lands', async () => {
+    const session = sessionWith()
+    await verifiedAccountLog({ session })
+    expect(peekedVersion(session)).toBe(1)
+
+    let release: () => void = () => undefined
+    logState.hold = new Promise<void>(resolve => {
+      release = resolve
+    })
+    const refreshed = refreshVerifiedAccountLog({ session })
+    // In flight: the peek and a plain read both still see the old document.
+    expect(peekedVersion(session)).toBe(1)
+    expect(
+      ((await verifiedAccountLog({ session })).doc as { version?: number })
+        .version
+    ).toBe(1)
+    release()
+    await refreshed
+    expect(peekedVersion(session)).toBe(2)
+    expect(
+      ((await verifiedAccountLog({ session })).doc as { version?: number })
+        .version
+    ).toBe(2)
+    expect(logState.verifications).toBe(2)
+  })
+
+  it('keeps the old value when the refresh fails', async () => {
+    const session = sessionWith()
+    await verifiedAccountLog({ session })
+    logState.failWith = new Error('the host is unreachable')
+    await expect(refreshVerifiedAccountLog({ session })).rejects.toThrow(
+      'unreachable'
+    )
+    logState.failWith = undefined
+    expect(peekedVersion(session)).toBe(1)
+    await verifiedAccountLog({ session })
+    // The kept memo serves the read; nothing re-verifies.
+    expect(logState.verifications).toBe(2)
+  })
+
+  it('shares one verification between concurrent refreshes', async () => {
+    const session = sessionWith()
+    await verifiedAccountLog({ session })
+    await Promise.all([
+      refreshVerifiedAccountLog({ session }),
+      refreshVerifiedAccountLog({ session })
+    ])
+    expect(logState.verifications).toBe(2)
+  })
+
+  it('does not overwrite a memo a ceremony invalidated mid-refresh', async () => {
+    const session = sessionWith()
+    await verifiedAccountLog({ session })
+    let release: () => void = () => undefined
+    logState.hold = new Promise<void>(resolve => {
+      release = resolve
+    })
+    const refreshed = refreshVerifiedAccountLog({ session })
+    invalidateVerifiedLog({ profile: session.profile })
+    release()
+    await refreshed
+    expect(peekVerifiedAccountLog({ profile: session.profile })).toBeUndefined()
+  })
+
+  it('reads a cold memo as an ordinary verification', async () => {
+    const session = sessionWith()
+    await refreshVerifiedAccountLog({ session })
+    expect(peekedVersion(session)).toBe(1)
+    expect(logState.verifications).toBe(1)
   })
 })
 

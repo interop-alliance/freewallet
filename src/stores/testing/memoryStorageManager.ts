@@ -2,8 +2,8 @@
  * The shared test harness for a `StorageManager` over a memory-RxDB
  * `BrowserStore` with real EDV ciphers and no remote store.
  *
- * Every caller wants the same thing: a replica whose rows really round-trip
- * through encrypt and decrypt, so a plaintext store's idempotent insert
+ * Every caller wants the same thing: a replica where every resource replica
+ * really round-trips through encrypt and decrypt, so a plaintext store's idempotent insert
  * cannot mask a missing dedupe. The only thing that differs between them is
  * which collections get a cipher, so that is the one argument.
  *
@@ -18,6 +18,7 @@ import { createEdvDocCipher, type DocCipher } from '@interop/was-client/edv'
 import { getRxStorageMemory } from 'rxdb/plugins/storage-memory'
 import { mintRecordEncryption } from '@/session/recordEnvelope'
 import { browserLocalSessionPersistence } from '@/session/persistence'
+import { sessionDisposalSignal } from '@/session/sessionLifecycle'
 import type { Session, User } from '@/types/auth'
 import { BrowserStore } from '@/stores/browserStore'
 import { StorageManager } from '@/stores/storageManager'
@@ -148,6 +149,8 @@ export async function memorySession(
     profile: {} as Session['profile'],
     storage,
     persistence: browserLocalSessionPersistence(),
-    isGuest: false
+    isGuest: false,
+    disposal: sessionDisposalSignal(),
+    encounterGate: Promise.resolve()
   }
 }

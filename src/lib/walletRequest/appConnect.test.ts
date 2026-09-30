@@ -109,7 +109,7 @@ describe('processAppConnect', () => {
     })
 
     expect(response.appConnect?.firstRun).toBe(true)
-    // The mint store method takes the credential alone: the row lands in
+    // The mint store method takes the credential alone: the Resource lands in
     // `app-connections` and no credential-created activity is attributed.
     expect(added).toEqual([{ credential: expect.anything() }])
     const subjectDid = response.appConnect?.subjectDid
@@ -129,8 +129,8 @@ describe('processAppConnect', () => {
   })
 
   it('refuses to mint when the scan skipped no-epoch-key rows', async () => {
-    // The rotation residue: every app-connections row sits in an epoch this
-    // session holds no wrap for, so "no match" does not mean "never
+    // The rotation residue: every app-connections Resource sits in an epoch
+    // this session holds no wrap for, so "no match" does not mean "never
     // connected" and a mint would orphan the app's prior identity.
     const { session, added } = await fakeSession({
       skipped: {
@@ -156,9 +156,9 @@ describe('processAppConnect', () => {
 
   it('refuses to mint when rows are still unknown-epoch after the refresh', async () => {
     // The facade spends at most one descriptor refresh per collection per
-    // session, and a failed fetch is swallowed -- so an unknown-epoch row can
-    // reach the match path unresolved (the consent preview already spent the
-    // refresh before this scan ran).
+    // session, and a failed fetch is swallowed -- so an unknown-epoch Resource
+    // can reach the match path unresolved (the consent preview already spent
+    // the refresh before this scan ran).
     const { session, added } = await fakeSession({
       skipped: {
         unknownEpoch: 1,
@@ -376,7 +376,7 @@ describe('processAppConnect', () => {
     // `credentialSubject.appUrl` claim, sitting among the ordinary
     // credentials. The match path reads `app-connections` only, so it is
     // invisible -- the connect is a genuine first run under a fresh identity,
-    // and the stranded row is the login-time sweep's business, not this
+    // and the stranded Resource is the login-time sweep's business, not this
     // path's.
     const { credential, subjectDid } = await mintAppKeyCredential({
       app: APP,

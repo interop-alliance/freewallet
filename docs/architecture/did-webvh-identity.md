@@ -279,7 +279,7 @@ a replica prefix `databases()` alone would have named, is reported on the
 outcome's `unverified` list rather than counted as a clean wipe.
 
 Limits no enumeration reaches: deleted IndexedDB data stays forensically
-recoverable, plaintext `public-credentials` rows included; the CHAPI popup's
+recoverable, plaintext `public-credentials` resource replicas included; the CHAPI popup's
 partitioned third-party buckets are unreachable from any top-level wipe; and
 the mediator-origin (authn.io) handler-registration bit records that a
 wallet was used in this browser. Only clearing the browser profile removes

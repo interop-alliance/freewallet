@@ -19,19 +19,19 @@ import type { SyncedDoc, WithDeleted } from '@interop/was-sync'
 import { createContactsConflictHandler } from './contactsConflictHandler'
 
 const CONTACT_ID = 'urn:uuid:c0ffee'
-const ROW_ID = 'row-1'
+const RESOURCE_ID = 'resource-1'
 const DECOY_ID = 'urn:uuid:decoy'
 
 /**
- * A stored contact head row, carrying an envelope the fake ciphers below key
- * their answer on.
+ * A stored contact head resource replica, carrying an envelope the fake
+ * ciphers below key their answer on.
  *
  * @param options {object}
  * @param options.envelopeId {string}
  * @param options.version {number}
  * @returns {WithDeleted<SyncedDoc>}
  */
-function row({
+function headResource({
   envelopeId,
   version
 }: {
@@ -39,7 +39,7 @@ function row({
   version: number
 }): WithDeleted<SyncedDoc> {
   return {
-    id: ROW_ID,
+    id: RESOURCE_ID,
     updatedAt: '000000000001',
     version,
     _deleted: false,
@@ -152,8 +152,8 @@ describe('the contacts conflict binding', () => {
     })
     const handler = createContactsConflictHandler({ getCipher: () => cipher })
     const input = {
-      realMasterState: row({ envelopeId: 'remote-env', version: 4 }),
-      newDocumentState: row({ envelopeId: 'local-env', version: 3 })
+      realMasterState: headResource({ envelopeId: 'remote-env', version: 4 }),
+      newDocumentState: headResource({ envelopeId: 'local-env', version: 3 })
     }
 
     expect(await handler.resolve(input)).toBe(input.realMasterState)
@@ -179,8 +179,8 @@ describe('the contacts conflict binding', () => {
         })
     })
     const input = {
-      realMasterState: row({ envelopeId: 'remote-env', version: 4 }),
-      newDocumentState: row({ envelopeId: 'local-env', version: 3 })
+      realMasterState: headResource({ envelopeId: 'remote-env', version: 4 }),
+      newDocumentState: headResource({ envelopeId: 'local-env', version: 3 })
     }
 
     expect(await handler.resolve(input)).toBe(input.realMasterState)
@@ -194,19 +194,22 @@ describe('the contacts conflict binding', () => {
     const handler = createContactsConflictHandler({
       getCipher: () => undefined
     })
-    const local = row({ envelopeId: 'local-env', version: 3 })
+    const local = headResource({ envelopeId: 'local-env', version: 3 })
 
     expect(handler.isEqual(local, local)).toBe(true)
     expect(
-      handler.isEqual(local, row({ envelopeId: 'local-env', version: 4 }))
+      handler.isEqual(
+        local,
+        headResource({ envelopeId: 'local-env', version: 4 })
+      )
     ).toBe(false)
   })
 
   it('addresses each side with the contested row id, not the payload id', async () => {
     // The envelope-to-resource binding check is only worth anything if the id
-    // the cipher is handed comes from the row. A payload member named `id` is
-    // a decoy: it rides inside the body the host served, so a decrypt
-    // addressed with it would verify the body against itself.
+    // the cipher is handed comes from the resource replica. A payload member
+    // named `id` is a decoy: it rides inside the body the host served, so a
+    // decrypt addressed with it would verify the body against itself.
     const addressedWith: string[] = []
     const handler = createContactsConflictHandler({
       getCipher: () =>
@@ -219,12 +222,12 @@ describe('the contacts conflict binding', () => {
         })
     })
     const input = {
-      realMasterState: row({ envelopeId: 'remote-env', version: 4 }),
-      newDocumentState: row({ envelopeId: 'local-env', version: 3 })
+      realMasterState: headResource({ envelopeId: 'remote-env', version: 4 }),
+      newDocumentState: headResource({ envelopeId: 'local-env', version: 3 })
     }
 
     expect(await handler.resolve(input)).toBe(input.newDocumentState)
-    expect(addressedWith).toEqual([ROW_ID, ROW_ID])
+    expect(addressedWith).toEqual([RESOURCE_ID, RESOURCE_ID])
     expect(addressedWith).not.toContain(DECOY_ID)
   })
 
@@ -237,8 +240,8 @@ describe('the contacts conflict binding', () => {
       getCipher: () => misboundCipher()
     })
     const input = {
-      realMasterState: row({ envelopeId: 'remote-env', version: 4 }),
-      newDocumentState: row({ envelopeId: 'local-env', version: 3 })
+      realMasterState: headResource({ envelopeId: 'remote-env', version: 4 }),
+      newDocumentState: headResource({ envelopeId: 'local-env', version: 3 })
     }
 
     let raised: unknown
@@ -266,8 +269,8 @@ describe('the contacts conflict binding', () => {
           })
       })
       const input = {
-        realMasterState: row({ envelopeId: 'remote-env', version: 4 }),
-        newDocumentState: row({ envelopeId: 'local-env', version: 3 })
+        realMasterState: headResource({ envelopeId: 'remote-env', version: 4 }),
+        newDocumentState: headResource({ envelopeId: 'local-env', version: 3 })
       }
 
       const capture = captureSink()
@@ -285,7 +288,7 @@ describe('the contacts conflict binding', () => {
       expect(refusal?.ns).toBe('sync')
       expect(refusal?.level).toBe('error')
       expect(refusal?.data).toMatchObject({
-        id: ROW_ID,
+        id: RESOURCE_ID,
         side: misbound === 'remote-env' ? 'remote' : 'local'
       })
     }
@@ -303,8 +306,8 @@ describe('the contacts conflict binding', () => {
       }
     })
     const input = {
-      realMasterState: row({ envelopeId: 'remote-env', version: 4 }),
-      newDocumentState: row({ envelopeId: 'local-env', version: 3 })
+      realMasterState: headResource({ envelopeId: 'remote-env', version: 4 }),
+      newDocumentState: headResource({ envelopeId: 'local-env', version: 3 })
     }
 
     const capture = captureSink()

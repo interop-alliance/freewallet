@@ -6,8 +6,9 @@
  *
  * The manager runs over a real BrowserStore on memory RxDB with real EDV
  * ciphers: the plaintext store's `insertIfNotExists` path is idempotent by
- * itself and would mask a missing dedupe, so every archived row here really
- * round-trips through encrypt/decrypt under a nondeterministic envelope.
+ * itself and would mask a missing dedupe, so every archived Resource here
+ * really round-trips through encrypt/decrypt under a nondeterministic
+ * envelope.
  *
  * @vitest-environment node
  */
@@ -21,10 +22,10 @@ import {
   memoryStorageManager
 } from '@/stores/testing/memoryStorageManager'
 import {
-  activityRow,
-  credentialRow,
-  headRow,
-  revisionRow
+  activityResource,
+  credentialResource,
+  headResource,
+  revisionResource
 } from '@/stores/testing/migrationFixtures'
 import { BrowserStore } from './browserStore'
 
@@ -36,7 +37,7 @@ afterEach(async () => {
 describe('StorageManager.importCredential', () => {
   it('accepts an archived credential once and skips the re-import', async () => {
     const { storage } = await memoryStorageManager()
-    const credential = credentialRow('Ada')
+    const credential = credentialResource('Ada')
 
     expect(await storage.importCredential({ credential })).toBe('accepted')
     expect(await storage.importCredential({ credential })).toBe('skipped')
@@ -46,10 +47,13 @@ describe('StorageManager.importCredential', () => {
   it('records no credential-created activity, unlike the interactive method', async () => {
     const { storage, user } = await memoryStorageManager()
 
-    await storage.importCredential({ credential: credentialRow('Ada') })
+    await storage.importCredential({ credential: credentialResource('Ada') })
     expect((await storage.listHistoryItems()).entries).toEqual([])
 
-    await storage.addCredential({ credential: credentialRow('Grace'), user })
+    await storage.addCredential({
+      credential: credentialResource('Grace'),
+      user
+    })
     expect((await storage.listHistoryItems()).entries).toHaveLength(1)
   })
 
@@ -70,7 +74,7 @@ describe('StorageManager.importContactHead', () => {
   it('writes the archived head verbatim and skips the re-import', async () => {
     const { storage } = await memoryStorageManager()
     const held = await storage.snapshotHeldContent()
-    const head = headRow({ contactId: 'contact-1', displayName: 'Ada' })
+    const head = headResource({ contactId: 'contact-1', displayName: 'Ada' })
 
     expect(await storage.importContactHead({ head, held })).toBe('accepted')
     expect(await storage.importContactHead({ head, held })).toBe('skipped')
@@ -87,12 +91,12 @@ describe('StorageManager.importContactHead', () => {
     const held = await storage.snapshotHeldContent()
     await storage.importContactHead({
       held,
-      head: headRow({ contactId: 'contact-1', displayName: 'Ada' })
+      head: headResource({ contactId: 'contact-1', displayName: 'Ada' })
     })
 
     const outcome = await storage.importContactHead({
       held,
-      head: headRow({
+      head: headResource({
         contactId: 'contact-1',
         displayName: 'Ada',
         writerId: 'another-writer'
@@ -106,12 +110,12 @@ describe('StorageManager.importContactHead', () => {
     const held = await storage.snapshotHeldContent()
     await storage.importContactHead({
       held,
-      head: headRow({ contactId: 'contact-1', displayName: 'Ada' })
+      head: headResource({ contactId: 'contact-1', displayName: 'Ada' })
     })
 
     const outcome = await storage.importContactHead({
       held,
-      head: headRow({
+      head: headResource({
         contactId: 'contact-1',
         displayName: 'Doctored',
         updatedAt: '2025-01-01T00:00:00.000Z'
@@ -128,7 +132,7 @@ describe('StorageManager.importContactHead', () => {
   it('records no create revision, unlike the interactive method', async () => {
     const { storage } = await memoryStorageManager()
     const held = await storage.snapshotHeldContent()
-    const head = headRow({ contactId: 'contact-1', displayName: 'Ada' })
+    const head = headResource({ contactId: 'contact-1', displayName: 'Ada' })
     await storage.importContactHead({ head, held })
 
     expect(
@@ -146,7 +150,7 @@ describe('StorageManager.importContactHead', () => {
   it('refuses a head that carries no contactId and stores nothing', async () => {
     const { storage } = await memoryStorageManager()
     const held = await storage.snapshotHeldContent()
-    const head = headRow({ contactId: 'contact-1', displayName: 'Ada' })
+    const head = headResource({ contactId: 'contact-1', displayName: 'Ada' })
     delete (head as Partial<ContactHeadPayload>).contactId
 
     expect(await storage.importContactHead({ head, held })).toBe('conflicting')
@@ -162,7 +166,7 @@ describe('StorageManager.importContactHead', () => {
     for (const name of ['Ada', 'Grace', 'Edith']) {
       await storage.importContactHead({
         held,
-        head: headRow({ contactId: `contact-${name}`, displayName: name })
+        head: headResource({ contactId: `contact-${name}`, displayName: name })
       })
     }
 
@@ -172,7 +176,7 @@ describe('StorageManager.importContactHead', () => {
 
   it('skips a bundle contact the new account already seeded', async () => {
     const { storage } = await memoryStorageManager()
-    // The seeded row the new account planted at signup, under its own id.
+    // The seeded contact the new account planted at signup, under its own id.
     await storage.addContact({
       contact: { displayName: SEED_CONTACT_NAMES[0] } as ContactData
     })
@@ -180,7 +184,7 @@ describe('StorageManager.importContactHead', () => {
 
     const outcome = await storage.importContactHead({
       held,
-      head: headRow({
+      head: headResource({
         contactId: 'contact-seed',
         displayName: SEED_CONTACT_NAMES[0]
       })
@@ -204,7 +208,7 @@ describe('StorageManager.importContactHead', () => {
 
     const outcome = await storage.importContactHead({
       held,
-      head: headRow({
+      head: headResource({
         contactId: 'contact-seed',
         displayName: SEED_CONTACT_NAMES[0]
       })
@@ -221,9 +225,9 @@ describe('StorageManager.importContactRevision', () => {
     const held = await storage.snapshotHeldContent()
     await storage.importContactHead({
       held,
-      head: headRow({ contactId: 'contact-1', displayName: 'Ada' })
+      head: headResource({ contactId: 'contact-1', displayName: 'Ada' })
     })
-    const revision = revisionRow({
+    const revision = revisionResource({
       contactId: 'contact-1',
       displayName: 'Ada Lovelace'
     })
@@ -244,7 +248,7 @@ describe('StorageManager.importContactRevision', () => {
   it('skips a revision it already holds and accepts a differing one', async () => {
     const { storage } = await memoryStorageManager()
     const held = await storage.snapshotHeldContent()
-    const revision = revisionRow({
+    const revision = revisionResource({
       contactId: 'contact-1',
       displayName: 'Ada'
     })
@@ -258,7 +262,7 @@ describe('StorageManager.importContactRevision', () => {
     expect(
       await storage.importContactRevision({
         held,
-        revision: revisionRow({
+        revision: revisionResource({
           contactId: 'contact-1',
           displayName: 'Ada',
           timestamp: '2024-05-06T07:08:09.000Z'
@@ -277,7 +281,10 @@ describe('StorageManager.importContactRevision', () => {
     expect(
       await storage.importContactRevision({
         held,
-        revision: revisionRow({ contactId: 'orphan', displayName: 'Nobody' })
+        revision: revisionResource({
+          contactId: 'orphan',
+          displayName: 'Nobody'
+        })
       })
     ).toBe('accepted')
     expect(
@@ -295,7 +302,10 @@ describe('StorageManager.importContactRevision', () => {
     expect(
       await storage.importContactRevision({
         held,
-        revision: revisionRow({ contactId: 'contact-1', displayName: 'Ada' })
+        revision: revisionResource({
+          contactId: 'contact-1',
+          displayName: 'Ada'
+        })
       })
     ).toBe('failed')
   })
@@ -310,7 +320,10 @@ describe('StorageManager.importContactRevision', () => {
     await expect(
       storage.importContactRevision({
         held,
-        revision: revisionRow({ contactId: 'contact-1', displayName: 'Ada' })
+        revision: revisionResource({
+          contactId: 'contact-1',
+          displayName: 'Ada'
+        })
       })
     ).rejects.toThrow(QuotaExceededError)
   })
@@ -320,7 +333,10 @@ describe('StorageManager.importActivity', () => {
   it('writes the archived activity under its own id and skips the re-import', async () => {
     const { storage } = await memoryStorageManager()
     const held = await storage.snapshotHeldContent()
-    const activity = activityRow({ id: 'activity-1', summary: 'Credential x' })
+    const activity = activityResource({
+      id: 'activity-1',
+      summary: 'Credential x'
+    })
 
     expect(await storage.importActivity({ activity, held })).toBe('accepted')
     expect(await storage.importActivity({ activity, held })).toBe('skipped')
@@ -336,12 +352,12 @@ describe('StorageManager.importActivity', () => {
     const held = await storage.snapshotHeldContent()
     await storage.importActivity({
       held,
-      activity: activityRow({ id: 'activity-1', summary: 'Credential x' })
+      activity: activityResource({ id: 'activity-1', summary: 'Credential x' })
     })
 
     const outcome = await storage.importActivity({
       held,
-      activity: activityRow({ id: 'activity-1', summary: 'Doctored' })
+      activity: activityResource({ id: 'activity-1', summary: 'Doctored' })
     })
 
     expect(outcome).toBe('conflicting')
@@ -355,16 +371,16 @@ describe('StorageManager.putHistoryItemReplacingOthers', () => {
   it('leaves exactly one row for the id, carrying the second run counts', async () => {
     const { storage, localStore } = await memoryStorageManager()
     await storage.putHistoryItemReplacingOthers({
-      activity: activityRow({ id: 'import-1', summary: 'Imported 3 rows' })
+      activity: activityResource({ id: 'import-1', summary: 'Imported 3 rows' })
     })
     await storage.putHistoryItemReplacingOthers({
-      activity: activityRow({ id: 'import-1', summary: 'Imported 7 rows' })
+      activity: activityResource({ id: 'import-1', summary: 'Imported 7 rows' })
     })
 
     const { entries: items } = await storage.listHistoryItems()
     expect(items).toHaveLength(1)
     expect(items[0].doc.summary).toBe('Imported 7 rows')
-    // Not merely collapsed at read time: the stale row is really gone.
+    // Not merely collapsed at read time: the stale activity is really gone.
     expect(
       await localStore.findHistoryItemsByInnerId({ id: 'import-1' })
     ).toHaveLength(1)

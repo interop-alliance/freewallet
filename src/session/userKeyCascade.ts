@@ -146,6 +146,10 @@ export function cascadeCollections({
  * @param options.clientKeyAgreementKey {IKeyAgreementKey}   this client's own
  *   (identity) key-agreement key, unwrapping the generations
  * @param options.userKey {UserKey}   the roster's current user key
+ * @param [options.collectionIds] {string[]}   the collections to cover, in
+ *   place of every encrypted standard collection plus every listed one. A
+ *   caller that already knows its candidates (a collection recorded as
+ *   stranded) names them and skips the listing
  * @param [options.controller] {WebvhResourceLogController}   a ceremony's
  *   post-edit controller view, set as every sealable store's minimum
  *   controller version before its first append so no collection append
@@ -159,6 +163,7 @@ export async function cascadeCollectionsToUserKey({
   rosterDescriptor,
   clientKeyAgreementKey,
   userKey,
+  collectionIds,
   controller
 }: {
   remoteStore: WASRemoteStore
@@ -166,11 +171,12 @@ export async function cascadeCollectionsToUserKey({
   rosterDescriptor: CollectionEncryption
   clientKeyAgreementKey: IKeyAgreementKey
   userKey: UserKey
+  collectionIds?: string[]
   controller?: WebvhResourceLogController
 }): Promise<UserKeyCascadeResult> {
   const work = cascadeCollections({ remoteStore, storeFor })
   const result = await driveCascade({
-    collectionIds: await work.collectionIds(),
+    collectionIds: collectionIds ?? (await work.collectionIds()),
     storeFor: work.storeFor,
     ...(work.isEncrypted ? { isEncrypted: work.isEncrypted } : {}),
     rosterDescriptor,

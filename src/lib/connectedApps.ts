@@ -3,8 +3,8 @@
  * connected app is one the user linked through the App Connect CHAPI flow: the
  * wallet holds a self-issued app-key credential for it (in the encrypted
  * `app-connections` collection, kept apart from the user's own credentials
- * because each row carries that app's private seed) and each connect wrote a
- * Login activity to `wallet-activity` recording the display name and the
+ * because each Resource carries that app's private seed) and each connect wrote
+ * a Login activity to `wallet-activity` recording the display name and the
  * storage grants.
  *
  * `listConnectedApps` joins those two sources into one entry per app-key
@@ -411,10 +411,10 @@ export async function listConnectedApps({
     const subject = subjectId(credential)
     const origin = appKeyOrigin(credential)
     const appUrl = appKeyAppUrl(credential)
-    // The collection holds app keys only, so the row check is the marker type
-    // plus the three members this listing reads: anything else in there (an
-    // opaque row planted server-side through a space import, say) is not
-    // something the page can render or revoke.
+    // The collection holds app keys only, so the per-Resource check is the
+    // marker type plus the three members this listing reads: anything else in
+    // there (an opaque Resource planted server-side through a space import,
+    // say) is not something the page can render or revoke.
     if (!presentsAsAppKey(credential) || !subject || !origin || !appUrl) {
       continue
     }
@@ -933,7 +933,7 @@ async function expiredRowsToDrop({
 }
 
 /**
- * Whether an activity is an agent-grant Revoke: the row
+ * Whether an activity is an agent-grant Revoke: the activity
  * {@link revokeAgentAccess} writes. Scoped exactly like the agent Login side
  * -- the interaction-URL origin marker, no `appConnect` member -- and carrying
  * a grantee `controller`, so an app revocation (or any other Revoke that

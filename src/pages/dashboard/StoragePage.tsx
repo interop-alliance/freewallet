@@ -343,7 +343,7 @@ export const StoragePage = () => {
           session={session}
           onClose={() => setMigrationOpen(false)}
           onImported={() => {
-            // The rows land through the session's own import methods, so a
+            // The Resources land through the session's own import methods, so a
             // remembered session's replica already carries them; this re-lists
             // what the page itself shows and nudges replication to push them
             // out.

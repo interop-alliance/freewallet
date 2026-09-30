@@ -95,7 +95,21 @@ function isCanonicalKeyRefusal({ err }: { err: unknown }): boolean {
   return /canonical X25519 twin/i.test((err as Error)?.message ?? '')
 }
 
-export function EnrolledClientsSection({ session }: { session: Session }) {
+/**
+ * The Connected wallets panel.
+ *
+ * @param options {object}
+ * @param options.session {Session}
+ * @param [options.registryRepairing] {boolean}   Settings is mending the
+ *   unlock-methods registry; disconnect, enrollment, and forget wait
+ */
+export function EnrolledClientsSection({
+  session,
+  registryRepairing = false
+}: {
+  session: Session
+  registryRepairing?: boolean
+}) {
   const { t, i18n } = useTranslation()
   const canManage = canManageAccountClients({ session })
   // Which signer would put this session's removal entry on the log. On the
@@ -519,7 +533,11 @@ export function EnrolledClientsSection({ session }: { session: Session }) {
                       size="small"
                       color="error"
                       sx={{ borderRadius: 2, alignSelf: 'flex-start' }}
-                      disabled={disconnecting || !eligibility.allowed}
+                      disabled={
+                        disconnecting ||
+                        !eligibility.allowed ||
+                        registryRepairing
+                      }
                       onClick={() => {
                         setDisconnectError(false)
                         setCascadeWarning(false)
@@ -548,7 +566,7 @@ export function EnrolledClientsSection({ session }: { session: Session }) {
                       size="small"
                       color="error"
                       sx={{ borderRadius: 2, alignSelf: 'flex-start' }}
-                      disabled={forgetting}
+                      disabled={forgetting || registryRepairing}
                       onClick={() => {
                         setForgetErrorKey(null)
                         setForgetLastClient(lastClient)
@@ -673,7 +691,7 @@ export function EnrolledClientsSection({ session }: { session: Session }) {
                 size="small"
                 sx={{ alignSelf: 'flex-start', borderRadius: 2 }}
                 loading={enrolling}
-                disabled={!enrollRequest}
+                disabled={!enrollRequest || registryRepairing}
                 onClick={() => void handleEnroll()}
               >
                 {t('settings.enrollConfirmAction')}
@@ -753,6 +771,7 @@ export function EnrolledClientsSection({ session }: { session: Session }) {
             variant="contained"
             color="error"
             loading={disconnecting}
+            disabled={registryRepairing}
             onClick={() => void handleDisconnect()}
           >
             {t('settings.clients.disconnectConfirmAction')}
@@ -830,6 +849,7 @@ export function EnrolledClientsSection({ session }: { session: Session }) {
             variant="contained"
             color="error"
             loading={forgetting}
+            disabled={registryRepairing}
             onClick={() => void handleForget()}
             data-testid="forget-this-browser-confirm"
           >

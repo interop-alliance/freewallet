@@ -50,6 +50,7 @@ import {
 import { chapiStyles } from '@/styles/appStyles'
 import { ChapiInitializing } from '@/pages/chapi/ChapiInitializing'
 import type { Session } from '@/types/auth'
+import { closeUnenteredSession } from '@/stores/sessionTeardown'
 import type { StoredCredential } from '@/types/credential'
 import {
   appConnectZcapRequests,
@@ -245,6 +246,20 @@ export function WalletGetPage() {
   )
   const initialized = useRef(false)
 
+  // The popup's session lives in this page's state and never enters the
+  // auth store, so its teardown is here: a replaced session and the page's
+  // unmount both release the session they drop through the one teardown for
+  // a never-entered session, which aborts its disposal signal and closes
+  // the local database a remembered popup opens and routes past.
+  useEffect(() => {
+    if (!session) {
+      return
+    }
+    return () => {
+      void closeUnenteredSession(session)
+    }
+  }, [session])
+
   useEffect(() => {
     if (initialized.current) {
       return
@@ -435,11 +450,12 @@ export function WalletGetPage() {
           appUrl: profile.appConnect.app.appUrl,
           origin: requestOrigin
         })
-        // The scan skipped rows this session cannot read and nothing matched,
-        // so approval would refuse rather than mint (`AppKeysUnreadableError`).
-        // Block here instead of showing first-run "Connect {app}?" copy the
-        // user would only see fail after clicking. The predicate is the
-        // approved path's own, so the two cannot drift apart.
+        // The scan skipped Resources this session cannot read and nothing
+        // matched, so approval would refuse rather than mint
+        // (`AppKeysUnreadableError`). Block here instead of showing first-run
+        // "Connect {app}?" copy the user would only see fail after clicking.
+        // The predicate is the approved path's own, so the two cannot drift
+        // apart.
         if (appKeyMintRefused({ matched: !!existing, skipped })) {
           setSession(loggedIn)
           setBlockReason('appKeysUnreadable')

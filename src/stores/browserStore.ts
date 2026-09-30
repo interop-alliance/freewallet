@@ -11,11 +11,11 @@
  * Encrypted collections (`private-credentials`, `wallet-activity`) store EDV
  * envelopes, not plaintext: a per-collection {@link DocCipher} (injected at
  * init) encrypts on write -- minting the content-derived envelope-hash id that
- * keys the row on every replica -- and decrypts on read. Because JWE
- * encryption is nondeterministic, the same document encrypts to a fresh id
+ * serves as the resource id on every replica -- and decrypts on read. Because
+ * JWE encryption is nondeterministic, the same document encrypts to a fresh id
  * each time, so writes dedupe by the document's content identity (the
- * credential `cid`, the activity `id`) rather than by row id, and reads
- * collapse any duplicate rows the same way.
+ * credential `cid`, the activity `id`) rather than by resource id, and reads
+ * collapse any duplicate resource replicas the same way.
  */
 import type { IVerifiableCredential } from '@interop/data-integrity-core'
 import type {
@@ -67,17 +67,17 @@ const REPLICA_DELETE_TIMEOUT_MS = 10_000
 
 /**
  * The local-only projection index over the append-only `contacts-history`
- * collection: one row per history row, carrying just that row's id and the
- * `contactId` its (encrypted) revision belongs to. It exists so a single
- * contact's history can be read without decrypting every other contact's
- * revisions, and it never leaves this browser -- it is deliberately not a
- * `WALLET_STANDARD_COLLECTIONS` entry, so nothing replicates it and the wire
- * body stays an opaque EDV envelope.
+ * collection: one index entry per history resource replica, carrying just that
+ * replica's resource id and the `contactId` its (encrypted) revision belongs
+ * to. It exists so a single contact's history can be read without decrypting
+ * every other contact's revisions, and it never leaves this browser -- it is
+ * deliberately not a `WALLET_STANDARD_COLLECTIONS` entry, so nothing replicates
+ * it and the wire body stays an opaque EDV envelope.
  *
- * Privacy: the index stores only the opaque `contactId` uuid beside the row
- * id -- never any part of the decrypted snapshot -- so what it exposes at rest
- * locally is revision grouping and per-contact revision counts, nothing about
- * the contact itself.
+ * Privacy: the index stores only the opaque `contactId` uuid beside the
+ * resource id -- never any part of the decrypted snapshot -- so what it exposes
+ * at rest locally is revision grouping and per-contact revision counts, nothing
+ * about the contact itself.
  *
  * RxDB requires an explicit `maxLength` on every indexed string field.
  */
@@ -110,96 +110,105 @@ export class BrowserStore {
   #contactsHistoryIndex?: RxCollection<{ id: string; contactId: string }>
   #storage: RxStorage<unknown, unknown>
   #ciphers?: Record<string, DocCipher>
-  // Count of rows the most recent list read had to skip because their envelope
-  // would not decrypt under the current vault KAK (corrupted, replicated
-  // verbatim from another identity, or written under a mismatched KAK).
-  // Surfaced so the pages can warn the user without any one bad row bricking
-  // the whole list.
+  // Count of resource replicas the most recent list read had to skip because
+  // their envelope would not decrypt under the current vault KAK (corrupted,
+  // replicated verbatim from another identity, or written under a mismatched
+  // KAK). Surfaced so the pages can warn the user without any one bad resource
+  // replica bricking the whole list.
   #undecryptableCredentials = 0
-  // Count of rows the most recent list read had to skip because their envelope
-  // named a key epoch this instance's cipher does not know
-  // (UnknownEpochError). Unlike the undecryptable rows above, these are not
-  // purgeable garbage: the row is likely fresh data written under an epoch the
-  // cached Collection Description has not caught up to (a rekey emits no change
-  // feed entry). They are counted separately, skipped, and NOT cached, so a
-  // caller can refresh the descriptor and re-read.
+  // Count of resource replicas the most recent list read had to skip because
+  // their envelope named a key epoch this instance's cipher does not know
+  // (UnknownEpochError). Unlike the undecryptable resource replicas above,
+  // these are not purgeable garbage: the resource replica is likely fresh data
+  // written under an epoch the cached Collection Description has not caught up
+  // to (a rekey emits no change feed entry). They are counted separately,
+  // skipped, and NOT cached, so a caller can refresh the descriptor and
+  // re-read.
   #unknownEpochCredentials = 0
   #unknownEpochContacts = 0
   // The whole-collection contacts-history scan's counterpart of the contacts
   // counter above.
   #unknownEpochContactsHistory = 0
-  // Count of rows the most recent list read had to skip because this wallet
-  // holds no key for their (known) key epoch -- KeyUnwrapError: it was never a
-  // recipient, or was removed and the epoch rotated. Like the unknown-epoch
-  // rows they are skipped, NOT cached, and never purged; unlike them a
-  // descriptor refresh cannot help, so they drive no refresh.
+  // Count of resource replicas the most recent list read had to skip because
+  // this wallet holds no key for their (known) key epoch -- KeyUnwrapError: it
+  // was never a recipient, or was removed and the epoch rotated. Like the
+  // unknown-epoch resource replicas they are skipped, NOT cached, and never
+  // purged; unlike them a descriptor refresh cannot help, so they drive no
+  // refresh.
   #noEpochKeyCredentials = 0
-  // Count of `private-credentials` rows the most recent list read had to skip
-  // because their body failed its integrity check -- IntegrityError: the
-  // envelope did not authenticate, or it was served under an id it was not
-  // sealed for. It takes no keys to produce, so it is the host-misbehavior
-  // signal the binding check exists to catch: the rows are counted, never
-  // cached, never purged, and drive no descriptor refresh.
+  // Count of `private-credentials` resource replicas the most recent list read
+  // had to skip because their body failed its integrity check --
+  // IntegrityError: the envelope did not authenticate, or it was served under
+  // an id it was not sealed for. It takes no keys to produce, so it is the
+  // host-misbehavior signal the binding check exists to catch: they are
+  // counted, never cached, never purged, and drive no descriptor refresh.
   #integrityCredentials = 0
   // Session-lifetime decrypt cache, keyed first by logical collection key and
-  // then by RxDB row id, holding each envelope row's decrypted plaintext so a
-  // row is decrypted at most once per session. Every read (list, load-one,
-  // delete's collapse scan, add's dedupe) otherwise re-decrypts the whole
-  // collection; this memoizes the plaintext. The key is safe: a row id is the
-  // content-derived hash of the JWE ciphertext, so it maps to exactly one
-  // plaintext under ANY cipher that can decrypt it -- an envelope's content, and
-  // therefore its content-derived id, is fixed once written. `setCiphers` may
-  // swap the injected ciphers (after a descriptor refresh or a share), but that only
-  // widens which rows decrypt; it never changes the plaintext a given row id
-  // yields, so the cached entries stay valid across a swap. Entries are dropped
-  // when their row is removed and the cache is cleared on teardown; an insert
-  // needs no invalidation because a new envelope always carries a fresh,
+  // then by resource id, holding each envelope resource replica's decrypted
+  // plaintext so a resource replica is decrypted at most once per session.
+  // Every read (list, load-one, delete's collapse scan, add's dedupe) otherwise
+  // re-decrypts the whole collection; this memoizes the plaintext. The key is
+  // safe: a resource id is the content-derived hash of the JWE ciphertext, so
+  // it maps to exactly one plaintext under ANY cipher that can decrypt it -- an
+  // envelope's content, and therefore its content-derived id, is fixed once
+  // written. `setCiphers` may swap the injected ciphers (after a descriptor
+  // refresh or a share), but that only widens which resource replicas decrypt;
+  // it never changes the plaintext a given resource id yields, so the cached
+  // entries stay valid across a swap. Entries are dropped when their resource
+  // replica is removed and the cache is cleared on teardown; an insert needs no
+  // invalidation because a new envelope always carries a fresh,
   // previously-unseen id.
   #decryptCache = new Map<string, Map<string, Json>>()
-  // The content cid of each decrypted `private-credentials` envelope row, keyed
-  // by row id, so `#credentialEntries` need not re-run `cidFrom` per read. Valid
-  // across a `setCiphers` swap for the same reason as `#decryptCache` (a row id
-  // maps to one plaintext, hence one cid); dropped with its row.
-  #credentialCidByRow = new Map<string, string>()
-  // In-memory content cid -> live-row-ids index over the encrypted
+  // The content cid of each decrypted `private-credentials` envelope resource
+  // replica, keyed by resource id, so `#credentialEntries` need not re-run
+  // `cidFrom` per read. Valid across a `setCiphers` swap for the same reason as
+  // `#decryptCache` (a resource id maps to one plaintext, hence one cid);
+  // dropped with its resource replica.
+  #credentialCidByResource = new Map<string, string>()
+  // In-memory content cid -> live-resource-ids index over the encrypted
   // `private-credentials` collection: the authority `addCredential` consults to
   // stay idempotent by content cid without a full decrypt-scan per insert (see
-  // `addCredential`). Rebuilt from a full scan by `#credentialEntries` (so every
-  // list/load/delete refreshes it) and maintained incrementally on add/delete.
+  // `addCredential`). Rebuilt from a full scan by `#credentialEntries` (so
+  // every list/load/delete refreshes it) and maintained incrementally on
+  // add/delete.
   #credentialCidIndex = new Map<string, Set<string>>()
   // Whether `#credentialCidIndex` reflects a full scan of the live collection
-  // this session. Reset by `setCiphers` (a wider cipher can reveal rows the last
-  // scan skipped as unknown-epoch), forcing the next `addCredential` to rebuild.
+  // this session. Reset by `setCiphers` (a wider cipher can reveal resource
+  // replicas the last scan skipped as unknown-epoch), forcing the next
+  // `addCredential` to rebuild.
   #credentialsIndexed = false
-  // Count of `app-connections` rows the most recent {@link listAppKeys} call
-  // had to skip because their envelope named a key epoch this instance's
-  // cipher does not know -- the same signal as `#unknownEpochCredentials`, and
-  // load-bearing here: an app key read as absent would mint a second identity
-  // for the app rather than merely hiding a row.
+  // Count of `app-connections` resource replicas the most recent
+  // {@link listAppKeys} call had to skip because their envelope named a key
+  // epoch this instance's cipher does not know -- the same signal as
+  // `#unknownEpochCredentials`, and load-bearing here: an app key read as
+  // absent would mint a second identity for the app rather than merely hiding a
+  // resource replica.
   #unknownEpochAppKeys = 0
-  // Count of `app-connections` rows the most recent {@link listAppKeys} call
-  // had to skip because this wallet holds no key for their (known) key epoch
-  // -- KeyUnwrapError, the app-key sibling of `#noEpochKeyCredentials`. No
-  // descriptor refresh can help, and the rows are real data, so they are never
-  // purged; they are surfaced because a skipped app key read as absent would
-  // mint a second identity for the app.
+  // Count of `app-connections` resource replicas the most recent
+  // {@link listAppKeys} call had to skip because this wallet holds no key for
+  // their (known) key epoch -- KeyUnwrapError, the app-key sibling of
+  // `#noEpochKeyCredentials`. No descriptor refresh can help, and they are real
+  // data, so they are never purged; they are surfaced because a skipped app key
+  // read as absent would mint a second identity for the app.
   #noEpochKeyAppKeys = 0
-  // Count of `app-connections` rows the most recent {@link listAppKeys} call
-  // had to skip because their envelope would not decrypt at all (corrupted, or
-  // written under a mismatched KAK). Purgeable garbage, exactly like the
-  // credential collection's undecryptable rows.
+  // Count of `app-connections` resource replicas the most recent
+  // {@link listAppKeys} call had to skip because their envelope would not
+  // decrypt at all (corrupted, or written under a mismatched KAK). Purgeable
+  // garbage, exactly like the credential collection's undecryptable resource
+  // replicas.
   #undecryptableAppKeys = 0
-  // Count of `app-connections` rows the most recent {@link listAppKeys} call
-  // had to skip because their body failed its integrity check -- the app-key
-  // sibling of `#integrityCredentials`, and load-bearing for the same reason
-  // as the epoch counters: an app key read as absent would mint a second
-  // identity for the app.
+  // Count of `app-connections` resource replicas the most recent
+  // {@link listAppKeys} call had to skip because their body failed its
+  // integrity check -- the app-key sibling of `#integrityCredentials`, and
+  // load-bearing for the same reason as the epoch counters: an app key read as
+  // absent would mint a second identity for the app.
   #integrityAppKeys = 0
-  // The content cid of each decrypted `app-connections` envelope row, keyed by
-  // row id (the app-key sibling of `#credentialCidByRow`). The collection
-  // holds one row per connected app, so it is scanned per call rather than
-  // carrying a session-wide cid index.
-  #appKeyCidByRow = new Map<string, string>()
+  // The content cid of each decrypted `app-connections` envelope resource
+  // replica, keyed by resource id (the app-key sibling of
+  // `#credentialCidByResource`). The collection holds one resource replica per
+  // connected app, so it is scanned per call rather than carrying a
+  // session-wide cid index.
+  #appKeyCidByResource = new Map<string, string>()
   // The replica-teardown listener (see #listenForTeardown); present while the
   // database is open in this tab and a BroadcastChannel implementation exists.
   #teardownChannel?: BroadcastChannel
@@ -370,19 +379,20 @@ export class BrowserStore {
   }
 
   /**
-   * Inserts a synced-doc row if absent (or previously deleted). Local writes
-   * stamp `updatedAt` so new rows sort into the change feed; `version` is
-   * server-authoritative and unknown until a pull, so `0` is the local
-   * placeholder (the replication create path sends `If-None-Match: *`, not
-   * this value).
+   * Inserts a resource replica if absent (or previously deleted). Local writes
+   * stamp `updatedAt` so new resource replicas sort into the change feed;
+   * `version` is server-authoritative and unknown until a pull, so `0` is the
+   * local placeholder (the replication create path sends `If-None-Match: *`,
+   * not this value).
    *
    * @param options {object}
    * @param options.logicalKey {string}
    * @param options.id {string}
    * @param options.data {Json}
    * @param [options.epoch] {string}   the key-epoch id the envelope was
-   *   encrypted under, stored on the row so the sync layer can push it as the
-   *   `Key-Epoch` header; absent for a plaintext or pre-epoch write
+   *   encrypted under, stored on the resource replica so the sync layer can
+   *   push it as the `Key-Epoch` header; absent for a plaintext or pre-epoch
+   *   write
    * @returns {Promise<void>}
    */
   async #insertDoc({
@@ -406,19 +416,19 @@ export class BrowserStore {
   }
 
   /**
-   * Rewrites an existing synced-doc row's body in place -- the mutable
+   * Rewrites an existing resource replica's body in place -- the mutable
    * counterpart of {@link _insertDoc}, used only by the `contacts` head
    * document (every other collection is content-addressed and never updated).
-   * Throws if the row does not exist; the caller (`updateContact`) always
-   * targets a row it just read.
+   * Throws if the resource replica does not exist; the caller (`updateContact`)
+   * always targets one it just read.
    *
    * @param options {object}
    * @param options.logicalKey {string}
    * @param options.id {string}
    * @param options.data {Json}
    * @param [options.epoch] {string}   the key-epoch id the re-encrypted body was
-   *   written under, re-stamped on the row so replication pushes the current
-   *   `Key-Epoch`; absent for a plaintext write
+   *   written under, re-stamped on the resource replica so replication pushes
+   *   the current `Key-Epoch`; absent for a plaintext write
    * @returns {Promise<void>}
    */
   async #updateDoc({
@@ -434,7 +444,9 @@ export class BrowserStore {
   }) {
     const doc = await this.rxCollection(logicalKey).findOne(id).exec()
     if (!doc) {
-      throw new Error(`No local "${logicalKey}" row "${id}" to update.`)
+      throw new Error(
+        `No local "${logicalKey}" resource replica "${id}" to update.`
+      )
     }
     await doc.incrementalPatch({
       updatedAt: new Date().toISOString(),
@@ -444,8 +456,8 @@ export class BrowserStore {
   }
 
   /**
-   * The session-lifetime decrypt cache (row id -> plaintext) for one collection,
-   * created on first use. See {@link _decryptCache}.
+   * The session-lifetime decrypt cache (resource id -> plaintext) for one
+   * collection, created on first use. See {@link _decryptCache}.
    *
    * @param logicalKey {string}
    * @returns {Map<string, Json>}
@@ -461,51 +473,54 @@ export class BrowserStore {
 
   /**
    * The single decrypt-read skeleton shared by every collection: reads the live
-   * rows in the requested order, decrypting envelope rows (through the
-   * per-collection cache) and passing legacy plaintext rows through, and sorts
-   * each decrypt failure into one of four buckets so a caller stays tolerant of
-   * a single bad row rather than failing the whole read.
+   * resource replicas in the requested order, decrypting envelope resource
+   * replicas (through the per-collection cache) and passing legacy plaintext
+   * ones through, and sorts each decrypt failure into one of four buckets so a
+   * caller stays tolerant of a single bad resource replica rather than failing
+   * the whole read.
    *
-   * A row whose envelope will not decrypt under the current KAK (corrupted,
-   * replicated verbatim from another identity, or written under a mismatched
-   * KAK) is collected in `undecryptableRowIds` -- purgeable garbage. A row whose
-   * envelope names an UNKNOWN key epoch (`UnknownEpochError`) is collected
-   * separately in `unknownEpochRowIds` and NOT cached: it is possibly-fresh data
-   * behind a stale descriptor, so a caller can refresh the descriptor (rebuild the cipher
-   * via {@link setCiphers}) and re-read rather than deleting it. A row whose
-   * epoch IS on the descriptor but which this wallet holds no key for
-   * (`KeyUnwrapError` -- never a recipient, or removed and the epoch
-   * rotated) is collected in `noEpochKeyRowIds` and likewise NOT cached: it is
-   * real data belonging to someone else's read set, so it is never purged, and
-   * a descriptor refresh cannot help it (only a later key grant can). A row
-   * whose body failed its integrity check (`IntegrityError` -- the envelope did
-   * not authenticate, or the host served it under an id it was not sealed for)
-   * is collected in `integrityRowIds` and NOT cached: it is the host's
-   * misbehavior rather than the row's, so it is never purged and drives no
-   * refresh.
+   * A resource replica whose envelope will not decrypt under the current KAK
+   * (corrupted, replicated verbatim from another identity, or written under a
+   * mismatched KAK) is collected in `undecryptableResourceIds` -- purgeable garbage.
+   * A resource replica whose envelope names an UNKNOWN key epoch
+   * (`UnknownEpochError`) is collected separately in `unknownEpochResourceIds` and
+   * NOT cached: it is possibly-fresh data behind a stale descriptor, so a
+   * caller can refresh the descriptor (rebuild the cipher via
+   * {@link setCiphers}) and re-read rather than deleting it. A resource replica
+   * whose epoch IS on the descriptor but which this wallet holds no key for
+   * (`KeyUnwrapError` -- never a recipient, or removed and the epoch rotated)
+   * is collected in `noEpochKeyResourceIds` and likewise NOT cached: it is real data
+   * belonging to someone else's read set, so it is never purged, and a
+   * descriptor refresh cannot help it (only a later key grant can). A resource
+   * replica whose body failed its integrity check (`IntegrityError` -- the
+   * envelope did not authenticate, or the host served it under an id it was not
+   * sealed for) is collected in `integrityResourceIds` and NOT cached: it is the
+   * host's misbehavior rather than the resource replica's, so it is never
+   * purged and drives no refresh.
    *
-   * `fromEnvelope` distinguishes a decrypted envelope row from a plaintext
-   * passthrough, which the credential caller needs (a plaintext row is keyed by
-   * its content cid, an envelope row's cid is recomputed from the plaintext).
+   * `fromEnvelope` distinguishes a decrypted envelope resource replica from a
+   * plaintext passthrough, which the credential caller needs (a plaintext
+   * resource replica is keyed by its content cid, an envelope one's cid is
+   * recomputed from the plaintext).
    *
-   * The decrypt cache is keyed by row id, which is sound only for the
-   * content-addressed collections (a row's content -- and thus its id -- is fixed
-   * once written). The one mutable collection (`contacts`, rewritten in place by
-   * an edit or a replication conflict merge under a stable row id) opts out with
-   * `cache: false`, since a row-id-keyed entry would go stale after an in-place
-   * rewrite.
+   * The decrypt cache is keyed by resource id, which is sound only for the
+   * content-addressed collections (a resource replica's content -- and thus its
+   * id -- is fixed once written). The one mutable collection (`contacts`,
+   * rewritten in place by an edit or a replication conflict merge under a
+   * stable resource id) opts out with `cache: false`, since a resource-id-keyed
+   * entry would go stale after an in-place rewrite.
    *
    * @param options {object}
    * @param options.logicalKey {string}
    * @param options.sort {'asc' | 'desc'}   `updatedAt` order
-   * @param [options.cache] {boolean}   memoize decrypts by row id (default true);
-   *   pass false for a mutable, rewritten-in-place collection
-   * @returns {Promise<{ entries: Array<{ rowId: string; data: Json;
-   *   fromEnvelope: boolean }>; undecryptableRowIds: string[];
-   *   unknownEpochRowIds: string[]; noEpochKeyRowIds: string[];
-   *   integrityRowIds: string[] }>}
+   * @param [options.cache] {boolean}   memoize decrypts by resource id
+   *   (default true); pass false for a mutable, rewritten-in-place collection
+   * @returns {Promise<{ entries: Array<{ resourceId: string; data: Json;
+   *   fromEnvelope: boolean }>; undecryptableResourceIds: string[];
+   *   unknownEpochResourceIds: string[]; noEpochKeyResourceIds: string[];
+   *   integrityResourceIds: string[] }>}
    */
-  async #decryptedRows({
+  async #decryptedResources({
     logicalKey,
     sort,
     cache = true
@@ -514,27 +529,31 @@ export class BrowserStore {
     sort: 'asc' | 'desc'
     cache?: boolean
   }): Promise<{
-    entries: Array<{ rowId: string; data: Json; fromEnvelope: boolean }>
-    undecryptableRowIds: string[]
-    unknownEpochRowIds: string[]
-    noEpochKeyRowIds: string[]
-    integrityRowIds: string[]
+    entries: Array<{ resourceId: string; data: Json; fromEnvelope: boolean }>
+    undecryptableResourceIds: string[]
+    unknownEpochResourceIds: string[]
+    noEpochKeyResourceIds: string[]
+    integrityResourceIds: string[]
   }> {
     const docs = await this.rxCollection(logicalKey)
       .find({ sort: [{ updatedAt: sort }] })
       .exec()
     const cipher = this.#ciphers?.[logicalKey]
     const decryptCache = cache ? this.#cacheFor(logicalKey) : undefined
-    const entries: Array<{ rowId: string; data: Json; fromEnvelope: boolean }> =
-      []
-    const undecryptableRowIds: string[] = []
-    const unknownEpochRowIds: string[] = []
-    const noEpochKeyRowIds: string[] = []
-    const integrityRowIds: string[] = []
-    // Every row's decrypt is independent, so they run together; the fold below
-    // then walks them in list order, keeping the entry ordering and the
-    // per-row failure buckets exactly as a sequential pass produced them.
-    const rows = await Promise.all(
+    const entries: Array<{
+      resourceId: string
+      data: Json
+      fromEnvelope: boolean
+    }> = []
+    const undecryptableResourceIds: string[] = []
+    const unknownEpochResourceIds: string[] = []
+    const noEpochKeyResourceIds: string[] = []
+    const integrityResourceIds: string[] = []
+    // Every resource replica's decrypt is independent, so they run together;
+    // the loop below then walks them in list order, keeping the entry ordering
+    // and the per-replica failure buckets exactly as a sequential pass produced
+    // them.
+    const decrypted = await Promise.all(
       docs.map(async doc => {
         const { id, data } = doc.toMutableJSON()
         if (!cipher || !isEncryptedEnvelope(data)) {
@@ -556,49 +575,60 @@ export class BrowserStore {
         }
       })
     )
-    for (const { id, plaintext, fromEnvelope, err } of rows) {
+    for (const { id, plaintext, fromEnvelope, err } of decrypted) {
       if (err) {
         const failure = classifyDecryptFailure(err)
         if (failure === 'unknown-epoch') {
           // Possibly-fresh data behind a stale descriptor: skip it (uncached) so a
           // descriptor refresh can pick it up, never purge it.
-          log.warn('Skipping unknown-epoch row', { logicalKey, id, err })
-          unknownEpochRowIds.push(id)
+          log.warn('Skipping unknown-epoch resource replica', {
+            logicalKey,
+            id,
+            err
+          })
+          unknownEpochResourceIds.push(id)
         } else if (failure === 'no-epoch-key') {
-          // This wallet is not a recipient of the row's key epoch. Real data,
-          // permanently unreadable here: skip it (uncached) but never purge it,
-          // and keep it out of the refresh signal -- a descriptor refresh cannot
-          // grant a key.
+          // This wallet is not a recipient of the resource replica's key epoch.
+          // Real data, permanently unreadable here: skip it (uncached) but
+          // never purge it, and keep it out of the refresh signal -- a
+          // descriptor refresh cannot grant a key.
           log.warn(
-            'Skipping row: this wallet is not a recipient of its key epoch',
+            'Skipping resource replica: this wallet is not a recipient of its key epoch',
             { logicalKey, id, err }
           )
-          noEpochKeyRowIds.push(id)
+          noEpochKeyResourceIds.push(id)
         } else if (failure === 'integrity') {
           // The host served a body that does not verify against the id it was
           // read under. Authentic data may sit behind it, so it is skipped
           // (uncached) and never purged; the error names the id the envelope
           // was sealed for beside the id read here.
-          log.warn('Refusing a row whose body failed its integrity check', {
+          log.warn(
+            'Refusing a resource replica whose body failed its integrity check',
+            {
+              logicalKey,
+              readUnderId: id,
+              err
+            }
+          )
+          integrityResourceIds.push(id)
+        } else {
+          log.warn('Skipping undecryptable resource replica', {
             logicalKey,
-            readUnderId: id,
+            id,
             err
           })
-          integrityRowIds.push(id)
-        } else {
-          log.warn('Skipping undecryptable row', { logicalKey, id, err })
-          undecryptableRowIds.push(id)
+          undecryptableResourceIds.push(id)
         }
         continue
       }
-      entries.push({ rowId: id, data: plaintext as Json, fromEnvelope })
+      entries.push({ resourceId: id, data: plaintext as Json, fromEnvelope })
     }
     return {
       entries,
-      undecryptableRowIds,
-      unknownEpochRowIds,
-      noEpochKeyRowIds,
-      integrityRowIds
+      undecryptableResourceIds,
+      unknownEpochResourceIds,
+      noEpochKeyResourceIds,
+      integrityResourceIds
     }
   }
 
@@ -633,17 +663,18 @@ export class BrowserStore {
   /**
    * Inserts a document into one collection, folding cipher selection,
    * encryption, and the key-epoch stamp (see {@link _encrypt}). When the write
-   * encrypted, the cipher-minted id keys the row -- the envelope-hash id on a
-   * content-addressed collection, the random EDV id on the stable-id `contacts`
-   * head (each cipher mints per its collection spec's `idDerivation`) -- and
-   * the passed `id` serves only as the plaintext-store fallback key. Returns
-   * the row id actually written and the stamped epoch.
+   * encrypted, the cipher-minted id keys the resource replica -- the
+   * envelope-hash id on a content-addressed collection, the random EDV id on
+   * the stable-id `contacts` head (each cipher mints per its collection spec's
+   * `idDerivation`) -- and the passed `id` serves only as the plaintext-store
+   * fallback key. Returns the resource id actually written and the stamped
+   * epoch.
    *
    * @param options {object}
    * @param options.logicalKey {string}
    * @param options.id {string}
    * @param options.data {Json}
-   * @returns {Promise<{ rowId: string; epoch?: string }>}
+   * @returns {Promise<{ resourceId: string; epoch?: string }>}
    */
   async #insertEncrypted({
     logicalKey,
@@ -653,15 +684,15 @@ export class BrowserStore {
     logicalKey: string
     id: string
     data: Json
-  }): Promise<{ rowId: string; epoch?: string }> {
+  }): Promise<{ resourceId: string; epoch?: string }> {
     const { body, mintedId, epoch } = await this.#encrypt({ logicalKey, data })
-    const rowId = mintedId ?? id
-    await this.#insertDoc({ logicalKey, id: rowId, data: body, epoch })
-    return { rowId, epoch }
+    const resourceId = mintedId ?? id
+    await this.#insertDoc({ logicalKey, id: resourceId, data: body, epoch })
+    return { resourceId, epoch }
   }
 
   /**
-   * The count of `private-credentials` rows the most recent
+   * The count of `private-credentials` resource replicas the most recent
    * {@link listCredentials} call had to skip because their envelope would not
    * decrypt under the current vault KAK.
    *
@@ -672,12 +703,12 @@ export class BrowserStore {
   }
 
   /**
-   * The count of `private-credentials` rows the most recent
+   * The count of `private-credentials` resource replicas the most recent
    * {@link listCredentials} call had to skip because their envelope named a key
    * epoch this instance's cipher does not know (its cached Collection
    * Description is likely stale). Unlike {@link undecryptableCredentials} these
-   * rows are not purged -- a caller refreshes the descriptor, rebuilds the cipher
-   * via {@link setCiphers}, and re-reads.
+   * resource replicas are not purged -- a caller refreshes the descriptor,
+   * rebuilds the cipher via {@link setCiphers}, and re-reads.
    *
    * @returns {number}
    */
@@ -686,11 +717,11 @@ export class BrowserStore {
   }
 
   /**
-   * The count of `private-credentials` rows the most recent
+   * The count of `private-credentials` resource replicas the most recent
    * {@link listCredentials} call had to skip because this wallet holds no key
    * for their key epoch (it was never a recipient, or was removed and the epoch
-   * rotated). Like {@link unknownEpochCredentials} these rows are never purged;
-   * unlike them, no descriptor refresh can make them readable.
+   * rotated). Like {@link unknownEpochCredentials} these resource replicas are
+   * never purged; unlike them, no descriptor refresh can make them readable.
    *
    * @returns {number}
    */
@@ -699,13 +730,13 @@ export class BrowserStore {
   }
 
   /**
-   * The count of `private-credentials` rows the most recent
+   * The count of `private-credentials` resource replicas the most recent
    * {@link listCredentials} call had to skip because their body failed its
    * integrity check: the envelope did not authenticate, or the host served it
-   * under an id it was not sealed for. Unlike
-   * {@link undecryptableCredentials} these rows are never purged -- the
-   * failure is the host's and the underlying data may be intact, so removing
-   * them would consume the only evidence of the misbehavior.
+   * under an id it was not sealed for. Unlike {@link undecryptableCredentials}
+   * these resource replicas are never purged -- the failure is the host's and
+   * the underlying data may be intact, so removing them would consume the only
+   * evidence of the misbehavior.
    *
    * @returns {number}
    */
@@ -714,9 +745,10 @@ export class BrowserStore {
   }
 
   /**
-   * The count of `contacts` rows the most recent {@link listContacts} scan
-   * had to skip for the same reason, so the facade's shared epoch-refresh path
-   * can rebuild the ciphers and re-read after a rekey by another client.
+   * The count of `contacts` resource replicas the most recent
+   * {@link listContacts} scan had to skip for the same reason, so the facade's
+   * shared epoch-refresh path can rebuild the ciphers and re-read after a rekey
+   * by another client.
    *
    * @returns {number}
    */
@@ -731,138 +763,150 @@ export class BrowserStore {
   /**
    * Swaps the injected per-collection document ciphers -- used after a
    * Collection Description descriptor refresh or a share/unshare rebuilds the
-   * ciphers under a new key epoch. The decrypt caches are deliberately kept:
-   * a row id is the content-derived hash of its envelope, so it maps to exactly
-   * one plaintext under any cipher that can decrypt it; a wider cipher set only
-   * decrypts more rows, never remaps an already-cached one.
+   * ciphers under a new key epoch. The decrypt caches are deliberately kept: a
+   * resource id is the content-derived hash of its envelope, so it maps to
+   * exactly one plaintext under any cipher that can decrypt it; a wider cipher
+   * set only decrypts more resource replicas, never remaps an already-cached
+   * one.
    *
    * @param ciphers {Record<string, DocCipher>}
    * @returns {void}
    */
   setCiphers(ciphers: Record<string, DocCipher>): void {
     this.#ciphers = ciphers
-    // A wider cipher set can reveal rows the last scan skipped as unknown-epoch,
-    // so the cid index is no longer known-complete; force the next
-    // `addCredential` to rebuild it. The decrypt caches stay valid (a row id
-    // maps to one plaintext under any cipher that can read it).
+    // A wider cipher set can reveal resource replicas the last scan skipped as
+    // unknown-epoch, so the cid index is no longer known-complete; force the
+    // next `addCredential` to rebuild it. The decrypt caches stay valid (a
+    // resource id maps to one plaintext under any cipher that can read it).
     this.#credentialsIndexed = false
   }
 
   /**
-   * Reads every live `private-credentials` row, oldest first, decrypting
-   * envelope rows and passing legacy plaintext rows through. Each entry keeps
-   * its RxDB row id (the write/delete key) alongside the credential's content
-   * cid (the page-facing key): for an envelope row the cid is recomputed from
-   * the decrypted VC, for a plaintext row it IS the row id.
+   * Reads every live `private-credentials` resource replica, oldest first,
+   * decrypting envelope resource replicas and passing legacy plaintext ones
+   * through. Each entry keeps its resource id (the write/delete key) alongside
+   * the credential's content cid (the page-facing key): for an envelope
+   * resource replica the cid is recomputed from the decrypted VC, for a
+   * plaintext one it IS the resource id.
    *
-   * A single row whose envelope does not decrypt under the current KAK
-   * (corrupted, replicated verbatim from another identity, or written under a
-   * mismatched KAK) is skipped -- logged and collected in `undecryptableRowIds`
-   * -- rather than rejecting the whole read, so one poisoned row cannot brick
-   * list/load/add/delete. The row id is returned so a caller can still target
-   * (and remove) it even though its content cid is unknowable.
+   * A single resource replica whose envelope does not decrypt under the current
+   * KAK (corrupted, replicated verbatim from another identity, or written under
+   * a mismatched KAK) is skipped -- logged and collected in
+   * `undecryptableResourceIds` -- rather than rejecting the whole read, so one
+   * poisoned resource replica cannot brick list/load/add/delete. The resource
+   * id is returned so a caller can still target (and remove) it even though its
+   * content cid is unknowable.
    *
-   * A row whose envelope names an UNKNOWN key epoch (its cached descriptor is
-   * likely stale, `UnknownEpochError`) is collected separately in
-   * `unknownEpochRowIds` and NOT cached: it is possibly-fresh data behind a
-   * stale descriptor, not purgeable garbage, so a caller can refresh the descriptor and
-   * re-read rather than deleting it.
+   * A resource replica whose envelope names an UNKNOWN key epoch (its cached
+   * descriptor is likely stale, `UnknownEpochError`) is collected separately in
+   * `unknownEpochResourceIds` and NOT cached: it is possibly-fresh data behind a
+   * stale descriptor, not purgeable garbage, so a caller can refresh the
+   * descriptor and re-read rather than deleting it.
    *
-   * A row this wallet holds no key for (`KeyUnwrapError`: never a recipient of
-   * that epoch, or removed and the epoch rotated) is collected in
-   * `noEpochKeyRowIds` and likewise NOT cached. It is another reader's data, not
-   * garbage: it is never purged, and no descriptor refresh can make it readable.
+   * A resource replica this wallet holds no key for (`KeyUnwrapError`: never a
+   * recipient of that epoch, or removed and the epoch rotated) is collected in
+   * `noEpochKeyResourceIds` and likewise NOT cached. It is another reader's data,
+   * not garbage: it is never purged, and no descriptor refresh can make it
+   * readable.
    *
-   * @returns {Promise<{ entries: Array<{ rowId: string; cid: string;
-   *   vc: IVerifiableCredential }>; undecryptableRowIds: string[];
-   *   unknownEpochRowIds: string[]; noEpochKeyRowIds: string[];
-   *   integrityRowIds: string[] }>}
+   * @returns {Promise<{ entries: Array<{ resourceId: string; cid: string;
+   *   vc: IVerifiableCredential }>; undecryptableResourceIds: string[];
+   *   unknownEpochResourceIds: string[]; noEpochKeyResourceIds: string[];
+   *   integrityResourceIds: string[] }>}
    */
   async #credentialEntries(): Promise<{
-    entries: Array<{ rowId: string; cid: string; vc: IVerifiableCredential }>
-    undecryptableRowIds: string[]
-    unknownEpochRowIds: string[]
-    noEpochKeyRowIds: string[]
-    integrityRowIds: string[]
+    entries: Array<{
+      resourceId: string
+      cid: string
+      vc: IVerifiableCredential
+    }>
+    undecryptableResourceIds: string[]
+    unknownEpochResourceIds: string[]
+    noEpochKeyResourceIds: string[]
+    integrityResourceIds: string[]
   }> {
     const {
-      entries: rows,
-      undecryptableRowIds,
-      unknownEpochRowIds,
-      noEpochKeyRowIds,
-      integrityRowIds
-    } = await this.#decryptedRows({
+      entries: decrypted,
+      undecryptableResourceIds,
+      unknownEpochResourceIds,
+      noEpochKeyResourceIds,
+      integrityResourceIds
+    } = await this.#decryptedResources({
       logicalKey: 'privateCredentials',
       sort: 'asc'
     })
     const entries: Array<{
-      rowId: string
+      resourceId: string
       cid: string
       vc: IVerifiableCredential
     }> = []
     // Rebuild the cid index from this full scan, so every list/load/delete
     // refreshes the authority `addCredential` consults.
     const cidIndex = new Map<string, Set<string>>()
-    for (const { rowId, data, fromEnvelope } of rows) {
+    for (const { resourceId, data, fromEnvelope } of decrypted) {
       const vc = data as unknown as IVerifiableCredential
       let cid: string
       if (fromEnvelope) {
-        // An envelope row's cid is recomputed from the decrypted VC (memoized
-        // per row id, since the envelope's plaintext -- and thus its cid -- is
-        // fixed once written).
+        // An envelope resource replica's cid is recomputed from the decrypted
+        // VC (memoized per resource id, since the envelope's plaintext -- and
+        // thus its cid -- is fixed once written).
         cid =
-          this.#credentialCidByRow.get(rowId) ?? (await cidFrom({ doc: vc }))
-        this.#credentialCidByRow.set(rowId, cid)
+          this.#credentialCidByResource.get(resourceId) ??
+          (await cidFrom({ doc: vc }))
+        this.#credentialCidByResource.set(resourceId, cid)
       } else {
-        // A plaintext row IS keyed by its content cid.
-        cid = rowId
+        // A plaintext resource replica IS keyed by its content cid.
+        cid = resourceId
       }
-      let rowIds = cidIndex.get(cid)
-      if (!rowIds) {
-        rowIds = new Set<string>()
-        cidIndex.set(cid, rowIds)
+      let resourceIds = cidIndex.get(cid)
+      if (!resourceIds) {
+        resourceIds = new Set<string>()
+        cidIndex.set(cid, resourceIds)
       }
-      rowIds.add(rowId)
-      entries.push({ rowId, cid, vc })
+      resourceIds.add(resourceId)
+      entries.push({ resourceId, cid, vc })
     }
     this.#credentialCidIndex = cidIndex
     this.#credentialsIndexed = true
     return {
       entries,
-      undecryptableRowIds,
-      unknownEpochRowIds,
-      noEpochKeyRowIds,
-      integrityRowIds
+      undecryptableResourceIds,
+      unknownEpochResourceIds,
+      noEpochKeyResourceIds,
+      integrityResourceIds
     }
   }
 
   /**
    * Adds a VC to the local `private-credentials` collection. On an encrypted
-   * store the row is the credential's EDV envelope keyed by its
+   * store the resource replica is the credential's EDV envelope keyed by its
    * content-derived envelope-hash id; because encryption is nondeterministic,
    * idempotence is by the credential's content cid (a re-add of a stored
-   * credential is a no-op), not by row id. Returns whether a row was actually
-   * inserted (`false` when the credential was already present), so the caller
-   * can gate credential-created history on a genuine insert.
+   * credential is a no-op), not by resource id. Returns whether a resource
+   * replica was actually inserted (`false` when the credential was already
+   * present), so the caller can gate credential-created history on a genuine
+   * insert.
    *
-   * Idempotence is enforced through the in-memory `#credentialCidIndex`
-   * (cid -> live row ids), consulted in O(1) rather than by a full decrypt-scan
-   * per insert. The index is built once per session on first use (a single scan)
-   * and maintained incrementally on add/delete, so a batch import runs in O(N)
-   * decrypts, not O(N^2) -- and idempotence no longer depends on the caller
-   * pre-deduping the batch or storing sequentially.
+   * Idempotence is enforced through the in-memory `#credentialCidIndex` (cid ->
+   * live resource ids), consulted in O(1) rather than by a full decrypt-scan
+   * per insert. The index is built once per session on first use (a single
+   * scan) and maintained incrementally on add/delete, so a batch import runs in
+   * O(N) decrypts, not O(N^2) -- and idempotence no longer depends on the
+   * caller pre-deduping the batch or storing sequentially.
    *
-   * Design tradeoff: the index is in-memory, not a persisted row field. A
-   * plaintext cid on the encrypted row would be simplest but would replicate to
-   * the server and defeat the encrypted-at-rest model (the cid links a subject
-   * to a stored ciphertext); the index keeps the server seeing only opaque
-   * envelopes. Its cost is a narrow staleness window: a credential pulled by
-   * background replication AFTER the index was last built (any list/load/delete
-   * rebuilds it) but before a racing local `addCredential` of the same cid can
-   * yield a second envelope row for that VC. That is the already-tolerated
-   * "duplicate envelope rows for the same VC" case -- `listCredentials` collapses
-   * duplicates by cid and `deleteCredential` removes every row for a cid -- so it
-   * costs a redundant row, never a correctness failure.
+   * Design tradeoff: the index is in-memory, not a persisted field on the
+   * resource replica. A plaintext cid on the encrypted resource replica would
+   * be simplest but would replicate to the server and defeat the
+   * encrypted-at-rest model (the cid links a subject to a stored ciphertext);
+   * the index keeps the server seeing only opaque envelopes. Its cost is a
+   * narrow staleness window: a credential pulled by background replication
+   * AFTER the index was last built (any list/load/delete rebuilds it) but
+   * before a racing local `addCredential` of the same cid can yield a second
+   * envelope resource replica for that VC. That is the already-tolerated
+   * "duplicate envelope resource replicas for the same VC" case --
+   * `listCredentials` collapses duplicates by cid and `deleteCredential`
+   * removes every resource replica for a cid -- so it costs a redundant
+   * resource replica, never a correctness failure.
    *
    * @param options {object}
    * @param options.cid {string}
@@ -878,9 +922,10 @@ export class BrowserStore {
   }): Promise<boolean> {
     const cipher = this.#ciphers?.privateCredentials
     if (!cipher) {
-      // Cipher-less (plaintext) store: the row is keyed by cid, so an existing
-      // (live) row means an already-stored credential. Checking first derives
-      // inserted-ness, since insertIfNotExists returns the conflicting doc.
+      // Cipher-less (plaintext) store: the resource replica is keyed by cid, so
+      // an existing (live) one means an already-stored credential. Checking
+      // first derives inserted-ness, since insertIfNotExists returns the
+      // conflicting doc.
       const existing = await this.rxCollection('privateCredentials')
         .findOne(cid)
         .exec()
@@ -894,28 +939,29 @@ export class BrowserStore {
       })
       return true
     }
-    // Ensure the cid index reflects a full scan of the live rows this session,
-    // then check it in O(1) instead of re-decrypting the whole collection.
+    // Ensure the cid index reflects a full scan of the live resource replicas
+    // this session, then check it in O(1) instead of re-decrypting the whole
+    // collection.
     if (!this.#credentialsIndexed) {
       await this.#credentialEntries()
     }
     if (this.#credentialCidIndex.has(cid)) {
       return false
     }
-    const { rowId } = await this.#insertEncrypted({
+    const { resourceId } = await this.#insertEncrypted({
       logicalKey: 'privateCredentials',
       id: cid,
       data: credential as unknown as Json
     })
     // Maintain the caches and index incrementally so the next insert in a batch
-    // sees this one without another scan, and a subsequent read need not decrypt
-    // this fresh row.
+    // sees this one without another scan, and a subsequent read need not
+    // decrypt this fresh resource replica.
     this.#cacheFor('privateCredentials').set(
-      rowId,
+      resourceId,
       credential as unknown as Json
     )
-    this.#credentialCidByRow.set(rowId, cid)
-    this.#credentialCidIndex.set(cid, new Set([rowId]))
+    this.#credentialCidByResource.set(resourceId, cid)
+    this.#credentialCidIndex.set(cid, new Set([resourceId]))
     return true
   }
 
@@ -930,11 +976,11 @@ export class BrowserStore {
   }
 
   /**
-   * Deletes a credential by content cid. Removes every row carrying that
-   * credential (duplicate envelope rows for the same VC can exist, e.g. a
-   * legacy random-id envelope replicated from remote alongside a re-keyed
-   * local copy); each removal is a soft delete replication pushes as a
-   * tombstone.
+   * Deletes a credential by content cid. Removes every resource replica
+   * carrying that credential (duplicate envelope resource replicas for the same
+   * VC can exist, e.g. a legacy random-id envelope replicated from remote
+   * alongside a re-keyed local copy); each removal is a soft delete replication
+   * pushes as a tombstone.
    *
    * @param options {object}
    * @param options.cid {string}
@@ -946,38 +992,39 @@ export class BrowserStore {
       if (entry.cid !== cid) {
         continue
       }
-      await this.deleteCredentialByRowId({ rowId: entry.rowId })
+      await this.deleteCredentialByResourceId({ resourceId: entry.resourceId })
     }
   }
 
   /**
-   * Removes a single `private-credentials` row by its RxDB row id (a soft
-   * delete replication pushes as a tombstone). Unlike {@link deleteCredential},
-   * this needs no decryption, so it is the way to remove an undecryptable row
-   * whose content cid cannot be recovered (see {@link undecryptableCredentials}
-   * / {@link purgeUndecryptableCredentials}).
+   * Removes a single `private-credentials` resource replica by its resource id
+   * (a soft delete replication pushes as a tombstone). Unlike
+   * {@link deleteCredential}, this needs no decryption, so it is the way to
+   * remove an undecryptable resource replica whose content cid cannot be
+   * recovered (see {@link undecryptableCredentials} /
+   * {@link purgeUndecryptableCredentials}).
    *
    * @param options {object}
-   * @param options.rowId {string}
+   * @param options.resourceId {string}
    * @returns {Promise<void>}
    */
-  async deleteCredentialByRowId({ rowId }: { rowId: string }) {
+  async deleteCredentialByResourceId({ resourceId }: { resourceId: string }) {
     const doc = await this.rxCollection('privateCredentials')
-      .findOne(rowId)
+      .findOne(resourceId)
       .exec()
     if (doc) {
       await doc.remove()
     }
-    this.#cacheFor('privateCredentials').delete(rowId)
-    // Drop the row from the cid index so a later re-add of the same credential
-    // is not wrongly treated as already present.
-    const cid = this.#credentialCidByRow.get(rowId)
+    this.#cacheFor('privateCredentials').delete(resourceId)
+    // Drop the resource replica from the cid index so a later re-add of the
+    // same credential is not wrongly treated as already present.
+    const cid = this.#credentialCidByResource.get(resourceId)
     if (cid !== undefined) {
-      this.#credentialCidByRow.delete(rowId)
-      const rowIds = this.#credentialCidIndex.get(cid)
-      if (rowIds) {
-        rowIds.delete(rowId)
-        if (rowIds.size === 0) {
+      this.#credentialCidByResource.delete(resourceId)
+      const resourceIds = this.#credentialCidIndex.get(cid)
+      if (resourceIds) {
+        resourceIds.delete(resourceId)
+        if (resourceIds.size === 0) {
           this.#credentialCidIndex.delete(cid)
         }
       }
@@ -985,45 +1032,45 @@ export class BrowserStore {
   }
 
   /**
-   * Removes every `private-credentials` row whose envelope will not decrypt
-   * under the current vault KAK, so a user can clear rows that can never be
-   * shown (corrupted, or written under a mismatched KAK). Returns the number
-   * of rows removed.
+   * Removes every `private-credentials` resource replica whose envelope will
+   * not decrypt under the current vault KAK, so a user can clear resource
+   * replicas that can never be shown (corrupted, or written under a mismatched
+   * KAK). Returns the number of resource replicas removed.
    *
-   * Only the `undecryptableRowIds` bucket is purged. Unknown-epoch rows, rows
-   * this wallet holds no epoch key for, and rows that failed their integrity
-   * check are real data (or a host's misbehavior over real data) and are left
-   * in place.
+   * Only the `undecryptableResourceIds` bucket is purged. Unknown-epoch resource
+   * replicas, ones this wallet holds no epoch key for, and ones that failed
+   * their integrity check are real data (or a host's misbehavior over real
+   * data) and are left in place.
    *
    * @returns {Promise<number>}
    */
   async purgeUndecryptableCredentials(): Promise<number> {
-    const { undecryptableRowIds } = await this.#credentialEntries()
-    for (const rowId of undecryptableRowIds) {
-      await this.deleteCredentialByRowId({ rowId })
+    const { undecryptableResourceIds } = await this.#credentialEntries()
+    for (const resourceId of undecryptableResourceIds) {
+      await this.deleteCredentialByResourceId({ resourceId })
     }
     this.#undecryptableCredentials = 0
-    return undecryptableRowIds.length
+    return undecryptableResourceIds.length
   }
 
   /**
-   * Lists the stored VCs, oldest first, collapsing duplicate rows that carry
-   * the same credential (same content cid) to their oldest copy.
+   * Lists the stored VCs, oldest first, collapsing duplicate resource replicas
+   * that carry the same credential (same content cid) to their oldest copy.
    *
    * @returns {Promise<Array<StoredCredential>>}
    */
   async listCredentials(): Promise<Array<StoredCredential>> {
     const {
       entries,
-      undecryptableRowIds,
-      unknownEpochRowIds,
-      noEpochKeyRowIds,
-      integrityRowIds
+      undecryptableResourceIds,
+      unknownEpochResourceIds,
+      noEpochKeyResourceIds,
+      integrityResourceIds
     } = await this.#credentialEntries()
-    this.#undecryptableCredentials = undecryptableRowIds.length
-    this.#unknownEpochCredentials = unknownEpochRowIds.length
-    this.#noEpochKeyCredentials = noEpochKeyRowIds.length
-    this.#integrityCredentials = integrityRowIds.length
+    this.#undecryptableCredentials = undecryptableResourceIds.length
+    this.#unknownEpochCredentials = unknownEpochResourceIds.length
+    this.#noEpochKeyCredentials = noEpochKeyResourceIds.length
+    this.#integrityCredentials = integrityResourceIds.length
     const seen = new Set<string>()
     const credentials: StoredCredential[] = []
     for (const { cid, vc } of entries) {
@@ -1037,69 +1084,76 @@ export class BrowserStore {
   }
 
   /**
-   * Reads every live `app-connections` row, oldest first, resolving each to
-   * its content cid + decrypted app-key credential -- the app-key sibling of
-   * {@link _credentialEntries}, without the session-wide cid index: the
-   * collection holds one row per connected app, so a full scan per call is
-   * cheap. Envelope rows are decrypted (their cid recomputed and memoized per
-   * row id), plaintext rows pass through keyed by their row id. Rows that will
-   * not decrypt are skipped exactly as in the credential scan.
+   * Reads every live `app-connections` resource replica, oldest first,
+   * resolving each to its content cid + decrypted app-key credential -- the
+   * app-key sibling of {@link _credentialEntries}, without the session-wide cid
+   * index: the collection holds one resource replica per connected app, so a
+   * full scan per call is cheap. Envelope resource replicas are decrypted
+   * (their cid recomputed and memoized per resource id), plaintext ones pass
+   * through keyed by their resource id. Resource replicas that will not decrypt
+   * are skipped exactly as in the credential scan.
    *
-   * @returns {Promise<{ entries: Array<{ rowId: string; cid: string;
-   *   vc: IVerifiableCredential }>; undecryptableRowIds: string[];
-   *   unknownEpochRowIds: string[]; noEpochKeyRowIds: string[];
-   *   integrityRowIds: string[] }>}
+   * @returns {Promise<{ entries: Array<{ resourceId: string; cid: string;
+   *   vc: IVerifiableCredential }>; undecryptableResourceIds: string[];
+   *   unknownEpochResourceIds: string[]; noEpochKeyResourceIds: string[];
+   *   integrityResourceIds: string[] }>}
    */
   async #appKeyEntries(): Promise<{
-    entries: Array<{ rowId: string; cid: string; vc: IVerifiableCredential }>
-    undecryptableRowIds: string[]
-    unknownEpochRowIds: string[]
-    noEpochKeyRowIds: string[]
-    integrityRowIds: string[]
+    entries: Array<{
+      resourceId: string
+      cid: string
+      vc: IVerifiableCredential
+    }>
+    undecryptableResourceIds: string[]
+    unknownEpochResourceIds: string[]
+    noEpochKeyResourceIds: string[]
+    integrityResourceIds: string[]
   }> {
     const {
-      entries: rows,
-      undecryptableRowIds,
-      unknownEpochRowIds,
-      noEpochKeyRowIds,
-      integrityRowIds
-    } = await this.#decryptedRows({
+      entries: decrypted,
+      undecryptableResourceIds,
+      unknownEpochResourceIds,
+      noEpochKeyResourceIds,
+      integrityResourceIds
+    } = await this.#decryptedResources({
       logicalKey: 'appConnections',
       sort: 'asc'
     })
     const entries: Array<{
-      rowId: string
+      resourceId: string
       cid: string
       vc: IVerifiableCredential
     }> = []
-    for (const { rowId, data, fromEnvelope } of rows) {
+    for (const { resourceId, data, fromEnvelope } of decrypted) {
       const vc = data as unknown as IVerifiableCredential
       let cid: string
       if (fromEnvelope) {
-        cid = this.#appKeyCidByRow.get(rowId) ?? (await cidFrom({ doc: vc }))
-        this.#appKeyCidByRow.set(rowId, cid)
+        cid =
+          this.#appKeyCidByResource.get(resourceId) ??
+          (await cidFrom({ doc: vc }))
+        this.#appKeyCidByResource.set(resourceId, cid)
       } else {
-        // A plaintext row IS keyed by its content cid.
-        cid = rowId
+        // A plaintext resource replica IS keyed by its content cid.
+        cid = resourceId
       }
-      entries.push({ rowId, cid, vc })
+      entries.push({ resourceId, cid, vc })
     }
     return {
       entries,
-      undecryptableRowIds,
-      unknownEpochRowIds,
-      noEpochKeyRowIds,
-      integrityRowIds
+      undecryptableResourceIds,
+      unknownEpochResourceIds,
+      noEpochKeyResourceIds,
+      integrityResourceIds
     }
   }
 
   /**
-   * Adds an app-key credential to the local `app-connections` collection --
-   * the wallet's own mint path is the only writer. Like
-   * {@link addCredential} the row is the credential's EDV envelope under a
-   * content-derived envelope-hash id and idempotence is by the credential's
-   * content cid (encryption is nondeterministic, so the row id cannot carry
-   * it). Returns whether a row was actually inserted.
+   * Adds an app-key credential to the local `app-connections` collection -- the
+   * wallet's own mint path is the only writer. Like {@link addCredential} the
+   * resource replica is the credential's EDV envelope under a content-derived
+   * envelope-hash id and idempotence is by the credential's content cid
+   * (encryption is nondeterministic, so the resource id cannot carry it).
+   * Returns whether a resource replica was actually inserted.
    *
    * @param options {object}
    * @param options.cid {string}
@@ -1117,34 +1171,37 @@ export class BrowserStore {
     if (entries.some(entry => entry.cid === cid)) {
       return false
     }
-    const { rowId } = await this.#insertEncrypted({
+    const { resourceId } = await this.#insertEncrypted({
       logicalKey: 'appConnections',
       id: cid,
       data: credential as unknown as Json
     })
-    this.#cacheFor('appConnections').set(rowId, credential as unknown as Json)
-    this.#appKeyCidByRow.set(rowId, cid)
+    this.#cacheFor('appConnections').set(
+      resourceId,
+      credential as unknown as Json
+    )
+    this.#appKeyCidByResource.set(resourceId, cid)
     return true
   }
 
   /**
    * Lists the stored app-key credentials, oldest first, collapsing duplicate
-   * rows carrying the same credential to their oldest copy.
+   * resource replicas carrying the same credential to their oldest copy.
    *
    * @returns {Promise<Array<StoredCredential>>}
    */
   async listAppKeys(): Promise<Array<StoredCredential>> {
     const {
       entries,
-      undecryptableRowIds,
-      unknownEpochRowIds,
-      noEpochKeyRowIds,
-      integrityRowIds
+      undecryptableResourceIds,
+      unknownEpochResourceIds,
+      noEpochKeyResourceIds,
+      integrityResourceIds
     } = await this.#appKeyEntries()
-    this.#unknownEpochAppKeys = unknownEpochRowIds.length
-    this.#noEpochKeyAppKeys = noEpochKeyRowIds.length
-    this.#undecryptableAppKeys = undecryptableRowIds.length
-    this.#integrityAppKeys = integrityRowIds.length
+    this.#unknownEpochAppKeys = unknownEpochResourceIds.length
+    this.#noEpochKeyAppKeys = noEpochKeyResourceIds.length
+    this.#undecryptableAppKeys = undecryptableResourceIds.length
+    this.#integrityAppKeys = integrityResourceIds.length
     const seen = new Set<string>()
     const appKeys: StoredCredential[] = []
     for (const { cid, vc } of entries) {
@@ -1158,9 +1215,9 @@ export class BrowserStore {
   }
 
   /**
-   * Deletes an app-key credential by content cid, removing every row that
-   * carries it (each removal is a soft delete replication pushes as a
-   * tombstone).
+   * Deletes an app-key credential by content cid, removing every resource
+   * replica that carries it (each removal is a soft delete replication pushes
+   * as a tombstone).
    *
    * @param options {object}
    * @param options.cid {string}
@@ -1173,21 +1230,21 @@ export class BrowserStore {
         continue
       }
       const doc = await this.rxCollection('appConnections')
-        .findOne(entry.rowId)
+        .findOne(entry.resourceId)
         .exec()
       if (doc) {
         await doc.remove()
       }
-      this.#cacheFor('appConnections').delete(entry.rowId)
-      this.#appKeyCidByRow.delete(entry.rowId)
+      this.#cacheFor('appConnections').delete(entry.resourceId)
+      this.#appKeyCidByResource.delete(entry.resourceId)
     }
   }
 
   /**
-   * The count of `app-connections` rows the most recent {@link listAppKeys}
-   * call had to skip because their envelope named a key epoch this instance's
-   * cipher does not know. Drives the same one-time descriptor refresh the
-   * credential read uses.
+   * The count of `app-connections` resource replicas the most recent
+   * {@link listAppKeys} call had to skip because their envelope named a key
+   * epoch this instance's cipher does not know. Drives the same one-time
+   * descriptor refresh the credential read uses.
    *
    * @returns {number}
    */
@@ -1196,10 +1253,11 @@ export class BrowserStore {
   }
 
   /**
-   * The count of `app-connections` rows the most recent {@link listAppKeys}
-   * call had to skip because this wallet holds no key for their (known) key
-   * epoch. Load-bearing on the match path: no descriptor refresh can reveal
-   * them, so a caller that found no match must refuse rather than mint.
+   * The count of `app-connections` resource replicas the most recent
+   * {@link listAppKeys} call had to skip because this wallet holds no key for
+   * their (known) key epoch. Load-bearing on the match path: no descriptor
+   * refresh can reveal them, so a caller that found no match must refuse rather
+   * than mint.
    *
    * @returns {number}
    */
@@ -1208,11 +1266,11 @@ export class BrowserStore {
   }
 
   /**
-   * The count of `app-connections` rows the most recent {@link listAppKeys}
-   * call had to skip because their body failed its integrity check. Never
-   * purged, and load-bearing on the match path for the same reason as
-   * {@link noEpochKeyAppKeys}: a skipped app key read as absent would mint a
-   * second identity for the app.
+   * The count of `app-connections` resource replicas the most recent
+   * {@link listAppKeys} call had to skip because their body failed its
+   * integrity check. Never purged, and load-bearing on the match path for the
+   * same reason as {@link noEpochKeyAppKeys}: a skipped app key read as absent
+   * would mint a second identity for the app.
    *
    * @returns {number}
    */
@@ -1221,9 +1279,9 @@ export class BrowserStore {
   }
 
   /**
-   * The count of `app-connections` rows the most recent {@link listAppKeys}
-   * call had to skip because their envelope would not decrypt at all.
-   * Purgeable via {@link purgeUndecryptableAppKeys}.
+   * The count of `app-connections` resource replicas the most recent
+   * {@link listAppKeys} call had to skip because their envelope would not
+   * decrypt at all. Purgeable via {@link purgeUndecryptableAppKeys}.
    *
    * @returns {number}
    */
@@ -1232,30 +1290,31 @@ export class BrowserStore {
   }
 
   /**
-   * Removes every `app-connections` row whose envelope will not decrypt under
-   * the current vault KAK, the app-key sibling of
-   * {@link purgeUndecryptableCredentials}. Returns the number of rows removed.
+   * Removes every `app-connections` resource replica whose envelope will not
+   * decrypt under the current vault KAK, the app-key sibling of
+   * {@link purgeUndecryptableCredentials}. Returns the number of resource
+   * replicas removed.
    *
-   * Only the `undecryptableRowIds` bucket is purged. Unknown-epoch rows and
-   * rows this wallet holds no epoch key for are real data -- an app's only
-   * identity, in this collection -- and are left in place.
+   * Only the `undecryptableResourceIds` bucket is purged. Unknown-epoch resource
+   * replicas and ones this wallet holds no epoch key for are real data -- an
+   * app's only identity, in this collection -- and are left in place.
    *
    * @returns {Promise<number>}
    */
   async purgeUndecryptableAppKeys(): Promise<number> {
-    const { undecryptableRowIds } = await this.#appKeyEntries()
-    for (const rowId of undecryptableRowIds) {
+    const { undecryptableResourceIds } = await this.#appKeyEntries()
+    for (const resourceId of undecryptableResourceIds) {
       const doc = await this.rxCollection('appConnections')
-        .findOne(rowId)
+        .findOne(resourceId)
         .exec()
       if (doc) {
         await doc.remove()
       }
-      this.#cacheFor('appConnections').delete(rowId)
-      this.#appKeyCidByRow.delete(rowId)
+      this.#cacheFor('appConnections').delete(resourceId)
+      this.#appKeyCidByResource.delete(resourceId)
     }
     this.#undecryptableAppKeys = 0
-    return undecryptableRowIds.length
+    return undecryptableResourceIds.length
   }
 
   /**
@@ -1298,9 +1357,10 @@ export class BrowserStore {
   }
 
   /**
-   * Reads every live `public-credentials` row. The collection is plaintext (it
-   * is public data) and keyed directly by the credential's content cid, so a
-   * row needs no decryption and its id IS the cid.
+   * Reads every live `public-credentials` resource replica. The collection is
+   * plaintext (it is public data) and keyed directly by the credential's
+   * content cid, so a resource replica needs no decryption and its id IS the
+   * cid.
    *
    * @returns {Promise<Array<StoredCredential>>}
    */
@@ -1333,15 +1393,16 @@ export class BrowserStore {
   }
 
   /**
-   * Appends an entry to the local `wallet-activity` log. On an encrypted
-   * store the row is the activity's EDV envelope keyed by its content-derived
-   * envelope-hash id; the caller's `resourceId` then lives on only as the
-   * activity's own `id` inside the encrypted document.
+   * Appends an entry to the local `wallet-activity` log. On an encrypted store
+   * the resource replica is the activity's EDV envelope keyed by its
+   * content-derived envelope-hash id; the caller's `resourceId` then lives on
+   * only as the activity's own `id` inside the encrypted document.
    *
-   * Returns the row id the entry landed under -- the cipher's envelope-hash id
-   * on an encrypted store, the passed `resourceId` on a plaintext one -- which
-   * the put-then-delete-others write of the migration's import activity needs,
-   * to tell the row it just wrote from the ones it is replacing.
+   * Returns the resource id the entry landed under -- the cipher's
+   * envelope-hash id on an encrypted store, the passed `resourceId` on a
+   * plaintext one -- which the put-then-delete-others write of the migration's
+   * import activity needs, to tell the resource replica it just wrote from the
+   * ones it is replacing.
    *
    * @param options {object}
    * @param options.resourceId {string}
@@ -1355,25 +1416,27 @@ export class BrowserStore {
     resourceId: string
     activity: WalletActivity
   }): Promise<string> {
-    const { rowId } = await this.#insertEncrypted({
+    const { resourceId: landedId } = await this.#insertEncrypted({
       logicalKey: 'walletActivity',
       id: resourceId,
       data: activity as Json
     })
-    return rowId
+    return landedId
   }
 
   /**
-   * Lists the `wallet-activity` log entries, oldest first, decrypting
-   * envelope rows and passing legacy plaintext rows through. Each item's `id`
-   * is the activity's own id (a uuid minted at record time); duplicate rows
-   * carrying the same activity are collapsed to their oldest copy.
+   * Lists the `wallet-activity` log entries, oldest first, decrypting envelope
+   * resource replicas and passing legacy plaintext ones through. Each item's
+   * `id` is the activity's own id (a uuid minted at record time); duplicate
+   * resource replicas carrying the same activity are collapsed to their oldest
+   * copy.
    *
-   * A row whose envelope will not decrypt under the current KAK is skipped
-   * (logged) rather than rejecting the whole read, so one poisoned row cannot hang the history page.
-   * The counts describe this same read: `unknownEpoch` for the facade's
-   * descriptor refresh, and `unreadable` for every row skipped for any
-   * reason, the unknown-epoch rows included.
+   * A resource replica whose envelope will not decrypt under the current KAK is
+   * skipped (logged) rather than rejecting the whole read, so one poisoned
+   * resource replica cannot hang the history page. The counts describe this
+   * same read: `unknownEpoch` for the facade's descriptor refresh, and
+   * `unreadable` for every resource replica skipped for any reason, the
+   * unknown-epoch ones included.
    *
    * @returns {Promise<{
    *   entries: Array<{ id: string; doc: WalletActivity }>,
@@ -1388,24 +1451,24 @@ export class BrowserStore {
   }> {
     const {
       entries,
-      unknownEpochRowIds,
-      noEpochKeyRowIds,
-      integrityRowIds,
-      undecryptableRowIds
-    } = await this.#decryptedRows({
+      unknownEpochResourceIds,
+      noEpochKeyResourceIds,
+      integrityResourceIds,
+      undecryptableResourceIds
+    } = await this.#decryptedResources({
       logicalKey: 'walletActivity',
       sort: 'asc'
     })
     const unreadable =
-      unknownEpochRowIds.length +
-      noEpochKeyRowIds.length +
-      integrityRowIds.length +
-      undecryptableRowIds.length
+      unknownEpochResourceIds.length +
+      noEpochKeyResourceIds.length +
+      integrityResourceIds.length +
+      undecryptableResourceIds.length
     const seen = new Set<string>()
     const items: Array<{ id: string; doc: WalletActivity }> = []
-    for (const { rowId, data } of entries) {
+    for (const { resourceId, data } of entries) {
       const activity = data as WalletActivity
-      const id = activity.id ?? rowId
+      const id = activity.id ?? resourceId
       if (seen.has(id)) {
         continue
       }
@@ -1414,107 +1477,115 @@ export class BrowserStore {
     }
     return {
       entries: items,
-      unknownEpoch: unknownEpochRowIds.length,
+      unknownEpoch: unknownEpochResourceIds.length,
       unreadable
     }
   }
 
   /**
-   * Every `wallet-activity` row carrying one activity id, row ids included --
-   * the write-side lookup the migration import needs, where
+   * Every `wallet-activity` resource replica carrying one activity id, resource
+   * ids included -- the write-side lookup the migration import needs, where
    * {@link listHistoryItems} collapses duplicates to their oldest copy and
-   * hides the rest. The activity id lives inside the encrypted body, so this
-   * is a decrypt scan (FW-545 tracks a stored index that would replace it).
+   * hides the rest. The activity id lives inside the encrypted body, so this is
+   * a decrypt scan (FW-545 tracks a stored index that would replace it).
    *
    * @param options {object}
-   * @param options.id {string}   the activity's own id, not a row id
-   * @returns {Promise<Array<{ rowId: string; doc: WalletActivity }>>}
+   * @param options.id {string}   the activity's own id, not a resource id
+   * @returns {Promise<Array<{ resourceId: string; doc: WalletActivity }>>}
    */
   async findHistoryItemsByInnerId({
     id
   }: {
     id: string
-  }): Promise<Array<{ rowId: string; doc: WalletActivity }>> {
-    const { entries } = await this.#decryptedRows({
+  }): Promise<Array<{ resourceId: string; doc: WalletActivity }>> {
+    const { entries } = await this.#decryptedResources({
       logicalKey: 'walletActivity',
       sort: 'asc'
     })
-    const found: Array<{ rowId: string; doc: WalletActivity }> = []
-    for (const { rowId, data } of entries) {
+    const found: Array<{ resourceId: string; doc: WalletActivity }> = []
+    for (const { resourceId, data } of entries) {
       const activity = data as WalletActivity
-      if ((activity.id ?? rowId) === id) {
-        found.push({ rowId, doc: activity })
+      if ((activity.id ?? resourceId) === id) {
+        found.push({ resourceId, doc: activity })
       }
     }
     return found
   }
 
   /**
-   * Removes a single `wallet-activity` row by its RxDB row id (a soft delete
-   * replication pushes as a tombstone) -- the `wallet-activity` twin of
-   * {@link deleteCredentialByRowId}, and the second half of the import
+   * Removes a single `wallet-activity` resource replica by its resource id (a
+   * soft delete replication pushes as a tombstone) -- the `wallet-activity`
+   * twin of {@link deleteCredentialByResourceId}, and the second half of the import
    * activity's put-then-delete-others write.
    *
    * @param options {object}
-   * @param options.rowId {string}
+   * @param options.resourceId {string}
    * @returns {Promise<void>}
    */
-  async deleteHistoryItemByRowId({ rowId }: { rowId: string }): Promise<void> {
-    const doc = await this.rxCollection('walletActivity').findOne(rowId).exec()
+  async deleteHistoryItemByResourceId({
+    resourceId
+  }: {
+    resourceId: string
+  }): Promise<void> {
+    const doc = await this.rxCollection('walletActivity')
+      .findOne(resourceId)
+      .exec()
     if (doc) {
       await doc.remove()
     }
-    this.#cacheFor('walletActivity').delete(rowId)
+    this.#cacheFor('walletActivity').delete(resourceId)
   }
 
   /**
-   * Reads every live `contacts` row, decrypting envelope rows and passing
-   * legacy plaintext rows through. Unlike credentials, a contact's row id is
-   * NOT content-derived -- it is a stable id minted at creation
-   * ({@link addContact}) -- so this simply reflects the current row set
-   * (`_updateDoc` rewrites a row's body in place rather than replacing the
-   * row), no cid-based dedupe needed.
+   * Reads every live `contacts` resource replica, decrypting envelope ones and
+   * passing legacy plaintext ones through. Unlike credentials, a contact's
+   * resource id is NOT content-derived -- it is a stable id minted at creation
+   * ({@link addContact}) -- so this simply reflects the current set of resource
+   * replicas (`_updateDoc` rewrites a resource replica's body in place rather
+   * than replacing it), no cid-based dedupe needed.
    *
-   * A row whose envelope will not decrypt under the current KAK is skipped, and
-   * an unknown-epoch row is skipped uncached for a descriptor refresh to pick up --
-   * the shared {@link _decryptedRows} tolerance (and its decrypt cache) that the
-   * credential and history reads use.
+   * A resource replica whose envelope will not decrypt under the current KAK is
+   * skipped, and an unknown-epoch one is skipped uncached for a descriptor
+   * refresh to pick up -- the shared {@link #decryptedResources} tolerance (and its
+   * decrypt cache) that the credential and history reads use.
    *
    * Every head passes through `upgradeContactHeadPayload` (as does
-   * {@link loadContact}'s point read), so a row written before the current
-   * `ContactData` postal shape is seen by the rest of the app, and by any
-   * save that carries its untouched fields forward, in the current shape.
-   * The upgrade is idempotent, so a row already in the current shape is
-   * unaffected, and a re-save therefore produces no spurious
+   * {@link loadContact}'s point read), so a resource replica written before the
+   * current `ContactData` postal shape is seen by the rest of the app, and by
+   * any save that carries its untouched fields forward, in the current shape.
+   * The upgrade is idempotent, so a resource replica already in the current
+   * shape is unaffected, and a re-save therefore produces no spurious
    * last-write-wins edit.
    *
-   * @returns {Promise<Array<{ rowId: string; head: ContactHeadPayload }>>}
+   * @returns {Promise<Array<{ resourceId: string; head: ContactHeadPayload }>>}
    */
   async #contactEntries(): Promise<
-    Array<{ rowId: string; head: ContactHeadPayload }>
+    Array<{ resourceId: string; head: ContactHeadPayload }>
   > {
-    const { entries, unknownEpochRowIds } = await this.#decryptedRows({
-      logicalKey: 'contacts',
-      sort: 'asc',
-      cache: false
-    })
-    this.#unknownEpochContacts = unknownEpochRowIds.length
-    return entries.map(({ rowId, data }) => ({
-      rowId,
+    const { entries, unknownEpochResourceIds } = await this.#decryptedResources(
+      {
+        logicalKey: 'contacts',
+        sort: 'asc',
+        cache: false
+      }
+    )
+    this.#unknownEpochContacts = unknownEpochResourceIds.length
+    return entries.map(({ resourceId, data }) => ({
+      resourceId,
       head: upgradeContactHeadPayload(data as unknown as ContactHeadPayload)
     }))
   }
 
   /**
-   * Reads the stored `contacts` rows as head payloads, oldest first -- the
-   * existence lookup the migration import needs. A head's `writerId` and its
-   * exact payload, which the {@link StoredContact} projection drops, are what
-   * the import's content check compares.
+   * Reads the stored `contacts` resource replicas as head payloads, oldest
+   * first -- the existence lookup the migration import needs. A head's
+   * `writerId` and its exact payload, which the {@link StoredContact}
+   * projection drops, are what the import's content check compares.
    *
-   * @returns {Promise<Array<{ rowId: string; head: ContactHeadPayload }>>}
+   * @returns {Promise<Array<{ resourceId: string; head: ContactHeadPayload }>>}
    */
   async listContactHeads(): Promise<
-    Array<{ rowId: string; head: ContactHeadPayload }>
+    Array<{ resourceId: string; head: ContactHeadPayload }>
   > {
     return await this.#contactEntries()
   }
@@ -1526,23 +1597,24 @@ export class BrowserStore {
    */
   async listContacts(): Promise<Array<StoredContact>> {
     const entries = await this.#contactEntries()
-    return entries.map(({ rowId, head }) => ({
-      id: rowId,
-      // Legacy heads written before the row-id / contact-id split carry no
-      // usable distinction; fall back to the row id for those.
-      contactId: head.contactId ?? rowId,
+    return entries.map(({ resourceId, head }) => ({
+      id: resourceId,
+      // Legacy heads written before the resource-id / contact-id split carry no
+      // usable distinction; fall back to the resource id for those.
+      contactId: head.contactId ?? resourceId,
       contact: head.contact,
       updatedAt: head.updatedAt
     }))
   }
 
   /**
-   * Loads one contact by row id -- a `findOne` point read plus at most one
-   * decrypt (the row id IS the RxDB primary key), never the full-collection
-   * scan {@link listContacts} pays. Mirrors the scan's per-row tolerance: a
-   * row whose envelope will not decrypt under the current KAK (or names an
-   * unknown key epoch, or fails its integrity check) resolves to
-   * `undefined`, exactly as the scan would have skipped it. The head passes through the same idempotent
+   * Loads one contact by resource id -- a `findOne` point read plus at most one
+   * decrypt (the resource id IS the RxDB primary key), never the
+   * full-collection scan {@link listContacts} pays. Mirrors the scan's
+   * per-replica tolerance: a resource replica whose envelope will not decrypt
+   * under the current KAK (or names an unknown key epoch, or fails its
+   * integrity check) resolves to `undefined`, exactly as the scan would have
+   * skipped it. The head passes through the same idempotent
    * `upgradeContactHeadPayload` read-side upgrade as {@link #contactEntries}.
    *
    * @param options {object}
@@ -1567,11 +1639,14 @@ export class BrowserStore {
       } catch (err) {
         if (classifyDecryptFailure(err) === 'integrity') {
           log.warn(
-            'Refusing a contacts row whose body failed its integrity check',
+            'Refusing a contacts resource replica whose body failed its integrity check',
             { readUnderId: id, err }
           )
         } else {
-          log.warn('Skipping undecryptable contacts row', { id, err })
+          log.warn('Skipping undecryptable contacts resource replica', {
+            id,
+            err
+          })
         }
         return undefined
       }
@@ -1589,12 +1664,13 @@ export class BrowserStore {
 
   /**
    * Adds a contact to the local `contacts` collection under a freshly minted,
-   * stable row id -- unlike credentials, this id is NOT content-derived, so
-   * a later edit can rewrite the same row in place ({@link updateContact}).
+   * stable resource id -- unlike credentials, this id is NOT content-derived,
+   * so a later edit can rewrite the same resource replica in place
+   * ({@link updateContact}).
    *
-   * The row id and the head payload's `contactId` are minted separately,
-   * matching Freewallet mobile (resource `syncId` vs local `_id`): the row id
-   * is transport-level addressing, `contactId` is the logical identity that
+   * The resource id and the head payload's `contactId` are minted separately,
+   * matching Freewallet mobile (resource `syncId` vs local `_id`): the resource
+   * id is transport-level addressing, `contactId` is the logical identity that
    * every `contacts-history` revision refers to.
    *
    * @param options {object}
@@ -1618,18 +1694,18 @@ export class BrowserStore {
       contact
     }
     // `contacts` is stable-id (mutable, updated in place): an encrypted write
-    // keys the row with the cipher-minted random EDV id (the collection spec's
-    // `idDerivation: 'random'`), which the sync layer pushes as the server
-    // resource id -- an EDV-format id like every other replica's. The uuid is
-    // only the plaintext-fallback row key. Rows created before this cipher
-    // change keep their uuid ids; every reader and updater (here and on other
-    // replicas) accepts both id universes.
-    const { rowId } = await this.#insertEncrypted({
+    // keys the resource replica with the cipher-minted random EDV id (the
+    // collection spec's `idDerivation: 'random'`), which the sync layer pushes
+    // as the server resource id -- an EDV-format id like every other replica's.
+    // The uuid is only the plaintext-fallback key. Resource replicas created
+    // before this cipher change keep their uuid ids; every reader and updater
+    // (here and on other replicas) accepts both id universes.
+    const { resourceId } = await this.#insertEncrypted({
       logicalKey: 'contacts',
       id: uuidv7(),
       data: head as unknown as Json
     })
-    return { id: rowId, contactId, contact, updatedAt }
+    return { id: resourceId, contactId, contact, updatedAt }
   }
 
   /**
@@ -1637,8 +1713,8 @@ export class BrowserStore {
    * method. Unlike {@link addContact} it mints nothing: the `contactId`,
    * `updatedAt`, and `writerId` the bundle carried are the ones stored, so the
    * imported contact keeps the identity its revisions refer to and the history
-   * reads as the old wallet's. The row id is minted here as always, since it
-   * is transport-level addressing and never travels in a bundle.
+   * reads as the old wallet's. The resource id is minted here as always, since
+   * it is transport-level addressing and never travels in a bundle.
    *
    * @param options {object}
    * @param options.head {ContactHeadPayload}
@@ -1653,14 +1729,14 @@ export class BrowserStore {
   }
 
   /**
-   * Rewrites a contact's row in place under its existing id, re-encrypting
-   * the whole head payload (fresh JWE nonce, so the envelope bytes always
-   * change even for a no-op save). The logical `contactId` sealed in the
-   * existing head is preserved verbatim -- it is the identity every revision
-   * (on every replica) refers to, and it differs from the row id for
-   * mobile-authored contacts. Throws when the existing head is unreachable
-   * (missing row, undecryptable envelope): rewriting it blind would sever the
-   * contact from its history.
+   * Rewrites a contact's resource replica in place under its existing id,
+   * re-encrypting the whole head payload (fresh JWE nonce, so the envelope
+   * bytes always change even for a no-op save). The logical `contactId` sealed
+   * in the existing head is preserved verbatim -- it is the identity every
+   * revision (on every replica) refers to, and it differs from the resource id
+   * for mobile-authored contacts. Throws when the existing head is unreachable
+   * (missing resource replica, undecryptable envelope): rewriting it blind
+   * would sever the contact from its history.
    *
    * @param options {object}
    * @param options.id {string}
@@ -1679,7 +1755,7 @@ export class BrowserStore {
   }): Promise<StoredContact> {
     const doc = await this.rxCollection('contacts').findOne(id).exec()
     if (!doc) {
-      throw new Error(`No local "contacts" row "${id}" to update.`)
+      throw new Error(`No local "contacts" resource replica "${id}" to update.`)
     }
     const { data } = doc.toMutableJSON()
     const cipherForRead = this.#ciphers?.contacts
@@ -1705,15 +1781,15 @@ export class BrowserStore {
       writerId,
       contact
     }
-    // Re-encrypt in place through the cipher's update path: it keeps the row's
-    // existing id verbatim (binding the envelope to the true resource id --
-    // including a legacy uuid row id) and advances the EDV `sequence` from the
-    // prior envelope, then re-stamp the epoch so replication pushes the current
-    // `Key-Epoch` for the rewritten body. With no cipher the head stays
-    // plaintext. A cipher over a plaintext prior row is refused: a fresh
-    // `encrypt` would mint its own id and bind it as `was.resource` while the
-    // write goes to this row id, an envelope a Collection-handle read refuses
-    // as swapped.
+    // Re-encrypt in place through the cipher's update path: it keeps the
+    // resource replica's existing id verbatim (binding the envelope to the true
+    // resource id -- including a legacy uuid one) and advances the EDV
+    // `sequence` from the prior envelope, then re-stamp the epoch so
+    // replication pushes the current `Key-Epoch` for the rewritten body. With
+    // no cipher the head stays plaintext. A cipher over a plaintext prior
+    // resource replica is refused: a fresh `encrypt` would mint its own id and
+    // bind it as `was.resource` while the write goes to this resource id, an
+    // envelope a Collection-handle read refuses as swapped.
     if (!cipherForRead) {
       await this.#updateDoc({
         logicalKey: 'contacts',
@@ -1725,7 +1801,7 @@ export class BrowserStore {
     if (!cipherForRead.encryptUpdate || !isEncryptedEnvelope(data)) {
       throw new Error(
         `Cannot update contact "${id}": its stored head is not an encrypted ` +
-          'envelope, so it cannot be re-encrypted under its own row id.'
+          'envelope, so it cannot be re-encrypted under its own resource id.'
       )
     }
     const { envelope, epoch } = await cipherForRead.encryptUpdate({
@@ -1743,7 +1819,8 @@ export class BrowserStore {
   }
 
   /**
-   * Removes a contact's row (a soft delete; replication pushes the tombstone).
+   * Removes a contact's resource replica (a soft delete; replication pushes the
+   * tombstone).
    *
    * @param options {object}
    * @param options.id {string}
@@ -1771,78 +1848,85 @@ export class BrowserStore {
   }: {
     revision: ContactRevisionPayload
   }): Promise<void> {
-    // Content-addressed under encryption (the cipher's envelope-hash id keys the
-    // row); the passed `id` is only the plaintext-store key, so a plaintext
-    // revision gets a fresh uuid. The epoch is now stamped too (via
-    // {@link _insertEncrypted}), matching the other encrypted writers.
-    const { rowId } = await this.#insertEncrypted({
+    // Content-addressed under encryption (the cipher's envelope-hash id keys
+    // the resource replica); the passed `id` is only the plaintext-store key,
+    // so a plaintext revision gets a fresh uuid. The epoch is now stamped too
+    // (via {@link _insertEncrypted}), matching the other encrypted writers.
+    const { resourceId } = await this.#insertEncrypted({
       logicalKey: 'contactsHistory',
       id: uuidv7(),
       data: revision as unknown as Json
     })
-    await this.#indexContactRevision({ rowId, contactId: revision.contactId })
+    await this.#indexContactRevision({
+      resourceId,
+      contactId: revision.contactId
+    })
   }
 
   /**
-   * Records one history row's `rowId -> contactId` projection in the local-only
-   * index, best-effort: the index is a read accelerator, so a failure here must
-   * never fail the revision write -- the row simply gets decrypted once by a
-   * later read, which backfills it.
+   * Records one history resource replica's `resourceId -> contactId` projection in
+   * the local-only index, best-effort: the index is a read accelerator, so a
+   * failure here must never fail the revision write -- the resource replica
+   * simply gets decrypted once by a later read, which backfills it.
    *
-   * The mapping is permanently valid: history rows are content-addressed and
-   * immutable, so a row id names one envelope, hence one revision, forever. An
-   * index row whose history row has since disappeared is harmless -- reads walk
-   * the history rows and consult the index, never the other way round.
+   * The mapping is permanently valid: history resource replicas are
+   * content-addressed and immutable, so a resource id names one envelope, hence
+   * one revision, forever. An index entry whose history resource replica has
+   * since disappeared is harmless -- reads walk the history resource replicas
+   * and consult the index, never the other way round.
    *
    * @param options {object}
-   * @param options.rowId {string}
+   * @param options.resourceId {string}
    * @param options.contactId {string}
    * @returns {Promise<void>}
    */
   async #indexContactRevision({
-    rowId,
+    resourceId,
     contactId
   }: {
-    rowId: string
+    resourceId: string
     contactId: string
   }): Promise<void> {
     try {
       await this.#contactsHistoryIndex?.insertIfNotExists({
-        id: rowId,
+        id: resourceId,
         contactId
       })
     } catch (err) {
-      log.warn('Failed to index contacts-history row', { rowId, err })
+      log.warn('Failed to index contacts-history resource replica', {
+        resourceId,
+        err
+      })
     }
   }
 
   /**
    * Lists a single contact's revision history, most recent first -- ordered by
    * the logical `timestamp` each revision payload carries (`writerId`
-   * descending breaks a tie), never by local row insertion order, so a history
-   * whose rows arrived out of order still reads chronologically
+   * descending breaks a tie), never by local insertion order, so a history
+   * whose resource replicas arrived out of order still reads chronologically
    * ({@link compareContactRevisionsNewestFirst}).
    *
    * `contacts-history` is append-only and grows without bound, so this read
    * does not decrypt it: the local-only projection index
-   * ({@link contactsHistoryIndexSchema}) answers "which contact does this row
-   * belong to?" in plaintext, and a row the index attributes to another
-   * contact is skipped with zero cryptographic work. Only rows attributed to
-   * the requested contact -- plus any row not yet in the index -- are
-   * decrypted, and every decrypt of a previously unindexed row backfills the
-   * index with its TRUE `contactId` (matching or not). Fresh revisions are
-   * indexed at write time, so the amortized cost of a read is one decrypt per
-   * revision of the requested contact, and each historical row is decrypted at
-   * most once ever per browser.
+   * ({@link contactsHistoryIndexSchema}) answers "which contact does this
+   * resource replica belong to?" in plaintext, and a resource replica the index
+   * attributes to another contact is skipped with zero cryptographic work. Only
+   * resource replicas attributed to the requested contact -- plus any not yet
+   * in the index -- are decrypted, and every decrypt of a previously unindexed
+   * resource replica backfills the index with its TRUE `contactId` (matching or
+   * not). Fresh revisions are indexed at write time, so the amortized cost of a
+   * read is one decrypt per revision of the requested contact, and each
+   * historical resource replica is decrypted at most once ever per browser.
    *
-   * Per-row tolerance mirrors {@link #decryptedRows}: a plaintext (legacy or
-   * cipher-less) body passes through; an `UnknownEpochError` row is
-   * skipped uncached AND left unindexed, since it is possibly-fresh data
-   * behind a stale descriptor that must stay retryable after a descriptor
-   * refresh; a `KeyUnwrapError` row (no key for its epoch on this wallet)
-   * is skipped the same way, retryable after a later key grant; an
-   * `IntegrityError` row (a body served under an id it was not sealed for)
-   * is refused under its own warning; any other decrypt failure is warned,
+   * Per-replica tolerance mirrors {@link #decryptedResources}: a plaintext (legacy
+   * or cipher-less) body passes through; an `UnknownEpochError` resource
+   * replica is skipped uncached AND left unindexed, since it is possibly-fresh
+   * data behind a stale descriptor that must stay retryable after a descriptor
+   * refresh; a `KeyUnwrapError` one (no key for its epoch on this wallet) is
+   * skipped the same way, retryable after a later key grant; an
+   * `IntegrityError` one (a body served under an id it was not sealed for) is
+   * refused under its own warning; any other decrypt failure is warned,
    * skipped, and likewise left unindexed.
    *
    * @param options {object}
@@ -1857,19 +1941,19 @@ export class BrowserStore {
     const docs = await this.rxCollection('contactsHistory')
       .find({ sort: [{ updatedAt: 'desc' }] })
       .exec()
-    const indexRows = (await this.#contactsHistoryIndex?.find().exec()) ?? []
-    const contactIdByRow = new Map<string, string>(
-      indexRows.map(row => [row.id, row.contactId])
+    const indexEntries = (await this.#contactsHistoryIndex?.find().exec()) ?? []
+    const contactIdByResource = new Map<string, string>(
+      indexEntries.map(entry => [entry.id, entry.contactId])
     )
     const cipher = this.#ciphers?.contactsHistory
     const decryptCache = this.#cacheFor('contactsHistory')
     // Each needed decrypt is independent, so they run together; the fold below
     // walks the results in document order, which is only the walk order -- the
     // returned revisions are sorted by their logical timestamp at the end.
-    const rows = await Promise.all(
+    const decrypted = await Promise.all(
       docs.map(async doc => {
         const { id, data } = doc.toMutableJSON()
-        const indexed = contactIdByRow.get(id)
+        const indexed = contactIdByResource.get(id)
         if (indexed !== undefined && indexed !== contactId) {
           // The whole win: another contact's revision, skipped undecrypted.
           return { id, skipped: true }
@@ -1894,8 +1978,8 @@ export class BrowserStore {
       })
     )
     const revisions: ContactRevisionPayload[] = []
-    const backfill: Array<{ rowId: string; contactId: string }> = []
-    for (const { id, skipped, plaintext, indexed, err } of rows) {
+    const backfill: Array<{ resourceId: string; contactId: string }> = []
+    for (const { id, skipped, plaintext, indexed, err } of decrypted) {
       if (skipped) {
         continue
       }
@@ -1904,12 +1988,15 @@ export class BrowserStore {
         if (failure === 'unknown-epoch') {
           // Possibly-fresh data behind a stale descriptor: skip it uncached and
           // unindexed so a descriptor refresh can pick it up on a later read.
-          log.warn('Skipping unknown-epoch contactsHistory row', { id, err })
+          log.warn('Skipping unknown-epoch contactsHistory resource replica', {
+            id,
+            err
+          })
         } else if (failure === 'no-epoch-key') {
-          // Not a recipient of this row's key epoch: skip it uncached and
-          // unindexed, so a later key grant can still surface it.
+          // Not a recipient of this resource replica's key epoch: skip it
+          // uncached and unindexed, so a later key grant can still surface it.
           log.warn(
-            'Skipping contactsHistory row: this wallet is not a recipient ' +
+            'Skipping contactsHistory resource replica: this wallet is not a recipient ' +
               'of its key epoch',
             { id, err }
           )
@@ -1917,12 +2004,15 @@ export class BrowserStore {
           // The host served a body that does not verify against the id it was
           // read under: skip it uncached and unindexed.
           log.warn(
-            'Refusing a contactsHistory row whose body failed its integrity ' +
+            'Refusing a contactsHistory resource replica whose body failed its integrity ' +
               'check',
             { readUnderId: id, err }
           )
         } else {
-          log.warn('Skipping undecryptable contactsHistory row', { id, err })
+          log.warn('Skipping undecryptable contactsHistory resource replica', {
+            id,
+            err
+          })
         }
         continue
       }
@@ -1933,7 +2023,7 @@ export class BrowserStore {
         plaintext as unknown as ContactRevisionPayload
       )
       if (indexed === undefined && revision.contactId) {
-        backfill.push({ rowId: id, contactId: revision.contactId })
+        backfill.push({ resourceId: id, contactId: revision.contactId })
       }
       if (revision.contactId === contactId) {
         revisions.push(revision)
@@ -1947,22 +2037,24 @@ export class BrowserStore {
   }
 
   /**
-   * Lists every contact's revisions in one pass, in no particular order --
-   * the whole-collection read the migration import's held-content snapshot
-   * takes once, in place of one read per archived revision. Every row is
+   * Lists every contact's revisions in one pass, in no particular order -- the
+   * whole-collection read the migration import's held-content snapshot takes
+   * once, in place of one read per archived revision. Every resource replica is
    * decrypted (through the session decrypt cache), with
-   * {@link #decryptedRows}'s per-row tolerance; the plaintext row-to-contact
-   * index is neither consulted nor backfilled here, since the caller wants
-   * every contact's rows.
+   * {@link #decryptedResources}'s per-replica tolerance; the plaintext
+   * resource-to-contact index is neither consulted nor backfilled here, since
+   * the caller wants every contact's resource replicas.
    *
    * @returns {Promise<Array<ContactRevisionPayload>>}
    */
   async listAllContactRevisions(): Promise<Array<ContactRevisionPayload>> {
-    const { entries, unknownEpochRowIds } = await this.#decryptedRows({
-      logicalKey: 'contactsHistory',
-      sort: 'desc'
-    })
-    this.#unknownEpochContactsHistory = unknownEpochRowIds.length
+    const { entries, unknownEpochResourceIds } = await this.#decryptedResources(
+      {
+        logicalKey: 'contactsHistory',
+        sort: 'desc'
+      }
+    )
+    this.#unknownEpochContactsHistory = unknownEpochResourceIds.length
     return entries.map(({ data }) =>
       upgradeContactRevisionPayload(data as unknown as ContactRevisionPayload)
     )
@@ -1977,10 +2069,10 @@ export class BrowserStore {
    */
   #clearCaches(): void {
     this.#decryptCache.clear()
-    this.#credentialCidByRow.clear()
+    this.#credentialCidByResource.clear()
     this.#credentialCidIndex.clear()
     this.#credentialsIndexed = false
-    this.#appKeyCidByRow.clear()
+    this.#appKeyCidByResource.clear()
   }
 
   /**

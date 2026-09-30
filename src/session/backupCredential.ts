@@ -8,7 +8,7 @@
  * The establishment (`establishBackupCredential`) is the export ceremony's
  * first stage and its pivot. Its order is entry-first, the passkey's shape
  * with one difference. The passkey writes a bare entry and completes it
- * afterwards, since that passkey's own next login rebuilds a bare row; a
+ * afterwards, since that passkey's own next login rebuilds a bare entry; a
  * backup credential has no next login until a restore runs it, and its
  * secret exists in memory alone until the bundle is written. So the entry
  * written before anything is published carries everything Settings needs to
@@ -16,7 +16,7 @@
  * (the unlock Space id, the roster kid, the key-agreement multibase, rung 0's
  * update key, the client DID) and a pre-minted management zcap. The strike
  * tolerates a verification method the document never listed and the Space
- * delete tolerates a 404, so a row left by a crash at any later stage is
+ * delete tolerates a 404, so an entry left by a crash at any later stage is
  * removable. The establishment then runs with its annex rung commit
  * required and placed before the document entry, since a restore login on
  * an uncommitted rung mints a fresh generation and loses every restored
@@ -28,7 +28,7 @@
  * acting session delete the unlock Space, and the ordinary revoke strikes
  * the ladder VM, rotates the user key off the roster wrap, and drops the
  * entry. The bundle that packed the credential then no longer signs in to
- * the live account. It still opens every row it carries offline: removal
+ * the live account. It still opens every Resource it carries offline: removal
  * bounds the live account, not a file already written.
  */
 import { BACKUP_CREDENTIAL_KDF } from '@interop/wallet-core/keyring'
@@ -78,7 +78,7 @@ export class BackupCredentialNotRemovableError extends Error {
 /**
  * Thrown when the backup credential could not be established, after the
  * verify-then-act cleanup ran. The `cause` is the establishment's own
- * failure. A registry row the cleanup could not clear stays listed under
+ * failure. A registry entry the cleanup could not clear stays listed under
  * Settings > Backup credentials, removable there.
  */
 export class BackupCredentialNotEstablishedError extends Error {
@@ -167,18 +167,18 @@ function annexCommitFailureReason(
  * 2. The registry entry, written first and carrying all of that but the
  *    delegation fields. A tear here leaves an entry naming a Space that does
  *    not exist and a key no document lists; its Remove in Settings deletes
- *    nothing and drops the row.
+ *    nothing and drops the entry.
  * 3. The establishment with its annex rung commit required and placed before
  *    the document entry: roster wrap, record, commit, document entry. A tear
  *    inside it, or a failure, runs the verify-then-act cleanup: a standing
  *    record the document lists is a lost-response success and completes the
  *    entry; anything else published is retired; nothing published deletes
- *    the Space and drops the row. A crash the cleanup never runs leaves the
- *    row from step 2, whose Remove converges whatever the establishment
+ *    the Space and drops the entry. A crash the cleanup never runs leaves the
+ *    entry from step 2, whose Remove converges whatever the establishment
  *    reached.
  * 4. The completion write: the delegation fields, and the establishment's
  *    own management zcap in place of the pre-minted one. A completion that
- *    fails to persist is logged and the row from step 2 stands: the
+ *    fails to persist is logged and the entry from step 2 stands: the
  *    credential is standing and the bundle restores through it, the entry
  *    just records no delegation expiry until a login with it refreshes one.
  *
@@ -251,7 +251,7 @@ export async function establishBackupCredential({
 
   // 2-4. The entry-first write, the establishment with its annex rung
   // commit required, and the completion write. A completion that fails to
-  // persist is logged there and the entry-first row stands, as described
+  // persist is logged there and the entry written first stands, as described
   // above.
   try {
     await establishEntryFirstStandingCredential({

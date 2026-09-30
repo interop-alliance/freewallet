@@ -206,6 +206,17 @@ user key orphans nothing. A partial collection fan-out is not a refusal: the
 stranded collections are named in a warn, the only trace on a
 credential-anchored account, which no login sweep revisits.
 
+A collection stranded later in a visit (another client rotated the user
+key, or its fan-out tore) is mended with no second login. The storage
+manager reports each collection it records as stranded, and the session
+binding runs the stranded-collection encounter behind the encounter gate
+(`src/session/menders/encounterSites.ts`). On the ladder kind it renews the
+generation delegation, refreshes the account log, re-reads the roster,
+follows a rotation it is behind, and re-epochs what is still stranded. A
+remembered session leaves the collection to its next login's roster sweep.
+The Dashboard re-lists the credentials after a clean run, and says why the
+list is empty when a run could not mend `private-credentials`.
+
 The composition maps the mend's report onto its typed refusals:
 
 - `unpromoted-account` -- a non-converged establishment arm. A
@@ -312,7 +323,7 @@ stream, so the save fails and does not finish the file.
 The establishment (`establishBackupCredential`) is entry-first, in the
 passkey's shape with one difference. A passkey writes a bare entry and
 completes it afterwards, because that passkey's own next login rebuilds a
-bare row. A backup credential has no next login until a restore runs it, and
+bare entry. A backup credential has no next login until a restore runs it, and
 its secret exists only in memory until the file is written. So its first
 write carries everything Settings needs to remove it with no secret in hand.
 That is the standing fields derivable in memory (the unlock Space id, the
@@ -330,7 +341,7 @@ A failure inside the establishment runs the verify-then-act cleanup the
 passkey add runs, shared through `src/session/standingEstablishment.ts`. The
 record is re-fetched first. A standing record the document lists is a lost
 response to a success, and completes the entry. Otherwise anything published
-is retired first, and then the unlock Space is deleted and the row dropped. The run then fails with `BackupAnnexCommitError` when the
+is retired first, and then the unlock Space is deleted and the entry dropped. The run then fails with `BackupAnnexCommitError` when the
 annex rung commit was what failed, and with
 `BackupCredentialNotEstablishedError` otherwise.
 
@@ -408,17 +419,17 @@ back and checks it the same way. An encrypted collection is ensured bare
 and then gets its first epoch owner-only, the second half of
 `provisionEncryptedCollection` with no grantee. On a collection the run
 creates, it declares the archived index schema through was-client's
-add-only `declareIndexes`. It then builds the row cipher from the
-descriptor and the collection metadata as it then stands. A standing
+add-only `declareIndexes`. It then builds the collection's cipher from
+the descriptor and the collection metadata as it then stands. A standing
 collection that predates the blinded index has no key to declare under, and
-its rows land without index entries. A plaintext collection is ensured
+its Resources land without index entries. A plaintext collection is ensured
 private with its archived attribution. When the run creates it and the
 archive says public, the world-read grant follows.
 
 A collection the account already holds keeps its own settings: its public
 read, its index schema, and its attribution are left as they are. The one
 exception is this migration's own torn create. A standing collection that
-holds no rows and whose `generator` equals the archived one is finished as
+holds no Resources and whose `generator` equals the archived one is finished as
 if the run had created it. A plaintext one gets the archived public read,
 and an encrypted one gets its first epoch and, when it declares none yet,
 the archived index schema. An archive with no `generator` never qualifies,
@@ -427,29 +438,30 @@ run torn between the create and the public read, or between the first epoch
 and the schema, converges on its re-run.
 
 Every other standing collection runs the refusal matrix. It is refused with
-`AppCollectionMismatchError`, and its rows are not written, in these cases.
+`AppCollectionMismatchError`, and its Resources are not written, in these cases.
 An archived plaintext collection is refused over one that stands encrypted.
 Any archive is refused over a collection encrypted under a client-written
 descriptor, which no governing log can take over. An archived encrypted
-collection is refused over a plaintext one holding rows, and finishes an
+collection is refused over a plaintext one holding Resources, and finishes an
 empty one. A plaintext archive is refused when its public read differs from
 the standing one. It is also refused over an empty collection with no
 `encryption` member and no public read. That empty state is also what an
 App Connect encrypted provision torn before its first epoch leaves, and
-plaintext rows landed there would keep the app's provision refused. An
+plaintext Resources landed there would keep the app's provision refused. An
 encrypted archive's public read is ignored, on the create and in the
 checks.
 
-The row cipher rides the same once-per-session unknown-epoch refresh the
-storage browser's app-collection reads use: a snapshot row sealed under an
-epoch the cipher does not know drops the cipher, and the rebuilt one reads
-the verified log head. The server takes a write's `Key-Epoch` as advisory,
-so the write path checks too. Before each row is sealed, the collection's
-served metadata is read and its current epoch compared with the cipher's.
-When they differ, the verified log head is read, and the cipher is rebuilt
-with its schema when that head has moved. A row is therefore sealed under
-the current epoch as of its own write, even after a rotation in another
-tab. `snapshotAppCollection` reads the collection's held rows once per
+The collection's cipher rides the same once-per-session unknown-epoch
+refresh the storage browser's app-collection reads use: a snapshot Resource
+sealed under an epoch the cipher does not know drops the cipher, and the
+rebuilt one reads the verified log head. The server takes a write's
+`Key-Epoch` as advisory, so the write path checks too. Before each Resource
+is sealed, the collection's served metadata is read and its current epoch
+compared with the cipher's. When they differ, the verified log head is read,
+and the cipher is rebuilt with its schema when that head has moved. A
+Resource is therefore sealed under the current epoch as of its own write,
+even after a rotation in another tab. `snapshotAppCollection` reads the
+collection's held Resources once per
 run, at its first Resource, and `importAppCollectionResource` decides each Resource
 against that snapshot: `skipped` for the same identity and content,
 `conflicting` for the same identity under other content, and otherwise a
@@ -498,12 +510,12 @@ remove the backup credential it entered on (`ActingCredentialRemovalError`),
 since every stage would act through the VM being struck. An entry recording
 no management zcap refuses with `BackupCredentialNotRemovableError`. After
 the removal the bundle no longer signs in to the live account. It still
-opens every row it carries offline, so removal bounds the live account and
+opens every Resource it carries offline, so removal bounds the live account and
 not a file already written.
 
 Contacts are reachable in a transient session. The remote-direct backend
 serves all seven contact operations against the remote `contacts` and
-`contacts-history` collections. Head rows are read and written in place
+`contacts-history` collections. Head Resources are read and written in place
 under compare-and-swap on the served ETag, and a lost race re-reads the
 fresh head and re-applies the edit, bounded to a few attempts. Revisions
 append content-addressed to `contacts-history`, the shape a local replica's

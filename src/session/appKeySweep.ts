@@ -6,38 +6,38 @@
  * They are deleted, never moved. An app key's value is the seed it carries, and
  * leaving one among the ordinary credentials keeps two paths open onto that
  * seed -- a world-readable public link, and a share of the credentials
- * collection. Copying the rows across would preserve each app's identity but
- * also preserve whatever a stale copy of the old row exposes, so the accepted
- * outcome is that an affected app reconnects through the ordinary App Connect
- * flow and is treated as a first run.
+ * collection. Copying the Resources across would preserve each app's identity
+ * but also preserve whatever a stale copy of the old Resource exposes, so the
+ * accepted outcome is that an affected app reconnects through the ordinary App
+ * Connect flow and is treated as a first run.
  *
- * Deleting a stranded row also removes the app from the Applications page,
+ * Deleting a stranded Resource also removes the app from the Applications page,
  * which lists connected apps out of the `app-connections` collection alone --
  * so the delete destroys the surface the user would revoke the app from. The
- * app's live authority is therefore retired BEFORE the row goes, through the
- * one sequence `revokeAppAccess` also runs (`revokeAppAuthority`: rotate the
- * app out of its collections' key epochs and revoke those pull-axis grants,
- * then revoke the remaining recorded grants). A stage that does not fully
- * land throws, and the row is left for the next login. Without that, an app's
+ * app's live authority is therefore retired BEFORE the Resource goes, through
+ * the one sequence `revokeAppAccess` also runs (`revokeAppAuthority`: rotate
+ * the app out of its collections' key epochs and revoke those pull-axis grants,
+ * then revoke the remaining recorded grants). A stage that does not fully land
+ * throws, and the Resource is left for the next login. Without that, an app's
  * delegated zcaps would stand until their TTL expired and it would stay a key
  * epoch recipient indefinitely, with nothing left to revoke it from.
  *
  * Retraction of a world-readable public copy is the delete path's job. The
- * sweep has it consult the remote `public-credentials` collection whenever
- * one is configured (`consultRemote`): the local replica may not have pulled the public copy yet (a
- * fresh enrollment, or replication sitting in retry backoff), so its rows
- * cannot show that no world-readable copy of a seed exists. A remote that
- * cannot be consulted refuses the delete, and the row is left for the next
- * login.
+ * sweep has it consult the remote `public-credentials` collection whenever one
+ * is configured (`consultRemote`): the local replica may not have pulled the
+ * public copy yet (a fresh enrollment, or replication sitting in retry
+ * backoff), so its resource replicas cannot show that no world-readable copy of
+ * a seed exists. A remote that cannot be consulted refuses the delete, and the
+ * Resource is left for the next login.
  *
- * A second pass covers the public copies with NO private row: a pre-upgrade
- * app key deleted through the delete dialog's "keep public copy" choice left
- * exactly that, and the private-row pass can never see it. Those copies are
- * retracted on their own.
+ * A second pass covers the public copies with NO private Resource: a
+ * pre-upgrade app key deleted through the delete dialog's "keep public copy"
+ * choice left exactly that, and the private-Resource pass can never see it.
+ * Those copies are retracted on their own.
  *
  * The sweep is idempotent and cheap on a healthy account: one credential list,
  * one public-copy listing whose bodies are fetched only for the copies with no
- * private row, a filter, and no writes when nothing matches.
+ * private Resource, a filter, and no writes when nothing matches.
  */
 import {
   appKeyOrigin,
@@ -84,47 +84,48 @@ async function isStrandedAppKey(
  * Deletes every app key still sitting in `private-credentials`, retiring the
  * app's live authority first.
  *
- * Revoke before delete, for the reason `revokeAppAccess` states: the row is
- * the app's only listing on the Applications page, so once it is gone there is
- * nothing left to revoke the app from, and its grants would stand until they
- * expired. A row whose subject DID or origin is missing has no revocable
+ * Revoke before delete, for the reason `revokeAppAccess` states: the Resource
+ * is the app's only listing on the Applications page, so once it is gone there
+ * is nothing left to revoke the app from, and its grants would stand until they
+ * expired. A Resource whose subject DID or origin is missing has no revocable
  * identity to look up and is deleted directly.
  *
- * A row whose revocation does not fully land is left in place: a rotation
+ * A Resource whose revocation does not fully land is left in place: a rotation
  * reporting failures, or a grant revocation that throws (`revokeAppGrants`
  * throws for any refused POST, a plain `ValidationError` included, after its
- * sibling POSTs settle), skips that row's delete. The sweep is unattended, so
- * an app that is only half rotated must stay retryable at the next login
+ * sibling POSTs settle), skips that Resource's delete. The sweep is unattended,
+ * so an app that is only half rotated must stay retryable at the next login
  * rather than lose its revocation handle -- deliberately stricter than the
- * interactive `revokeAppAccess`, where a user sees the outcome. The
- * storage manager's own verified-document reading, resolved lazily when a
- * row needs revoking, is what keeps a dead grant from wedging its row
- * forever: it lets `revokeAppGrants` skip the POST for a grant the verified
- * document already reads as dead (expired, orphaned, or chained under a
- * rotted parent delegation) instead of having the server refuse it at every
- * login; a read that throws degrades to POSTing everything unexpired. Delete
- * failures (a public copy that cannot be retracted, a network
- * failure) are logged and skipped the same way, so one bad row cannot strand
- * every later seed until some future login. The sweep is idempotent, so the
- * skipped rows are retried at the next one.
+ * interactive `revokeAppAccess`, where a user sees the outcome. The storage
+ * manager's own verified-document reading, resolved lazily when a Resource
+ * needs revoking, is what keeps a dead grant from wedging its Resource forever:
+ * it lets `revokeAppGrants` skip the POST for a grant the verified document
+ * already reads as dead (expired, orphaned, or chained under a rotted parent
+ * delegation) instead of having the server refuse it at every login; a read
+ * that throws degrades to POSTing everything unexpired. Delete failures (a
+ * public copy that cannot be retracted, a network failure) are logged and
+ * skipped the same way, so one bad Resource cannot strand every later seed
+ * until some future login. The sweep is idempotent, so the skipped Resources
+ * are retried at the next one.
  *
  * The activity history both revocation calls scan, and the Space collection
  * listing the rotation derives its candidates from, are each fetched once
- * across the whole sweep, and only when at least one row needs revoking.
+ * across the whole sweep, and only when at least one Resource needs revoking.
  *
  * The orphan pass then retracts every app-key public copy that has no private
- * row -- a public copy the user kept through the delete dialog's "keep public
- * copy" choice, which no private-row delete will ever reach. It runs the same
- * revoke-before-delete pair when the public copy states a revocable identity
- * (an app whose row is gone still has live grants), and its per-copy failures
- * are logged and skipped like the rows'. A public-copy listing that throws --
- * an unreadable remote collection is not an empty one -- is logged and leaves
- * the whole pass for the next login, without disturbing the private one.
+ * Resource -- a public copy the user kept through the delete dialog's "keep
+ * public copy" choice, which no private-Resource delete will ever reach. It
+ * runs the same revoke-before-delete pair when the public copy states a
+ * revocable identity (an app whose Resource is gone still has live grants), and
+ * its per-copy failures are logged and skipped like the Resources'. A
+ * public-copy listing that throws -- an unreadable remote collection is not an
+ * empty one -- is logged and leaves the whole pass for the next login, without
+ * disturbing the private one.
  *
  * @param options {object}
  * @param options.storage {StorageManager}
  * @returns {Promise<{ deleted: number; retracted: number }>}   how many
- *   private rows were deleted, and how many orphan public copies retracted
+ *   private Resources were deleted, and how many orphan public copies retracted
  */
 export async function sweepStrandedAppKeys({
   storage
@@ -156,8 +157,8 @@ export async function sweepStrandedAppKeys({
       if (origin && subjectDid) {
         items ??= await storage.listHistoryItems()
         collections ??= await storage.listCollections()
-        // Throws when a stage did not fully land, which leaves the row in
-        // place for the next login.
+        // Throws when a stage did not fully land, which leaves the Resource
+        // in place for the next login.
         await revokeAppAuthority({
           storage,
           origin,
@@ -168,7 +169,7 @@ export async function sweepStrandedAppKeys({
       }
       // Through the ordinary delete path, so a stranded key that was ever
       // published as a public link has that world-readable copy retracted
-      // first -- the one case where the row's seed is already exposed. The
+      // first -- the one case where the Resource's seed is already exposed. The
       // remote collection is consulted too: the local replica may not have
       // pulled the copy yet.
       await storage.deleteCredential({ cid, consultRemote: true })
@@ -191,11 +192,11 @@ export async function sweepStrandedAppKeys({
 }
 
 /**
- * Retracts every app-key public copy with no private row behind it.
+ * Retracts every app-key public copy with no private Resource behind it.
  *
- * The bodies of the public copies that DO have a private row are never
- * fetched: `deleteCredential` retracts those as part of the row's delete, so
- * the pass costs one listing plus a read per genuinely orphaned copy.
+ * The bodies of the public copies that DO have a private Resource are never
+ * fetched: `deleteCredential` retracts those as part of the Resource's delete,
+ * so the pass costs one listing plus a read per genuinely orphaned copy.
  *
  * @param options {object}
  * @param options.storage {StorageManager}

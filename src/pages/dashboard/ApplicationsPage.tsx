@@ -102,9 +102,9 @@ export function ApplicationsPage() {
     useState<ConnectedAgent | null>(null)
   const [revoking, setRevoking] = useState(false)
   const [revokeError, setRevokeError] = useState(false)
-  // Rows the app-key scan had to skip: undecryptable envelopes (purgeable
-  // garbage) and rows in a key epoch this session holds no key for (real data,
-  // never purged -- an app's only identity lives in this collection).
+  // Resources the app-key scan had to skip: undecryptable envelopes (purgeable
+  // garbage) and Resources in a key epoch this session holds no key for (real
+  // data, never purged -- an app's only identity lives in this collection).
   const [undecryptableAppKeys, setUndecryptableAppKeys] = useState(0)
   const [noEpochKeyAppKeys, setNoEpochKeyAppKeys] = useState(0)
   // A failed purge shows the same warning a failed load does. It is its own

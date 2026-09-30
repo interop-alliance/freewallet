@@ -1,6 +1,7 @@
 /**
- * The one teardown for a session that will not be entered again: background
- * replication stopped, then the local replica handle released. Shared by the
+ * The one teardown for a session that will not be entered again: its
+ * disposal signal aborted, background replication stopped, then the local
+ * replica handle released. Shared by the
  * auth store's logout and account switch and by the setup store's discard of
  * an abandoned run's session, so the order (replication before the database)
  * lives in one place.
@@ -8,6 +9,7 @@
 import type { Session } from '@/types/auth'
 import { syncController } from '@/stores/syncController'
 import { createLogger } from '@/lib/log'
+import { disposeSession } from '@/session/sessionLifecycle'
 
 const log = createLogger('fw:session:teardown')
 
@@ -21,6 +23,11 @@ const log = createLogger('fw:session:teardown')
  * @returns {Promise<void>}
  */
 export async function discardSession(session: Session | null): Promise<void> {
+  // Aborted first, so work still running for the session writes nothing
+  // back while the teardown below runs.
+  if (session) {
+    disposeSession({ session })
+  }
   try {
     await syncController.stop()
   } catch (err) {
@@ -52,6 +59,7 @@ export async function closeUnenteredSession(
   if (!session) {
     return
   }
+  disposeSession({ session })
   try {
     await session.storage.close()
   } catch (err) {

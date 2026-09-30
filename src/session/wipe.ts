@@ -16,13 +16,13 @@
  * `BrowserStore.wipeStorage`).
  *
  * What no enumeration reaches, honestly: forensic recoverability of deleted
- * IndexedDB data (the plaintext `public-credentials` rows included), the
- * CHAPI popup's partitioned third-party buckets, and the mediator-origin
- * (authn.io) "a wallet handler is registered here" bit -- only clearing the
- * browser profile removes those. Global UI prefs (theme, language) are not
- * account state and stay out; the global `writerId` is cleared only when the
- * consumer asks (the forget grade), since it is browser-global rather than
- * account-scoped.
+ * IndexedDB data (the plaintext `public-credentials` resource replicas
+ * included), the CHAPI popup's partitioned third-party buckets, and the
+ * mediator-origin (authn.io) "a wallet handler is registered here" bit -- only
+ * clearing the browser profile removes those. Global UI prefs (theme, language)
+ * are not account state and stay out; the global `writerId` is cleared only
+ * when the consumer asks (the forget grade), since it is browser-global rather
+ * than account-scoped.
  */
 import { deriveSpaceId } from '@interop/was-client/sync'
 import { ceremonyEvents, type CeremonyEmitter } from '@interop/wallet-core'

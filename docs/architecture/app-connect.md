@@ -74,20 +74,21 @@ than merely read-only. So are `key-map` and `unlock-methods`. `key-map`'s
 user key roster carries a passphrase-derived key beside a wrap of the user
 key, so a read of it would be an offline guessing oracle, and
 `unlock-methods` is the account's credential registry. An idempotent
-login-time sweep deletes app-key rows stranded in `private-credentials` and
-retracts app-key public copies left with no private row behind them; the
+login-time sweep deletes app-key credentials stranded in
+`private-credentials` and retracts app-key public copies left with no private
+credential behind them; the
 affected app reconnects as a first run.
 
 Match and consent-preview candidates come from
 `StorageManager.listAppKeys()`, so ordinary credentials stay out of the
-match. It reports what the scan skipped: rows whose key epoch is unknown
-after the one descriptor refresh, rows in a known epoch this session holds
-no wrap for, and envelopes that will not decrypt at all. A scan that found
-nothing but skipped such rows refuses to mint, since a fresh mint would
-orphan the app's prior identity. Undecryptable rows are purgeable from the
-Applications page; the other two kinds stay unpurged.
+match. It reports what the scan skipped: Resources whose key epoch is
+unknown after the one descriptor refresh, Resources in a known epoch this
+session holds no wrap for, and envelopes that will not decrypt at all. A
+scan that found nothing but skipped such Resources refuses to mint, since a
+fresh mint would orphan the app's prior identity. Undecryptable Resources are purgeable from
+the Applications page; the other two kinds stay unpurged.
 
-Which bucket a row lands in is decided by the error's NAME rather than by
+Which bucket a Resource lands in is decided by the error's NAME rather than by
 `instanceof`, through `isUnknownEpochError` and `isKeyUnwrapError`
 (`@interop/was-client/sync`, the latter also on `/edv`). The cipher is an
 injected seam, so a second resolved copy of `@interop/was-client` throws a
@@ -364,8 +365,8 @@ grants one axis without the other.
 shareable standard collections: every `WALLET_STANDARD_COLLECTIONS` entry
 whose roster spec carries `shareable: true`, so today `private-credentials`,
 `contacts`, and `contacts-history`. `app-connections` is encrypted but never
-shareable, its rows carrying app seeds. Neither is `wallet-activity`. Its
-Login and collection-share rows carry each delegated capability verbatim,
+shareable, its Resources carrying app seeds. Neither is `wallet-activity`. Its
+Login and collection-share activities carry each delegated capability verbatim,
 proof and capability chain included, so one reader of it would learn every
 connected app and agent, with its targets, verbs, and expiry, and would hold
 the capability documents themselves. The flag gates new shares only. A

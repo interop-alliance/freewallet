@@ -277,10 +277,10 @@ test('the minted app key lands in app-connections, never on the credentials list
 }, testInfo) => {
   test.slow()
 
-  // App keys live in their own `app-connections` collection: each row carries
-  // that app's private seed, so it must stay out of every credential-wide
-  // surface (the dashboard, the credential detail route, public links,
-  // shares).
+  // App keys live in their own `app-connections` collection: each Resource
+  // carries that app's private seed, so it must stay out of every
+  // credential-wide surface (the dashboard, the credential detail route, public
+  // links, shares).
   const { passphrase } = await signupViaWizard(page, testInfo)
   const token = `${Date.now()}-w${testInfo.workerIndex}`
 

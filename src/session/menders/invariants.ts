@@ -91,7 +91,8 @@ const DECLARATIONS: ReadonlyArray<
   // converger: wallet-core's driver (`keys/userKeyCascade.ts`), called by
   // `cascadeCollectionsToUserKey` (`src/session/userKeyCascade.ts`), from the
   // remembered chain's sweep and the transient chain's collection fan-out.
-  // Also runs in the remote-direct CHAPI popup.
+  // Also runs in the remote-direct CHAPI popup, and mid-visit from the
+  // stranded-collection encounter (`STRANDED_COLLECTION_ENCOUNTER`).
   {
     id: 'collection-epochs-name-the-current-user-key',
     statement:
@@ -101,7 +102,8 @@ const DECLARATIONS: ReadonlyArray<
     triggers: [
       'remembered-login-chain',
       'transient-login-chain',
-      'ceremony-tail'
+      'ceremony-tail',
+      'encounter'
     ],
     ceremonies: [
       'client-revocation',
@@ -122,14 +124,16 @@ const DECLARATIONS: ReadonlyArray<
   },
   // 4
   // converger: `repairStaleUnlockRegistrySeal`
-  // (`src/session/registryReseal.ts`).
+  // (`src/session/registryReseal.ts`), on both chains and from the Settings
+  // stale-seal encounter (`REGISTRY_SEAL_ENCOUNTER`); the account deletion
+  // walk runs the escrow re-seal in place.
   {
     id: 'unlock-registry-opens-under-the-current-user-key',
     statement:
       "The unlock-methods registry record is sealed to the account's current user key generation.",
     standsOn: ['ladder-anchored', 'enrolled'],
     authority: 'account',
-    triggers: ['remembered-login-chain', 'transient-login-chain'],
+    triggers: ['remembered-login-chain', 'transient-login-chain', 'encounter'],
     ceremonies: [
       'client-revocation',
       'recovery-code-spend',
@@ -192,10 +196,11 @@ const DECLARATIONS: ReadonlyArray<
       "The registry lists a passphrase entry whenever the account can be unlocked by one, with that credential's current fields.",
     standsOn: ['ladder-anchored', 'enrolled'],
     authority: 'account',
-    triggers: ['remembered-login-chain', 'transient-login-chain'],
+    triggers: ['remembered-login-chain', 'transient-login-chain', 'encounter'],
     ceremonies: [],
     evidence: ['verified-registry'],
-    // The CHAPI popup stands this pass down: it writes no registry.
+    // The CHAPI popup stands the chain pass down: it writes no registry. The
+    // Settings encounter site does not evaluate this.
     when: (route: { popup: boolean }) => !route.popup
   },
   // 8
@@ -337,12 +342,19 @@ const DECLARATIONS: ReadonlyArray<
       "The pointed generation's embedded delegation is unexpired and signed by a key the verified account document still lists.",
     standsOn: ['ladder-anchored', 'enrolled'],
     authority: 'account',
-    triggers: ['remembered-login-chain', 'login-routing', 'ceremony-tail'],
+    triggers: [
+      'remembered-login-chain',
+      'login-routing',
+      'ceremony-tail',
+      'encounter'
+    ],
     ceremonies: ['client-revocation', 'unlock-credential-rotation'],
     // Expiry is the local clock against the embedded delegation; the signer
     // check reads the verified account document under the visit's pins.
     evidence: ['verified-log', 'local-clock'],
-    // The CHAPI popup stands this pass down: it writes no registry.
+    // The remembered chain's heal stands down in the CHAPI popup, which
+    // renews its delegation on the grant path instead. The encounter sites
+    // (the grant path and the deletion walk) do not evaluate this.
     when: (route: { popup: boolean }) => !route.popup
   },
   // 17
@@ -354,10 +366,11 @@ const DECLARATIONS: ReadonlyArray<
       "The acting credential's registry entry carries an unexpired management zcap for its own unlock Space.",
     standsOn: ['ladder-anchored'],
     authority: 'ladder',
-    triggers: ['transient-login-chain'],
+    triggers: ['transient-login-chain', 'encounter'],
     ceremonies: [],
     evidence: ['verified-registry'],
-    // The CHAPI popup stands this pass down: it writes no registry.
+    // The CHAPI popup stands the chain pass down: it writes no registry. The
+    // Settings encounter site does not evaluate this.
     when: (route: { popup: boolean }) => !route.popup
   },
   // 18
@@ -393,7 +406,7 @@ const DECLARATIONS: ReadonlyArray<
   {
     id: 'app-keys-live-only-in-app-connections',
     statement:
-      'No app-key credential remains in `private-credentials`, and no world-readable app-key copy stands with no private row behind it.',
+      'No app-key credential remains in `private-credentials`, and no world-readable app-key copy stands with no private Resource behind it.',
     standsOn: ['ladder-anchored', 'enrolled'],
     authority: 'account',
     triggers: ['remembered-login-chain'],

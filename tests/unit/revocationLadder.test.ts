@@ -155,30 +155,42 @@ vi.mock('@/session/annexReach', () => ({
   })
 }))
 
-vi.mock('@/session/userKeyAdoption', () => ({
-  // Both adoptions resolve the visit's authority off the live profile stamp,
-  // so the recorded value is that stamp at the moment each ran.
-  adoptRotatedUserKey: vi.fn(
-    async ({
-      session
-    }: {
-      session: { profile: { invocationCapability?: unknown } }
-    }) => {
-      state.calls.push('adoptRotatedUserKey')
-      state.adoptedCapabilities.push(session.profile.invocationCapability)
-    }
-  ),
-  adoptRotatedUserKeyInBand: vi.fn(
-    async ({
-      session
-    }: {
-      session: { profile: { invocationCapability?: unknown } }
-    }) => {
-      state.calls.push('adoptRotatedUserKeyInBand')
-      state.adoptedCapabilities.push(session.profile.invocationCapability)
-    }
+vi.mock('@/session/userKeyAdoption', () => {
+  const withOwnUserKeyRotation = vi.fn(
+    async ({ run }: { run: () => Promise<unknown> }) => await run()
   )
-}))
+  return {
+    withOwnUserKeyRotation,
+    heldAsOwnUserKeyRotation:
+      (body: (options: { session: unknown }) => Promise<unknown>) =>
+      async (options: { session: unknown }) =>
+        await withOwnUserKeyRotation({
+          run: () => body(options)
+        }),
+    // Both adoptions resolve the visit's authority off the live profile stamp,
+    // so the recorded value is that stamp at the moment each ran.
+    adoptRotatedUserKey: vi.fn(
+      async ({
+        session
+      }: {
+        session: { profile: { invocationCapability?: unknown } }
+      }) => {
+        state.calls.push('adoptRotatedUserKey')
+        state.adoptedCapabilities.push(session.profile.invocationCapability)
+      }
+    ),
+    adoptRotatedUserKeyInBand: vi.fn(
+      async ({
+        session
+      }: {
+        session: { profile: { invocationCapability?: unknown } }
+      }) => {
+        state.calls.push('adoptRotatedUserKeyInBand')
+        state.adoptedCapabilities.push(session.profile.invocationCapability)
+      }
+    )
+  }
+})
 
 vi.mock('@/session/userKeyCascade', () => ({
   cascadeCollections: vi.fn(() => ({

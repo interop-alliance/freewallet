@@ -460,6 +460,34 @@ export function sessionAuthorityKind({ session }: { session: Session }):
 }
 
 /**
+ * The key-agreement key this session holds a user key roster wrap for, and
+ * so the key every roster read and escrow unwrap of this session uses: an
+ * enrolled client's own identity key, or on the ladder kind the standing
+ * credential's key. A transient session's `profile.clientKeyAgreementKey` is
+ * the per-visit key, which no roster epoch wraps to, so it is never the
+ * answer there. `undefined` when the session is of neither kind.
+ *
+ * @param options {object}
+ * @param options.session {Session}
+ * @returns {IKeyAgreementKey | undefined}
+ */
+export function rosterUnwrapKey({
+  session
+}: {
+  session: Session
+}): IKeyAgreementKey | undefined {
+  const authority = sessionAuthorityKind({ session })
+  if (authority?.kind === 'enrolled') {
+    return authority.clientKeyAgreementKey
+  }
+  if (authority?.kind === 'ladder') {
+    return authority.standingUnlock.standingClient.agents
+      .keyAgreementKey as IKeyAgreementKey
+  }
+  return undefined
+}
+
+/**
  * The account-ceremony context for this session, bound to whichever kind it
  * is, or `null` when neither kind's authorities exist.
  *

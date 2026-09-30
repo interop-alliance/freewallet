@@ -120,7 +120,11 @@ import {
   refreshStandingDelegationFields,
   unlockEntryReaderFor
 } from '@/session/unlockMethods'
-import { adoptRotatedUserKeyInBand } from '@/session/userKeyAdoption'
+import {
+  adoptRotatedUserKeyInBand,
+  heldAsOwnUserKeyRotation
+} from '@/session/userKeyAdoption'
+import { disposeSession } from '@/session/sessionLifecycle'
 import { cascadeCollections } from '@/session/userKeyCascade'
 import { createLogger } from '@/lib/log'
 import { wasServiceDescription } from '@/lib/wasService'
@@ -234,7 +238,12 @@ export type ForgetOutcome = ForgetCeremonyOutcome & {
  * @param [options.idb] {IDBFactory}
  * @returns {Promise<ForgetOutcome>}
  */
-export async function forgetThisBrowser({
+export const forgetThisBrowser = heldAsOwnUserKeyRotation(forgetThisBrowserHeld)
+
+/**
+ * The body of {@link forgetThisBrowser}, run with the own-rotation mark held.
+ */
+async function forgetThisBrowserHeld({
   session,
   lastClient = false,
   idb
@@ -466,6 +475,11 @@ export async function forgetThisBrowser({
   } finally {
     invalidateVerifiedLog({ profile: session.profile })
   }
+
+  // The session is done with: abort its disposal signal before the wipe, so
+  // work still running for it (a user key adoption about to persist the
+  // client-key record) cannot write this browser's state back afterward.
+  disposeSession({ session })
 
   // Quiesce first: stop background replication before the replica database
   // goes, so the controller's poll timer does not keep driving reSync()

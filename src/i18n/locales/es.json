@@ -29,7 +29,9 @@
     "type": "Tipo",
     "issuer": "Emisor",
     "noDescription": "Sin descripción",
-    "brand": "Freewallet"
+    "brand": "Freewallet",
+    "rosterWrapLostRemembered": "Este navegador ya no puede abrir las claves de su cuenta. Es posible que se haya desconectado desde otro navegador. Cierre la sesión y vuelva a iniciarla con su frase de contraseña o una llave de acceso.",
+    "rosterWrapLostTransient": "El método de inicio de sesión que usó ya no puede abrir las claves de su cuenta. Es posible que se haya cambiado o eliminado desde otro navegador. Cierre la sesión e iníciela con su frase de contraseña o llave de acceso actual."
   },
   "settings": {
     "title": "Ajustes",
@@ -149,6 +151,7 @@
     "passkeyLoadError": "No se pudieron cargar sus llaves de acceso. Es posible que algunas acciones no estén disponibles.",
     "passkeyRegistryStaleSeal": "Su lista de métodos de desbloqueo está sellada con una clave anterior. Se repara automáticamente en el próximo inicio de sesión desde este navegador.",
     "passkeyRegistryStaleSealTransient": "Su lista de métodos de desbloqueo está sellada con una clave anterior. Se repara automáticamente en el próximo inicio de sesión con su frase de contraseña.",
+    "passkeyRegistryRepairing": "Reparando su lista de métodos de desbloqueo...",
     "passkeyNameLabel": "Nombre de la llave de acceso",
     "passkeyLabelSaved": "Nombre de la llave de acceso guardado.",
     "passkeyCreatedOn": "Agregada el {{date}}",
@@ -493,6 +496,7 @@
     "removeUndecryptable": "Eliminar",
     "undecryptableRemoved_one": "Se eliminó {{count}} credencial no descifrable.",
     "undecryptableRemoved_other": "Se eliminaron {{count}} credenciales no descifrables.",
+    "strandedUnmended": "Sus credenciales están selladas con una clave que esta visita no pudo alcanzar, así que no se pueden mostrar. Volver a iniciar sesión lo reintenta.",
     "integrity_one": "{{count}} credencial no superó su comprobación de integridad y no se muestra. El servidor de almacenamiento devolvió datos que no coinciden con la credencial guardada. La credencial no se ha modificado.",
     "integrity_other": "{{count}} credenciales no superaron su comprobación de integridad y no se muestran. El servidor de almacenamiento devolvió datos que no coinciden con las credenciales guardadas. No se han modificado.",
     "passkeySafety": {

@@ -29,7 +29,9 @@
     "type": "Type",
     "issuer": "Issuer",
     "noDescription": "No description",
-    "brand": "Freewallet"
+    "brand": "Freewallet",
+    "rosterWrapLostRemembered": "This browser can no longer open your account's keys. It may have been disconnected from another browser. Log out, then sign in again with your passphrase or a passkey.",
+    "rosterWrapLostTransient": "The sign-in method you used can no longer open your account's keys. It may have been changed or removed from another browser. Log out, then sign in with your current passphrase or passkey."
   },
   "settings": {
     "title": "Settings",
@@ -149,6 +151,7 @@
     "passkeyLoadError": "Could not load your passkeys. Some passkey actions may be unavailable.",
     "passkeyRegistryStaleSeal": "Your list of unlock methods is sealed to an older key. It is repaired automatically at the next login from this browser.",
     "passkeyRegistryStaleSealTransient": "Your list of unlock methods is sealed to an older key. It is repaired automatically at the next login with your passphrase.",
+    "passkeyRegistryRepairing": "Repairing your list of unlock methods...",
     "passkeyNameLabel": "Passkey name",
     "passkeyLabelSaved": "Passkey name saved.",
     "passkeyCreatedOn": "Added {{date}}",
@@ -493,6 +496,7 @@
     "removeUndecryptable": "Remove",
     "undecryptableRemoved_one": "{{count}} undecryptable credential removed.",
     "undecryptableRemoved_other": "{{count}} undecryptable credentials removed.",
+    "strandedUnmended": "Your credentials are sealed to a key this visit could not catch up to, so they cannot be shown. Logging in again retries.",
     "integrity_one": "{{count}} credential failed its integrity check and is not shown. The storage server returned data that does not match the credential it was stored as. The credential has been left untouched.",
     "integrity_other": "{{count}} credentials failed their integrity check and are not shown. The storage server returned data that does not match the credentials they were stored as. They have been left untouched.",
     "passkeySafety": {

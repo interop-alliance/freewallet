@@ -203,8 +203,8 @@ export type RecipientRotationOutcome = {
 
 /**
  * The activity history as {@link StorageManager.listHistoryItems} lists it:
- * one entry per `wallet-activity` row, keyed by its resource id, plus the
- * count of `wallet-activity` rows that read skipped for any reason.
+ * one entry per `wallet-activity` Resource, keyed by its resource id, plus
+ * the count of `wallet-activity` Resources that read skipped for any reason.
  */
 export type HistoryItems = {
   entries: Array<{ id: string; doc: WalletActivity }>
@@ -306,8 +306,8 @@ async function decryptEnvelope({
   try {
     return {
       // Every synced collection stores JSON, which decrypts to JSON. A binary
-      // or text payload decrypts to a `Blob`, and no synced row is sealed
-      // from one.
+      // or text payload decrypts to a `Blob`, and no synced Resource is
+      // sealed from one.
       value: (await cipher.decrypt({ id, envelope })) as Json,
       unknownEpoch: false
     }
@@ -428,11 +428,11 @@ function clientWrittenDescriptorMessage(collectionId: string): string {
 
 /**
  * An encrypted app collection Resource's identity, as the content migration
- * dedupes on it. A JSON Resource is identified by its payload's own string
- * `id` (was-react rows carry one), or else by the payload's content cid. A
- * bytes Resource (one that decrypts to a `Blob`, chunked or not) is
- * identified by its resource id. The three kinds are prefixed apart, so no
- * value of one kind can match another.
+ * dedupes on it. A JSON Resource is identified by its payload's own string `id`
+ * (was-react's Resources carry one), or else by the payload's content cid. A
+ * bytes Resource (one that decrypts to a `Blob`, chunked or not) is identified
+ * by its resource id. The three kinds are prefixed apart, so no value of one
+ * kind can match another.
  *
  * @param resource {{ json: Json; cid: string } | { resourceId: string }}   the
  *   decrypted JSON payload with its content cid, or a bytes Resource's id
@@ -479,14 +479,14 @@ const ENCRYPTED_COLLECTION_IDS = ENCRYPTED_STANDARD_COLLECTIONS.map(
 
 /**
  * Descriptors for a session with no remote store (a guest, or no WAS server
- * configured). Every encrypted collection still carries a key-epoch roster
- * from birth, so each collection gets a local one-epoch descriptor wrapped to
- * the session's vault KAK alone -- minted on first use and persisted in the
- * session's descriptor cache, scoped by the user's DID in place of a Space
- * id, so a returning local login rebuilds the same epoch and keeps
- * decrypting its own rows. A guest's identity is random per session and its
- * data dies with it, so a guest's persistence strategy supplies an in-memory
- * cache and its descriptors die with the session.
+ * configured). Every encrypted collection still carries a key-epoch roster from
+ * birth, so each collection gets a local one-epoch descriptor wrapped to the
+ * session's vault KAK alone -- minted on first use and persisted in the
+ * session's descriptor cache, scoped by the user's DID in place of a Space id,
+ * so a returning local login rebuilds the same epoch and keeps decrypting its
+ * own resource replicas. A guest's identity is random per session and its data
+ * dies with it, so a guest's persistence strategy supplies an in-memory cache
+ * and its descriptors die with the session.
  *
  * @param options {object}
  * @param options.cache {EncryptionDescriptorCache}   the session's cache
@@ -705,7 +705,7 @@ export class PublicCopyRetractionError extends Error {
  * the archive is plaintext or the reverse, encrypted under a client-written
  * descriptor no log governs, public where a plaintext archive is private or
  * the reverse, or empty with no marker that it was made plaintext. The
- * standing collection is left as it is, and its rows are not imported. See
+ * standing collection is left as it is, and its Resources are not imported. See
  * {@link StorageManager.ensureImportedAppCollection}.
  */
 export class AppCollectionMismatchError extends Error {
@@ -753,6 +753,11 @@ export class StorageManager {
   // because no key epoch names the vault KAK (see `strandsReader`). Rewritten
   // at every cipher (re)build, so it always describes the installed ciphers.
   #strandedCollectionIds: string[]
+  // Told, fire-and-forget and with no argument, whenever a cipher rebuild
+  // records a stranded collection. Set by the session binding after
+  // construction (see `setOnStranded`), since the static factory runs before
+  // the session exists.
+  #onStranded?: () => unknown
   // The provisioning promise from `ensureUserCollections` (fired at session
   // creation), awaited by the read-readiness contract in non-remote-direct mode.
   #provisioning?: Promise<void>
@@ -832,7 +837,7 @@ export class StorageManager {
   // session, by WAS collection id. A Set, since the ids come from a bundle.
   #importCollections = new Set<string>()
   // The ciphers the content migration reads and writes those collections'
-  // rows through, keyed by WAS collection id, each beside the verified
+  // Resources through, keyed by WAS collection id, each beside the verified
   // descriptor it was built from. Each carries the collection's index schema
   // as it stands, so its writes carry the blinded index entries. An
   // unknown-epoch refresh drops the entry, and the next use rebuilds it from
@@ -941,6 +946,45 @@ export class StorageManager {
    */
   get strandedCollectionIds(): string[] {
     return [...this.#strandedCollectionIds]
+  }
+
+  /**
+   * Sets, replaces, or clears the callback a cipher rebuild calls when it
+   * records a stranded collection. The call is fire-and-forget, takes no
+   * argument, and runs after the rebuild has installed its ciphers; a
+   * callback reads {@link strandedCollectionIds} for the candidates. A
+   * throwing or rejecting callback is logged and does not reach the rebuild.
+   *
+   * Strands recorded before a callback is set are not replayed here: the
+   * static factory builds the first ciphers before any session exists. The
+   * binding that sets the callback reads {@link strandedCollectionIds} to
+   * learn of them.
+   *
+   * @param callback {Function | undefined}   `() => unknown`, or `undefined`
+   *   to clear it
+   * @returns {void}
+   */
+  setOnStranded(callback: (() => unknown) | undefined): void {
+    this.#onStranded = callback
+  }
+
+  /**
+   * Tells the stranded callback, when one is set, that a rebuild just
+   * recorded a stranded collection. Deferred to a microtask so the callback
+   * never runs inside the rebuild that reported it.
+   *
+   * @returns {void}
+   */
+  #reportStranded(): void {
+    const callback = this.#onStranded
+    if (!callback) {
+      return
+    }
+    void Promise.resolve()
+      .then(() => callback())
+      .catch((err: unknown) => {
+        log.warn('The stranded-collection callback failed', { err })
+      })
   }
 
   /**
@@ -1296,7 +1340,7 @@ export class StorageManager {
       // The collection spec's id mint ('random' for the mutable
       // contacts head, 'content' for the content-addressed
       // collections), so a minted id follows the spec and can key
-      // the row.
+      // the Resource.
       idDerivation,
       encryption: descriptor
     })
@@ -1350,11 +1394,11 @@ export class StorageManager {
   /**
    * A {@link DocCipher} that refuses every operation: the stand-in for an
    * encrypted collection whose descriptor could not be acquired, or whose
-   * epochs name no current user key generation (`stranded`). The refusal
-   * clears when a descriptor refresh rebuilds the ciphers. A stranded
-   * refusal is a `KeyUnwrapError`, so a list read skips the collection's rows
-   * as not-a-recipient rather than collecting them for the undecryptable
-   * purge, which would delete them from the server.
+   * epochs name no current user key generation (`stranded`). The refusal clears
+   * when a descriptor refresh rebuilds the ciphers. A stranded refusal is a
+   * `KeyUnwrapError`, so a list read skips the collection's Resources as
+   * not-a-recipient rather than collecting them for the undecryptable purge,
+   * which would delete them from the server.
    *
    * @param options {object}
    * @param options.collectionId {string}
@@ -1435,6 +1479,9 @@ export class StorageManager {
     // remote-direct backend in the popup); both honor `setCiphers` for the
     // descriptor-refresh path.
     this.#store.setCiphers(ciphers)
+    if (strandedCollectionIds.length > 0) {
+      this.#reportStranded()
+    }
   }
 
   /**
@@ -1476,15 +1523,18 @@ export class StorageManager {
       ...(stranded ? [collectionId] : [])
     ]
     this.#store.setCiphers(this.#ciphers)
+    if (stranded) {
+      this.#reportStranded()
+    }
   }
 
   /**
    * Refreshes every encrypted collection's descriptor -- and its stored
    * `/meta`, so an index schema declared mid-session reaches the rebuilt
    * ciphers -- from the remote store, caches them, and rebuilds + swaps the
-   * ciphers. Called when a local read reports unknown-epoch rows -- a rekey
-   * emits no change-feed entry, so the local cipher may be built from a stale
-   * descriptor. No-op without a remote store.
+   * ciphers. Called when a local read reports unknown-epoch resource replicas
+   * -- a rekey emits no change-feed entry, so the local cipher may be built
+   * from a stale descriptor. No-op without a remote store.
    *
    * @param options {object}
    * @param options.refuseStranded {boolean}   see
@@ -1616,9 +1666,9 @@ export class StorageManager {
   }
 
   /**
-   * Runs a read that reports whether it skipped unknown-epoch rows; on the first
-   * such report for a collection this session, refreshes the descriptor (rebuilding
-   * + swapping the ciphers) and re-reads once, via the shared
+   * Runs a read that reports whether it skipped unknown-epoch Resources; on the
+   * first such report for a collection this session, refreshes the descriptor
+   * (rebuilding + swapping the ciphers) and re-reads once, via the shared
    * `DescriptorRefreshPolicy`. The single seam behind `listCredentials`,
    * `listHistoryItems`, and `decryptCollectionResource`, so a fresh-epoch
    * resource is never silently dropped after a rekey by another client -- for
@@ -1857,9 +1907,9 @@ export class StorageManager {
   }
 
   /**
-   * Stores a credential and, when a row was actually inserted (a re-add of a
-   * stored credential is a no-op), records its Create history entry. Routes to
-   * the active backend (the local active replica, or the remote-direct popup
+   * Stores a credential and, when a Resource was actually inserted (a re-add of
+   * a stored credential is a no-op), records its Create history entry. Routes
+   * to the active backend (the local active replica, or the remote-direct popup
    * backend).
    *
    * This is the single entry point every credential coming from outside the
@@ -1869,8 +1919,8 @@ export class StorageManager {
    * it binds to its own seed: app keys are wallet-minted, never imported, and
    * the mint path has its own store method ({@link addMintedAppKey}). The
    * background sync pull
-   * (the driver in `@interop/was-sync`) writes pulled rows into the local
-   * replica without
+   * (the driver in `@interop/was-sync`) stores pulled Resources as resource
+   * replicas in the local replica without
    * passing through here, deliberately: it replicates the account's own
    * remote collections, which only the account's enrolled wallet clients can
    * write (`private-credentials` is a protected collection -- RP and share
@@ -1906,7 +1956,7 @@ export class StorageManager {
    * from the carried seed) so this method cannot be misused to store a foreign
    * app key either.
    *
-   * The row lands in the dedicated `app-connections` collection, never in
+   * The app key lands in the dedicated `app-connections` collection, never in
    * `private-credentials`, and no credential-created activity is written: the
    * app-connect Login activity is the record of the connection, and an app key
    * is not a credential the user acquired.
@@ -1949,8 +1999,8 @@ export class StorageManager {
       integrity: number
     }
   }> {
-    // Unknown-epoch rows mean the cipher may be built from a stale descriptor
-    // (a rekey emits no change-feed entry); refresh the descriptor once and
+    // Unknown-epoch Resources mean the cipher may be built from a stale
+    // descriptor (a rekey emits no change-feed entry); refresh the descriptor once and
     // re-read, as the credential list does. Load-bearing here: an app key
     // missed by a stale cipher would read as "no key for this app" and mint a
     // second identity, orphaning what the app encrypted under the first.
@@ -2043,9 +2093,9 @@ export class StorageManager {
   }
 
   async listCredentials(): Promise<Array<StoredCredential>> {
-    // Unknown-epoch rows mean the cipher may be built from a stale descriptor (a
-    // rekey emits no change-feed entry); the shared helper refreshes the descriptor
-    // once and re-reads, uniformly for both backends.
+    // Unknown-epoch Resources mean the cipher may be built from a stale
+    // descriptor (a rekey emits no change-feed entry); the shared helper
+    // refreshes the descriptor once and re-reads, uniformly for both backends.
     return this.#readWithEpochRefresh({
       collectionId: 'private-credentials',
       read: async () => ({
@@ -2116,21 +2166,21 @@ export class StorageManager {
    * public copy is indistinguishable from an unretracted one -- so both refuse
    * the delete with a {@link PublicCopyRetractionError}.
    *
-   * With `consultRemote`, the remote collection is consulted first whenever
-   * one is configured and this session carries the local replica. The local
+   * With `consultRemote`, the remote collection is consulted first whenever one
+   * is configured and this session carries the local replica. The local
    * `public-credentials` replica cannot prove the ABSENCE of a remote copy: a
    * freshly enrolled browser, or one whose `public-credentials` replication
-   * sits in retry backoff, has not pulled the copy yet, and deciding
-   * retraction on the local rows alone would let the world-readable copy
+   * sits in retry backoff, has not pulled the copy yet, and deciding retraction
+   * on the local resource replicas alone would let the world-readable copy
    * stand with no handle left to retract it. A remote that cannot be reached
    * then refuses. Without the option the decision is the local replica's, the
    * interactive delete's offline-tolerant behaviour. (In the replica-less
    * remote-direct variant the store's own `hasPublicCredential` /
    * `removePublicCredential` already go straight to the remote either way.)
    *
-   * The local row is then removed as before. Its replication push is a
-   * tombstone against a resource this call has already deleted remotely, which
-   * the push path tolerates: a `DELETE` of an absent resource is the
+   * The local resource replica is then removed as before. Its replication push
+   * is a tombstone against a resource this call has already deleted remotely,
+   * which the push path tolerates: a `DELETE` of an absent resource is the
    * tombstone's goal state, and a conditional delete refused on a vanished
    * master resolves as an ordinary delete/delete conflict (the push handler's
    * `deleteContent` and conflict assembler in `@interop/was-sync`).
@@ -2172,10 +2222,11 @@ export class StorageManager {
 
   /**
    * Every world-readable public credential copy this session can see: the
-   * local `public-credentials` replica's rows, unioned by cid with the remote
-   * collection's resources when a remote store is configured and this session
-   * carries the replica. The collection is plaintext and keyed by the
-   * credential's content cid, so a row's id IS its cid.
+   * resource replicas in the local `public-credentials` replica, unioned by
+   * cid with the remote collection's resources when a remote store is
+   * configured and this session carries the replica. The collection is
+   * plaintext and keyed by the credential's content cid, so a resource id IS
+   * its cid.
    *
    * `skipCids` names the cids the caller does not need (the app-key sweep
    * already reaches those through `deleteCredential`, which retracts their
@@ -2219,11 +2270,11 @@ export class StorageManager {
   }
 
   /**
-   * The count of local `private-credentials` rows the most recent
+   * The count of local `private-credentials` resource replicas the most recent
    * {@link listCredentials} read had to skip because their envelope would not
    * decrypt under the current vault KAK (corrupted, or written under a
    * mismatched KAK). Surfaced so the dashboard can warn the user without one
-   * bad row bricking the list.
+   * bad resource replica bricking the list.
    *
    * @returns {number}
    */
@@ -2232,12 +2283,12 @@ export class StorageManager {
   }
 
   /**
-   * The count of `private-credentials` rows the most recent
+   * The count of `private-credentials` Resources the most recent
    * {@link listCredentials} read had to skip because their body failed its
    * integrity check: the envelope did not authenticate, or the host served it
    * under an id it was not sealed for. Surfaced on the dashboard separately
    * from {@link undecryptableCredentials}, and never purgeable -- producing
-   * such a row takes no keys, so removing it would let a host present
+   * such a Resource takes no keys, so removing it would let a host present
    * recoverable data as garbage and have the wallet destroy it.
    *
    * @returns {number}
@@ -2247,9 +2298,9 @@ export class StorageManager {
   }
 
   /**
-   * Removes the local `private-credentials` rows that could not be decrypted,
-   * so the user can clear rows that can never be shown. Returns the number of
-   * rows removed.
+   * Removes the local `private-credentials` resource replicas that could not
+   * be decrypted, so the user can clear what can never be shown. Returns the
+   * number of resource replicas removed.
    *
    * @returns {Promise<number>}
    */
@@ -2258,8 +2309,9 @@ export class StorageManager {
   }
 
   /**
-   * The count of `app-connections` rows the most recent {@link listAppKeys}
-   * read had to skip because their envelope would not decrypt at all.
+   * The count of `app-connections` Resources the most recent
+   * {@link listAppKeys} read had to skip because their envelope would not
+   * decrypt at all.
    * Surfaced on the Applications page beside its purge action.
    *
    * @returns {number}
@@ -2269,8 +2321,9 @@ export class StorageManager {
   }
 
   /**
-   * The count of `app-connections` rows the most recent {@link listAppKeys}
-   * read had to skip because their body failed its integrity check. Never
+   * The count of `app-connections` Resources the most recent
+   * {@link listAppKeys} read had to skip because their body failed its
+   * integrity check. Never
    * purged, and load-bearing on the match path: a skipped app key read as
    * absent would mint a second identity for the app.
    *
@@ -2281,10 +2334,11 @@ export class StorageManager {
   }
 
   /**
-   * The count of `app-connections` rows the most recent {@link listAppKeys}
-   * read had to skip because this wallet holds no key for their (known) key
-   * epoch. Never purged: the row is an app's real identity, readable again
-   * once the collection's epochs wrap a key this session holds.
+   * The count of `app-connections` Resources the most recent
+   * {@link listAppKeys} read had to skip because this wallet holds no key for
+   * their (known) key epoch. Never purged: the Resource is an app's real
+   * identity, readable again once the collection's epochs wrap a key this
+   * session holds.
    *
    * @returns {number}
    */
@@ -2293,8 +2347,8 @@ export class StorageManager {
   }
 
   /**
-   * Removes the `app-connections` rows that could not be decrypted at all.
-   * Returns the number of rows removed.
+   * Removes the `app-connections` Resources that could not be decrypted at
+   * all. Returns the number of Resources removed.
    *
    * @returns {Promise<number>}
    */
@@ -2859,12 +2913,12 @@ export class StorageManager {
   /**
    * Refuses to provision over a collection that already stands without an
    * `encryption` descriptor and holds resources. Declaring such a collection
-   * encrypted would mint epoch[0] over its plaintext rows, and no reader
+   * encrypted would mint epoch[0] over its plaintext Resources, and no reader
    * could open them afterward. Provisioning never converts a collection.
    *
    * A standing collection with no descriptor and no resources is let
    * through. That is the state a provision torn between the collection
-   * create and the first epoch leaves behind, and finishing it makes no row
+   * create and the first epoch leaves behind, and finishing it makes no Resource
    * unreadable.
    *
    * @param options {object}
@@ -3434,7 +3488,7 @@ export class StorageManager {
    * digest, written before the collected generation's delete. Unlike every
    * other `addHistory*` method, the activity id is the generation id
    * VERBATIM rather than a minted `uuidv7`: the deterministic payload id is
-   * what lets a torn re-run's second row collapse at read time, and readers
+   * what lets a torn re-run's second Resource collapse at read time, and readers
    * must not assume activity ids are UUIDs.
    *
    * @param options {object}
@@ -3644,8 +3698,8 @@ export class StorageManager {
    * Records (in the `wallet-activity` collection) a Revoke activity for an
    * agent grant: the user revoked the storage grants answered from an
    * interaction-URL request. The recorded controller is the grantee did:key
-   * the Applications listing joins its agent rows on, so writing this row is
-   * what takes the agent out of the listing.
+   * the Applications listing joins its agent rows on, so writing this
+   * activity is what takes the agent out of the listing.
    *
    * @param options {object}
    * @param options.user {User}
@@ -4446,12 +4500,12 @@ export class StorageManager {
         }
       }
     })
-    // The admitted set came from a history read that skipped rows, so a
-    // reader whose one admission sits in such a row was left out. The
+    // The admitted set came from a history read that skipped Resources, so a
+    // reader whose one admission sits in such a Resource was left out. The
     // rotation still lands, since a revocation must not wait on history.
     if (items.unreadable > 0) {
       log.warn(
-        'Rotated a collection key from a history with unreadable rows; a reader admitted only there was left out',
+        'Rotated a collection key from a history with unreadable resources; a reader admitted only there was left out',
         {
           collectionId,
           unreadableHistory: items.unreadable,
@@ -5450,7 +5504,7 @@ export class StorageManager {
   }
 
   /**
-   * Lists the stored contacts. Unknown-epoch rows mean the contacts cipher
+   * Lists the stored contacts. Unknown-epoch Resources mean the contacts cipher
    * may be built from a stale descriptor (a rekey emits no change-feed
    * entry), so the shared helper refreshes the descriptor once and re-reads,
    * uniformly for both backends -- the same seam `listCredentials` rides.
@@ -5505,7 +5559,7 @@ export class StorageManager {
   }
 
   /**
-   * Rewrites a contact's row in place and appends its `update` revision.
+   * Rewrites a contact's Resource in place and appends its `update` revision.
    *
    * Restoring an earlier version is the same write with `action: 'restore'`:
    * the snapshot replaces the contact wholesale and the appended revision
@@ -5543,7 +5597,7 @@ export class StorageManager {
 
   /**
    * Deletes a contact and appends a `delete` revision carrying its last known
-   * snapshot (read before the row is removed).
+   * snapshot (read before the Resource is removed).
    *
    * @param options {object}
    * @param options.id {string}
@@ -5605,7 +5659,7 @@ export class StorageManager {
   /**
    * Lists a contact's revision history, most recent first. Keyed by the
    * LOGICAL contact id (`StoredContact.contactId`, the id inside the head
-   * payload that every replica's revisions refer to), not the row id --
+   * payload that every replica's revisions refer to), not the resource id --
    * for mobile-authored contacts the two differ.
    *
    * @param options {object}
@@ -5622,30 +5676,31 @@ export class StorageManager {
 
   /**
    * The content-migration import methods: one per migrated collection, each
-   * taking an ARCHIVED row out of a backup bundle and writing it with no side
-   * effects of its own -- no `created` activity, no `create` revision, and no
-   * re-minted id, timestamp, or `writerId`. The interactive write methods
+   * taking an ARCHIVED Resource out of a backup bundle and writing it with no
+   * side effects of its own -- no `created` activity, no `create` revision, and
+   * no re-minted id, timestamp, or `writerId`. The interactive write methods
    * above keep their side effects unconditionally; nothing here is a flag on
    * them.
    *
    * Every one reports an {@link ImportOutcome} rather than throwing, so the
-   * walk carries on past a row it could not write. The one exception is the
+   * walk carries on past a Resource it could not write. The one exception is the
    * walk-stopping error (`WALK_STOPPING_ERROR_NAME`, was-client's 507), which
-   * is a wall rather than a per-row failure and is rethrown so the walk stops.
+   * is a wall rather than a per-Resource failure and is rethrown so the walk
+   * stops.
    *
    * The merge rule is "skip existing, by content identity", so a re-run of the
    * same bundle converges and a populated account keeps what it has. The
    * "already held" checks read the {@link HeldContent} snapshot the caller
-   * took with {@link snapshotHeldContent}, and each accepted write adds its row
-   * to that snapshot, so one run reads each collection once and a row it
-   * wrote counts as held for the rows behind it.
+   * took with {@link snapshotHeldContent}, and each accepted write adds its
+   * Resource to that snapshot, so one run reads each collection once and a
+   * Resource it wrote counts as held for the Resources behind it.
    *
    * @param options {object}
    * @param options.what {string}   what the failed write was, for the log line
    * @param options.write {function}   the write, reporting its own outcome
    * @returns {Promise<Outcome | 'failed'>}
    */
-  async #importRow<Outcome extends string>({
+  async #importResource<Outcome extends string>({
     what,
     write
   }: {
@@ -5656,7 +5711,7 @@ export class StorageManager {
       return await write()
     } catch (err) {
       if (errorNameOf(err) === WALK_STOPPING_ERROR_NAME) {
-        // The Space is full: every row behind this one would fail the same
+        // The Space is full: every Resource behind this one would fail the same
         // way, so the walk stops rather than wasting the rest of the bundle.
         throw err
       }
@@ -5669,7 +5724,7 @@ export class StorageManager {
    * Reads what the account holds in the collections the import methods
    * write, once, as the snapshot they decide against. The three listings are
    * independent and run together. Each rides the same stale-descriptor
-   * refresh the page reads do, so a row another client re-sealed under a
+   * refresh the page reads do, so a Resource another client re-sealed under a
    * rotated key epoch is still seen as held rather than imported a second
    * time.
    *
@@ -5697,10 +5752,10 @@ export class StorageManager {
       this.listHistoryItems()
     ])
     const contactHeads = new Map<string, ContactHeadPayload>()
-    for (const { rowId, head } of heads) {
-      // Legacy heads written before the row-id / contact-id split carry no
-      // usable distinction; fall back to the row id for those.
-      contactHeads.set(head.contactId ?? rowId, head)
+    for (const { resourceId, head } of heads) {
+      // Legacy heads written before the resource-id / contact-id split carry
+      // no usable distinction; fall back to the resource id for those.
+      contactHeads.set(head.contactId ?? resourceId, head)
     }
 
     const contactRevisions = new Map<string, Set<string>>()
@@ -5723,13 +5778,13 @@ export class StorageManager {
 
   /**
    * Imports one archived credential, deduped by its content cid. Records no
-   * Create activity: the bundle's own `wallet-activity` rows carry the old
+   * Create activity: the bundle's own `wallet-activity` Resources carry the old
    * wallet's history, and a burst of creations dated today would bury it.
    *
-   * A row presenting as an app key (the marker type) is reported `skipped`
-   * without a write: app keys are wallet-minted and do not migrate in this
-   * build, so the row is screened and counted as not migrated rather than
-   * counted as a write that failed.
+   * A credential presenting as an app key (the marker type) is reported
+   * `skipped` without a write: app keys are wallet-minted and do not migrate in
+   * this build, so the credential is screened and counted as not migrated
+   * rather than counted as a write that failed.
    *
    * @param options {object}
    * @param options.credential {IVerifiableCredential}
@@ -5740,7 +5795,7 @@ export class StorageManager {
   }: {
     credential: IVerifiableCredential
   }): Promise<ImportOutcome> {
-    return await this.#importRow({
+    return await this.#importResource({
       what: 'credential',
       write: async () => {
         if (presentsAsAppKey(credential)) {
@@ -5760,18 +5815,18 @@ export class StorageManager {
    *
    * A head carrying no `contactId` is `conflicting`: it could be deduped
    * against nothing, so every re-run would land another copy under a fresh
-   * row id, and reporting it as failed would invite a retry that can never
+   * resource id, and reporting it as failed would invite a retry that can never
    * converge.
    *
    * Two checks run before the write. A held contact that is the un-customized
    * seed twin of the archived one (social-core's `isUnlinkedSeedTwin` over
    * this wallet's seed names) already stands for it, so the archived copy is
-   * reported `seed-twin` and lands nowhere; a customized local seed row is
+   * reported `seed-twin` and lands nowhere; a customized local seed contact is
    * not matched and the archived copy lands beside it. Then the id check: a
-   * held row under the same `contactId` is `skipped` when its payload's
+   * held contact under the same `contactId` is `skipped` when its payload's
    * content identity matches, and `conflicting` when it differs -- the held
-   * row is left untouched and nothing is written, so a doctored bundle
-   * cannot overwrite a genuine row by reusing its id.
+   * contact is left untouched and nothing is written, so a doctored bundle
+   * cannot overwrite a genuine contact by reusing its id.
    *
    * `seed-twin` is reported apart from `skipped` because the contact's
    * revisions ride on the difference: an already-held head stands for them,
@@ -5791,7 +5846,7 @@ export class StorageManager {
     head: ContactHeadPayload
     held: HeldContent
   }): Promise<ImportOutcome | 'seed-twin'> {
-    return await this.#importRow({
+    return await this.#importResource({
       what: 'contact',
       write: async (): Promise<ImportOutcome | 'seed-twin'> => {
         if (!head.contactId) {
@@ -5817,7 +5872,7 @@ export class StorageManager {
           }
         }
         // Compared through the read-side upgrade every listing passes a head
-        // through, so a row this import itself wrote reads back as the same
+        // through, so a head this import itself wrote reads back as the same
         // identity and a re-run converges rather than reporting a conflict.
         const upgraded = upgradeContactHeadPayload(head)
         const stored = heads.get(head.contactId)
@@ -5861,7 +5916,7 @@ export class StorageManager {
     revision: ContactRevisionPayload
     held: HeldContent
   }): Promise<ImportOutcome> {
-    return await this.#importRow({
+    return await this.#importResource({
       what: 'contact revision',
       write: async () => {
         let identities = held.contactRevisions.get(revision.contactId)
@@ -5870,7 +5925,7 @@ export class StorageManager {
           held.contactRevisions.set(revision.contactId, identities)
         }
         // Upgraded for the comparison, stored verbatim: the listings upgrade
-        // every row they read, so an identity built from the raw archived
+        // every revision they read, so an identity built from the raw archived
         // payload would miss this import's own earlier write.
         const identity = contentCid(
           upgradeContactRevisionPayload(revision) as unknown as Json
@@ -5887,16 +5942,16 @@ export class StorageManager {
 
   /**
    * Imports one archived activity verbatim, its own `id` included, deduped by
-   * that id. A held row under the same id whose body's content identity
-   * differs is `conflicting`: the archived row lands nowhere and the held row
-   * is untouched.
+   * that id. A held activity under the same id whose body's content identity
+   * differs is `conflicting`: the archived activity lands nowhere and the held
+   * activity is untouched.
    *
-   * An archived row carrying no id of its own is `conflicting` too. It cannot
-   * be deduped, so every re-run would add another copy; reporting it as failed
-   * would invite a retry that can never converge.
+   * An archived activity carrying no id of its own is `conflicting` too. It
+   * cannot be deduped, so every re-run would add another copy; reporting it as
+   * failed would invite a retry that can never converge.
    *
    * Which activities are worth migrating (only a credential's own, and the
-   * drop rule for an archived `created` row) is the walk's filter, not this
+   * drop rule for an archived `created` activity) is the walk's filter, not this
    * method's.
    *
    * @param options {object}
@@ -5911,7 +5966,7 @@ export class StorageManager {
     activity: WalletActivity
     held: HeldContent
   }): Promise<ImportOutcome> {
-    return await this.#importRow({
+    return await this.#importResource({
       what: 'activity',
       write: async () => {
         const id = activity.id
@@ -5949,7 +6004,7 @@ export class StorageManager {
    *
    * A standing collection keeps its own settings: its public read, its index
    * schema, and its attribution. One exception is this migration's own torn
-   * create. A standing collection that holds no rows and carries the
+   * create. A standing collection that holds no Resources and carries the
    * archived `generator` is finished as if this run had created it. An
    * archive with no `generator` never qualifies, since an interaction-URL
    * grant also leaves an unattributed collection.
@@ -5959,11 +6014,11 @@ export class StorageManager {
    * key. The first epoch is create-if-absent, so a standing roster is
    * adopted. On a collection this run creates or finishes, the archived
    * `indexSchema`, when given, is declared, unless the collection already
-   * declares one. Last, the cipher the rows are read and written through is
+   * declares one. Last, the cipher the Resources are read and written through is
    * built from the descriptor and the collection's metadata as it now
    * stands, so every write carries the blinded index entries the
    * collection's schema asks for. A standing collection that predates the
-   * blinded index carries no key to declare under; its rows migrate without
+   * blinded index carries no key to declare under; its Resources migrate without
    * index entries. The archived public read is ignored for an encrypted
    * collection.
    *
@@ -6056,7 +6111,7 @@ export class StorageManager {
     const indexes = declares ? (indexSchema?.indexes ?? []) : []
     if (indexes.length > 0 && !descriptor.hmac) {
       log.warn(
-        'The collection carries no blinded-index key, so its imported rows ' +
+        'The collection carries no blinded-index key, so its imported resources ' +
           'carry no index entries',
         { collectionId }
       )
@@ -6162,7 +6217,7 @@ export class StorageManager {
    * archived one, before anything is written. Nothing is written here.
    *
    * First it decides whether the collection is this migration's own torn
-   * create. That holds when the collection has no rows and its `generator`
+   * create. That holds when the collection has no Resources and its `generator`
    * equals the archived one. A missing archived `generator` never
    * qualifies.
    *
@@ -6171,14 +6226,15 @@ export class StorageManager {
    * - an archived plaintext collection over one that stands encrypted;
    * - any archive over a collection encrypted under a client-written
    *   descriptor, which no governing log can take over;
-   * - an archived encrypted collection over a plaintext one that holds rows;
+   * - an archived encrypted collection over a plaintext one that holds
+   *   Resources;
    * - for a plaintext archive, a public read that differs from the
    *   archive's. A torn create that stands private under a public archive is
    *   let through, so the caller can grant the public read it missed;
    * - for a plaintext archive, an empty collection with no `encryption`
    *   member and no public read, unless it is a torn create. That is also
    *   the state an App Connect encrypted provision torn before its first
-   *   epoch leaves, and a plaintext row landed there would keep the app's
+   *   epoch leaves, and a plaintext Resource landed there would keep the app's
    *   provision refused for good.
    *
    * An empty collection with no `encryption` member is let through for an
@@ -6231,10 +6287,10 @@ export class StorageManager {
       standing.generator !== undefined &&
       contentCid(generator as unknown as Json) ===
         contentCid(standing.generator as unknown as Json)
-    // Rows matter for the torn-create test, and for the kind checks on a
+    // Resources matter for the torn-create test, and for the kind checks on a
     // collection with no `encryption` member. The listing stops at the first
-    // page holding a row.
-    const holdsAnyRow = async (): Promise<boolean> => {
+    // page holding a Resource.
+    const holdsAnyResource = async (): Promise<boolean> => {
       for await (const page of handle.listPages()) {
         if (page.items.length > 0) {
           return true
@@ -6242,13 +6298,13 @@ export class StorageManager {
       }
       return false
     }
-    const [holdsRows, standsPublic] = await Promise.all([
-      sameGenerator || !standsEncrypted ? holdsAnyRow() : false,
+    const [holdsResources, standsPublic] = await Promise.all([
+      sameGenerator || !standsEncrypted ? holdsAnyResource() : false,
       encrypted ? false : handle.isPublic()
     ])
-    const resumesOwnCreate = sameGenerator && !holdsRows
+    const resumesOwnCreate = sameGenerator && !holdsResources
     if (encrypted) {
-      if (!standsEncrypted && holdsRows) {
+      if (!standsEncrypted && holdsResources) {
         refuse(
           `The collection "${collectionId}" already holds unencrypted ` +
             'resources, so an archived encrypted collection cannot be ' +
@@ -6265,18 +6321,18 @@ export class StorageManager {
           `${isPublic ? 'public' : 'private'}. Its setting is left as it is.`
       )
     }
-    if (!holdsRows && !standsPublic && !resumesOwnCreate) {
+    if (!holdsResources && !standsPublic && !resumesOwnCreate) {
       refuse(
         `The collection "${collectionId}" stands empty with no encryption ` +
           'set up, which may be an encrypted collection not yet finished, ' +
-          'so archived plaintext rows are not written into it.'
+          'so archived plaintext resources are not written into it.'
       )
     }
     return { resumesOwnCreate, standsPublic }
   }
 
   /**
-   * Builds the cipher an encrypted app collection's imported rows go
+   * Builds the cipher an encrypted app collection's imported Resources go
    * through, from its descriptor and its metadata as it now stands, so the
    * collection's index schema is installed on it. The cipher is recorded
    * beside the descriptor it was built from.
@@ -6295,7 +6351,7 @@ export class StorageManager {
   }): Promise<{ cipher: EdvDocCipher; descriptor: CollectionEncryption }> {
     const { keyAgreementKey, keyResolver } = this.#vaultKeys
     // Read back rather than built from the archived schema: a standing
-    // collection keeps its own declarations, and its rows must carry them.
+    // collection keeps its own declarations, and its Resources must carry them.
     const meta = await this.#requireRemote(
       'Importing an app collection'
     ).collectionMeta({ collectionId })
@@ -6326,7 +6382,7 @@ export class StorageManager {
   ): Promise<{ cipher: EdvDocCipher; descriptor: CollectionEncryption }> {
     if (!this.#importCollections.has(collectionId)) {
       throw new Error(
-        `The app collection "${collectionId}" was not ensured before its rows.`
+        `The app collection "${collectionId}" was not ensured before its resources.`
       )
     }
     const cached = this.#importCiphers.get(collectionId)
@@ -6343,8 +6399,8 @@ export class StorageManager {
   }
 
   /**
-   * The cipher an imported row is sealed under, current as of this write.
-   * The server takes a write's `Key-Epoch` as advisory, so a row sealed
+   * The cipher an imported Resource is sealed under, current as of this write.
+   * The server takes a write's `Key-Epoch` as advisory, so a Resource sealed
    * under a superseded epoch would land. An epoch rotated mid-run, by a
    * revocation cascade in another tab say, must therefore be caught here.
    *
@@ -6429,7 +6485,7 @@ export class StorageManager {
       read: async () => {
         // Fetched inside the read: a refresh drops the cipher.
         const { cipher } = await this.#importCipherFor(collectionId)
-        const rows = await Promise.all(
+        const decrypted = await Promise.all(
           documents.map(async ({ id, data }) => ({
             id,
             ...(await decryptHeldAppResource({
@@ -6441,7 +6497,7 @@ export class StorageManager {
           }))
         )
         const held: HeldAppResources = new Map()
-        for (const { id, value, bytes } of rows) {
+        for (const { id, value, bytes } of decrypted) {
           if (bytes) {
             held.set(appResourceIdentity({ resourceId: id }), null)
           } else if (value !== undefined) {
@@ -6451,7 +6507,7 @@ export class StorageManager {
         }
         return {
           value: held,
-          unknownEpoch: rows.some(row => row.unknownEpoch)
+          unknownEpoch: decrypted.some(entry => entry.unknownEpoch)
         }
       }
     })
@@ -6506,7 +6562,7 @@ export class StorageManager {
     content: { json: Json } | { bytes: Uint8Array }
     held: HeldAppResources
   }): Promise<ImportOutcome> {
-    return await this.#importRow({
+    return await this.#importResource({
       what: 'app collection resource',
       write: async (): Promise<ImportOutcome> => {
         const remote = this.#requireRemote('Importing an app collection')
@@ -6536,7 +6592,8 @@ export class StorageManager {
         }
         if ('bytes' in content) {
           if (held.has(resourceId)) {
-            // A JSON row stands under the id this non-JSON row would take.
+            // A JSON Resource stands under the id this non-JSON Resource would
+            // take.
             return 'conflicting'
           }
           const { created } = await remote.putPlaintextResource({
@@ -6593,20 +6650,20 @@ export class StorageManager {
   }
 
   /**
-   * Writes one activity and then removes every OTHER row carrying the same
+   * Writes one activity and then removes every OTHER Resource carrying the same
    * activity id -- the migration's import activity, the one activity written
    * this way.
    *
-   * The order is load-bearing. `listHistoryItems` keeps the first row it meets
-   * per activity id, and an envelope is nondeterministic, so a re-run's fresh
-   * row would otherwise hide behind the first run's stale one forever. Writing
-   * first leaves no window with no row at all, and a kill between the two
-   * writes leaves two rows that the next run's delete step clears, so it
-   * converges either way.
+   * The order is load-bearing. `listHistoryItems` keeps the first Resource it
+   * meets per activity id, and an envelope is nondeterministic, so a re-run's
+   * fresh Resource would otherwise hide behind the first run's stale one
+   * forever. Writing first leaves no window with no Resource at all, and a
+   * kill between the two writes leaves two Resources that the next run's
+   * delete step clears, so it converges either way.
    *
    * @param options {object}
    * @param options.activity {WalletActivity}   carries its own deterministic
-   *   id, the one the replaced rows share
+   *   id, the one the replaced Resources share
    * @returns {Promise<void>}
    */
   async putHistoryItemReplacingOthers({
@@ -6617,20 +6674,25 @@ export class StorageManager {
     const id = activity.id
     if (!id) {
       throw new Error(
-        'Cannot replace history rows for an activity that carries no id.'
+        'Cannot replace history resources for an activity that carries no id.'
       )
     }
-    const rowId = await this.#store.addHistoryItem({ resourceId: id, activity })
-    const rows = await this.#store.findHistoryItemsByInnerId({ id })
-    for (const row of rows) {
-      if (row.rowId !== rowId) {
-        await this.#store.deleteHistoryItemByRowId({ rowId: row.rowId })
+    const resourceId = await this.#store.addHistoryItem({
+      resourceId: id,
+      activity
+    })
+    const resources = await this.#store.findHistoryItemsByInnerId({ id })
+    for (const resource of resources) {
+      if (resource.resourceId !== resourceId) {
+        await this.#store.deleteHistoryItemByResourceId({
+          resourceId: resource.resourceId
+        })
       }
     }
   }
 
   /**
-   * Removes every row carrying one activity id. An approval uses it to take
+   * Removes every Resource carrying one activity id. An approval uses it to take
    * back the Login it persisted before provisioning, when the rest of the
    * approval fails before anything is delivered.
    *
@@ -6639,9 +6701,11 @@ export class StorageManager {
    * @returns {Promise<void>}
    */
   async deleteHistoryActivity({ id }: { id: string }): Promise<void> {
-    const rows = await this.#store.findHistoryItemsByInnerId({ id })
-    for (const row of rows) {
-      await this.#store.deleteHistoryItemByRowId({ rowId: row.rowId })
+    const resources = await this.#store.findHistoryItemsByInnerId({ id })
+    for (const resource of resources) {
+      await this.#store.deleteHistoryItemByResourceId({
+        resourceId: resource.resourceId
+      })
     }
   }
 }

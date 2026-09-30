@@ -27,11 +27,12 @@ import type {
 } from './types'
 
 /**
- * The match scan skipped rows this session cannot read, and no stored app key
- * matched. Carries the skipped counts so the popup can say which way the read
- * failed: rows whose key epoch is still unknown after the one descriptor
- * refresh, rows in a known epoch this session holds no wrap for, rows whose
- * body failed its integrity check, and envelopes that will not decrypt at all.
+ * The match scan skipped Resources this session cannot read, and no stored app
+ * key matched. Carries the skipped counts so the popup can say which way the
+ * read failed: Resources whose key epoch is still unknown after the one
+ * descriptor refresh, Resources in a known epoch this session holds no wrap
+ * for, Resources whose body failed its integrity check, and envelopes that will
+ * not decrypt at all.
  */
 export class AppKeysUnreadableError extends Error {
   unknownEpoch: number
@@ -52,10 +53,10 @@ export class AppKeysUnreadableError extends Error {
   }) {
     super(
       'Could not read the stored app keys: ' +
-        `${unknownEpoch} row(s) in a still-unknown key epoch, ` +
-        `${noEpochKey} row(s) in a key epoch this session holds no key for, ` +
-        `${integrity} row(s) whose body failed its integrity check, ` +
-        `${undecryptable} undecryptable row(s).`
+        `${unknownEpoch} resource(s) in a still-unknown key epoch, ` +
+        `${noEpochKey} resource(s) in a key epoch this session holds no key for, ` +
+        `${integrity} resource(s) whose body failed its integrity check, ` +
+        `${undecryptable} undecryptable resource(s).`
     )
     this.name = 'AppKeysUnreadableError'
     this.unknownEpoch = unknownEpoch
@@ -67,13 +68,13 @@ export class AppKeysUnreadableError extends Error {
 
 /**
  * Whether a match scan that found nothing must refuse rather than mint: the
- * scan skipped rows this session could not read, so "no match" does not mean
- * "this app has never connected", and minting would hand the app a second
- * seed and DID. The consent preview and the approved path share this
- * predicate so the popup blocks on exactly what approval would refuse.
+ * scan skipped Resources this session could not read, so "no match" does not
+ * mean "this app has never connected", and minting would hand the app a second
+ * seed and DID. The consent preview and the approved path share this predicate
+ * so the popup blocks on exactly what approval would refuse.
  *
- * A row whose body failed its integrity check counts here too: it is the one
- * skip a host can produce with no keys at all, so treating it as "absent"
+ * A Resource whose body failed its integrity check counts here too: it is the
+ * one skip a host can produce with no keys at all, so treating it as "absent"
  * would let the host force a second identity for the app.
  *
  * @param options {object}
@@ -194,17 +195,16 @@ export async function processAppConnect({
     origin
   })
 
-  // No match, but the scan could not read every row: refuse rather than mint.
-  // None of the three buckets is resolvable from here. An unknown-epoch row
-  // survived the facade's one descriptor refresh (its fetch failed, or the
-  // refresh was already spent earlier this session -- the consent preview
-  // scans before this call does); a no-epoch-key row names an epoch this
+  // No match, but the scan could not read every Resource: refuse rather than
+  // mint. None of the three buckets is resolvable from here. An unknown-epoch
+  // Resource survived the facade's one descriptor refresh (its fetch failed, or
+  // the refresh was already spent earlier this session -- the consent preview
+  // scans before this call does); a no-epoch-key Resource names an epoch this
   // session holds no wrap for (the residue of a rotation whose
-  // `app-connections` fan-out did not complete); and an undecryptable
-  // envelope will not open under any descriptor. So "no match" here does not
-  // mean "this app has never connected", and minting would hand the app a
-  // second seed and DID, permanently orphaning whatever it encrypted under
-  // the first.
+  // `app-connections` fan-out did not complete); and an undecryptable envelope
+  // will not open under any descriptor. So "no match" here does not mean "this
+  // app has never connected", and minting would hand the app a second seed and
+  // DID, permanently orphaning whatever it encrypted under the first.
   if (appKeyMintRefused({ matched: !!existing, skipped })) {
     throw new AppKeysUnreadableError(skipped)
   }

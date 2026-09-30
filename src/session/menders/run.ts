@@ -27,6 +27,7 @@ import {
   type AccountCeremonyContext
 } from '@/session/accountCeremonyContext'
 import { createLogger } from '@/lib/log'
+import { openEncounterGateBehindBlock } from '@/session/sessionLifecycle'
 import { freewalletMenderRegistry } from './index.js'
 import {
   REMEMBERED_REGISTRATIONS,
@@ -83,7 +84,11 @@ export function blockCeremonyContext({ session }: { session: Session }): {
  * @param options.session {Session}
  * @returns {ReadonlyArray<Authority>}
  */
-function heldFor({ session }: { session: Session }): ReadonlyArray<Authority> {
+export function heldFor({
+  session
+}: {
+  session: Session
+}): ReadonlyArray<Authority> {
   const authority = sessionAuthorityKind({ session })
   return heldAuthorities({ ...(authority ? { kind: authority.kind } : {}) })
 }
@@ -165,6 +170,9 @@ export function startLoginMenderBlock({
     settleRegistry = resolve
   })
   session.mends = accumulator.settled
+  // A mend raised at a read waits behind the registry writers, not beside
+  // them.
+  openEncounterGateBehindBlock({ session })
   if (awaited.size === 0) {
     settleRegistry()
   }

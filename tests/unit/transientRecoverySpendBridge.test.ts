@@ -182,10 +182,22 @@ vi.mock('@/session/userKeyCascade', () => ({
   cascadeCollectionsToUserKey: vi.fn(async () => {})
 }))
 
-vi.mock('@/session/userKeyAdoption', () => ({
-  rewrapUnlockRegistryToUserKey: vi.fn(async () => true),
-  adoptRotatedUserKeyInBand: vi.fn(async () => {})
-}))
+vi.mock('@/session/userKeyAdoption', () => {
+  const withOwnUserKeyRotation = vi.fn(
+    async ({ run }: { run: () => Promise<unknown> }) => await run()
+  )
+  return {
+    withOwnUserKeyRotation,
+    heldAsOwnUserKeyRotation:
+      (body: (options: { session: unknown }) => Promise<unknown>) =>
+      async (options: { session: unknown }) =>
+        await withOwnUserKeyRotation({
+          run: () => body(options)
+        }),
+    rewrapUnlockRegistryToUserKey: vi.fn(async () => true),
+    adoptRotatedUserKeyInBand: vi.fn(async () => {})
+  }
+})
 
 vi.mock('@/session/unlockMethods', async importOriginal => ({
   ...(await importOriginal<typeof import('@/session/unlockMethods')>()),
