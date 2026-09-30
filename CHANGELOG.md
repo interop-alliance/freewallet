@@ -121,6 +121,9 @@
 
 ### Changed
 
+- The did:webvh identity doc prices the account log's growth: bytes per
+  entry by enrolled client and standing credential, entries per ceremony,
+  and the failure mode at the server's upload limit.
 - `reportCeremonyTail` takes the ceremony that ran. Its info line for a
   non-failed entry is replaced by the entry's mender event; the declared
   warn stays.

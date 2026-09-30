@@ -46,6 +46,36 @@ projection is the only producer of `id/did.json`; the wallet assembles no
 did:web document of its own, so did:web and did:webvh resolution of one
 account cannot disagree. It is the whole document with its ids rewritten.
 
+**The log's growth.** Every entry is a full snapshot: the whole document,
+the full `updateKeys` and `nextKeyHashes`, and one proof. Nothing is a
+diff, and the log is append-only, so its size is the sum of the document
+size at each entry. At the deployed DID length an entry costs about 2 KB
+plus 1.8 KB per enrolled client (two verification methods, five relation
+references, one update key, two hashes) plus 1.55 KB per standing
+credential (the ladder VM, the `keyAgreement` member, one revealed rung,
+two hashes). A passphrase, a passkey, a recovery code, and a backup
+credential each count as one standing credential. The standing inventory is
+bounded by live membership: a retirement strikes the whole inventory in one
+entry, a revealed rung is reused rather than consumed, and no retired member
+lingers in `updateKeys` or `nextKeyHashes`. Entries are added only by
+ceremonies. A transient login writes the annex log and not this one. Most
+ceremonies add one or two entries; the last-client transition adds three,
+the annex GC's generation swap adds one pointer entry per period, and a
+backup export adds one entry plus one standing credential that stays until
+the user removes it. An account with two clients and five standing
+credentials pays about 13 KB per entry, so the server's 64 MiB upload limit
+is about 5,000 entries away, beyond any realistic account life.
+
+The practical cost is verification time rather than bytes. Every pinned
+read verifies the log from genesis, about 1.2 ms per entry in Node and more
+in a browser, and each entry written costs two full client verifications
+(the read and the `updateDID` resolve) plus one on the server. At the
+upload limit every log-extending ceremony fails at once with was-client's
+`PayloadTooLargeError`, which no log-write path catches, and no compaction
+is possible because the SCID chain anchors at genesis. Login-time menders
+would warn and skip under the runner's discipline, and the account would
+keep reading and serving its content.
+
 **The projection's freshness on a credential-anchored account.** A
 ladder-signed entry writes `did.jsonl` alone, since the bridge delegation is
 a PUT on exactly that resource. So the ceremonies a standing credential runs
