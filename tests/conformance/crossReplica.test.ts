@@ -89,7 +89,7 @@ import type {
   ResolveConflict,
   SyncCheckpoint,
   SyncStore,
-  SyncedRow,
+  SyncedResourceReplica,
   WasSyncPort,
   WireDoc
 } from '@interop/wallet-core/sync'
@@ -361,7 +361,7 @@ class InMemoryStore implements SyncStore {
     return this.checkpoint
   }
 
-  async getDirtyRows(): Promise<SyncedRow[]> {
+  async getDirtyResourceReplicas(): Promise<SyncedResourceReplica[]> {
     return [...this.resources.values()]
       .filter(resource => resource.dirty)
       .map(({ id, version, etag, updatedAt, deleted, data }) => ({

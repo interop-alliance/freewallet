@@ -15,9 +15,6 @@ const WAS_SERVER_DIR = process.env.WAS_SERVER_DIR ?? '../was-teaching-server'
 
 export default defineConfig({
   testDir: './tests/e2e-was',
-  // Empties WAS_E2E_DATA_DIR before the teaching server starts, so the run
-  // begins against an empty store.
-  globalSetup: './tests/e2e-was/wasDataDir.ts',
   fullyParallel: false,
   // One shared teaching server (dev mode, single process) serves every test,
   // and it fully re-verifies the did:webvh log per zcap request -- parallel
@@ -39,8 +36,12 @@ export default defineConfig({
   ],
   webServer: [
     {
-      // Local WAS teaching server (FileSystem backend).
-      command: 'pnpm run dev',
+      // Local WAS teaching server (FileSystem backend). The data dir is
+      // emptied in the same command, ahead of the boot, so the run begins
+      // against an empty store. A `globalSetup` hook runs after the web
+      // servers are up, which would delete the `store.json` version stamp
+      // the server writes at boot and leave a dir the next boot refuses.
+      command: `rm -rf "${WAS_E2E_DATA_DIR}" && pnpm run dev`,
       cwd: WAS_SERVER_DIR,
       url: WAS_URL,
       reuseExistingServer: !process.env.CI,

@@ -3797,17 +3797,21 @@ export class StorageManager {
    * delegated). The app never receives decryption key material, so unlike a
    * collection un-share this rotates no epoch and touches no recipient roster.
    *
-   * Per capability, `#revokeZcaps`'s contract: a grant the verified account
-   * document already reads as dead (expired, orphaned, or chained under a
-   * parent delegation that has rotted) is skipped without a POST, the server's
-   * `AlreadyRevokedError` counts as revoked, and any other failure -- a plain
-   * `ValidationError` included -- is thrown after every POST settles, so the
-   * caller keeps the credential and retries rather than recording a
-   * revocation the server never accepted. Legacy records that stored only a
-   * display summary (no full zcap) are nothing to revoke -- expiry is their
-   * backstop -- and count as skipped. A capability the rotation stage
-   * already revoked (`revokedByRotation`) is counted as revoked without a
-   * second POST. `withdrawn` counts only the POSTs that landed on this call:
+   * Per capability, `#revokeZcaps`'s contract: only a grant already past
+   * its own `expires` by more than the revocation clock-skew margin is
+   * skipped without a POST. Every other unexpired grant is POSTed. The
+   * server's `AlreadyRevokedError` counts as revoked. A plain refusal --
+   * a `ValidationError`, or the server's masked `NotFoundError` on a grant
+   * whose chain no longer verifies -- counts as skipped when the verified
+   * account document explains it (expired, orphaned, or chained under a
+   * parent delegation that has rotted); any other failure is thrown after
+   * every POST settles, so the caller keeps the credential and retries rather
+   * than recording a revocation the server never accepted. Legacy records
+   * that stored only a display summary (no full zcap) are nothing to revoke
+   * -- expiry is their backstop -- and count as skipped. A capability the
+   * rotation stage already revoked (`revokedByRotation`) is counted as
+   * revoked without a second POST. `withdrawn` counts only the POSTs that
+   * landed on this call:
    * a grant answered `AlreadyRevokedError`, or revoked by the rotation
    * stage, counts in `revoked` and not in `withdrawn`. A no-op returning
    * zero counts when no remote store is configured.

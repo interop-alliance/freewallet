@@ -4,6 +4,14 @@
 
 ### Fixed
 
+- Revoking an app whose grant was signed by a since-disconnected wallet
+  client succeeds again. The server now answers that dead grant with a
+  masked 404, and wallet-core's refusal reading counts it as skipped
+  against the verified account document.
+- The WAS e2e run empties its server data dir in the server's own start
+  command rather than in a `globalSetup` hook, which ran after boot and
+  deleted the store's version stamp, so the next run's server refused to
+  start.
 - A recovery spend whose registry write fails no longer strands the retired
   credentials' registry entries and unlock Spaces. The remembered spend's
   save confirm retries the write, and keeps the pending record when the
@@ -259,6 +267,9 @@
   and, for the backup export, the account's other Spaces.
 - The account-log signer's enrolled-client arm is `kind: 'enrolled'`
   (was `'client'`), following wallet-core's `AccountLogSigner` rename.
+- The cross-replica conformance `SyncStore` fake follows wallet-core's
+  rename of `SyncedRow` to `SyncedResourceReplica` and `getDirtyRows` to
+  `getDirtyResourceReplicas`.
 
 ### Added
 
