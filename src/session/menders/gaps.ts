@@ -98,6 +98,17 @@ export const MENDER_GAPS: ReadonlyArray<InvariantGap> = [
     item: 'FW-469',
     kind: 'none'
   },
+  // 23. Listed after row 9 so the ARCHITECTURE.md order holds. A transient
+  // spend leaves no pending carrier, so its tail's one retry is the last
+  // registry write that names these entries.
+  {
+    invariant: 'no-unlock-space-outlives-its-credential',
+    tornState:
+      "The retired credentials' registry entries and unlock Spaces on a transient recovery spend whose registry write and its one retry both failed.",
+    standsOn: ['ladder-anchored'],
+    item: 'FW-607',
+    kind: 'none'
+  },
   // 10. Retired: the transient chain's collection fan-out seals the
   // collection descriptor logs behind a forget ceremony's removal entry, on
   // both grades. The number stays, so the rows below keep theirs.

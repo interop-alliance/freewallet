@@ -919,13 +919,58 @@ export async function locateRecoveryAccount({
  * logging in from other browsers is outstanding, and it completes at a later
  * resume or remembered-login mend. The continuation never fails for a pending
  * standing.
+ *
+ * `registry` is what the tail's registry step did, held in memory only:
+ * `'failed'` when the write that drops the retired credentials' entries did
+ * not land. The remembered variant's `completeRecovery` retries that write
+ * before it clears the carrier. The transient variant has already retried it
+ * once in the tail, so a `'failed'` there is the stated residue.
  */
 export interface RecoveryOutcome {
   replacementCode: string
   replacementEntry: RecoveryCodeUnlockMethod
   spentRecoveryKid: string
   standing: 'established' | 'pending'
+  registry: 'written' | 'not-owed' | 'failed'
   completeRecovery?: (options?: { currentUserKey?: UserKey }) => Promise<void>
+}
+
+/**
+ * The save confirm's registry gate, shared by the tail's completion and the
+ * spend resume's. The pending carrier is the only thing that fires the spend
+ * resume, and the resume's registry pass is the only later pass that drops
+ * the retired credentials' entries and deletes their unlock Spaces. So when
+ * the registry step failed, the confirm retries it once, and clears the
+ * carrier only when that retry lands. A retry that fails too keeps the
+ * carrier, and the next login's resume runs the registry pass again (and
+ * shows the replacement code once more).
+ *
+ * @param options {object}
+ * @param options.outcome {'written' | 'not-owed' | 'failed'}   what the
+ *   registry step last did
+ * @param [options.retry] {Function}   re-runs the registry step; absent when
+ *   the caller cannot rebuild it, which keeps the carrier on a failure
+ * @returns {Promise<{ clear: boolean, outcome: string }>}   whether the
+ *   carrier may clear, and the step's outcome after any retry
+ */
+async function settleRegistryBeforeCompletion({
+  outcome,
+  retry
+}: {
+  outcome: 'written' | 'not-owed' | 'failed'
+  retry?: () => Promise<'written' | 'not-owed' | 'failed'>
+}): Promise<{ clear: boolean; outcome: 'written' | 'not-owed' | 'failed' }> {
+  if (outcome !== 'failed') {
+    return { clear: true, outcome }
+  }
+  const retried = retry ? await retry() : 'failed'
+  if (retried !== 'failed') {
+    return { clear: true, outcome: retried }
+  }
+  log.warn(
+    "Recovery-spend registry drop still failed at the save confirm; the pending carrier is kept so the next login's spend resume drops the retired credentials' entries and deletes their unlock Spaces"
+  )
+  return { clear: false, outcome: retried }
 }
 
 /**
@@ -1172,7 +1217,12 @@ async function retireCredentialsFromRegistry({
   finish,
   spaces
 }: {
-  stage: 'remembered-tail' | 'transient-tail' | 'resume'
+  stage:
+    | 'remembered-tail'
+    | 'remembered-confirm'
+    | 'transient-tail'
+    | 'resume'
+    | 'resume-confirm'
   registry: Omit<Parameters<typeof updateUnlockMethodsWithClient>[0], 'mutate'>
   did: string
   retirement: RecoverySpendRetirement
@@ -1791,78 +1841,95 @@ export async function recoverAccountWithCode({
   const newBridge = bridge
   const bridgeKeyId = delegationProofKeyId(newBridge)
   const siblingKeyId = sibling ? delegationProofKeyId(sibling) : undefined
-  await retireCredentialsFromRegistry({
-    stage: 'remembered-tail',
-    registry: {
-      zcapClient: newZcapClient,
-      spaceId: pointer.spaceId,
-      userKey: newUserKey
-    },
-    did: accountDid,
-    retirement: continuation,
-    // The new passphrase's own unlock Space is spared: a torn earlier
-    // attempt may have written its entry before the establishment landed,
-    // and that entry is re-upserted below.
-    spareUnlockSpaceId: recordBind.unlockSpaceId,
-    dropRecoveryKids: [replacementMethod.recoveryKid, spent.recipientKid],
-    finish: record => {
-      const methods = [...record.methods, replacementMethod]
-      // The standing block only when the establishment above landed: a
-      // failed establishment writes a BARE entry instead -- the shape the
-      // bare-entry repairs treat as mendable (and they rebuild only once
-      // the document actually carries the credential's commitment), so
-      // the registry never asserts a standing configuration the account
-      // does not back.
-      return upsertPassphraseUnlockMethod({
-        record: { ...record, methods },
-        unlockSpaceId: recordBind.unlockSpaceId,
-        manageCapability: recordBind.manageCapability,
-        ...(standingEstablished
-          ? {
-              standing: {
-                rosterKid: newCredential.standing.recipientKid,
-                keyAgreementKeyMultibase:
-                  newCredential.standing.keyAgreementKeyMultibase,
-                updateKeyMultibase: newRung0.keyMultibase,
-                unlockClientDid: newCredential.standing.clientDid,
-                ...(bridgeKeyId ? { delegationKeyId: bridgeKeyId } : {}),
-                ...(zcapExpires(newBridge)
-                  ? {
-                      delegationExpires: zcapExpires(newBridge)
-                    }
-                  : {}),
-                ...(siblingKeyId
-                  ? { delegatedClientsKeyId: siblingKeyId }
-                  : {}),
-                ...(sibling && zcapExpires(sibling)
-                  ? {
-                      delegatedClientsExpires: zcapExpires(sibling)
-                    }
-                  : {}),
-                ...(recordBind.unlockKeyAgreementKeyId
-                  ? {
-                      unlockKeyAgreementKeyId:
-                        recordBind.unlockKeyAgreementKeyId
-                    }
-                  : {}),
-                ...(recordBind.unlockKeyAgreementKeyMultibase
-                  ? {
-                      unlockKeyAgreementKeyMultibase:
-                        recordBind.unlockKeyAgreementKeyMultibase
-                    }
-                  : {})
+  // The step as a closure: the save confirm below re-runs it when this
+  // first write failed. Every input is either durable or fixed for the run,
+  // so the re-run re-applies the same mutation to whatever the registry
+  // then holds.
+  const retireStep = async ({
+    stage,
+    userKey
+  }: {
+    stage: 'remembered-tail' | 'remembered-confirm'
+    userKey: UserKey
+  }) =>
+    await retireCredentialsFromRegistry({
+      stage,
+      registry: {
+        zcapClient: newZcapClient,
+        spaceId: pointer.spaceId,
+        userKey
+      },
+      did: accountDid,
+      retirement: continuation,
+      // The new passphrase's own unlock Space is spared: a torn earlier
+      // attempt may have written its entry before the establishment landed,
+      // and that entry is re-upserted below.
+      spareUnlockSpaceId: recordBind.unlockSpaceId,
+      dropRecoveryKids: [replacementMethod.recoveryKid, spent.recipientKid],
+      finish: record => {
+        const methods = [...record.methods, replacementMethod]
+        // The standing block only when the establishment above landed: a
+        // failed establishment writes a BARE entry instead -- the shape the
+        // bare-entry repairs treat as mendable (and they rebuild only once
+        // the document actually carries the credential's commitment), so
+        // the registry never asserts a standing configuration the account
+        // does not back.
+        return upsertPassphraseUnlockMethod({
+          record: { ...record, methods },
+          unlockSpaceId: recordBind.unlockSpaceId,
+          manageCapability: recordBind.manageCapability,
+          ...(standingEstablished
+            ? {
+                standing: {
+                  rosterKid: newCredential.standing.recipientKid,
+                  keyAgreementKeyMultibase:
+                    newCredential.standing.keyAgreementKeyMultibase,
+                  updateKeyMultibase: newRung0.keyMultibase,
+                  unlockClientDid: newCredential.standing.clientDid,
+                  ...(bridgeKeyId ? { delegationKeyId: bridgeKeyId } : {}),
+                  ...(zcapExpires(newBridge)
+                    ? {
+                        delegationExpires: zcapExpires(newBridge)
+                      }
+                    : {}),
+                  ...(siblingKeyId
+                    ? { delegatedClientsKeyId: siblingKeyId }
+                    : {}),
+                  ...(sibling && zcapExpires(sibling)
+                    ? {
+                        delegatedClientsExpires: zcapExpires(sibling)
+                      }
+                    : {}),
+                  ...(recordBind.unlockKeyAgreementKeyId
+                    ? {
+                        unlockKeyAgreementKeyId:
+                          recordBind.unlockKeyAgreementKeyId
+                      }
+                    : {}),
+                  ...(recordBind.unlockKeyAgreementKeyMultibase
+                    ? {
+                        unlockKeyAgreementKeyMultibase:
+                          recordBind.unlockKeyAgreementKeyMultibase
+                      }
+                    : {})
+                }
               }
-            }
-          : {})
-      })
-    },
-    // The retired credentials' browser-local state goes with their Spaces:
-    // a remembered spend runs on a browser that may hold it.
-    spaces: {
-      zcapClient: newZcapClient,
-      clearLocalState: true,
-      ...(idb ? { idb } : {})
-    }
+            : {})
+        })
+      },
+      // The retired credentials' browser-local state goes with their Spaces:
+      // a remembered spend runs on a browser that may hold it.
+      spaces: {
+        zcapClient: newZcapClient,
+        clearLocalState: true,
+        ...(idb ? { idb } : {})
+      }
+    })
+  // Read by the save confirm: a failed write is retried there before the
+  // carrier clears, since the carrier is what fires the spend resume.
+  let registryOutcome = await retireStep({
+    stage: 'remembered-tail',
+    userKey: newUserKey
   })
 
   // The epoch cascade: every encrypted collection takes a fresh epoch naming
@@ -1921,6 +1988,17 @@ export async function recoverAccountWithCode({
     // passes its vault user key; a caller without one (the /recover page
     // pre-login) has nothing rotating underneath it.
     const userKeyToPersist = options.currentUserKey ?? newUserKey
+    // The registry sits sealed to the current user key, so the retry reads
+    // and writes under the same key the record is completed with.
+    const settled = await settleRegistryBeforeCompletion({
+      outcome: registryOutcome,
+      retry: () =>
+        retireStep({ stage: 'remembered-confirm', userKey: userKeyToPersist })
+    })
+    registryOutcome = settled.outcome
+    if (!settled.clear) {
+      return
+    }
     await persistNewClientKeys({
       userKey: userKeyToPersist,
       pointerDid: did,
@@ -1934,6 +2012,7 @@ export async function recoverAccountWithCode({
     replacementEntry: replacementMethod,
     spentRecoveryKid: spent.recipientKid,
     standing: standingEstablished ? 'established' : 'pending',
+    registry: registryOutcome,
     completeRecovery
   }
 }
@@ -2375,6 +2454,13 @@ export async function resumeRecoverySpend({
   // step then deletes the dropped entries' Spaces once that write lands.
   // A record with no replacement code owes no registry write here.
   let registryStatus: RecoverySpendResumeReport['registry'] = 'not-owed'
+  // The registry step again, for the save confirm to retry when this run's
+  // write failed; unset when the step could not even be prepared.
+  let retryRegistryStep:
+    | ((options: {
+        userKey: UserKey
+      }) => Promise<'written' | 'not-owed' | 'failed'>)
+    | undefined
   if (replacement) {
     registryStatus = 'skipped'
     let step:
@@ -2492,6 +2578,22 @@ export async function resumeRecoverySpend({
       )
     }
     if (step && retirement) {
+      const stepInputs = step
+      const stepRetirement = retirement
+      retryRegistryStep = async ({ userKey: stepUserKey }) =>
+        await retireCredentialsFromRegistry({
+          stage: 'resume-confirm',
+          registry: {
+            zcapClient: newZcapClient,
+            spaceId: pointer.spaceId,
+            userKey: stepUserKey
+          },
+          did,
+          retirement: stepRetirement,
+          spareUnlockSpaceId: found.unlockSpaceId,
+          ...stepInputs,
+          spaces: { zcapClient: newZcapClient, clearLocalState: true }
+        })
       const written = await retireCredentialsFromRegistry({
         stage: 'resume',
         registry: {
@@ -2528,6 +2630,16 @@ export async function resumeRecoverySpend({
     // The CURRENT key wins over the closure capture: the confirming session
     // may have adopted a sweep rotation while the code was on display.
     const userKeyToPersist = options.currentUserKey ?? userKey
+    // A skipped registry backfill keeps the carrier unless the retry lands,
+    // or the retired credentials' entries would outlive the last resume.
+    const retry = retryRegistryStep
+    const settled = await settleRegistryBeforeCompletion({
+      outcome: registryStatus === 'skipped' ? 'failed' : 'written',
+      ...(retry ? { retry: () => retry({ userKey: userKeyToPersist }) } : {})
+    })
+    if (!settled.clear) {
+      return
+    }
     await persistClientKeys({
       userKey: userKeyToPersist,
       pointerDid: did,
@@ -3046,63 +3158,83 @@ async function recoverAccountTransient({
   const replacementMethod = replacementEntry
   const bridgeKeyId = delegationProofKeyId(bridge)
   const siblingKeyId = delegationProofKeyId(sibling)
-  await retireCredentialsFromRegistry({
-    stage: 'transient-tail',
-    registry: {
-      zcapClient: transientZcapClient,
-      spaceId,
-      userKey: oldUserKey,
-      writeUserKey: newUserKey,
-      capability: generationDelegation
-    },
-    did,
-    retirement: continuation,
-    // The fresh credential's own unlock Space is spared.
-    spareUnlockSpaceId: recordBind.unlockSpaceId,
-    dropRecoveryKids: [replacementMethod.recoveryKid, spent.recipientKid],
-    finish: record =>
-      upsertPassphraseUnlockMethod({
-        record: { ...record, methods: [...record.methods, replacementMethod] },
-        unlockSpaceId: recordBind.unlockSpaceId,
-        manageCapability: recordBind.manageCapability,
-        standing: {
-          rosterKid: standing.recipientKid,
-          keyAgreementKeyMultibase: standing.keyAgreementKeyMultibase,
-          updateKeyMultibase: rung0.keyMultibase,
-          unlockClientDid: standing.clientDid,
-          ...(bridgeKeyId ? { delegationKeyId: bridgeKeyId } : {}),
-          ...(zcapExpires(bridge)
-            ? { delegationExpires: zcapExpires(bridge) }
-            : {}),
-          ...(siblingKeyId ? { delegatedClientsKeyId: siblingKeyId } : {}),
-          ...(zcapExpires(sibling)
-            ? {
-                delegatedClientsExpires: zcapExpires(sibling)
-              }
-            : {}),
-          ...(recordBind.unlockKeyAgreementKeyId
-            ? {
-                unlockKeyAgreementKeyId: recordBind.unlockKeyAgreementKeyId
-              }
-            : {}),
-          ...(recordBind.unlockKeyAgreementKeyMultibase
-            ? {
-                unlockKeyAgreementKeyMultibase:
-                  recordBind.unlockKeyAgreementKeyMultibase
-              }
-            : {})
-        }
-      }),
-    // Remote only: a transient visit touches no local storage. The fresh
-    // ladder VM is the delegator, and its bare did:key -- the bootstrap
-    // identity, which carries no invocation relation under its account
-    // form -- is what sends each DELETE.
-    spaces: {
-      zcapClient: ladderZcap,
-      invoker: didKeyZcapClient({ keyAgent: bootstrapAgent }),
-      controller: bootstrapAgent.id
-    }
-  })
+  // The step as a closure, so a failed first write is retried once below.
+  const retireStep = async () =>
+    await retireCredentialsFromRegistry({
+      stage: 'transient-tail',
+      registry: {
+        zcapClient: transientZcapClient,
+        spaceId,
+        userKey: oldUserKey,
+        writeUserKey: newUserKey,
+        capability: generationDelegation
+      },
+      did,
+      retirement: continuation,
+      // The fresh credential's own unlock Space is spared.
+      spareUnlockSpaceId: recordBind.unlockSpaceId,
+      dropRecoveryKids: [replacementMethod.recoveryKid, spent.recipientKid],
+      finish: record =>
+        upsertPassphraseUnlockMethod({
+          record: {
+            ...record,
+            methods: [...record.methods, replacementMethod]
+          },
+          unlockSpaceId: recordBind.unlockSpaceId,
+          manageCapability: recordBind.manageCapability,
+          standing: {
+            rosterKid: standing.recipientKid,
+            keyAgreementKeyMultibase: standing.keyAgreementKeyMultibase,
+            updateKeyMultibase: rung0.keyMultibase,
+            unlockClientDid: standing.clientDid,
+            ...(bridgeKeyId ? { delegationKeyId: bridgeKeyId } : {}),
+            ...(zcapExpires(bridge)
+              ? { delegationExpires: zcapExpires(bridge) }
+              : {}),
+            ...(siblingKeyId ? { delegatedClientsKeyId: siblingKeyId } : {}),
+            ...(zcapExpires(sibling)
+              ? {
+                  delegatedClientsExpires: zcapExpires(sibling)
+                }
+              : {}),
+            ...(recordBind.unlockKeyAgreementKeyId
+              ? {
+                  unlockKeyAgreementKeyId: recordBind.unlockKeyAgreementKeyId
+                }
+              : {}),
+            ...(recordBind.unlockKeyAgreementKeyMultibase
+              ? {
+                  unlockKeyAgreementKeyMultibase:
+                    recordBind.unlockKeyAgreementKeyMultibase
+                }
+              : {})
+          }
+        }),
+      // Remote only: a transient visit touches no local storage. The fresh
+      // ladder VM is the delegator, and its bare did:key -- the bootstrap
+      // identity, which carries no invocation relation under its account
+      // form -- is what sends each DELETE.
+      spaces: {
+        zcapClient: ladderZcap,
+        invoker: didKeyZcapClient({ keyAgent: bootstrapAgent }),
+        controller: bootstrapAgent.id
+      }
+    })
+  // A transient spend leaves no pending carrier, so no later resume re-runs
+  // this step. One immediate retry covers a passing failure (a lost
+  // conditional-write race, a dropped connection). A second failure is the
+  // stated residue: the retired credentials' entries and unlock Spaces
+  // stand, and no credential-only visit drops them.
+  let registryOutcome = await retireStep()
+  if (registryOutcome === 'failed') {
+    log.info('Recovery-spend registry: retrying the transient registry write')
+    registryOutcome = await retireStep()
+  }
+  if (registryOutcome === 'failed') {
+    log.warn(
+      "Recovery-spend registry write failed twice; the retired credentials' registry entries and unlock Spaces stand, with no mender a credential-only visit fires"
+    )
+  }
 
   // Retire the spent code's unlock Space -- a typed code is a spent
   // credential. Remote only: a transient visit touches no local storage.
@@ -3124,7 +3256,8 @@ async function recoverAccountTransient({
     // The transient variant establishes the credential's standing inside
     // the add-and-retire entry and the mandatory rotation, both fatal on
     // failure, so a returned outcome is always established.
-    standing: 'established'
+    standing: 'established',
+    registry: registryOutcome
   }
 }
 

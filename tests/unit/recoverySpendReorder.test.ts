@@ -21,7 +21,10 @@
  *   show-once prompt back until the confirm;
  * - the retired credentials' unlock Spaces are deleted only once the
  *   registry drop naming them has landed, and the resume drops and deletes
- *   them on every arm.
+ *   them on every arm;
+ * - a save confirm retries a failed registry drop before it clears the
+ *   carrier, and keeps the carrier when the retry fails too, so the next
+ *   resume still fires.
  *
  * The remote halves are mocked at their module seams; the codes, the unlock
  * identities, and the stored records are real.
@@ -46,6 +49,8 @@ const state = vi.hoisted(() => ({
   registryWrites: [] as unknown[],
   registryRecord: null as unknown,
   failNextRegistryWrite: false,
+  // How many registry writes in a row fail, for the save confirm's retry.
+  registryWriteFailures: 0,
   deletedEntrySpaceIds: [] as string[],
   escrows: [] as Array<{ recipientId: string; ownerKid: string }>,
   rosterReads: 0,
@@ -237,6 +242,10 @@ vi.mock('@/session/unlockMethods', async importOriginal => ({
     }
     if (state.failNextRegistryWrite) {
       state.failNextRegistryWrite = false
+      throw new Error('registry write failed (simulated lost CAS race)')
+    }
+    if (state.registryWriteFailures > 0) {
+      state.registryWriteFailures -= 1
       throw new Error('registry write failed (simulated lost CAS race)')
     }
     state.registryWrites.push(next)
@@ -452,6 +461,7 @@ beforeEach(() => {
   state.registryWrites = []
   state.registryRecord = null
   state.failNextRegistryWrite = false
+  state.registryWriteFailures = 0
   state.deletedEntrySpaceIds = []
   state.escrows = []
   state.rosterReads = 0
@@ -962,6 +972,107 @@ describe('the retired credentials -- entry-drop-first, deletes gated on the drop
   })
 })
 
+describe('the save confirm after a failed registry drop', () => {
+  /**
+   * Reads the new passphrase's keyring hit off the fake session database.
+   *
+   * @param options {object}
+   * @param options.idb {IDBFactory}
+   * @returns {Promise<KeyringFetchResult | null>}
+   */
+  async function newPassphraseHit({ idb }: { idb: IDBFactory }) {
+    return await fetchKeyring({
+      accountLogPinStore: memoryResourceLogPinStore(),
+      secret: NEW_PASSPHRASE,
+      kdf: KEYRING_KDF,
+      idb
+    })
+  }
+
+  it('retries the drop on the confirm, then deletes the Spaces and clears the carrier', async () => {
+    const { code } = await storeRecordForCode()
+    const { idb } = createFakeSessionIdb()
+    state.registryRecord = { methods: [await retiredPassphraseEntry()] }
+    state.registryWriteFailures = 1
+
+    const outcome = await recoverAccountWithCode({
+      code,
+      newPassphrase: NEW_PASSPHRASE,
+      rememberBrowser: true,
+      idb
+    })
+    expect(outcome.registry).toBe('failed')
+    expect(state.deletedEntrySpaceIds).toEqual([])
+
+    await outcome.completeRecovery!()
+
+    const written = state.registryRecord as {
+      methods: Array<{ unlockSpaceId?: string }>
+    }
+    expect(
+      written.methods.some(
+        method => method.unlockSpaceId === 'unlock-retired-passphrase'
+      )
+    ).toBe(false)
+    expect(state.deletedEntrySpaceIds).toEqual(['unlock-retired-passphrase'])
+    const found = await newPassphraseHit({ idb })
+    expect(found?.clientKeys?.pending).toBeUndefined()
+    expect(found?.clientKeys?.userKey).toBeDefined()
+  })
+
+  it('keeps the carrier when the retry fails too, and the next resume drops and deletes', async () => {
+    const { code } = await storeRecordForCode()
+    const { idb } = createFakeSessionIdb()
+    state.registryRecord = { methods: [await retiredPassphraseEntry()] }
+    state.registryWriteFailures = 2
+    const capture = captureSink()
+    addSink(capture.sink)
+
+    const outcome = await recoverAccountWithCode({
+      code,
+      newPassphrase: NEW_PASSPHRASE,
+      rememberBrowser: true,
+      idb
+    })
+    await outcome.completeRecovery!()
+
+    expect(state.deletedEntrySpaceIds).toEqual([])
+    expect(
+      capture.events.some(
+        event =>
+          event.level === 'warn' &&
+          String(event.msg).includes('the pending carrier is kept')
+      )
+    ).toBe(true)
+    const found = await newPassphraseHit({ idb })
+    expect(found?.clientKeys?.pending?.ceremony).toBe('recovery-spend')
+    expect(found?.clientKeys?.pending?.replacementCode).toHaveLength(16)
+
+    // The next login's spend resume, fired by the kept carrier.
+    state.rosterRecipients = ['everyone-already-escrowed']
+    const resumed = await resumeRecoverySpend({
+      pinStore: memoryResourceLogPinStore(),
+      found: found as KeyringFetchResult
+    })
+
+    expect(resumed.spendResume.registry).toBe('landed')
+    const written = state.registryRecord as {
+      methods: Array<{ type: string; unlockSpaceId?: string }>
+    }
+    expect(
+      written.methods.some(
+        method => method.unlockSpaceId === 'unlock-retired-passphrase'
+      )
+    ).toBe(false)
+    expect(state.deletedEntrySpaceIds).toEqual(['unlock-retired-passphrase'])
+    // The code is shown once more, and its confirm now clears the carrier.
+    expect(resumed.recoverySpendPrompt).toBeDefined()
+    await resumed.recoverySpendPrompt!.complete()
+    const completed = await newPassphraseHit({ idb })
+    expect(completed?.clientKeys?.pending).toBeUndefined()
+  })
+})
+
 describe('resumeRecoverySpend -- the spend-completion resume', () => {
   // The new passphrase's derived standing client -- REAL (the standing
   // backfill computes a commitment over its key-agreement multibase), and
@@ -1292,6 +1403,37 @@ describe('resumeRecoverySpend -- the spend-completion resume', () => {
 
     expect(state.calls).toContain('registryMutation')
     expect(state.deletedEntrySpaceIds).toEqual([])
+  })
+
+  it("retries a failed drop on the resume's confirm, and keeps the carrier when it fails again", async () => {
+    const { found, persistClientKeys, standingClient } = await makeSpendFound()
+    state.rosterRecipients = [
+      'everyone-already-escrowed',
+      standingClient.recipientKid
+    ]
+    state.registryRecord = { methods: [await retiredPassphraseEntry()] }
+    state.registryWriteFailures = 2
+
+    const result = await resumeRecoverySpend({
+      pinStore: memoryResourceLogPinStore(),
+      found
+    })
+    expect(result.spendResume.registry).toBe('skipped')
+
+    await result.recoverySpendPrompt!.complete()
+
+    expect(
+      state.calls.filter(call => call === 'registryMutation')
+    ).toHaveLength(2)
+    expect(state.deletedEntrySpaceIds).toEqual([])
+    expect(persistClientKeys).not.toHaveBeenCalled()
+
+    // A later confirm whose retry lands clears it.
+    await result.recoverySpendPrompt!.complete()
+    expect(state.deletedEntrySpaceIds).toEqual(['unlock-retired-passphrase'])
+    expect(persistClientKeys).toHaveBeenCalledWith(
+      expect.objectContaining({ pending: null })
+    )
   })
 
   it('rethrows a roster refusal other than the unwrap miss unchanged', async () => {

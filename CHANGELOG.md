@@ -4,6 +4,12 @@
 
 ### Fixed
 
+- A recovery spend whose registry write fails no longer strands the retired
+  credentials' registry entries and unlock Spaces. The remembered spend's
+  save confirm retries the write, and keeps the pending record when the
+  retry fails, so the next login's spend resume drops them. The spend
+  resume's confirm does the same. The transient spend retries the write
+  once in its tail.
 - Account deletion from a transient session over a stale-sealed
   unlock-methods registry unwraps the roster with the standing credential's
   key rather than the per-visit key, so its in-place repair no longer

@@ -703,6 +703,12 @@ built:
   `no-unlock-space-outlives-its-credential`). The entries are gone, so
   nothing names the Spaces again. The residue is inert, and is the class the
   registry-driven account-deletion walk already leaves behind.
+- The retired credentials' registry entries and unlock Spaces on a
+  transient recovery spend whose registry write failed twice (invariant
+  `no-unlock-space-outlives-its-credential`). The tail retries the write
+  once. A transient spend leaves no pending carrier, so no resume runs the
+  drop again. The entries name credentials the document no longer lists,
+  and Settings shows them as unlock methods.
 - An establishment torn between the record re-bind and the registry
   re-entry leaves the unlock-methods registry naming no establishing
   credential (invariant `registry-records-the-establishing-credential`). The

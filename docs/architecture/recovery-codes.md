@@ -148,18 +148,18 @@ write dropping the entries has landed, since a registry naming a deleted
 Space breaks every later registry-driven walk. The visit then enters through
 the ordinary transient composition with zero local residue.
 
-Three residues remain, none of them mended here. A tear inside the append
+Four residues remain, none of them mended here. A tear inside the append
 leaves the spent code dead (a re-run refuses it as spent) and the current
 epoch wrapped to the removed code alone; the mender would be a repair
 holding both the spent code and the new passphrase, and it is not built. A
 rotation torn mid-fan-out strands a collection keyed to the spent code until
 the next login, transient or remembered, whose collection fan-out re-epochs
-it onto the current user key. A tail torn between the
-registry drop and the deletes leaves the retired credentials' unlock Spaces
-standing with nothing naming them, and a failed registry write leaves their
-entries standing with no pass here to drop them. Both of the last are inert,
-and a lingering retired entry is dropped by the next spend's own registry
-pass.
+it onto the current user key. A tail torn between the registry drop and the
+deletes leaves the retired credentials' unlock Spaces standing with nothing
+naming them. A failed registry write is retried once in the tail. A second
+failure leaves their entries and Spaces standing, and a transient spend
+leaves no pending carrier for a resume to drop them. Both of the last are
+inert, and both are declared open gaps.
 
 The remembered spend, the `rememberBrowser` entry, mints a fresh
 enrolled-client key set instead. Its required `onCommitted` seam, between
@@ -174,9 +174,13 @@ rotation, and the registry mutation, keyed on the same report, runs between
 the re-seal and the cascade. The new enrolled client then deletes each
 retired entry's unlock Space and this browser's unlock-local state for it,
 best-effort, under the same registry-write-first ordering. A failed write
-leaves the entries named and their Spaces standing for the spend resume's
-registry pass, which drops and deletes them on every arm. The resume never
-re-enters the continuation, so it reads the same report back off the log
+leaves the entries named and their Spaces standing. The save confirm then
+retries the write before it clears the carrier. When the retry fails too,
+the confirm keeps the carrier, so the next login's spend resume fires. Its
+registry pass drops the entries and deletes the Spaces on every arm, and it
+shows the replacement code once more. The resume's own confirm retries
+and keeps the carrier the same way. The resume never re-enters the
+continuation, so it reads the same report back off the log
 (`recoverySpendRetirementFromLog`). The replacement code's save confirm
 completes the local record and clears the carrier. The spent code's unlock
 Space is deleted, so a spent code thereafter fails distinctly. A post-entry
