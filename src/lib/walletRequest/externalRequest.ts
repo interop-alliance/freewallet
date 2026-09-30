@@ -14,8 +14,10 @@
  * that needs an origin (`DIDAuthentication`, a `domain`, an
  * `AppConnectQuery`), every grant class beyond the two an agent may
  * legitimately ask for (`#public-collection` and `#private-collection`
- * descriptors, or plain collection URLs resolving to those classes), and a
- * `interact.service` endpoint on another origin than the exchange.
+ * descriptors, or plain collection URLs resolving to those classes), a plain
+ * collection URL naming an encrypted collection whose current key epoch does
+ * not list the agent, and a `interact.service` endpoint on another origin
+ * than the exchange.
  */
 import {
   isInteractionUrl,
@@ -28,7 +30,7 @@ import type {
 } from '@interop/wallet-request'
 import { errorNameOf } from '@interop/wallet-core/menders'
 import { classifyRequest, queriesOf } from './classify'
-import type { ResolvedGrant } from './processZcaps'
+import type { ExistingCollections, ResolvedGrant } from './processZcaps'
 import type { IVPRDetails, WalletRequestProfile } from './types'
 
 /**
@@ -73,7 +75,9 @@ export function isAgentActivityObject(object: unknown): boolean {
  * engine supports is refused before consent: a share hands the grantee
  * decryption of the user's own encrypted collections, and a
  * protected-collection read covers plaintext `public-credentials`. Widening
- * the list is a documented decision, not a code change.
+ * the list is a documented decision, not a code change. A plain collection
+ * URL resolving to the `collection` class passes this list and faces one
+ * more check once the key epochs are read ({@link unreadableGrants}).
  */
 const ALLOWED_TARGET_CLASSES: readonly string[] = [
   'public-collection',
@@ -97,6 +101,7 @@ export type ExternalRequestRefusal =
   | 'appConnect'
   | 'foreignDelivery'
   | 'barredGrant'
+  | 'unreadableTarget'
   | 'multipleGrantees'
 
 /**
@@ -305,7 +310,9 @@ export function precheckExternalRequest({
  * allowlist. Run once the grants are resolved (the first point a target's
  * class is known); a non-empty result refuses the request before consent.
  * Unsatisfiable grants are not barred -- they delegate nothing and render as
- * "cannot fulfill", as on the popup.
+ * "cannot fulfill", as on the popup. A plain URL on an encrypted collection
+ * the agent cannot read is refused separately, after the key epochs are read
+ * ({@link unreadableGrants}).
  *
  * @param grants {ResolvedGrant[]}
  * @returns {ResolvedGrant[]}
@@ -315,5 +322,53 @@ export function barredGrants(grants: ResolvedGrant[]): ResolvedGrant[] {
     ({ target }) =>
       target.targetClass !== undefined &&
       !ALLOWED_TARGET_CLASSES.includes(target.targetClass)
+  )
+}
+
+/**
+ * Whether any grant is a plain URL `invocationTarget` naming a collection
+ * that already stands (or a Resource inside one). Only such a grant can be
+ * refused by {@link unreadableGrants}, so only then does the page wait for
+ * the attribution pass, which reads the key epochs, before consent renders.
+ *
+ * @param options {object}
+ * @param options.grants {ResolvedGrant[]}   the first resolution pass
+ * @param options.collections {ExistingCollections}   the pre-request snapshot
+ * @returns {boolean}
+ */
+export function namesExistingCollectionByUrl({
+  grants,
+  collections
+}: {
+  grants: ResolvedGrant[]
+  collections: ExistingCollections
+}): boolean {
+  return grants.some(
+    ({ descriptor, target }) =>
+      typeof descriptor.invocationTarget === 'string' &&
+      target.collectionId !== undefined &&
+      collections.has(target.collectionId)
+  )
+}
+
+/**
+ * The grants that would hand the agent a live zcap over ciphertext it cannot
+ * decrypt: a plain URL `invocationTarget` naming an existing encrypted
+ * collection (or a Resource inside one) whose current key epoch was read and
+ * does not list the agent. A plain URL admits the grantee to no key roster;
+ * the `#private-collection` descriptor naming the same collection does. Run
+ * over the attributed grants, since the first pass reads no key epoch. An
+ * epoch that could not be read decides nothing, so that grant delegates with
+ * the ciphertext note as on the popup. A non-empty result refuses the request
+ * before consent.
+ *
+ * @param grants {ResolvedGrant[]}   the attributed grants
+ * @returns {ResolvedGrant[]}
+ */
+export function unreadableGrants(grants: ResolvedGrant[]): ResolvedGrant[] {
+  return grants.filter(
+    ({ descriptor, target }) =>
+      typeof descriptor.invocationTarget === 'string' &&
+      target.outsideKeyEpoch === true
   )
 }

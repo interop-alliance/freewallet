@@ -366,7 +366,10 @@ interaction-URL page `/external/request`. That entry point is stricter than
 the popup, the only requester signals being the grantee DID and
 request-supplied text: every refusal is decided before consent renders, and
 only public-collection and private-collection targets are granted from a
-link.
+link. A plain URL target naming an existing encrypted collection whose
+current key epoch does not list the agent is refused too, since that grant
+would read only ciphertext. The refusal is shown on the page, and the popup
+still delegates such a grant with its ciphertext note.
 
 Sharing is the other direction, granting a third party read and decrypt
 access to one of the wallet's own encrypted collections through a

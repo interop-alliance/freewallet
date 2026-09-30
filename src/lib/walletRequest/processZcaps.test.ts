@@ -196,6 +196,7 @@ describe('resolveInvocationTarget string targets', () => {
       requester
     })
     expect(listed.encrypted).toBe(false)
+    expect(listed.outsideKeyEpoch).toBe(false)
     const unlisted = resolveInvocationTarget({
       descriptor: collectionUrl,
       space: SPACE,
@@ -205,6 +206,16 @@ describe('resolveInvocationTarget string targets', () => {
       requester
     })
     expect(unlisted.encrypted).toBe(true)
+    expect(unlisted.outsideKeyEpoch).toBe(true)
+    // An epoch left unread reaches no verdict, whatever `encrypted` says.
+    const unread = resolveInvocationTarget({
+      descriptor: collectionUrl,
+      space: SPACE,
+      collections: existingCollectionsFrom([{ id: 'notes', encrypted: true }]),
+      requester
+    })
+    expect(unread.encrypted).toBe(true)
+    expect(unread.outsideKeyEpoch).toBe(false)
     // A standard encrypted collection a share already escrowed the grantee
     // into reads the same way.
     const standard = resolveInvocationTarget({
@@ -216,6 +227,27 @@ describe('resolveInvocationTarget string targets', () => {
       requester
     })
     expect(standard.encrypted).toBe(false)
+  })
+
+  it('reaches no key-epoch verdict on a controller that derives no recipient', () => {
+    // A did:key the recipient derivation cannot handle (a P-256 key here) was
+    // never escrowed, so the collection reads as ciphertext to it. But a
+    // read epoch cannot be said to exclude an id that does not exist, so
+    // the interaction-URL page's refusal does not fire: its copy would send
+    // the developer to a descriptor form the same controller cannot satisfy.
+    const p256 = {
+      controller: 'did:key:zDnaerDaTF5BXEavCrfRZEk316dpbLsfPDZ3WJ5hRTPFU2169'
+    }
+    const target = resolveInvocationTarget({
+      descriptor: collectionUrl,
+      space: SPACE,
+      collections: existingCollectionsFrom([
+        { id: 'notes', encrypted: true, recipientIds: new Set(['#other']) }
+      ]),
+      requester: p256
+    })
+    expect(target.encrypted).toBe(true)
+    expect(target.outsideKeyEpoch).toBe(false)
   })
 
   it('refuses the Space itself, with or without a trailing slash', () => {

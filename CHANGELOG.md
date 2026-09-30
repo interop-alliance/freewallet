@@ -273,6 +273,14 @@
 
 ### Added
 
+- The interaction-URL request page refuses, before consent, a plain URL
+  `invocationTarget` naming an existing encrypted collection (or a Resource
+  inside one) whose current key epoch does not list the agent. Such a grant
+  would read only ciphertext. The refusal copy points the developer to the
+  `#private-collection` descriptor. An epoch that could not be read refuses
+  nothing, and neither does an agent whose did:key derives no recipient key,
+  since that descriptor form cannot admit it either. The page delivers nothing to the exchange, and the CHAPI get
+  popup still delegates with the ciphertext note.
 - An interaction-URL request that creates a collection, public or private,
   stamps its `generator` with the agent's did:key as `id`, and the request's
   self-declared `agent.name` as `name` when it carries one. The stamp has no

@@ -59,7 +59,9 @@ module `src/lib/walletRequest/externalRequest.ts`, each with its own copy:
 - a VPR-named presentation endpoint (`interact.service`) on another origin
   than the exchange, since delivery prefers that endpoint and the consent
   panel names the resolved delivery host;
-- any grant class outside the allowlist.
+- any grant class outside the allowlist;
+- a string target naming an existing encrypted collection, or a Resource
+  inside one, whose current key epoch does not list the agent.
 
 Only `#public-collection` and `#private-collection` targets are granted from
 a link, string targets resolving to those classes included. A string target
@@ -69,7 +71,31 @@ share would hand the grantee decryption of the user's own encrypted
 collections, and a protected-collection read covers the plaintext
 `public-credentials`. `barredGrants` runs once the grants are resolved, the
 first point a target's class is known. Widening the allowlist is a
-documented decision rather than a code change. A failed POST-back leaves the
+documented decision rather than a code change.
+
+A string target passes the allowlist as the `collection` class, but it
+admits the grantee to no key roster. On an encrypted collection whose
+current key epoch does not list the agent, the zcap would fetch only
+ciphertext. The `#private-collection` descriptor naming the same collection
+is the form that adds the agent as a recipient. So `unreadableGrants`
+refuses such a grant with `unreadableTarget`, and the copy tells the
+developer to request that descriptor instead. The check needs the key
+epochs, which only the attribution pass reads. When a string target names
+an existing collection (`namesExistingCollectionByUrl`), the page awaits
+`attributeExistingCollections` before consent and shows its result through
+`useAttributedGrants`' `showGrants`. Any other request renders consent at
+once, with the attribution pass behind it. The verdict
+(`ResolvedTarget.outsideKeyEpoch` in `processZcaps.ts`) rests on positive
+evidence only. The collection must be encrypted, the current epoch's
+recipients must have been read, and the agent must be absent from them. A
+failed or skipped read decides nothing, so that grant delegates with the
+ciphertext note. A string target whose current epoch already lists the
+agent delegates as before. The refusal is shown on the page alone. The
+protocol defines no decline or problem-report message, so nothing is
+delivered to the exchange. The CHAPI get popup does not refuse here: it
+delegates and shows the ciphertext note.
+
+A failed POST-back leaves the
 grant recorded and offers the composed response for manual delivery; a
 decline abandons the exchange, which expires on its own.
 

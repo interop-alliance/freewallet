@@ -340,29 +340,27 @@ export function existingCollectionsFrom(
 }
 
 /**
- * Whether a grantee's key-agreement key sits in a collection's current key
- * epoch, per the recipient ids read in for it. A controller the recipient
- * derivation cannot handle was never escrowed, so it is no recipient.
+ * The key-agreement recipient id a grantee's did:key derives, the id a
+ * collection's key epoch would list it under. Undefined for no controller and
+ * for one the recipient derivation cannot handle: such a controller was
+ * never escrowed, but no epoch can be read as excluding it either.
  *
  * @param options {object}
  * @param [options.controller] {string}   the grantee did:key
- * @param [options.recipientIds] {ReadonlySet<string>}
- * @returns {boolean}
+ * @returns {string | undefined}
  */
-function isCurrentRecipient({
-  controller,
-  recipientIds
+function granteeRecipientId({
+  controller
 }: {
   controller?: string
-  recipientIds?: ReadonlySet<string>
-}): boolean {
-  if (!controller || !recipientIds) {
-    return false
+}): string | undefined {
+  if (!controller) {
+    return undefined
   }
   try {
-    return recipientIds.has(x25519RecipientFromDidKey({ did: controller }).id!)
+    return x25519RecipientFromDidKey({ did: controller }).id
   } catch {
-    return false
+    return undefined
   }
 }
 
@@ -505,8 +503,15 @@ interface ResolvedTarget {
   // An encrypted collection the grantee does not join the key roster of, so
   // the RP will only see ciphertext: a standard EDV collection, or an
   // existing encrypted collection a string target names, whose current key
-  // epoch does not already list the grantee.
+  // epoch does not already list the grantee. On a string target this can be
+  // true with the epoch unread (a standard collection before the attribution
+  // pass, or a failed roster read); `outsideKeyEpoch` is the read verdict.
   encrypted: boolean
+  // Set only on a string target naming an existing encrypted collection:
+  // true once that collection's current key epoch has been read and does not
+  // list the grantee, false otherwise (listed, or the epoch unread). The
+  // interaction-URL page refuses on it; the popup renders `encrypted` alone.
+  outsideKeyEpoch?: boolean
   // Present when the target names a private collection that already stands
   // (see {@link ExistingCollectionReading}); absent on a new name, a public
   // or protected collection, or an unsatisfiable target.
@@ -845,7 +850,8 @@ function classifySpaceTarget({
  *   cannot create a collection through its first write. A collection an
  *   earlier descriptor in the same request provisions (`provisioned`) does
  *   not count. An existing encrypted collection is flagged `encrypted` unless
- *   its current key epoch already lists the grantee. A container target is
+ *   its current key epoch already lists the grantee, and `outsideKeyEpoch`
+ *   once that epoch has been read and does not list it. A container target is
  *   normalized to its canonical trailing-slash form whichever way it
  *   arrived. Any other string -- the Space URL itself, a foreign origin, a
  *   path that escapes the Space, a target carrying a query or fragment, a
@@ -999,6 +1005,12 @@ function resolveTargetForm({
     const encryptedCollection =
       !!standardCollection(collectionId)?.encryption ||
       !!existingEntry.encrypted
+    const recipientId = granteeRecipientId({
+      controller: requester.controller
+    })
+    const currentRecipient =
+      recipientId !== undefined &&
+      !!existingEntry.recipientIds?.has(recipientId)
     return {
       ...SATISFIABLE_DEFAULTS,
       invocationTarget:
@@ -1009,12 +1021,15 @@ function resolveTargetForm({
               path: resourcePath(space.spaceId, collectionId, resourceId)
             }),
       collectionId,
-      encrypted:
+      encrypted: encryptedCollection && !currentRecipient,
+      // A verdict only on positive evidence: an unread epoch cannot say the
+      // grantee is absent from it, and neither can a read one when the
+      // grantee's controller derives no recipient id to look for.
+      outsideKeyEpoch:
         encryptedCollection &&
-        !isCurrentRecipient({
-          controller: requester.controller,
-          recipientIds: existingEntry.recipientIds
-        }),
+        existingEntry.recipientIds !== undefined &&
+        recipientId !== undefined &&
+        !currentRecipient,
       targetClass: collectionClassFor({ collectionId, collections }),
       existing: existingCollectionReading({
         collectionId,

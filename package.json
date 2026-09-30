@@ -48,7 +48,7 @@
     "@interop/verifier-core": "^3.6.0",
     "@interop/vh-resource-log": "^0.5.4",
     "@interop/wallet-backup": "^0.5.1",
-    "@interop/wallet-core": "^0.90.0",
+    "@interop/wallet-core": "^0.91.0",
     "@interop/wallet-request": "^0.4.1",
     "@interop/was-client": "^0.80.0",
     "@interop/was-sync": "^0.6.0",

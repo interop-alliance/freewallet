@@ -88,6 +88,26 @@ describe('attributeExistingCollections key-epoch read', () => {
       storage: storage as unknown as Session['storage']
     })
     expect(attributed?.[0]!.target.encrypted).toBe(true)
+    expect(attributed?.[0]!.target.outsideKeyEpoch).toBe(true)
+  })
+
+  it('reaches no verdict on the key epoch when the roster read fails', async () => {
+    const resolution = stringTargetResolution('notes')
+    const storage = {
+      ...storageDouble({ encrypted: true, recipientIds: [] }),
+      listCollectionShares: vi.fn(async () => {
+        throw new Error('roster unreachable')
+      })
+    }
+    const attributed = await attributeExistingCollections({
+      resolution,
+      grants: resolveGrants(resolution),
+      storage: storage as unknown as Session['storage']
+    })
+    // The ciphertext note stays, but an unread epoch says nothing about
+    // whether the grantee is absent from it.
+    expect(attributed?.[0]!.target.encrypted).toBe(true)
+    expect(attributed?.[0]!.target.outsideKeyEpoch).toBe(false)
   })
 
   it('reads no key epoch for a plaintext collection', async () => {
@@ -110,6 +130,8 @@ describe('attributeExistingCollections key-epoch read', () => {
     })
     const [first] = resolveGrants(resolution)
     expect(first!.target.encrypted).toBe(true)
+    // The first pass reads no epoch, so it reaches no verdict yet.
+    expect(first!.target.outsideKeyEpoch).toBe(false)
     const attributed = await attributeExistingCollections({
       resolution,
       grants: [first!],

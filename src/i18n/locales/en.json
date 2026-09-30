@@ -1063,6 +1063,7 @@
       "appConnect": "This is an app connection request. Apps connect from their own website, not from a link.",
       "foreignDelivery": "This request would send your answer somewhere other than where it came from, so it was refused.",
       "barredGrant": "This request asks for access this wallet does not grant from a link: only collections created for the requester can be granted here, not shared wallet collections.",
+      "unreadableTarget": "This request names an encrypted collection by its URL, which grants no key to read it. The requester would get only unreadable data. Ask its developer to request the collection with a https://w3id.org/byoe#private-collection descriptor instead, which grants that key.",
       "multipleGrantees": "This request asks for access on behalf of more than one program key. A link can grant access to one requester at a time, so it was refused.",
       "zcapUnavailable": "This request needs remote storage, which this wallet isn't configured with.",
       "processFailed": "Something went wrong preparing the answer. Please try again.",

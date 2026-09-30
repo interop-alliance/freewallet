@@ -4,20 +4,29 @@
  * (`src/lib/walletRequest/externalRequest.ts`): the deep-link parser, the
  * exchange-opening error mapping, and the pre-consent refusal matrix (DID
  * Auth, `domain`, `AppConnectQuery`, a foreign delivery endpoint, the grant
- * class allowlist).
+ * class allowlist, a plain URL on an encrypted collection the agent cannot
+ * read).
  */
 import { describe, expect, it, vi } from 'vitest'
 import { EphemeralExchangeGoneError } from '@interop/wallet-request'
+import { x25519RecipientFromDidKey } from '@interop/was-client/edv'
 import {
   barredGrants,
   EXTERNAL_REQUEST_ORIGIN,
   ExternalRequestRefusedError,
   externalRequestPath,
   interactionUrlFromSearch,
+  namesExistingCollectionByUrl,
   openExternalRequest,
-  precheckExternalRequest
+  precheckExternalRequest,
+  unreadableGrants
 } from './externalRequest'
-import type { ResolvedGrant } from './processZcaps'
+import {
+  existingCollectionsFrom,
+  resolveGrants,
+  type ExistingCollections,
+  type ResolvedGrant
+} from './processZcaps'
 import type { IVPRDetails } from './types'
 
 const INTERACTION_URL =
@@ -367,6 +376,144 @@ describe('barredGrants', () => {
 
   it('ignores unsatisfiable grants, which delegate nothing', () => {
     expect(barredGrants([grant(undefined)])).toEqual([])
+  })
+})
+
+describe('unreadableGrants', () => {
+  const SPACE = { serverUrl: 'https://was.example/', spaceId: 'abc' }
+  const AGENT = 'did:key:z6MkqojacRDqmQgDi4ESKKhGDqnZx4C6cChAbQZXvnUFX7D7'
+  const AGENT_KID = x25519RecipientFromDidKey({ did: AGENT }).id!
+  const NOTES_URL = `${SPACE.serverUrl}space/${SPACE.spaceId}/notes/`
+
+  /**
+   * Resolves one agent grant against a Space snapshot, as the page does
+   * after the attribution pass has read it in.
+   *
+   * @param options {object}
+   * @param options.invocationTarget {ResolvedGrant['descriptor']['invocationTarget']}
+   * @param options.collections {ExistingCollections}
+   * @returns {ResolvedGrant[]}
+   */
+  function resolve({
+    invocationTarget,
+    collections
+  }: {
+    invocationTarget: ResolvedGrant['descriptor']['invocationTarget']
+    collections: ExistingCollections
+  }): ResolvedGrant[] {
+    return resolveGrants({
+      zcapRequests: [
+        {
+          referenceId: 'notes',
+          allowedAction: ['GET'],
+          invocationTarget,
+          controller: AGENT
+        }
+      ],
+      space: SPACE,
+      collections
+    })
+  }
+
+  it('refuses a URL on an encrypted collection whose key epoch omits the agent', () => {
+    const grants = resolve({
+      invocationTarget: NOTES_URL,
+      collections: existingCollectionsFrom([
+        { id: 'notes', encrypted: true, recipientIds: new Set(['#other']) }
+      ])
+    })
+    expect(barredGrants(grants)).toEqual([])
+    expect(unreadableGrants(grants)).toHaveLength(1)
+  })
+
+  it('refuses a Resource URL inside such a collection', () => {
+    const grants = resolve({
+      invocationTarget: `${NOTES_URL}note-1`,
+      collections: existingCollectionsFrom([
+        { id: 'notes', encrypted: true, recipientIds: new Set() }
+      ])
+    })
+    expect(unreadableGrants(grants)).toHaveLength(1)
+  })
+
+  it('lets a URL through when the key epoch already lists the agent', () => {
+    const grants = resolve({
+      invocationTarget: NOTES_URL,
+      collections: existingCollectionsFrom([
+        { id: 'notes', encrypted: true, recipientIds: new Set([AGENT_KID]) }
+      ])
+    })
+    expect(unreadableGrants(grants)).toEqual([])
+  })
+
+  it('lets a URL through when the key epoch could not be read', () => {
+    // An unread epoch is no evidence the agent is absent; the grant keeps
+    // the ciphertext note, as on the popup.
+    const grants = resolve({
+      invocationTarget: NOTES_URL,
+      collections: existingCollectionsFrom([{ id: 'notes', encrypted: true }])
+    })
+    expect(grants[0]!.target.encrypted).toBe(true)
+    expect(unreadableGrants(grants)).toEqual([])
+  })
+
+  it('lets a URL on a plaintext or public collection through', () => {
+    for (const entry of [
+      { id: 'notes', encrypted: false, recipientIds: new Set<string>() },
+      { id: 'notes', isPublic: true }
+    ]) {
+      const grants = resolve({
+        invocationTarget: NOTES_URL,
+        collections: existingCollectionsFrom([entry])
+      })
+      expect(unreadableGrants(grants)).toEqual([])
+    }
+  })
+
+  it('lets a private-collection descriptor on a standard encrypted collection through', () => {
+    const grants = resolve({
+      invocationTarget: {
+        type: 'https://w3id.org/byoe#private-collection',
+        name: 'private-credentials'
+      },
+      collections: existingCollectionsFrom([
+        { id: 'private-credentials', recipientIds: new Set() }
+      ])
+    })
+    // Only a URL target is refused here. This one is a protected collection,
+    // which the allowlist bars on its own.
+    expect(grants[0]!.target.encrypted).toBe(true)
+    expect(unreadableGrants(grants)).toEqual([])
+  })
+
+  it('waits for the key epochs only for a URL naming an existing collection', () => {
+    const collections = existingCollectionsFrom([{ id: 'notes' }])
+    expect(
+      namesExistingCollectionByUrl({
+        grants: resolve({ invocationTarget: NOTES_URL, collections }),
+        collections
+      })
+    ).toBe(true)
+    expect(
+      namesExistingCollectionByUrl({
+        grants: resolve({
+          invocationTarget: {
+            type: 'https://w3id.org/byoe#private-collection',
+            name: 'notes'
+          },
+          collections
+        }),
+        collections
+      })
+    ).toBe(false)
+    // A URL naming no existing collection is unsatisfiable and names none.
+    const empty = existingCollectionsFrom([])
+    expect(
+      namesExistingCollectionByUrl({
+        grants: resolve({ invocationTarget: NOTES_URL, collections: empty }),
+        collections: empty
+      })
+    ).toBe(false)
   })
 })
 

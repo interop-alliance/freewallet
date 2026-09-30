@@ -13,7 +13,8 @@
  * login in place (the same login routing `/login` runs) and adopts
  * the session app-wide. Everything the entry point refuses -- the exchange
  * states, DID Auth, a `domain`, an `AppConnectQuery`, a delivery endpoint on
- * another origin, a grant class outside the allowlist -- is decided in
+ * another origin, a grant class outside the allowlist, a plain URL on an
+ * encrypted collection the agent cannot read -- is decided in
  * `src/lib/walletRequest/externalRequest.ts` before consent renders, each
  * with its own copy. The grant is recorded on the Login activity under the
  * fixed `n/a (API request)` origin marker before anything is delivered.
@@ -51,10 +52,13 @@ import {
   EXTERNAL_REQUEST_ORIGIN,
   ExternalRequestRefusedError,
   interactionUrlFromSearch,
+  namesExistingCollectionByUrl,
   openExternalRequest,
   precheckExternalRequest,
+  unreadableGrants,
   type ExternalRequestRefusal
 } from '@/lib/walletRequest/externalRequest'
+import { attributeExistingCollections } from '@/lib/walletRequest/attributeExistingCollections'
 import { useAttributedGrants } from '@/hooks/useAttributedGrants'
 import { findKnownAgents } from '@/lib/connectedApps'
 import { formatDate } from '@/lib/viewMappers/formatDate'
@@ -119,8 +123,13 @@ export function ExternalRequestPage() {
   const [profile, setProfile] = useState<WalletRequestProfile | null>(null)
   const [session, setSession] = useState<Session | null>(null)
   // The consent screen's grants: the first pass at once, then the pass with
-  // the existing collections' attribution read in.
-  const { grants: resolvedGrants, attributeGrants } = useAttributedGrants()
+  // the existing collections' attribution read in. A plain URL naming an
+  // existing collection waits for that pass instead, before consent.
+  const {
+    grants: resolvedGrants,
+    attributeGrants,
+    showGrants
+  } = useAttributedGrants()
   const [loginError, setLoginError] = useState<string | null>(null)
   // The requester DIDs this account has granted before and not revoked,
   // read off the activity history after consent renders.
@@ -149,7 +158,9 @@ export function ExternalRequestPage() {
   /**
    * Resolves the request's grants against the session's Space and runs the
    * allowlist check, then renders consent. The one post-login refusal the
-   * popup also has: no remote Space to delegate against.
+   * popup also has: no remote Space to delegate against. A plain URL naming
+   * an existing collection holds consent behind the attribution pass, which
+   * reads the key epochs the unreadable-target refusal needs.
    */
   async function prepareConsent({
     loggedIn,
@@ -187,7 +198,34 @@ export function ExternalRequestPage() {
       block('barredGrant')
       return
     }
-    attributeGrants({ resolution, grants, storage: loggedIn.storage })
+    if (
+      namesExistingCollectionByUrl({
+        grants,
+        collections: resolution.collections
+      })
+    ) {
+      let attributed: typeof grants | undefined
+      try {
+        attributed = await attributeExistingCollections({
+          resolution,
+          grants,
+          storage: loggedIn.storage
+        })
+      } catch (err) {
+        // Best-effort, as on the popup: an unread epoch refuses nothing.
+        log.warn('Could not attribute the existing collections', { err })
+      }
+      const checked = attributed ?? grants
+      // A plain URL on an encrypted collection whose current key epoch does
+      // not list the agent would delegate a zcap over ciphertext only.
+      if (unreadableGrants(checked).length > 0) {
+        block('unreadableTarget')
+        return
+      }
+      showGrants(checked)
+    } else {
+      attributeGrants({ resolution, grants, storage: loggedIn.storage })
+    }
     setPageState('consenting')
     void readKnownAgents({ loggedIn, requestProfile })
   }

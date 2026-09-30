@@ -8,7 +8,10 @@
  * naming an encrypted collection also has the collection's current key epoch
  * read, so a grantee already listed there does not get that note. The lean
  * Space listing the first pass consults carries none of this, so the rows
- * show it only once this pass lands.
+ * show it only once this pass lands. The popup renders the first pass at once
+ * and this one behind it. The interaction-URL page awaits this pass before
+ * consent when a plain URL names an existing collection, and refuses the
+ * request when the epoch it read does not list the agent.
  */
 
 import type { Session } from '@/types/auth'
@@ -41,8 +44,9 @@ const log = createLogger('fw:request:attribution')
  * descriptor. Any other's is read only once its metadata says it is
  * encrypted, so a plaintext collection costs no descriptor read. Every read
  * is best-effort: a failed metadata read leaves that collection
- * unattributed, a failed roster read lists no recipient (the ciphertext
- * note stays), and a failed records lookup leaves every creator unresolved,
+ * unattributed, a failed roster read leaves its recipients unread (the
+ * ciphertext note stays, and the interaction-URL page does not refuse on
+ * it), and a failed records lookup leaves every creator unresolved,
  * so a collection this app did not create reads as another application's
  * and names its origin. A caller that has already
  * listed the app keys (the CHAPI get popup's App Connect match) hands the
