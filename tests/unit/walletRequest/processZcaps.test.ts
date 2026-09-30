@@ -1422,12 +1422,13 @@ describe('processZcaps', () => {
 
     expect(zcaps).toHaveLength(2)
     // Only the un-provisioned RP collection is created, encrypted, with the
-    // grantee escrowed beside the user.
+    // grantee escrowed beside the user and stamped as its creator.
     expect(ensureCalls).toEqual([])
     expect(provisionCalls).toEqual([
       {
         collectionId: 'example-app-data',
-        recipientId: x25519RecipientFromDidKey({ did: RP_DID }).id
+        recipientId: x25519RecipientFromDidKey({ did: RP_DID }).id,
+        generator: { id: RP_DID }
       }
     ])
 
@@ -1690,19 +1691,21 @@ describe('processZcaps', () => {
     ).toBe('public-collection')
   })
 
-  it('an interaction-URL agent grant provisions encrypted and unattributed', async () => {
+  it("an interaction-URL agent grant provisions encrypted, stamped with the agent's DID and name", async () => {
     delegated.length = 0
     ensureCalls.length = 0
     provisionCalls.length = 0
     await processZcaps({
       zcapRequests: [{ ...collectionDetail, controller: granteeDid }],
-      session
+      session,
+      agent: { name: 'Backup Agent' }
     })
     expect(ensureCalls).toEqual([])
     expect(provisionCalls).toEqual([
       {
         collectionId: 'example-app-data',
-        recipientId: x25519RecipientFromDidKey({ did: granteeDid }).id
+        recipientId: x25519RecipientFromDidKey({ did: granteeDid }).id,
+        generator: { id: granteeDid, name: 'Backup Agent' }
       }
     ])
   })

@@ -170,9 +170,9 @@ export function ExternalRequestPage() {
     // The creator of a private collection that already stands is read
     // afterwards, off each collection's own metadata, without holding the
     // consent screen (`useAttributedGrants`). An interaction-URL grant stamps
-    // no attribution, so a collection an agent itself provisioned gets the
-    // plain existing-collection note, and one another application created
-    // names that application.
+    // the agent's did:key (and its self-declared name) on a private
+    // collection it provisions, so the same agent's collection reads as its
+    // own, and one another party created names that party.
     const resolution = {
       zcapRequests: requestProfile.zcapRequests,
       space,

@@ -213,11 +213,13 @@ silent. `resolveInvocationTarget` reports, on a target naming a private
 collection that already stands, an `existing` reading of its creator: the
 requester's own did:key (`this-app`), a key the same application held
 earlier (`this-application`, the site reconnecting after a disconnect), a
-different application (`other`), or nothing stamped (`unattributed`, a
-collection an interaction-URL grant provisioned). The signal is the
-`generator` object stamped at creation (`{ id, origin, url, name }`: the
-app's did:key, its attested origin, its canonical app URL, and its display
-name), read off each named collection's own Collection Metadata object.
+different application (`other`), or nothing stamped (`unattributed`). The
+signal is the `generator` object stamped at creation, read off each named
+collection's own Collection Metadata object. App Connect stamps
+`{ id, origin, url, name }`: the app's did:key, its attested origin, its
+canonical app URL, and its display name. An interaction-URL grant stamps a
+collection it creates with `{ id, name }`: the agent's did:key, and its
+self-declared `agent.name` when the request carries one.
 The lean Space listing grant resolution consults does not carry it. A collection entry
 in the resolution snapshot therefore carries an optional `attribution`, and
 while it is absent the resolver reports no `existing` reading, so the row
@@ -232,8 +234,8 @@ behind it, and drops a superseded pass's late result. A second pass that
 fails outright is logged, and the rows settle over the first resolution. A
 metadata read that fails, or a collection the store cannot see, gets an
 empty attribution and reads `unattributed`. The second pass also joins the
-creating app (`creatorApp: { name, appUrl }`) onto `generator.id` from the
-wallet's own records (`lookupCollectionCreators` in
+creating app (`creatorApp: { name, appUrl }`) onto an app stamp's
+`generator.id` from the wallet's own records (`lookupCollectionCreators` in
 `src/lib/connectedApps.ts`). The app key answers while the creator is
 connected. Once it is not, the App Connect Login activities that recorded
 grants to its DID answer, since a disconnect deletes the app key. The
@@ -252,7 +254,9 @@ neither reads `other`, the cautious side. An interaction-URL agent carries no
 app URL, so it reads `other` unless the collection is its own (`this-app`).
 The reading carries the creator's display name (`creatorName`): the stamped
 `generator.name`, else the name the join recovers. The row names the creator
-by it, or by `generator.origin` otherwise. A public collection carries no roster and reports no
+by it, or by `generator.origin` otherwise. A stamp with no `origin` names an
+agent. The join skips it, since an agent holds no app key and writes no App
+Connect Login, and an unnamed one is named by its shortened `generator.id`. A public collection carries no roster and reports no
 reading. The same metadata read says whether the collection carries an
 `encryption` descriptor. A string target admits the grantee to no roster,
 so on an encrypted collection the row gets the ciphertext note once the

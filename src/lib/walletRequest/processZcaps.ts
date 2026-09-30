@@ -291,17 +291,18 @@ export type ExistingCollections = ReadonlyMap<
 type ProvisionedByRequest = ReadonlyMap<string, { isPublic: boolean }>
 
 /**
- * A collection's app attribution as grant resolution reads it: the
- * `generator` object App Connect provisioning stamps on the Collection
- * Metadata object at creation (`id`, the did:key of the application the
- * collection was provisioned for; `origin`, the Web origin that DID was bound
- * to; `url`, the app's canonical app URL; `name`, its display name), plus
+ * A collection's attribution as grant resolution reads it: the `generator`
+ * object provisioning stamps on the Collection Metadata object at creation
+ * (`id`, the did:key of the party the collection was provisioned for;
+ * `origin`, the Web origin that DID was bound to; `url`, the app's canonical
+ * app URL; `name`, its display name). App Connect stamps all four. An
+ * interaction-URL agent grant stamps `id` and at most `name`. Beside it sits
  * the creating app as the wallet's own records know it, joined onto
  * `generator.id` by the caller (`lookupCollectionCreators` in
- * `lib/connectedApps.ts`). The join is the fallback for a collection stamped
- * without `generator.url` or `generator.name`: it supplies the creator's app
- * URL and display name there. An empty object is a collection read and found
- * unstamped.
+ * `lib/connectedApps.ts`). The join is the fallback for an app stamp without
+ * `generator.url` or `generator.name`: it supplies the creator's app URL and
+ * display name there. An agent's stamp (no `origin`) is never joined. An
+ * empty object is a collection read and found unstamped.
  */
 export interface CollectionAttribution {
   generator?: CollectionGenerator
@@ -369,9 +370,9 @@ function isCurrentRecipient({
  * How an existing private collection stands in relation to the requester,
  * reported on a satisfiable target naming one so the consent row can say the
  * collection already exists and who created it. The signal is the attribution
- * App Connect provisioning stamps on the Collection Metadata object at
- * creation (`generator`), read against the requester's did:key and its
- * canonical `appUrl`. A collection that
+ * provisioning stamps on the Collection Metadata object at creation
+ * (`generator`, by App Connect or an interaction-URL agent grant), read
+ * against the requester's did:key and its canonical `appUrl`. A collection that
  * already stands admits the requester into every key epoch it has, so the
  * row states it before approval.
  */
@@ -379,8 +380,9 @@ export interface ExistingCollectionReading {
   // Who provisioned the collection: `this-app` (the requester's own did:key),
   // `this-application` (a key the same application held earlier -- the site
   // reconnecting after a disconnect minted a new one), `other` (a different
-  // application), or `unattributed` (nothing stamped: a collection an
-  // interaction-URL grant provisioned, which records no origin).
+  // application), or `unattributed` (nothing stamped: no grant this wallet
+  // resolved recorded a creator for it). An agent's stamp carries no
+  // `origin` and reads `this-app` or `other`.
   creator: 'this-app' | 'this-application' | 'other' | 'unattributed'
   generator?: CollectionGenerator
   // The creating app's display name: the collection's own `generator.name`,
@@ -1369,6 +1371,10 @@ export function resolveGrants({
  *   each share activity so the settings panel can name the app instead of
  *   showing a bare did:key, and all three are stamped as the attribution of
  *   each collection this call creates.
+ * @param [options.agent] {{ name: string }}   the interaction-URL path's
+ *   validated VPR-root `agent` member, when the request carried one. Its
+ *   `name` is stamped beside the grantee did:key on each collection this
+ *   call creates without an `app`.
  * @param [options.beforeProvision] {Function}   `(zcaps) => Promise<void>`,
  *   awaited with every signed grant once signing is done and before any
  *   share is escrowed or collection provisioned; called only when some grant
@@ -1382,6 +1388,7 @@ export async function processZcaps({
   writeTtlMs = RP_ZCAP_WRITE_TTL_MS,
   shareTtlMs = SHARE_ZCAP_TTL_MS,
   app,
+  agent,
   beforeProvision
 }: {
   zcapRequests: ICapabilityQueryDetail[]
@@ -1390,6 +1397,7 @@ export async function processZcaps({
   writeTtlMs?: number
   shareTtlMs?: number
   app?: { name: string; origin: string; appUrl: string }
+  agent?: { name: string }
   beforeProvision?: (zcaps: IZcap[]) => Promise<void>
 }): Promise<IZcap[]> {
   if (zcapRequests.length === 0) {
@@ -1526,9 +1534,14 @@ export async function processZcaps({
    * is told apart from another app on its origin. A
    * collection that already stands keeps whatever attribution it has, since
    * was-client's ensure stamps it on the guarded create only: the re-admit pass that adds a second
-   * app to an existing private collection cannot rename its creator. An
-   * interaction-URL agent grant stamps nothing -- there is no attested origin
-   * to record.
+   * app to an existing private collection cannot rename its creator.
+   *
+   * On the interaction-URL agent path a collection this call creates, public
+   * or private, is stamped too, with the agent did:key as `id` and the request's
+   * self-declared `agent.name` as `name` when it carried one. It has no
+   * `origin` or `url`, since the path has no attested origin and no app URL.
+   * So the collection names the agent it was provisioned for even once the
+   * request's Login activity is gone.
    *
    * @param options {object}
    * @param options.collectionId {string}
@@ -1554,19 +1567,20 @@ export async function processZcaps({
     // `generator` is typed as a DID downstream, and the controller arrives
     // here as a plain request string. `isEd25519DidKey` is the check that
     // earns the `IDID` -- it proves the `did:key:` prefix the type asserts --
-    // and a controller that fails it was never a stampable app identity, so
-    // it stamps nothing rather than recording a non-DID as the creator.
-    const attribution =
-      app && isEd25519DidKey(controller)
-        ? {
-            generator: {
-              id: controller as IDID,
-              origin: app.origin,
-              url: app.appUrl,
-              ...(app.name && { name: app.name })
-            }
+    // and a controller that fails it was never a stampable identity, so it
+    // stamps nothing rather than recording a non-DID as the creator.
+    const name = app ? app.name : agent?.name
+    const attribution: { generator?: CollectionGenerator } = isEd25519DidKey(
+      controller
+    )
+      ? {
+          generator: {
+            id: controller as IDID,
+            ...(app && { origin: app.origin, url: app.appUrl }),
+            ...(name && { name })
           }
-        : {}
+        }
+      : {}
     if (!isPublic) {
       if (!recipient) {
         throw new Error(

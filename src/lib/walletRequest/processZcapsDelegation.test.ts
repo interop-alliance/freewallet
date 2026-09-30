@@ -461,17 +461,46 @@ describe('processZcaps collection attribution', () => {
     })
   })
 
-  it('stamps nothing on an interaction-URL agent grant', async () => {
+  it('stamps the agent DID and its declared name on an interaction-URL private collection', async () => {
     const { session } = fakeSession()
     await processZcaps({
       zcapRequests: [WRITE_DESCRIPTOR],
-      session
+      session,
+      agent: { name: 'Backup Agent' }
     })
     expect(session.storage.ensureCollection).not.toHaveBeenCalled()
     const [args] = vi.mocked(session.storage.provisionEncryptedCollection).mock
       .calls[0]
     expect(args.collectionId).toBe('docs')
-    expect(args).not.toHaveProperty('generator')
+    expect(args.generator).toEqual({
+      id: WRITE_DESCRIPTOR.controller,
+      name: 'Backup Agent'
+    })
+  })
+
+  it('stamps the agent DID alone when the request declared no agent', async () => {
+    const { session } = fakeSession()
+    await processZcaps({
+      zcapRequests: [WRITE_DESCRIPTOR],
+      session
+    })
+    const [args] = vi.mocked(session.storage.provisionEncryptedCollection).mock
+      .calls[0]
+    expect(args.generator).toEqual({ id: WRITE_DESCRIPTOR.controller })
+  })
+
+  it('stamps the agent DID and its declared name on an interaction-URL public collection', async () => {
+    const { session } = fakeSession()
+    await processZcaps({
+      zcapRequests: [APP_PUBLIC_DESCRIPTOR],
+      session,
+      agent: { name: 'Backup Agent' }
+    })
+    expect(session.storage.ensureCollection).toHaveBeenCalledWith({
+      id: 'gallery',
+      isPublic: true,
+      generator: { id: APP_PUBLIC_DESCRIPTOR.controller, name: 'Backup Agent' }
+    })
   })
 })
 

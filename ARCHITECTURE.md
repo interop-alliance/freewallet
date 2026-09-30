@@ -469,9 +469,14 @@ content migration stamps it too, on an app collection it creates. It copies
 the bundle's value as it stands, and nothing verifies it. The stamp only
 labels the consent row and the listings, and grants nothing. A collection
 that already stands keeps its attribution, so a second app admitted to it
-does not rename the creator. An interaction-URL grant stamps none. The listing carries the object whole to every surface. A surface
-names the creator by `generator.name` first. For a collection stamped
-without it, one reader, `lookupCollectionCreators`
+does not rename the creator. An interaction-URL grant stamps a collection
+it creates, public or private, with the agent's did:key as `id`, and the
+request's self-declared `agent.name` as `name` when it carries one. That
+stamp has no `origin` or `url`. The listing carries the object whole to every surface. A surface
+names the creator by `generator.name` first. A stamp with no `origin` names
+an agent, which holds no app key and writes no App Connect Login, so an
+unnamed one is shown by its shortened `generator.id` and never looked up.
+For an app stamp without a name, one reader, `lookupCollectionCreators`
 (`src/lib/connectedApps.ts`), names the app behind `generator.id`, for the
 consent row, the Storage page's listing, and the collection contents page.
 A connected app answers from its app key. A disconnected one answers from
@@ -506,8 +511,9 @@ whether it created the collection decides what the run sets up, not an
 earlier read. The public read and the index schema travel only to a
 collection the run creates, or to its own torn create. A standing collection
 counts as that when it holds no Resources and carries the archived
-`generator`. An unattributed archive never counts, since an interaction-URL
-grant also leaves an unattributed collection. A re-run finishes such a
+`generator`. An unattributed archive never counts, since an unattributed
+standing collection is one no grant this wallet resolved created, and the
+run cannot tell it from its own. A re-run finishes such a
 collection, so a run torn between its create and its settings converges. Any
 other collection the account already holds keeps its attribution, public
 read, and schema, and is merged by the same skip-existing rule. It is

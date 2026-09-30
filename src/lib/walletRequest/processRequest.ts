@@ -8,7 +8,8 @@
  */
 import {
   isDIDAuthRequested,
-  processRequest as sharedProcessRequest
+  processRequest as sharedProcessRequest,
+  requestingAgentOf
 } from '@interop/wallet-request'
 import type {
   IVPRDetails as ISpecVPRDetails,
@@ -91,10 +92,11 @@ export async function processRequest({
     ? { signer: session.profile.keyAgent!.getSigner(), holder: session.user.id }
     : await presentationSignerFor({ session, queries })
 
+  // Freewallet widens `IVPRDetails.query` with the app-side `AppConnectQuery`;
+  // the shared pipeline reads the query set structurally.
+  const specRequest = request as ISpecVPRDetails
   return sharedProcessRequest({
-    // Freewallet widens `IVPRDetails.query` with the app-side `AppConnectQuery`;
-    // the shared pipeline reads the query set structurally.
-    request: request as ISpecVPRDetails,
+    request: specRequest,
     presentationSigner,
     selectedVCs,
     credentialRequestOrigin,
@@ -106,6 +108,10 @@ export async function processRequest({
           processZcaps({
             zcapRequests,
             session,
+            // The self-declared `agent` name, stamped on each collection
+            // the grant provisions. Classification already validated it, so
+            // this read does not throw.
+            agent: requestingAgentOf(specRequest),
             ...(beforeProvision && {
               beforeProvision: zcaps => beforeProvision({ zcaps })
             })

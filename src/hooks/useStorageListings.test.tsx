@@ -72,7 +72,7 @@ describe('useStorageListings', () => {
         {
           id: 'app-notes',
           url: 'https://was.example/spaces/s/collections/app-notes',
-          generator: { id: 'did:key:z6MkApp' }
+          generator: { id: 'did:key:z6MkApp', origin: 'https://app.example' }
         } as StorageCollection
       ]
     })
@@ -101,6 +101,24 @@ describe('useStorageListings', () => {
     expect(storage.listCollectionShares).toHaveBeenCalledTimes(
       ENCRYPTED_STANDARD_COLLECTIONS.length
     )
+    expect(storage.listAppKeys).not.toHaveBeenCalled()
+    await probe.unmount()
+  })
+
+  it("leaves the apps listing off for an agent's stamp, which carries no origin", async () => {
+    const storage = storageDouble()
+    const session = { storage } as unknown as Session
+    const probe = await mount({
+      session,
+      collections: [
+        {
+          id: 'agent-notes',
+          url: 'https://was.example/spaces/s/collections/agent-notes',
+          generator: { id: 'did:key:z6MkAgent', name: 'Backup Agent' }
+        } as StorageCollection
+      ]
+    })
+    expect(storage.listHistoryItems).toHaveBeenCalledTimes(1)
     expect(storage.listAppKeys).not.toHaveBeenCalled()
     await probe.unmount()
   })

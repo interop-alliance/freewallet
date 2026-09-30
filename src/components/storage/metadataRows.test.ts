@@ -63,6 +63,20 @@ describe('metadataRows', () => {
     ])
   })
 
+  it("renders an agent's `generator` stamp, which carries no origin or url", () => {
+    const rows = metadataRows({
+      meta: {
+        generator: { id: 'did:key:z6MkAgent', name: 'Backup Agent' }
+      },
+      fieldOrder: ['name', 'generator'],
+      locale: 'en'
+    })
+    expect(rows).toEqual([
+      { key: 'generator.id', value: 'did:key:z6MkAgent' },
+      { key: 'generator.name', value: 'Backup Agent' }
+    ])
+  })
+
   it('formats timestamps, scalars and scalar arrays', () => {
     expect(
       formatMetadataValue({

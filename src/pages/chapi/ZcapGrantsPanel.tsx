@@ -38,7 +38,8 @@
  * A private-collection grant naming a collection that already stands states
  * so on the row, from the resolver's `existing` reading: created by another
  * application (a warning naming that app where the wallet's records know
- * it, else the creator origin, else its DID), unattributed, or left by an
+ * it, else the creator origin, else its DID; an agent by its stamped name,
+ * else its shortened DID), unattributed, or left by an
  * earlier connection of the same application. The admitted app reads every
  * key epoch the collection has, and the row says so before approval. The
  * reading is absent until the caller has read the collection's attribution,

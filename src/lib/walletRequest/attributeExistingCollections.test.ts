@@ -119,3 +119,74 @@ describe('attributeExistingCollections key-epoch read', () => {
     expect(storage.collectionAttribution).not.toHaveBeenCalled()
   })
 })
+
+describe("attributeExistingCollections on an agent's stamp", () => {
+  const AGENT = 'did:key:z6MkhaXgBZDvotDkL5257faiztiGiC2QtKLGpbnnEGta2doK'
+
+  /**
+   * The consent inputs for one private-collection descriptor naming the
+   * existing collection `notes`.
+   *
+   * @param controller {string}   the requesting grantee
+   * @returns {Parameters<typeof resolveGrants>[0]}
+   */
+  function privateTargetResolution(
+    controller: string
+  ): Parameters<typeof resolveGrants>[0] {
+    return {
+      zcapRequests: [
+        {
+          referenceId: 'notes',
+          allowedAction: ['GET'],
+          invocationTarget: {
+            type: 'https://w3id.org/byoe#private-collection',
+            name: 'notes'
+          },
+          controller
+        }
+      ],
+      space: SPACE,
+      collections: existingCollectionsFrom([{ id: 'notes' }])
+    }
+  }
+
+  /**
+   * A storage double whose metadata read reports an agent's stamp.
+   *
+   * @param generator {object}   the stamped `generator`
+   * @returns {object}
+   */
+  function stampedStorage(generator: { id: string; name?: string }) {
+    return {
+      ...storageDouble({ encrypted: true, recipientIds: [] }),
+      collectionAttribution: vi.fn(async () => ({ encrypted: true, generator }))
+    }
+  }
+
+  it('names the agent by its stamped name, with no records lookup', async () => {
+    const resolution = privateTargetResolution(GRANTEE)
+    const storage = stampedStorage({ id: AGENT, name: 'Backup Agent' })
+    const attributed = await attributeExistingCollections({
+      resolution,
+      grants: resolveGrants(resolution),
+      storage: storage as unknown as Session['storage']
+    })
+    expect(attributed?.[0]!.target.existing).toMatchObject({
+      creator: 'other',
+      creatorName: 'Backup Agent'
+    })
+    expect(storage.listAppKeys).not.toHaveBeenCalled()
+    expect(storage.listHistoryItems).not.toHaveBeenCalled()
+  })
+
+  it("reads the agent's own collection as this-app", async () => {
+    const resolution = privateTargetResolution(AGENT)
+    const storage = stampedStorage({ id: AGENT, name: 'Backup Agent' })
+    const attributed = await attributeExistingCollections({
+      resolution,
+      grants: resolveGrants(resolution),
+      storage: storage as unknown as Session['storage']
+    })
+    expect(attributed?.[0]!.target.existing?.creator).toBe('this-app')
+  })
+})

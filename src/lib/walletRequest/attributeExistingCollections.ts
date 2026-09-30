@@ -16,6 +16,7 @@ import {
   lookupCollectionCreators,
   type CollectionCreator
 } from '@/lib/connectedApps'
+import { isAppGenerator, recordedCreatorOf } from '@/lib/collectionAttribution'
 import { createLogger } from '@/lib/log'
 import {
   existingCollectionsFrom,
@@ -32,8 +33,9 @@ const log = createLogger('fw:request:attribution')
  * parallel, joins the creator's display name and canonical `appUrl` from the
  * wallet's records (`lookupCollectionCreators`, keyed by `generator.id`), and
  * resolves again. The joined `appUrl` matters only for a collection stamped
- * without `generator.url`. A string target naming an encrypted collection also
- * gets that collection's current key-epoch recipients
+ * without `generator.url`. An agent's stamp (no `generator.origin`) is not
+ * joined, and names the agent from the stamp alone. A string target naming
+ * an encrypted collection also gets that collection's current key-epoch recipients
  * (`listCollectionShares`, handed an empty history so it reads no activity).
  * A standard collection's is read at once, usually off the session's cached
  * descriptor. Any other's is read only once its metadata says it is
@@ -164,10 +166,12 @@ export async function attributeExistingCollections({
     ...knownEncryptedIds.map(readRoster)
   ])
   // A stamp carrying both `url` and `name` answers the consent row on its
-  // own, so only the others are joined against the wallet's records.
+  // own, so only the other app stamps are joined against the wallet's
+  // records.
   const generators = [...reads.values()].flatMap(
     ({ attribution: { generator } }) =>
-      generator && (generator.url === undefined || generator.name === undefined)
+      isAppGenerator(generator) &&
+      (generator.url === undefined || generator.name === undefined)
         ? [generator.id]
         : []
   )
@@ -185,7 +189,7 @@ export async function attributeExistingCollections({
         return { id, isPublic, recipientIds }
       }
       const { generator } = read.attribution
-      const creatorApp = generator ? creators.get(generator.id) : undefined
+      const creatorApp = recordedCreatorOf({ generator, creators })
       return {
         id,
         isPublic,

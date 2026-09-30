@@ -11,7 +11,8 @@ import type { StorageCollection } from '@/lib/storage'
  *
  * @param options {object}
  * @param options.id {string}
- * @param [options.generator] {string}   the stamped `generator.id`
+ * @param [options.generator] {string}   the stamped `generator.id`, stamped
+ *   as an app's (with an `origin`)
  * @returns {StorageCollection}
  */
 function collectionEntry({
@@ -24,9 +25,13 @@ function collectionEntry({
   return {
     id,
     url: `/space/abc/${id}`,
-    ...(generator && { generator: { id: generator } })
+    ...(generator && {
+      generator: { id: generator, origin: 'https://app.example' }
+    })
   }
 }
+
+const AGENT_DID = 'did:key:z6MkhaXgBZDvotDkL5257faiztiGiC2QtKLGpbnnEGta2doK'
 
 const CONNECTED: CollectionCreator = {
   name: 'Editor',
@@ -74,6 +79,20 @@ describe('attributeCollectionsToApps', () => {
     })
     expect(attribution.get('notes')).toBe(disconnected)
   })
+
+  it("leaves an agent's stamp (no origin) out, even when a record shares its DID", () => {
+    const attribution = attributeCollectionsToApps({
+      collections: [
+        {
+          id: 'agent-notes',
+          url: '/space/abc/agent-notes',
+          generator: { id: 'did:key:zApp', name: 'Backup Agent' }
+        }
+      ],
+      creators: new Map([['did:key:zApp', CONNECTED]])
+    })
+    expect(attribution.size).toBe(0)
+  })
 })
 
 describe('collectionCreatorLabel', () => {
@@ -110,6 +129,30 @@ describe('collectionCreatorLabel', () => {
       origin: 'https://app.example'
     }
     expect(collectionCreatorLabel({ generator })).toBe('https://app.example')
+  })
+
+  it("names an agent's stamp by its generator.name, ignoring any record name", () => {
+    expect(
+      collectionCreatorLabel({
+        generator: { id: AGENT_DID, name: 'Backup Agent' },
+        recordName: CONNECTED.name
+      })
+    ).toBe('Backup Agent')
+  })
+
+  it("names an unnamed agent's stamp by its shortened DID", () => {
+    expect(
+      collectionCreatorLabel({
+        generator: { id: AGENT_DID },
+        recordName: CONNECTED.name
+      })
+    ).toBe('did:key:z6MkhaXg...ta2doK')
+  })
+
+  it("shows an unnamed agent's short DID whole", () => {
+    expect(collectionCreatorLabel({ generator: { id: 'did:key:zApp' } })).toBe(
+      'did:key:zApp'
+    )
   })
 
   it('names nothing for an unattributed collection', () => {

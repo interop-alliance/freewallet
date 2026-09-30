@@ -433,7 +433,8 @@ holds no Resources and whose `generator` equals the archived one is finished as
 if the run had created it. A plaintext one gets the archived public read,
 and an encrypted one gets its first epoch and, when it declares none yet,
 the archived index schema. An archive with no `generator` never qualifies,
-since an interaction-URL grant also leaves an unattributed collection. So a
+since an unattributed standing collection is one no grant this wallet
+resolved created, and the run cannot tell it from its own. So a
 run torn between the create and the public read, or between the first epoch
 and the schema, converges on its re-run.
 

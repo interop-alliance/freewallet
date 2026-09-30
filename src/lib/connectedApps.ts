@@ -673,7 +673,9 @@ export interface CollectionCreator {
  * disconnect does, so its App Connect Login activities answer instead: the
  * latest one whose recorded grants were delegated to that DID supplies both
  * members. A creator neither source knows is absent from the result, and the
- * surface names its origin.
+ * surface names its origin. Callers hand in app stamps alone (those carrying
+ * a `generator.origin`). An agent's stamp has no app key or App Connect Login
+ * to answer it, and names itself.
  *
  * @param options {object}
  * @param options.storage {StorageManager}

@@ -18,9 +18,16 @@ with the exchange URL. Its consent rows carry the same existing-collection
 reading the popup's rows do, through the same hook (`useAttributedGrants`)
 and second resolution pass (`attributeExistingCollections`). A collection
 another application created names that application. An interaction-URL
-grant stamps no attribution, so an agent re-requesting a collection it
-provisioned reads `unattributed` and gets the plain existing-collection
-note. Without a live app session it runs the ordinary login in place and
+grant that creates a collection, public or private, stamps its `generator`
+with the agent's did:key as `id`, and the request's self-declared
+`agent.name` as `name` when it carries one (`provisionFor` in
+`src/lib/walletRequest/processZcaps.ts`). The stamp has no `origin` or `url`,
+since this entry point has neither. So an agent re-requesting a collection
+it provisioned reads `this-app` and gets no existing-collection note, and a
+different agent reads `other` with the creator named. Every reader names an
+agent's stamp by `generator.name`, else by its shortened `generator.id`, and
+none looks it up in the app keys or the App Connect Login activities.
+Without a live app session it runs the ordinary login in place and
 adopts it app-wide. The Login activity records the grant under the fixed
 origin marker `n/a (API request)`, which the Applications page
 keys agent rows on.
@@ -114,8 +121,10 @@ POSTs the remaining grants. The rotation's pull revokes under the same
 per-grant policy. A collection the rotation could not re-key keeps the row
 listed with no Revoke recorded, since a Revoke would hide the row. The grant
 stage still runs, and the retry's Revoke names what it withdrew. There is no app key to
-delete. Such a collection carries no `generator` attribution, so the
-recorded grants are the rotation's only source. So the Login activity is
+delete. The revocation does not read the collections' `generator` stamps
+as a second candidate source, so the recorded grants are the rotation's
+only source and a collection whose Login activity is gone is not rotated.
+So the Login activity is
 persisted before any collection is provisioned. Approval signs every grant
 first, persists the Login with the signed grants, and only then provisions,
 which is the step that escrows the agent into a key epoch. A failed persist

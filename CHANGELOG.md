@@ -259,6 +259,12 @@
 
 ### Added
 
+- An interaction-URL request that creates a collection, public or private,
+  stamps its `generator` with the agent's did:key as `id`, and the request's
+  self-declared `agent.name` as `name` when it carries one. The stamp has no
+  `origin` or `url`. The Storage page, the collection contents page, and the
+  consent row name such a creator by `generator.name`, else by its shortened
+  DID, and look up no app key or App Connect Login for it.
 - Mid-visit mending at the point of encounter (`src/session/menders/encounter.ts`).
   A collection recorded as stranded while a transient or popup session runs
   is mended with no second login: the session renews its generation

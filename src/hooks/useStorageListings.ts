@@ -11,6 +11,7 @@
  * history read failing leaves both off.
  */
 import { useMemo } from 'react'
+import { isAppGenerator } from '@/lib/collectionAttribution'
 import { createLogger } from '@/lib/log'
 import { listSharedCollections, type CollectionShare } from '@/session/shares'
 import type { CollectionCreator } from '@/lib/connectedApps'
@@ -32,7 +33,8 @@ const NO_SHARES: Record<string, CollectionShare[]> = {}
  * @param options.session {Session | null}   the live session; both listings
  *   stay off without one, and without remote storage
  * @param options.collections {StorageCollection[]}   the listed collections;
- *   the creators lookup runs only once one of them carries a `generator`
+ *   the creators lookup runs only once one of them carries an app
+ *   `generator` (one with an `origin`)
  * @returns {{ sharesByCollection: Record<string, CollectionShare[]>,
  *   creators: ReadonlyMap<string, CollectionCreator>, reload: () =>
  *   Promise<void> }}   the two listings, the creators keyed by `generator.id`
@@ -94,7 +96,7 @@ export function useStorageListings({
   const creators = useCollectionCreators({
     storage: session?.storage,
     generators: collections.flatMap(({ generator }) =>
-      generator ? [generator.id] : []
+      isAppGenerator(generator) ? [generator.id] : []
     ),
     items,
     enabled: items !== undefined

@@ -4,7 +4,8 @@
  * load is non-blocking: a failure is logged and reads as no creators, so the
  * line falls back to the stamped origin rather than the page failing. It runs
  * only where the line can name an app: a session with remote storage and at
- * least one `generator` to look up.
+ * least one `generator` to look up. Callers hand in app stamps alone (those
+ * carrying an `origin`); an agent's stamp names itself.
  */
 import {
   lookupCollectionCreators,

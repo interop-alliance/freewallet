@@ -4183,9 +4183,9 @@ export class StorageManager {
    * collection the agent's recorded grants target, expired grants included,
    * is rotated off the agent's recipient key in one `removeRecipient` call
    * that also revokes the unexpired pull-axis grants. The candidates come from
-   * the agent Login activities alone, since a collection provisioned for an
-   * agent carries no `generator` attribution to list it by. The retiring kid
-   * is derived from the agent's `did:key` controller, as provisioning derived
+   * the agent Login activities alone; the `generator` stamps naming the agent
+   * are not read as a second source, so a collection whose Login activity is
+   * gone is not rotated. The retiring kid is derived from the agent's `did:key` controller, as provisioning derived
    * it, so the revoke needs nothing the agent holds. A controller the
    * derivation refuses was never escrowed, so it rotates nothing. The
    * Space's lean listing is read once to leave out the targets it reports
@@ -6006,8 +6006,9 @@ export class StorageManager {
    * schema, and its attribution. One exception is this migration's own torn
    * create. A standing collection that holds no Resources and carries the
    * archived `generator` is finished as if this run had created it. An
-   * archive with no `generator` never qualifies, since an interaction-URL
-   * grant also leaves an unattributed collection.
+   * archive with no `generator` never qualifies, since an unattributed
+   * standing collection is one no grant this wallet resolved created, and
+   * the run cannot tell it from its own.
    *
    * An encrypted collection is provisioned owner-only: a fresh governing log
    * whose first epoch wraps to the user key alone, with a new blinded-index

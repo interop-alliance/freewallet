@@ -4,7 +4,8 @@
  * collection's `generator` or else the name the wallet's records hold for it
  * (linked while the app is still connected), the bare origin recorded at
  * provisioning when neither names the app, or the wallet itself for the
- * collections it provisions.
+ * collections it provisions. The naming order is `collectionCreatorLabel`'s,
+ * an interaction-URL agent's stamp included.
  */
 import Box from '@mui/material/Box'
 import Link from '@mui/material/Link'
@@ -35,7 +36,7 @@ export function CollectionAttribution({
 
   const caption = isWalletCollection(collection.id)
     ? t('storage.createdByWallet')
-    : appCaption({ collection, creator, linkToApp })
+    : creatorCaption({ collection, creator, linkToApp })
   if (!caption) {
     return null
   }
@@ -51,13 +52,12 @@ export function CollectionAttribution({
 }
 
 /**
- * The app half of the caption: a creator named by its stamped
- * `generator.name`, or else by the wallet's records, is named, and linked to
- * its Applications row while it is still connected; one stamped with an
- * origin alone names that origin as plain text; one with neither has no
+ * The stamped-creator half of the caption: the creator's label, linked to
+ * its Applications row while the wallet's records still hold a connected
+ * app for it and plain text otherwise; a collection with no stamp has no
  * caption.
  */
-function appCaption({
+function creatorCaption({
   collection,
   creator,
   linkToApp
