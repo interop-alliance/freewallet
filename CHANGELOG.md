@@ -79,6 +79,9 @@
   completes once the grant stage revokes the missed grants.
 - An agent revocation that cannot read the collection listing fails and
   keeps the row.
+- Revoking a connected agent also rotates it off every private collection
+  whose `generator` names its did:key, so a collection whose Login activity
+  is gone is still re-keyed.
 - Provisioning an encrypted collection refuses an existing unencrypted
   collection that holds resources.
 - The revoke toast counts only the grants the run itself revoked.

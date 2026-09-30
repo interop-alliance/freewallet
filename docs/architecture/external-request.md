@@ -115,24 +115,33 @@ derives from makes the grant unsatisfiable. Consent still renders, and the
 row shows it as one that cannot be fulfilled. This page and App Connect are
 the only paths that provision a collection, since both list their grantees
 and can revoke them. Revoking the row
-rotates each collection the agent's recorded grants target off that key
-first (`revokeAgentCollectionRecipients`, expired grants included), then
-POSTs the remaining grants. The rotation's pull revokes under the same
-per-grant policy. A collection the rotation could not re-key keeps the row
-listed with no Revoke recorded, since a Revoke would hide the row. The grant
-stage still runs, and the retry's Revoke names what it withdrew. There is no app key to
-delete. The revocation does not read the collections' `generator` stamps
-as a second candidate source, so the recorded grants are the rotation's
-only source and a collection whose Login activity is gone is not rotated.
-So the Login activity is
-persisted before any collection is provisioned. Approval signs every grant
-first, persists the Login with the signed grants, and only then provisions,
-which is the step that escrows the agent into a key epoch. A failed persist
-fails the request with nothing escrowed. A provisioning failure after the
-persist fails the request and leaves a Login naming a grant the collection
-may not list. The rotation skips such a collection, since its current epoch
-does not list the agent. A Login activity lost later still leaves the agent
-a recipient with nothing to find it by.
+rotates each candidate collection off that key first
+(`revokeAgentCollectionRecipients`), then POSTs the remaining grants. The
+candidates are the collections the agent's recorded grants target, expired
+grants included. The revocation also reads the full collection listing and
+adds every private collection whose `generator.id` is the agent's did:key.
+So a collection the agent provisioned is still rotated when its Login
+activity is gone. A protected collection is not a candidate. The match reads
+`generator.id` alone and ignores `origin`. The stamp is request-supplied, so
+an agent naming an app's did:key as its `controller` stamps that DID. That
+makes the app's collections candidates only for a rotation off the key that
+same DID derives. The rotation's pull revokes under the same per-grant
+policy. A collection the rotation could not re-key keeps the row listed with
+no Revoke recorded, since a Revoke would hide the row. The grant stage still
+runs, and the retry's Revoke names what it withdrew. There is no app key to
+delete.
+
+A collection the grant targets but did not create carries no stamp naming
+the agent, so for it the recorded grants are the rotation's only source.
+That is why the Login activity is persisted before any collection is provisioned.
+Approval signs every grant first, persists the Login with the signed grants,
+and only then provisions, which is the step that escrows the agent into a
+key epoch. A failed persist fails the request with nothing escrowed. A
+provisioning failure after the persist fails the request and leaves a Login
+naming a grant the collection may not list. The rotation skips such a
+collection, since its current epoch does not list the agent. A Login
+activity lost later still leaves the agent a recipient of an existing
+collection its grant targeted, with nothing to find it by.
 
 A grant delegated from a transient session chains under the session's
 generation delegation (`profile.invocationCapability`) rather than the Space

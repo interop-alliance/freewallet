@@ -1197,8 +1197,9 @@ export async function listConnectedAgents({
  * The key rotation runs first (`revokeAgentCollectionRecipients`), as on the
  * app path: a private collection provisioned for an agent escrows the agent's
  * identity key-agreement key into its key epochs, so each collection the
- * agent's recorded grants target gains a fresh epoch without that key, and
- * its pull-axis grants are revoked with it. The grant stage counts the ones
+ * agent's recorded grants target or its `generator` stamp names gains a
+ * fresh epoch without that key, and its pull-axis grants are revoked with
+ * it. The grant stage counts the ones
  * the rotation confirmed revoked and names them on the recorded Revoke
  * without POSTing them again. A collection the rotation could not re-key
  * keeps the agent a recipient of the current epoch, so the call throws once

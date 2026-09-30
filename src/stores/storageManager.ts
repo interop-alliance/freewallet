@@ -4182,15 +4182,16 @@ export class StorageManager {
    * same contract as {@link revokeAppCollectionRecipients}: each private
    * collection the agent's recorded grants target, expired grants included,
    * is rotated off the agent's recipient key in one `removeRecipient` call
-   * that also revokes the unexpired pull-axis grants. The candidates come from
-   * the agent Login activities alone; the `generator` stamps naming the agent
-   * are not read as a second source, so a collection whose Login activity is
-   * gone is not rotated. The retiring kid is derived from the agent's `did:key` controller, as provisioning derived
-   * it, so the revoke needs nothing the agent holds. A controller the
-   * derivation refuses was never escrowed, so it rotates nothing. The
-   * Space's lean listing is read once to leave out the targets it reports
-   * public. A listing that cannot be read counts as one failure, as on the
-   * app path, so the revocation throws and the row stays for a retry.
+   * that also revokes the unexpired pull-axis grants. Every listed private
+   * collection whose `generator.id` is the agent's did:key is a candidate
+   * beside the recorded grants' targets, so a collection whose Login activity
+   * is gone is still rotated. The retiring kid is derived from the agent's
+   * `did:key` controller, as provisioning derived it, so the revoke needs
+   * nothing the agent holds. A controller the derivation refuses was never
+   * escrowed, so it rotates nothing. The Space's collection listing is read
+   * once, for those stamps and to leave out the targets it reports public. A
+   * listing that cannot be read counts as one failure, as on the app path,
+   * so the revocation throws and the row stays for a retry.
    *
    * @param options {object}
    * @param options.controller {string}   the grantee did:key
@@ -4214,8 +4215,9 @@ export class StorageManager {
       controller,
       granteeKid,
       items,
-      // The lean listing, read for its public states alone.
-      listing: { read: () => this.listCollectionPublicStates() }
+      // The collections provisioned for this agent, stamped with its did:key,
+      // whether or not a Login activity still records the grant.
+      listing: { read: () => this.listCollections(), attributedTo: controller }
     })
   }
 

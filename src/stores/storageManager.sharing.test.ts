@@ -3602,10 +3602,48 @@ describe('StorageManager.revokeAgentCollectionRecipients', () => {
     expect(readIds).not.toContain('agent-public')
   })
 
+  it('rotates a collection its generator stamp names, with no Login recording a grant', async () => {
+    const agent = await generateAppIdentity()
+    const { owner, storage, remoteStore, setCollections } =
+      await agentGrantStorage(agent)
+    // A second collection provisioned for the agent, whose Login activity is
+    // gone: only its `generator` stamp names the agent.
+    await storage.provisionEncryptedCollection({
+      collectionId: 'agent-drafts',
+      recipient: agent.recipient
+    })
+    setCollections([
+      {
+        id: 'agent-notes',
+        url: 'https://was.example/space/s-space/agent-notes/'
+      },
+      {
+        id: 'agent-drafts',
+        url: 'https://was.example/space/s-space/agent-drafts/',
+        generator: { id: agent.did }
+      }
+    ])
+
+    const outcome = await storage.revokeAgentCollectionRecipients({
+      controller: agent.did
+    })
+
+    expect(outcome).toEqual({
+      collections: 2,
+      rotated: 2,
+      failed: 0,
+      revokedIds: ['z-agent-notes']
+    })
+    const descriptor = await remoteStore.collectionEncryption({
+      collectionId: 'agent-drafts'
+    })
+    expect(currentEpochKids(descriptor!)).toEqual([owner.keyAgreementKey.id])
+  })
+
   it('counts a listing it could not read as a failure, and still rotates', async () => {
     const agent = await generateAppIdentity()
     const { storage, remoteStore } = await agentGrantStorage(agent)
-    vi.spyOn(remoteStore, 'listCollectionPublicStates').mockRejectedValue(
+    vi.spyOn(remoteStore, 'listCollections').mockRejectedValue(
       new Error('offline')
     )
 
@@ -3625,7 +3663,7 @@ describe('StorageManager.revokeAgentCollectionRecipients', () => {
   it('records no Revoke when the listing cannot be read', async () => {
     const agent = await generateAppIdentity()
     const { storage, remoteStore, user } = await agentGrantStorage(agent)
-    vi.spyOn(remoteStore, 'listCollectionPublicStates').mockRejectedValue(
+    vi.spyOn(remoteStore, 'listCollections').mockRejectedValue(
       new Error('offline')
     )
 
