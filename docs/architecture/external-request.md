@@ -26,9 +26,9 @@ since this entry point has neither. So an agent re-requesting a collection
 it provisioned reads `this-app` and gets no existing-collection note, and a
 different agent reads `other` with the creator named. Every reader names an
 agent's stamp by `generator.name`, else by its shortened `generator.id`, and
-none looks it up in the app keys or the App Connect Login activities.
+none looks it up in the app keys or the App Connect Grant activities.
 Without a live app session it runs the ordinary login in place and
-adopts it app-wide. The Login activity records the grant under the fixed
+adopts it app-wide. A `Grant` activity records the grant under the fixed
 origin marker `n/a (API request)`, which the Applications page
 keys agent rows on.
 
@@ -82,9 +82,8 @@ refuses such a grant with `unreadableTarget`, and the copy tells the
 developer to request that descriptor instead. The check needs the key
 epochs, which only the attribution pass reads. When a string target names
 an existing collection (`namesExistingCollectionByUrl`), the page awaits
-`attributeExistingCollections` before consent and shows its result through
-`useAttributedGrants`' `showGrants`. Any other request renders consent at
-once, with the attribution pass behind it. The verdict
+the attribution pass `useAttributedGrants` hands back before consent. Any
+other request renders consent at once, with the attribution pass behind it. The verdict
 (`ResolvedTarget.outsideKeyEpoch` in `processZcaps.ts`) rests on positive
 evidence only. The collection must be encrypted, the current epoch's
 recipients must have been read, and the agent must be absent from them. A
@@ -104,7 +103,7 @@ agent rows, keyed by the grant's `controller` did:key (`listConnectedAgents`
 in `src/lib/connectedApps.ts`), which is every grant's controller, since the
 precheck refuses a request naming two and titled by `agent.name`, or by the grantee
 key's fingerprint when no name was sent. A row's grants are the union over
-every agent Login for that controller newer than the latest matching Revoke
+every agent Grant for that controller newer than the latest matching Revoke
 activity (same origin marker, no `appConnect`, the controller in
 `object.controller`), since a later request can add a grant without retiring
 an earlier one. A row whose grants have all expired stays listed while the
@@ -125,7 +124,7 @@ under a parent delegation whose signer has left the document or whose
 generation is no longer the pointed one) counts as skipped, the server's
 `AlreadyRevokedError` counts as revoked, and any other refusal is thrown
 before any Revoke is recorded. The Revoke's
-`created` is stamped at least one millisecond past the latest Login, so a
+`created` is stamped at least one millisecond past the latest Grant, so a
 fast-clocked terminal cannot leave the row standing. A run that left a
 recorded grant with no capability to POST (a legacy summary-only entry)
 ends with its own toast (`agentRevokeOutcomeKey` in
@@ -146,7 +145,7 @@ rotates each candidate collection off that key first
 candidates are the collections the agent's recorded grants target, expired
 grants included. The revocation also reads the full collection listing and
 adds every private collection whose `generator.id` is the agent's did:key.
-So a collection the agent provisioned is still rotated when its Login
+So a collection the agent provisioned is still rotated when its Grant
 activity is gone. A protected collection is not a candidate. The match reads
 `generator.id` alone and ignores `origin`. The stamp is request-supplied, so
 an agent naming an app's did:key as its `controller` stamps that DID. That
@@ -159,13 +158,13 @@ delete.
 
 A collection the grant targets but did not create carries no stamp naming
 the agent, so for it the recorded grants are the rotation's only source.
-That is why the Login activity is persisted before any collection is provisioned.
-Approval signs every grant first, persists the Login with the signed grants,
+That is why the Grant activity is persisted before any collection is provisioned.
+Approval signs every grant first, persists the Grant with the signed grants,
 and only then provisions, which is the step that escrows the agent into a
 key epoch. A failed persist fails the request with nothing escrowed. A
-provisioning failure after the persist fails the request and leaves a Login
+provisioning failure after the persist fails the request and leaves a Grant
 naming a grant the collection may not list. The rotation skips such a
-collection, since its current epoch does not list the agent. A Login
+collection, since its current epoch does not list the agent. A Grant
 activity lost later still leaves the agent a recipient of an existing
 collection its grant targeted, with nothing to find it by.
 

@@ -2,11 +2,10 @@
  * The consent screen's resolved grants, shared by the CHAPI get popup and the
  * interaction-URL request page: the first resolution pass shown at once, then
  * replaced by the second pass with the existing collections' attribution read
- * in (`attributeExistingCollections`). A caller that has already awaited the
- * attribution pass (the interaction-URL page, whose refusal needs it) shows
- * the result directly. A later call supersedes an earlier pass, so a
- * superseded pass's late result is dropped rather than written over a newer
- * one.
+ * in (`attributeExistingCollections`). The call hands the second pass back
+ * as well, for a caller whose refusal needs it (the interaction-URL page). A
+ * later call supersedes an earlier pass, so a superseded pass's late result
+ * is dropped rather than written over a newer one.
  */
 
 import { useCallback, useRef, useState } from 'react'
@@ -24,12 +23,13 @@ const log = createLogger('fw:request:attribution')
  * @returns {{ grants: ResolvedGrant[], attributeGrants: (options: {
  *   resolution: Parameters<typeof resolveGrants>[0], grants:
  *   ResolvedGrant[], storage: Session['storage'], appKeys?:
- *   Awaited<ReturnType<Session['storage']['listAppKeys']>> }) => void,
- *   showGrants: (grants: ResolvedGrant[]) => void }}
- *   the grants to render; the call that shows a first pass's grants and
+ *   Awaited<ReturnType<Session['storage']['listAppKeys']>> }) =>
+ *   Promise<ResolvedGrant[]> }}
+ *   the grants to render, and the call that shows a first pass's grants and
  *   starts the attribution pass behind them, handed the caller's app-key
- *   listing when it already holds one; and the call that shows grants
- *   already attributed, with no pass behind them
+ *   listing when it already holds one. The call resolves to the attributed
+ *   pass, or to the first pass when the attribution failed (best-effort: an
+ *   unread epoch refuses nothing), and never rejects.
  */
 export function useAttributedGrants(): {
   grants: ResolvedGrant[]
@@ -38,14 +38,13 @@ export function useAttributedGrants(): {
     grants: ResolvedGrant[]
     storage: Session['storage']
     appKeys?: Awaited<ReturnType<Session['storage']['listAppKeys']>>
-  }) => void
-  showGrants: (grants: ResolvedGrant[]) => void
+  }) => Promise<ResolvedGrant[]>
 } {
   const [grants, setGrants] = useState<ResolvedGrant[]>([])
   const runRef = useRef(0)
 
   const attributeGrants = useCallback(
-    ({
+    async ({
       resolution,
       grants: firstPass,
       storage,
@@ -55,32 +54,27 @@ export function useAttributedGrants(): {
       grants: ResolvedGrant[]
       storage: Session['storage']
       appKeys?: Awaited<ReturnType<Session['storage']['listAppKeys']>>
-    }) => {
+    }): Promise<ResolvedGrant[]> => {
       const run = ++runRef.current
       setGrants(firstPass)
-      attributeExistingCollections({
-        resolution,
-        grants: firstPass,
-        storage,
-        appKeys
-      })
-        .then(attributed => {
-          if (attributed && runRef.current === run) {
-            setGrants(attributed)
-          }
+      let attributed: ResolvedGrant[] | undefined
+      try {
+        attributed = await attributeExistingCollections({
+          resolution,
+          grants: firstPass,
+          storage,
+          appKeys
         })
-        .catch((err: unknown) => {
-          log.warn('Could not attribute the existing collections', { err })
-        })
+      } catch (err) {
+        log.warn('Could not attribute the existing collections', { err })
+      }
+      if (attributed && runRef.current === run) {
+        setGrants(attributed)
+      }
+      return attributed ?? firstPass
     },
     []
   )
 
-  const showGrants = useCallback((attributed: ResolvedGrant[]) => {
-    // Supersedes any pass still in flight.
-    runRef.current++
-    setGrants(attributed)
-  }, [])
-
-  return { grants, attributeGrants, showGrants }
+  return { grants, attributeGrants }
 }

@@ -494,7 +494,7 @@ export function WalletGetPage() {
             allowMissingController: true,
             appUrl: profile.appConnect.app.appUrl
           }
-          attributeGrants({
+          void attributeGrants({
             resolution,
             grants: resolveGrants(resolution),
             storage: loggedIn.storage,

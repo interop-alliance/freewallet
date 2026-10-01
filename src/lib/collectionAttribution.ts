@@ -9,7 +9,7 @@
  * disconnected creator is named the same way on every surface. An
  * interaction-URL grant stamps the agent's did:key as `id` with no `origin`,
  * and at most its self-declared `name`. An agent holds no app key and writes
- * no App Connect Login, so its stamp is never looked up. It is named by
+ * no App Connect Grant, so its stamp is never looked up. It is named by
  * `generator.name`, else by a shortened `generator.id`. A collection carrying
  * no `generator` is unattributed.
  */
@@ -28,15 +28,30 @@ const SHORT_DID_TAIL_CHARS = 6
  * Whether a `generator` stamp names an application the wallet's records can
  * know: one carrying an `origin`, which App Connect provisioning always
  * stamps. A stamp without one names an interaction-URL agent, which holds no
- * app key and has no App Connect Login to look up.
+ * app key and has no App Connect Grant to look up.
  *
  * @param [generator] {CollectionGenerator}
  * @returns {boolean}
  */
-export function isAppGenerator(
+function isAppGenerator(
   generator?: CollectionGenerator
 ): generator is CollectionGenerator & { origin: string } {
   return generator?.origin !== undefined
+}
+
+/**
+ * The `generator.id` DIDs the wallet's records can answer, out of a set of
+ * stamps: the app stamps' alone, the agent stamps and the unstamped dropped.
+ *
+ * @param generators {Iterable<CollectionGenerator | undefined>}
+ * @returns {string[]}
+ */
+export function appGeneratorIds(
+  generators: Iterable<CollectionGenerator | undefined>
+): string[] {
+  return [...generators].flatMap(generator =>
+    isAppGenerator(generator) ? [generator.id] : []
+  )
 }
 
 /**

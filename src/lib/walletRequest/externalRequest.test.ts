@@ -518,7 +518,7 @@ describe('unreadableGrants', () => {
 })
 
 describe('EXTERNAL_REQUEST_ORIGIN', () => {
-  it('is the fixed marker the Login activity records', () => {
+  it('is the fixed marker the Grant activity records', () => {
     expect(EXTERNAL_REQUEST_ORIGIN).toBe('n/a (API request)')
   })
 })

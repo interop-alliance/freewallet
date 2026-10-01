@@ -62,7 +62,7 @@ constrained to DID methods no session on this deployment could present
 (`unsupported`), and a `domain` that does not match the attested origin
 (`domainMismatch`). The origin cell is read ahead of the request body, so an
 unattributable request is refused before the popup opens a VC API exchange on
-the requester's behalf. The consent screen's requester label and the Login
+the requester's behalf. The consent screen's requester label and the recorded
 activity's `origin` both come from that attested value, and
 `requestingOriginOf` returns undefined for a value that does not parse as well
 as for one whose origin is opaque (`mailto:`, `data:`, `file:`, which

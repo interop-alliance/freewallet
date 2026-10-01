@@ -1,7 +1,7 @@
 /**
  * Tests for the connected-applications model: `listConnectedApps` joins the
  * app-key credentials of the dedicated `app-connections` collection with the
- * latest matching App Connect Login activity (name, grants, last-connected
+ * latest matching App Connect Grant activity (name, grants, last-connected
  * timestamp), skipping Resources that do not carry the `AppKeyCredential`
  * marker; `deriveGrantsState` reads the recorded delegation signers against the
  * account's current key set (the current-key-set rule), deriving a client-annex
@@ -86,10 +86,10 @@ function unmarkedCredential(cid: string): StoredCredential {
 }
 
 /**
- * An App Connect Login activity. Omitting `appUrl` produces an activity the
+ * An App Connect Grant activity. Omitting `appUrl` produces an activity the
  * listing cannot join to any app key.
  */
-function loginActivity({
+function grantActivity({
   origin,
   appUrl,
   name,
@@ -109,9 +109,9 @@ function loginActivity({
   }>
 }) {
   return {
-    id: `login-${created}-${name}`,
+    id: `grant-${created}-${name}`,
     doc: {
-      type: ['Login'],
+      type: ['Grant'],
       summary: `Connected ${name} (${origin}) to wallet.`,
       object: {
         origin,
@@ -158,7 +158,7 @@ function fakeStorage({
 }
 
 describe('listConnectedApps', () => {
-  it('joins an app-key credential with its latest Login activity', async () => {
+  it('joins an app-key credential with its latest Grant activity', async () => {
     const origin = 'https://app.example'
     const storage = fakeStorage({
       appKeys: [
@@ -166,13 +166,13 @@ describe('listConnectedApps', () => {
         appKeyCredential({ cid: 'c-app', origin, appUrl: APP_URL })
       ],
       history: [
-        loginActivity({
+        grantActivity({
           origin,
           appUrl: APP_URL,
           name: 'Old Name',
           created: '2026-07-01T00:00:00Z'
         }),
-        loginActivity({
+        grantActivity({
           origin,
           appUrl: APP_URL,
           name: 'Example App',
@@ -196,7 +196,7 @@ describe('listConnectedApps', () => {
     expect(app.cid).toBe('c-app')
     expect(app.origin).toBe(origin)
     expect(app.subjectDid).toBe(APP_DID)
-    // The latest Login supplies the display name and grants.
+    // The latest Grant supplies the display name and grants.
     expect(app.name).toBe('Example App')
     expect(app.lastConnectedAt).toBe('2026-07-05T00:00:00Z')
     expect(app.connectedAt).toBe('2026-07-01T00:00:00Z')
@@ -219,7 +219,7 @@ describe('listConnectedApps', () => {
         })
       ],
       history: [
-        loginActivity({
+        grantActivity({
           origin,
           appUrl: editorUrl,
           name: 'Editor',
@@ -233,7 +233,7 @@ describe('listConnectedApps', () => {
             }
           ]
         }),
-        loginActivity({
+        grantActivity({
           origin,
           appUrl: readerUrl,
           name: 'Reader',
@@ -268,8 +268,8 @@ describe('listConnectedApps', () => {
     expect(reader?.grants.map(grant => grant.id)).toEqual(['urn:zcap:reader'])
   })
 
-  it('never joins a Login activity that recorded no appUrl', async () => {
-    // The `appUrl` is the whole join. A Login activity carrying none names no
+  it('never joins a Grant activity that recorded no appUrl', async () => {
+    // The `appUrl` is the whole join. A Grant activity carrying none names no
     // application, so it cannot lend its grants to a key that shares only the
     // origin.
     const origin = 'https://app.example'
@@ -283,7 +283,7 @@ describe('listConnectedApps', () => {
         })
       ],
       history: [
-        loginActivity({
+        grantActivity({
           origin,
           name: 'Example App',
           created: '2026-07-05T00:00:00Z',
@@ -318,7 +318,7 @@ describe('listConnectedApps', () => {
         })
       ],
       history: [
-        loginActivity({
+        grantActivity({
           origin,
           appUrl: 'https://app.example/reader',
           name: 'Reader',
@@ -342,7 +342,35 @@ describe('listConnectedApps', () => {
     expect(app.lastConnectedAt).toBeUndefined()
   })
 
-  it('falls back to the stripped credential name when no Login matches', async () => {
+  it('does not join an App Connect object recorded as a Login', async () => {
+    const recorded = grantActivity({
+      origin: 'https://app.example',
+      appUrl: APP_URL,
+      name: 'Editor',
+      created: '2026-08-01T00:00:00.000Z'
+    })
+    recorded.doc.type = ['Login']
+    const storage = fakeStorage({
+      appKeys: [
+        appKeyCredential({
+          cid: 'c-app',
+          origin: 'https://app.example',
+          appUrl: APP_URL,
+          name: 'Solo App app key'
+        })
+      ],
+      history: [recorded]
+    })
+
+    const apps = await listConnectedApps({ storage })
+
+    expect(apps).toHaveLength(1)
+    expect(apps[0].name).toBe('Solo App')
+    expect(apps[0].grants).toEqual([])
+    expect(apps[0].lastConnectedAt).toBeUndefined()
+  })
+
+  it('falls back to the stripped credential name when no Grant matches', async () => {
     const storage = fakeStorage({
       appKeys: [
         appKeyCredential({
@@ -390,7 +418,7 @@ describe('listConnectedApps', () => {
     const storage = fakeStorage({
       appKeys: [appKeyCredential({ cid: 'c-app', origin, appUrl: APP_URL })],
       history: [
-        loginActivity({
+        grantActivity({
           origin,
           appUrl: APP_URL,
           name: 'Example App',
@@ -434,7 +462,7 @@ describe('lookupCollectionCreators', () => {
 
   /**
    * A recorded grant delegated to a controller, as the App Connect approval
-   * writes one onto the Login activity's `object.zcaps`.
+   * writes one onto the Grant activity's `object.zcaps`.
    */
   function grantTo(controller: string) {
     return {
@@ -446,7 +474,7 @@ describe('lookupCollectionCreators', () => {
     }
   }
 
-  it('answers a connected app from its app key and latest Login', async () => {
+  it('answers a connected app from its app key and latest Grant', async () => {
     const storage = fakeStorage({
       appKeys: [
         appKeyCredential({
@@ -456,7 +484,7 @@ describe('lookupCollectionCreators', () => {
         })
       ],
       history: [
-        loginActivity({
+        grantActivity({
           origin: 'https://app.example',
           appUrl: APP_URL,
           name: 'Editor',
@@ -467,7 +495,7 @@ describe('lookupCollectionCreators', () => {
 
     const creators = await lookupCollectionCreators({
       storage,
-      generators: [APP_DID]
+      generators: [{ id: APP_DID, origin: 'https://app.example' }]
     })
 
     expect(creators.get(APP_DID)).toEqual({
@@ -498,7 +526,7 @@ describe('lookupCollectionCreators', () => {
 
     const creators = await lookupCollectionCreators({
       storage,
-      generators: [APP_DID]
+      generators: [{ id: APP_DID, origin: 'https://app.example' }]
     })
 
     expect(creators.get(APP_DID)?.cid).toBe('k-new')
@@ -525,7 +553,7 @@ describe('lookupCollectionCreators', () => {
     }
     const items = {
       entries: [
-        loginActivity({
+        grantActivity({
           origin: 'https://app.example',
           appUrl: APP_URL,
           name: 'Editor',
@@ -537,7 +565,7 @@ describe('lookupCollectionCreators', () => {
 
     const creators = await lookupCollectionCreators({
       storage,
-      generators: [APP_DID],
+      generators: [{ id: APP_DID, origin: 'https://app.example' }],
       appKeys,
       items
     })
@@ -547,21 +575,21 @@ describe('lookupCollectionCreators', () => {
     expect(storage.listHistoryItems).not.toHaveBeenCalled()
   })
 
-  it('answers a disconnected app from the Login that recorded grants to its DID', async () => {
+  it('answers a disconnected app from the Grant that recorded grants to its DID', async () => {
     // The disconnect deleted the app key, so only the activity history
     // still names the app: the grants it recorded were delegated to the
     // creator DID, and the record carries the appUrl and the display name.
     const storage = fakeStorage({
       appKeys: [],
       history: [
-        loginActivity({
+        grantActivity({
           origin: 'https://app.example',
           appUrl: OTHER_URL,
           name: 'Notes (old)',
           created: '2026-07-01T00:00:00Z',
           grants: [grantTo(OTHER_DID)]
         }),
-        loginActivity({
+        grantActivity({
           origin: 'https://app.example',
           appUrl: OTHER_URL,
           name: 'Notes',
@@ -573,7 +601,7 @@ describe('lookupCollectionCreators', () => {
 
     const creators = await lookupCollectionCreators({
       storage,
-      generators: [OTHER_DID]
+      generators: [{ id: OTHER_DID, origin: 'https://app.example' }]
     })
 
     expect(creators.get(OTHER_DID)).toEqual({
@@ -592,7 +620,7 @@ describe('lookupCollectionCreators', () => {
         })
       ],
       history: [
-        loginActivity({
+        grantActivity({
           origin: 'https://app.example',
           appUrl: APP_URL,
           name: 'Editor',
@@ -604,10 +632,25 @@ describe('lookupCollectionCreators', () => {
 
     const creators = await lookupCollectionCreators({
       storage,
-      generators: ['did:key:zNobody']
+      generators: [{ id: 'did:key:zNobody', origin: 'https://app.example' }]
     })
 
     expect(creators.size).toBe(0)
+  })
+
+  it('reads nothing for an agent stamp or an unstamped collection', async () => {
+    const storage = fakeStorage({ appKeys: [], history: [] })
+
+    // An agent's stamp carries no origin and names itself, even when the DID
+    // is one a record could answer.
+    const creators = await lookupCollectionCreators({
+      storage,
+      generators: [{ id: APP_DID, name: 'Agent' }, undefined]
+    })
+
+    expect(creators.size).toBe(0)
+    expect(storage.listAppKeys).not.toHaveBeenCalled()
+    expect(storage.listHistoryItems).not.toHaveBeenCalled()
   })
 
   it('reads nothing when no collection is attributed', async () => {

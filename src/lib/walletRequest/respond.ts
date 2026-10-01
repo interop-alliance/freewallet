@@ -1,7 +1,8 @@
 /**
  * The CHAPI `get` response sequence: compose the presentation, persist the
- * Login activity, and only then deliver anything externally. A request whose
- * grants provision a collection persists the Login earlier, after its
+ * Grant or Login activity, and only then deliver anything externally. A
+ * request whose grants provision a collection persists the Grant earlier,
+ * after its
  * delegations are signed and before the grantee is escrowed into any key
  * epoch. The ordering is the security-critical part and lives here rather
  * than in the popup page, so it is stated once and exercisable without a DOM.
@@ -35,7 +36,7 @@ type WalletResponseFailureReason =
  * A response that was refused before anything reached the relying party. When
  * `reason` is `processFailed` after a failed history write, nothing has been
  * delivered: the already-signed delegations stay inert rather than
- * unrevocable. When `reason` is `exchangeFailed`, the Login activity is
+ * unrevocable. When `reason` is `exchangeFailed`, the request's activity is
  * already recorded and the composed response rides on `response`, so a page
  * with no other channel to the requester can offer it for manual delivery.
  */
@@ -55,13 +56,15 @@ export class WalletResponseFailure extends Error {
 }
 
 /**
- * Records the Login activity when the request granted storage capabilities,
- * connected an app, or authenticated the user's DID -- the capabilities
+ * Records the request's activity. A request that connected an app or asked
+ * for storage capabilities is recorded as a Grant: the capabilities
  * `processRequest` actually delegated (threaded out alongside the VP), rather
  * than read back off the composed VP's embedded `zcap` array; for App Connect,
  * also the app name, the app's `appUrl`, and whether the app key was minted on
  * this connect. Recording the `appUrl` is what lets the Applications panel
- * attribute a connect to one of several apps sharing an origin.
+ * attribute a connect to one of several apps sharing an origin. A request
+ * that only authenticated the user's DID is recorded as a plain Login, which
+ * carries no capabilities.
  *
  * @param options {object}
  * @param options.session {Session}
@@ -76,7 +79,7 @@ export class WalletResponseFailure extends Error {
  * @returns {Promise<string | undefined>}   the recorded activity's id, or
  *   undefined when the request granted nothing worth recording
  */
-async function recordLoginActivity({
+async function recordRequestActivity({
   session,
   profile,
   requestOrigin,
@@ -89,12 +92,18 @@ async function recordLoginActivity({
   zcaps: IZcap[]
   appConnectResult?: WalletResponse['appConnect']
 }): Promise<string | undefined> {
-  if (
-    !profile.didAuth &&
-    profile.zcapRequests.length === 0 &&
-    !profile.appConnect
-  ) {
-    return undefined
+  const isGrant =
+    profile.appConnect !== null ||
+    profile.zcapRequests.length > 0 ||
+    zcaps.length > 0
+  if (!isGrant) {
+    if (!profile.didAuth) {
+      return undefined
+    }
+    return await session.storage.addHistoryLogin({
+      user: session.user,
+      origin: requestOrigin
+    })
   }
   const grants = zcaps.map(zcap => {
     const allowedAction =
@@ -114,7 +123,7 @@ async function recordLoginActivity({
       zcap
     }
   })
-  return await session.storage.addHistoryLogin({
+  return await session.storage.addHistoryGrant({
     user: session.user,
     origin: requestOrigin,
     grants,
@@ -139,7 +148,7 @@ async function recordLoginActivity({
 
 /**
  * Composes the response VP (selected VCs plus any delegated grants), records
- * the Login activity when capabilities were granted, and only then delivers
+ * the Grant activity when capabilities were granted, and only then delivers
  * the VP externally -- POSTing it to the VC API exchange when the request came
  * from one. Returning the presentation over the CHAPI channel stays with the
  * caller, since only it holds the CHAPI event.
@@ -147,12 +156,12 @@ async function recordLoginActivity({
  * Ordering: history/zcap persistence precedes every external delivery, so the
  * relying party can never hold live delegated capabilities that lack a
  * revocation hook. It also precedes every key-epoch escrow: when a grant
- * provisions a collection, the Login is persisted from inside
+ * provisions a collection, the Grant is persisted from inside
  * `processRequest`, once the delegations are signed and before the grantee
  * is added to the collection's key epochs, and it is not written again after
- * compose. When the rest of `processRequest` then fails, that Login is
+ * compose. When the rest of `processRequest` then fails, that Grant is
  * removed again, since nothing was delivered and its grants stay inert. The
- * Login activity is the stored record App Connect
+ * Grant activity is the stored record App Connect
  * revocation re-reads the zcap documents from, and both the exchange POST and
  * the CHAPI response hand the relying party the VP with its embedded,
  * already-signed `zcap` array. Persisting last would let a delivered grant
@@ -198,11 +207,11 @@ export async function composeAndDeliverResponse({
   expectedAppKeyDid?: string
   delegateStandaloneZcaps?: boolean
 }): Promise<WalletResponse> {
-  // Set once the Login activity is persisted ahead of provisioning, so the
+  // Set once the Grant activity is persisted ahead of provisioning, so the
   // post-compose write below does not record the same request twice, and a
   // failed approval can remove it again.
   let persisted = false
-  let persistedLoginId: string | undefined
+  let persistedGrantId: string | undefined
   let response: WalletResponse
   try {
     response = await processRequest({
@@ -212,13 +221,13 @@ export async function composeAndDeliverResponse({
       selectedVCs,
       expectedAppKeyDid,
       delegateStandaloneZcaps,
-      // Revocation finds a grantee through the Login activity's recorded
+      // Revocation finds a grantee through the Grant activity's recorded
       // grants, so the record must exist before provisioning escrows the
       // grantee into a key epoch. A failed write fails the request closed:
       // nothing is escrowed and nothing is delivered.
       beforeProvision: async ({ zcaps, appConnect }) => {
         try {
-          persistedLoginId = await recordLoginActivity({
+          persistedGrantId = await recordRequestActivity({
             session,
             profile,
             requestOrigin,
@@ -226,21 +235,21 @@ export async function composeAndDeliverResponse({
             appConnectResult: appConnect
           })
         } catch (err) {
-          log.error('Could not record the login history entry', { err })
+          log.error('Could not record the grant history entry', { err })
           throw err
         }
         persisted = true
       }
     })
   } catch (err) {
-    // Nothing was delivered, so a Login persisted ahead of provisioning
+    // Nothing was delivered, so a Grant persisted ahead of provisioning
     // records grants the requester never received. Remove it, so the
-    // Applications page does not list them and a retry leaves one Login.
-    if (persistedLoginId) {
+    // Applications page does not list them and a retry leaves one Grant.
+    if (persistedGrantId) {
       try {
-        await session.storage.deleteHistoryActivity({ id: persistedLoginId })
+        await session.storage.deleteHistoryActivity({ id: persistedGrantId })
       } catch (deleteErr) {
-        log.error('Could not remove the login history entry', {
+        log.error('Could not remove the grant history entry', {
           err: deleteErr
         })
       }
@@ -262,7 +271,7 @@ export async function composeAndDeliverResponse({
   }
   const grantedZcaps = response.zcaps ?? []
 
-  // The Login activity is the stored record App Connect revocation re-reads
+  // The Grant activity is the stored record App Connect revocation re-reads
   // the zcap documents from, so it must be persisted BEFORE any external
   // delivery -- both the exchange POST below and the CHAPI response hand the
   // relying party the VP with its embedded, already-signed `zcap` array, so
@@ -271,7 +280,7 @@ export async function composeAndDeliverResponse({
   // to revoke it from the sharing panel.
   if (!persisted) {
     try {
-      await recordLoginActivity({
+      await recordRequestActivity({
         session,
         profile,
         requestOrigin,
@@ -279,7 +288,7 @@ export async function composeAndDeliverResponse({
         appConnectResult: response.appConnect
       })
     } catch (err) {
-      log.error('Could not record the login history entry', { err })
+      log.error('Could not record the request history entry', { err })
       if (grantedZcaps.length > 0) {
         // Fail closed: nothing is delivered, so the already-signed
         // delegations stay inert rather than unrevocable. (Conversely, a

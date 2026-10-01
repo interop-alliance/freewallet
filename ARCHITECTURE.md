@@ -49,9 +49,9 @@ src/lib/            Pure business logic (no React)
   walletRequest/    VPR classification + response assembly for CHAPI requests
     getRequest.ts   The CHAPI get popup's pre-consent refusal matrix,
                     the attested requesting origin included
-    respond.ts      Compose, persist the Login activity, then deliver (the
-                    CHAPI `get` approval sequence); the persist runs before
-                    any grant's collection is provisioned
+    respond.ts      Compose, persist the Grant or Login activity, then
+                    deliver (the CHAPI `get` approval sequence); the persist
+                    runs before any grant's collection is provisioned
     externalRequest.ts  The interaction-URL entry point's pure half: the
                     deep-link parser, exchange opening, and pre-consent
                     refusal matrix
@@ -477,13 +477,13 @@ it creates, public or private, with the agent's did:key as `id`, and the
 request's self-declared `agent.name` as `name` when it carries one. That
 stamp has no `origin` or `url`. The listing carries the object whole to every surface. A surface
 names the creator by `generator.name` first. A stamp with no `origin` names
-an agent, which holds no app key and writes no App Connect Login, so an
+an agent, which holds no app key and writes no App Connect Grant, so an
 unnamed one is shown by its shortened `generator.id` and never looked up.
 For an app stamp without a name, one reader, `lookupCollectionCreators`
 (`src/lib/connectedApps.ts`), names the app behind `generator.id`, for the
 consent row, the Storage page's listing, and the collection contents page.
 A connected app answers from its app key. A disconnected one answers from
-the App Connect Login activities that recorded grants to its DID. A creator
+the App Connect Grant activities that recorded grants to its DID. A creator
 neither names is shown by its `generator.origin`.
 
 Content migration brings another account's backup bundle into this one. The

@@ -126,6 +126,7 @@ import {
 import type { IDID } from '@interop/data-integrity-core'
 import type { CollectionGenerator, IDelegatedZcap } from '@interop/was-client'
 import type { ICapabilityQueryDetail, IZcap } from './types'
+import { granteeRecipientId } from '@/lib/zcap'
 
 /**
  * Default actions for a grant whose `allowedAction` is absent: read-only.
@@ -340,28 +341,29 @@ export function existingCollectionsFrom(
 }
 
 /**
- * The key-agreement recipient id a grantee's did:key derives, the id a
- * collection's key epoch would list it under. Undefined for no controller and
- * for one the recipient derivation cannot handle: such a controller was
- * never escrowed, but no epoch can be read as excluding it either.
+ * Whether a grant is a plain URL `invocationTarget` naming a collection that
+ * already stands (or a Resource inside one): the one grant shape whose
+ * collection's current key epoch decides anything, since a URL admits the
+ * grantee to no key roster. The attribution pass reads those epochs, and the
+ * interaction-URL page waits for it only when a grant has this shape.
  *
  * @param options {object}
- * @param [options.controller] {string}   the grantee did:key
- * @returns {string | undefined}
+ * @param options.grant {ResolvedGrant}
+ * @param options.collections {ExistingCollections}   the pre-request snapshot
+ * @returns {boolean}
  */
-function granteeRecipientId({
-  controller
+export function urlNamesExistingCollection({
+  grant: { descriptor, target },
+  collections
 }: {
-  controller?: string
-}): string | undefined {
-  if (!controller) {
-    return undefined
-  }
-  try {
-    return x25519RecipientFromDidKey({ did: controller }).id
-  } catch {
-    return undefined
-  }
+  grant: ResolvedGrant
+  collections: ExistingCollections
+}): boolean {
+  return (
+    typeof descriptor.invocationTarget === 'string' &&
+    target.collectionId !== undefined &&
+    collections.has(target.collectionId)
+  )
 }
 
 /**
@@ -1005,9 +1007,15 @@ function resolveTargetForm({
     const encryptedCollection =
       !!standardCollection(collectionId)?.encryption ||
       !!existingEntry.encrypted
-    const recipientId = granteeRecipientId({
-      controller: requester.controller
-    })
+    // The grantee's recipient id is looked for only in a read epoch: an
+    // unread one cannot say the grantee is absent from it, and neither can a
+    // read one when the controller derives no recipient id to look for.
+    const recipientId =
+      encryptedCollection &&
+      existingEntry.recipientIds !== undefined &&
+      requester.controller
+        ? granteeRecipientId(requester.controller)
+        : undefined
     const currentRecipient =
       recipientId !== undefined &&
       !!existingEntry.recipientIds?.has(recipientId)
@@ -1022,14 +1030,9 @@ function resolveTargetForm({
             }),
       collectionId,
       encrypted: encryptedCollection && !currentRecipient,
-      // A verdict only on positive evidence: an unread epoch cannot say the
-      // grantee is absent from it, and neither can a read one when the
-      // grantee's controller derives no recipient id to look for.
-      outsideKeyEpoch:
-        encryptedCollection &&
-        existingEntry.recipientIds !== undefined &&
-        recipientId !== undefined &&
-        !currentRecipient,
+      // A verdict only on positive evidence: a derived id absent from the
+      // read epoch.
+      outsideKeyEpoch: recipientId !== undefined && !currentRecipient,
       targetClass: collectionClassFor({ collectionId, collections }),
       existing: existingCollectionReading({
         collectionId,
@@ -1556,7 +1559,7 @@ export async function processZcaps({
    * self-declared `agent.name` as `name` when it carried one. It has no
    * `origin` or `url`, since the path has no attested origin and no app URL.
    * So the collection names the agent it was provisioned for even once the
-   * request's Login activity is gone.
+   * request's Grant activity is gone.
    *
    * @param options {object}
    * @param options.collectionId {string}

@@ -2,6 +2,7 @@
  * Classifies a `wallet-activity` record into the History page's tabs.
  */
 import type { WalletActivity } from '@/stores/storageManager'
+import { ACTIVITY_TYPE } from '@interop/wallet-core/space'
 
 export type HistoryTab = 'all' | 'credentials' | 'login' | 'applications'
 
@@ -75,12 +76,14 @@ export function classifyActivity(
     return 'credentials'
   }
 
-  if (types.includes('Login')) {
-    const object = doc.object as { appConnect?: unknown } | undefined
-    return object?.appConnect ? 'applications' : 'login'
+  if (types.includes(ACTIVITY_TYPE.Login)) {
+    return 'login'
   }
 
-  if (types.includes('Revoke')) {
+  if (
+    types.includes(ACTIVITY_TYPE.Grant) ||
+    types.includes(ACTIVITY_TYPE.Revoke)
+  ) {
     return 'applications'
   }
 

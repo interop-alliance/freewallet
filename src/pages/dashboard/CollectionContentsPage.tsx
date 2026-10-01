@@ -60,7 +60,7 @@ import {
 } from '@/components/storage/displayUtils'
 import { CollectionAttribution } from '@/components/storage/CollectionAttribution'
 import { useCollectionCreators } from '@/hooks/useCollectionCreators'
-import { isAppGenerator } from '@/lib/collectionAttribution'
+import { recordedCreatorOf } from '@/lib/collectionAttribution'
 import { createLogger } from '@/lib/log'
 
 const log = createLogger('fw:ui:storage')
@@ -177,18 +177,13 @@ export function CollectionContentsPage() {
   )
 
   // The application that created this collection, for the header's
-  // "Created by" line, by its `generator.id` DID: the same reader the Storage
-  // page and the consent row use. A collection stamped with no generator
+  // "Created by" line, by its `generator` stamp: the same reader the Storage
+  // page and the consent row use. A collection stamped with no app generator
   // names no app, so the load is off there rather than decrypting the
-  // activity log for nothing. So is one stamped for an agent (no
-  // `generator.origin`), which names itself from the stamp alone.
+  // activity log for nothing.
   const generator = collection?.generator
-  const generatorId = isAppGenerator(generator) ? generator.id : undefined
-  const creators = useCollectionCreators({
-    storage,
-    generators: generatorId ? [generatorId] : []
-  })
-  const creator = generatorId ? creators.get(generatorId) : undefined
+  const creators = useCollectionCreators({ storage, generators: [generator] })
+  const creator = recordedCreatorOf({ generator, creators })
 
   const resources = contentsError ? [] : (contents?.resources ?? [])
   const errorKey = contentsError

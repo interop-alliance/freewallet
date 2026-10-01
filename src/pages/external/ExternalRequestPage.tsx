@@ -16,7 +16,7 @@
  * another origin, a grant class outside the allowlist, a plain URL on an
  * encrypted collection the agent cannot read -- is decided in
  * `src/lib/walletRequest/externalRequest.ts` before consent renders, each
- * with its own copy. The grant is recorded on the Login activity under the
+ * with its own copy. The grant is recorded on a Grant activity under the
  * fixed `n/a (API request)` origin marker before anything is delivered.
  */
 import { useEffect, useMemo, useRef, useState } from 'react'
@@ -58,7 +58,6 @@ import {
   unreadableGrants,
   type ExternalRequestRefusal
 } from '@/lib/walletRequest/externalRequest'
-import { attributeExistingCollections } from '@/lib/walletRequest/attributeExistingCollections'
 import { useAttributedGrants } from '@/hooks/useAttributedGrants'
 import { findKnownAgents } from '@/lib/connectedApps'
 import { formatDate } from '@/lib/viewMappers/formatDate'
@@ -125,11 +124,7 @@ export function ExternalRequestPage() {
   // The consent screen's grants: the first pass at once, then the pass with
   // the existing collections' attribution read in. A plain URL naming an
   // existing collection waits for that pass instead, before consent.
-  const {
-    grants: resolvedGrants,
-    attributeGrants,
-    showGrants
-  } = useAttributedGrants()
+  const { grants: resolvedGrants, attributeGrants } = useAttributedGrants()
   const [loginError, setLoginError] = useState<string | null>(null)
   // The requester DIDs this account has granted before and not revoked,
   // read off the activity history after consent renders.
@@ -143,7 +138,7 @@ export function ExternalRequestPage() {
     [session]
   )
   // The composed response a failed exchange POST left behind, offered for
-  // manual delivery: the Login activity is already recorded, so the grant
+  // manual delivery: the Grant activity is already recorded, so the grant
   // stands whether or not the requester ever receives it.
   const [undeliveredResponse, setUndeliveredResponse] = useState<string | null>(
     null
@@ -180,7 +175,7 @@ export function ExternalRequestPage() {
     // The existing collections' public state, consulted by grant resolution.
     // The creator of a private collection that already stands is read
     // afterwards, off each collection's own metadata, without holding the
-    // consent screen (`useAttributedGrants`). An interaction-URL grant stamps
+    // consent screen (`useAttributedGrants`) unless the refusal needs it. An interaction-URL grant stamps
     // the agent's did:key (and its self-declared name) on a private
     // collection it provisions, so the same agent's collection reads as its
     // own, and one another party created names that party.
@@ -198,33 +193,24 @@ export function ExternalRequestPage() {
       block('barredGrant')
       return
     }
+    // Best-effort, as on the popup: an unread epoch refuses nothing.
+    const attribution = attributeGrants({
+      resolution,
+      grants,
+      storage: loggedIn.storage
+    })
     if (
       namesExistingCollectionByUrl({
         grants,
         collections: resolution.collections
       })
     ) {
-      let attributed: typeof grants | undefined
-      try {
-        attributed = await attributeExistingCollections({
-          resolution,
-          grants,
-          storage: loggedIn.storage
-        })
-      } catch (err) {
-        // Best-effort, as on the popup: an unread epoch refuses nothing.
-        log.warn('Could not attribute the existing collections', { err })
-      }
-      const checked = attributed ?? grants
       // A plain URL on an encrypted collection whose current key epoch does
       // not list the agent would delegate a zcap over ciphertext only.
-      if (unreadableGrants(checked).length > 0) {
+      if (unreadableGrants(await attribution).length > 0) {
         block('unreadableTarget')
         return
       }
-      showGrants(checked)
-    } else {
-      attributeGrants({ resolution, grants, storage: loggedIn.storage })
     }
     setPageState('consenting')
     void readKnownAgents({ loggedIn, requestProfile })
@@ -387,7 +373,7 @@ export function ExternalRequestPage() {
         session,
         profile,
         // No requesting origin exists on this entry point; the fixed marker
-        // is what the Login activity records and what the Applications
+        // is what the Grant activity records and what the Applications
         // listing keys agent rows on.
         requestOrigin: EXTERNAL_REQUEST_ORIGIN,
         selectedVCs: [],

@@ -787,8 +787,10 @@ export async function updateUnlockMethods({
  * ceremony's registry update both run here, before any session exists. Reads
  * decrypt with `userKey`'s vault keys; when the written record must seal to a
  * rotated key instead (the recovery spend, whose base is still sealed to the
- * pre-rotation key), `writeUserKey` names it. No local cache is touched: the
- * callers are transient visits.
+ * pre-rotation key), `writeUserKey` names it, and a stored record `userKey`
+ * cannot open is read under `writeUserKey` too, since an earlier attempt of
+ * the same write may have landed with its response lost. No local cache is
+ * touched: the callers are transient visits.
  *
  * @param options {object}
  * @param options.zcapClient {ZcapClient}   the client the record GET and the
@@ -838,7 +840,29 @@ export async function updateUnlockMethodsWithClient({
         spaceId,
         ...(capability ? { capability } : {})
       }),
-    unwrap: stored => unwrapRecord({ record: stored, userKey }),
+    unwrap: async stored => {
+      try {
+        return await unwrapRecord({ record: stored, userKey })
+      } catch (err) {
+        if (!writeUserKey) {
+          throw err
+        }
+        // A re-sealing write whose response was lost leaves the record
+        // already sealed to the write key, so a retry of that write opens it
+        // under either. The fallback verifies the proof under the write key
+        // as well, so a record neither key opens still refuses.
+        const record = await unwrapRecord({
+          record: stored,
+          userKey: writeUserKey
+        }).catch(() => {
+          throw err
+        })
+        log.info(
+          'Unlock-methods registry already sealed to the write key; a prior write landed'
+        )
+        return record
+      }
+    },
     wrap: record => wrapRecord({ record, userKey: writeKey }),
     write: async (record, precondition) => {
       await putUnlockMethodsRecord({

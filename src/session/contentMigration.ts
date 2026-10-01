@@ -398,8 +398,8 @@ function migrationSink({ session }: { session: Session }): MigrationSink {
       const info = credentialActivityInfo(activity)
       if (!info) {
         // Everything else records an authority event on the old account --
-        // a login, a revocation, a collection share -- whose subject does
-        // not migrate.
+        // a login, a grant, a revocation, a collection share -- whose subject
+        // does not migrate.
         return 'skipped'
       }
       if (info.verb === 'created' && (await heldCreated()).has(info.cid)) {

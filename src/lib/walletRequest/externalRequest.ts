@@ -30,7 +30,11 @@ import type {
 } from '@interop/wallet-request'
 import { errorNameOf } from '@interop/wallet-core/menders'
 import { classifyRequest, queriesOf } from './classify'
-import type { ExistingCollections, ResolvedGrant } from './processZcaps'
+import {
+  urlNamesExistingCollection,
+  type ExistingCollections,
+  type ResolvedGrant
+} from './processZcaps'
 import type { IVPRDetails, WalletRequestProfile } from './types'
 
 /**
@@ -42,7 +46,7 @@ export const EXTERNAL_REQUEST_PATH = '/external/request'
 export const EXTERNAL_REQUEST_URL_PARAM = 'url'
 
 /**
- * The `origin` recorded on the Login activity for a grant answered through
+ * The `origin` recorded on the Grant activity for a grant answered through
  * this entry point, which has no requesting origin. A fixed marker rather
  * than the exchange host, so the Applications listing can key agent rows on
  * it beside the grant's `controller` DID.
@@ -343,11 +347,8 @@ export function namesExistingCollectionByUrl({
   grants: ResolvedGrant[]
   collections: ExistingCollections
 }): boolean {
-  return grants.some(
-    ({ descriptor, target }) =>
-      typeof descriptor.invocationTarget === 'string' &&
-      target.collectionId !== undefined &&
-      collections.has(target.collectionId)
+  return grants.some(grant =>
+    urlNamesExistingCollection({ grant, collections })
   )
 }
 
@@ -366,9 +367,5 @@ export function namesExistingCollectionByUrl({
  * @returns {ResolvedGrant[]}
  */
 export function unreadableGrants(grants: ResolvedGrant[]): ResolvedGrant[] {
-  return grants.filter(
-    ({ descriptor, target }) =>
-      typeof descriptor.invocationTarget === 'string' &&
-      target.outsideKeyEpoch === true
-  )
+  return grants.filter(({ target }) => target.outsideKeyEpoch === true)
 }

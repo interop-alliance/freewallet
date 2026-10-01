@@ -109,7 +109,7 @@ export function HistoryPage() {
   // the credential, but only while the wallet still holds it: a deletion
   // activity, or an activity about a credential deleted since, has nothing
   // left to link to, so its title renders as plain text. Every other activity
-  // (login, app revoke, collection share) falls back to its plain `summary`
+  // (login, grant, app revoke, collection share) falls back to its plain `summary`
   // line.
   function renderActivityLine(doc: WalletActivity) {
     const info = credentialActivityInfo(doc)

@@ -214,7 +214,7 @@ its generation delegation.
 wallet clients, with a cross-pointer in each. Its listing checks each
 recorded App Connect grant's delegation signer against the same verified
 document, matched on the key-multibase fragment so a key's did:key and
-promoted did:webvh forms agree; the full zcap is recorded on the Login
+promoted did:webvh forms agree; the full zcap is recorded on the Grant
 activity. An app whose recorded signers have all left the document shows as
 orphaned, and reconnecting through the ordinary App Connect flow is the
 recovery path. A grant minted in a transient session is signed by an annex

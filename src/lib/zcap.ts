@@ -3,6 +3,7 @@
  * many call sites share one shape assertion instead of restating it.
  */
 import type { IZcap } from '@interop/data-integrity-core'
+import { x25519RecipientFromDidKey } from '@interop/was-client/edv'
 import { parseSpaceTarget } from '@interop/was-client/paths'
 
 /**
@@ -45,4 +46,22 @@ export function collectionIdFromTarget({
     return undefined
   }
   return parsed.collectionId
+}
+
+/**
+ * The key-agreement recipient id a grantee's did:key derives, the id a
+ * collection's key epoch lists it under, derived the way provisioning
+ * derives it. Undefined for a controller the derivation cannot handle: such
+ * a controller was never escrowed anywhere, so there is nothing to rotate
+ * and no epoch can be read as excluding it.
+ *
+ * @param controller {string}   the grantee did:key
+ * @returns {string | undefined}
+ */
+export function granteeRecipientId(controller: string): string | undefined {
+  try {
+    return x25519RecipientFromDidKey({ did: controller }).id
+  } catch {
+    return undefined
+  }
 }

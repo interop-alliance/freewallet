@@ -931,9 +931,16 @@ export interface RecoveryOutcome {
   replacementEntry: RecoveryCodeUnlockMethod
   spentRecoveryKid: string
   standing: 'established' | 'pending'
-  registry: 'written' | 'not-owed' | 'failed'
+  registry: RegistryStepOutcome
   completeRecovery?: (options?: { currentUserKey?: UserKey }) => Promise<void>
 }
+
+/**
+ * What one run of the registry step did: `'written'` when the write landed,
+ * `'not-owed'` when the record owed none, `'failed'` when the write was
+ * swallowed and warned.
+ */
+type RegistryStepOutcome = 'written' | 'not-owed' | 'failed'
 
 /**
  * The save confirm's registry gate, shared by the tail's completion and the
@@ -946,31 +953,29 @@ export interface RecoveryOutcome {
  * shows the replacement code once more).
  *
  * @param options {object}
- * @param options.outcome {'written' | 'not-owed' | 'failed'}   what the
- *   registry step last did
+ * @param options.outcome {RegistryStepOutcome}   what the registry step last
+ *   did
  * @param [options.retry] {Function}   re-runs the registry step; absent when
  *   the caller cannot rebuild it, which keeps the carrier on a failure
- * @returns {Promise<{ clear: boolean, outcome: string }>}   whether the
- *   carrier may clear, and the step's outcome after any retry
+ * @returns {Promise<boolean>}   whether the carrier may clear
  */
 async function settleRegistryBeforeCompletion({
   outcome,
   retry
 }: {
-  outcome: 'written' | 'not-owed' | 'failed'
-  retry?: () => Promise<'written' | 'not-owed' | 'failed'>
-}): Promise<{ clear: boolean; outcome: 'written' | 'not-owed' | 'failed' }> {
+  outcome: RegistryStepOutcome
+  retry?: () => Promise<RegistryStepOutcome>
+}): Promise<boolean> {
   if (outcome !== 'failed') {
-    return { clear: true, outcome }
+    return true
   }
-  const retried = retry ? await retry() : 'failed'
-  if (retried !== 'failed') {
-    return { clear: true, outcome: retried }
+  if (retry && (await retry()) !== 'failed') {
+    return true
   }
   log.warn(
     "Recovery-spend registry drop still failed at the save confirm; the pending carrier is kept so the next login's spend resume drops the retired credentials' entries and deletes their unlock Spaces"
   )
-  return { clear: false, outcome: retried }
+  return false
 }
 
 /**
@@ -1204,8 +1209,8 @@ async function deleteRetiredCredentialSpaces({
  *   step is drop-only
  * @param options.spaces {object}   the Space deletes' signer set
  *   (`deleteRetiredCredentialSpaces`'s options, minus `entries`)
- * @returns {Promise<'written' | 'not-owed' | 'failed'>}   what the registry
- *   write did, for the resume's own report
+ * @returns {Promise<RegistryStepOutcome>}   what the registry write did, for
+ *   the resume's own report
  */
 async function retireCredentialsFromRegistry({
   stage,
@@ -1232,14 +1237,14 @@ async function retireCredentialsFromRegistry({
     record: UnlockMethodsRecord
   ) => UnlockMethodsRecord | Promise<UnlockMethodsRecord>
   spaces: Omit<Parameters<typeof deleteRetiredCredentialSpaces>[0], 'entries'>
-}): Promise<'written' | 'not-owed' | 'failed'> {
+}): Promise<RegistryStepOutcome> {
   // Filled by the mutation, consumed by the Space deletes only once the
   // write has landed.
   let retired: UnlockMethod[] = []
   // What the write did, for the caller that reports on it. The failure is
   // swallowed here, so a caller reading the resolved call alone could not
   // tell a landed registry from a warned-and-skipped one.
-  let outcome: 'written' | 'not-owed' | 'failed' = 'written'
+  let outcome: RegistryStepOutcome = 'written'
   try {
     await updateUnlockMethodsWithClient({
       ...registry,
@@ -1927,7 +1932,7 @@ export async function recoverAccountWithCode({
     })
   // Read by the save confirm: a failed write is retried there before the
   // carrier clears, since the carrier is what fires the spend resume.
-  let registryOutcome = await retireStep({
+  const registryOutcome = await retireStep({
     stage: 'remembered-tail',
     userKey: newUserKey
   })
@@ -1990,13 +1995,12 @@ export async function recoverAccountWithCode({
     const userKeyToPersist = options.currentUserKey ?? newUserKey
     // The registry sits sealed to the current user key, so the retry reads
     // and writes under the same key the record is completed with.
-    const settled = await settleRegistryBeforeCompletion({
+    const clear = await settleRegistryBeforeCompletion({
       outcome: registryOutcome,
       retry: () =>
         retireStep({ stage: 'remembered-confirm', userKey: userKeyToPersist })
     })
-    registryOutcome = settled.outcome
-    if (!settled.clear) {
+    if (!clear) {
       return
     }
     await persistNewClientKeys({
@@ -2453,16 +2457,17 @@ export async function resumeRecoverySpend({
   // Each arm names what the one registry step writes past the drop; the
   // step then deletes the dropped entries' Spaces once that write lands.
   // A record with no replacement code owes no registry write here.
-  let registryStatus: RecoverySpendResumeReport['registry'] = 'not-owed'
-  // The registry step again, for the save confirm to retry when this run's
+  let registryOutcome: RegistryStepOutcome = 'not-owed'
+  // The registry step, kept for the save confirm to retry when this run's
   // write failed; unset when the step could not even be prepared.
-  let retryRegistryStep:
+  let registryStep:
     | ((options: {
+        stage: 'resume' | 'resume-confirm'
         userKey: UserKey
-      }) => Promise<'written' | 'not-owed' | 'failed'>)
+      }) => Promise<RegistryStepOutcome>)
     | undefined
   if (replacement) {
-    registryStatus = 'skipped'
+    registryOutcome = 'failed'
     let step:
       | Pick<
           Parameters<typeof retireCredentialsFromRegistry>[0],
@@ -2580,9 +2585,9 @@ export async function resumeRecoverySpend({
     if (step && retirement) {
       const stepInputs = step
       const stepRetirement = retirement
-      retryRegistryStep = async ({ userKey: stepUserKey }) =>
+      registryStep = async ({ stage, userKey: stepUserKey }) =>
         await retireCredentialsFromRegistry({
-          stage: 'resume-confirm',
+          stage,
           registry: {
             zcapClient: newZcapClient,
             spaceId: pointer.spaceId,
@@ -2590,33 +2595,25 @@ export async function resumeRecoverySpend({
           },
           did,
           retirement: stepRetirement,
+          // The new passphrase's own unlock Space is spared: it is
+          // re-upserted by the arm's `finish`.
           spareUnlockSpaceId: found.unlockSpaceId,
           ...stepInputs,
+          // The retired credentials' browser-local state goes with their
+          // Spaces: the resume runs on the remembered browser.
           spaces: { zcapClient: newZcapClient, clearLocalState: true }
         })
-      const written = await retireCredentialsFromRegistry({
-        stage: 'resume',
-        registry: {
-          zcapClient: newZcapClient,
-          spaceId: pointer.spaceId,
-          userKey
-        },
-        did,
-        retirement,
-        // The new passphrase's own unlock Space is spared: it is re-upserted
-        // by the arm's `finish`.
-        spareUnlockSpaceId: found.unlockSpaceId,
-        ...step,
-        // The retired credentials' browser-local state goes with their
-        // Spaces: the resume runs on the remembered browser.
-        spaces: { zcapClient: newZcapClient, clearLocalState: true }
-      })
-      // A swallowed write is a skipped backfill: the entries the tail owed
-      // are still missing (or the retired ones still named), and the next
-      // resume retries it.
-      registryStatus = written === 'failed' ? 'skipped' : 'landed'
+      registryOutcome = await registryStep({ stage: 'resume', userKey })
     }
   }
+  // A swallowed write is a skipped backfill: the entries the tail owed are
+  // still missing (or the retired ones still named), and the next resume
+  // retries it.
+  const registryStatus: RecoverySpendResumeReport['registry'] = {
+    written: 'landed' as const,
+    'not-owed': 'not-owed' as const,
+    failed: 'skipped' as const
+  }[registryOutcome]
 
   // 4. The completion, confirm-gated while the show-once obligation stands.
   const completedClientKeys: ClientKeyRecord = {
@@ -2632,12 +2629,17 @@ export async function resumeRecoverySpend({
     const userKeyToPersist = options.currentUserKey ?? userKey
     // A skipped registry backfill keeps the carrier unless the retry lands,
     // or the retired credentials' entries would outlive the last resume.
-    const retry = retryRegistryStep
-    const settled = await settleRegistryBeforeCompletion({
-      outcome: registryStatus === 'skipped' ? 'failed' : 'written',
-      ...(retry ? { retry: () => retry({ userKey: userKeyToPersist }) } : {})
+    const retry = registryStep
+    const clear = await settleRegistryBeforeCompletion({
+      outcome: registryOutcome,
+      ...(retry
+        ? {
+            retry: () =>
+              retry({ stage: 'resume-confirm', userKey: userKeyToPersist })
+          }
+        : {})
     })
-    if (!settled.clear) {
+    if (!clear) {
       return
     }
     await persistClientKeys({
@@ -3222,7 +3224,10 @@ async function recoverAccountTransient({
     })
   // A transient spend leaves no pending carrier, so no later resume re-runs
   // this step. One immediate retry covers a passing failure (a lost
-  // conditional-write race, a dropped connection). A second failure is the
+  // conditional-write race, a dropped connection). When the first PUT landed
+  // and only its response was lost, the record is already sealed to
+  // `newUserKey`; the registry read falls back to it, so the retry converges
+  // on the landed write instead of failing to open it. A second failure is the
   // stated residue: the retired credentials' entries and unlock Spaces
   // stand, and no credential-only visit drops them.
   let registryOutcome = await retireStep()

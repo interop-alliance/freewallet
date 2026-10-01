@@ -11,7 +11,6 @@
  * history read failing leaves both off.
  */
 import { useMemo } from 'react'
-import { isAppGenerator } from '@/lib/collectionAttribution'
 import { createLogger } from '@/lib/log'
 import { listSharedCollections, type CollectionShare } from '@/session/shares'
 import type { CollectionCreator } from '@/lib/connectedApps'
@@ -95,9 +94,7 @@ export function useStorageListings({
 
   const creators = useCollectionCreators({
     storage: session?.storage,
-    generators: collections.flatMap(({ generator }) =>
-      isAppGenerator(generator) ? [generator.id] : []
-    ),
+    generators: collections.map(({ generator }) => generator),
     items,
     enabled: items !== undefined
   })

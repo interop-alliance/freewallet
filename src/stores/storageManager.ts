@@ -106,7 +106,7 @@ import type {
 } from '@/types/migration'
 import { didWebFromSpace } from '@/lib/didWeb'
 import { ensureKmsAuthentication } from '@/lib/kms'
-import { collectionIdFromTarget } from '@/lib/zcap'
+import { collectionIdFromTarget, granteeRecipientId } from '@/lib/zcap'
 import {
   didKeyZcapClient,
   isWebvhDid,
@@ -167,6 +167,8 @@ import {
   addHistoryCredentialShared as buildHistoryCredentialShared,
   addHistoryCredentialUnshared as buildHistoryCredentialUnshared,
   addHistoryLogin as buildHistoryLogin,
+  ACTIVITY_TYPE,
+  addHistoryGrant as buildHistoryGrant,
   addHistoryWalletLogin as buildHistoryWalletLogin,
   addHistoryAppRevoke as buildHistoryAppRevoke,
   addHistoryAgentRevoke as buildHistoryAgentRevoke,
@@ -1958,7 +1960,7 @@ export class StorageManager {
    *
    * The app key lands in the dedicated `app-connections` collection, never in
    * `private-credentials`, and no credential-created activity is written: the
-   * app-connect Login activity is the record of the connection, and an app key
+   * App Connect Grant activity is the record of the connection, and an app key
    * is not a credential the user acquired.
    *
    * @param options {object}
@@ -3594,30 +3596,55 @@ export class StorageManager {
 
   /**
    * Records (in the `wallet-activity` collection) a Login activity: the user
-   * logged in to a relying party via "Login with Wallet", granting the listed
-   * capabilities. The recorded zcap ids are the hook for a revocation UI: the
-   * WAS server now exposes a Space-scoped revocation endpoint, so a grant can
-   * be retired before its expiry.
+   * logged in to a relying party via a plain "Login with Wallet". A plain
+   * login delegates no capabilities; an App Connect connection or an agent
+   * grant is recorded by `addHistoryGrant` below.
    *
    * @param options {object}
    * @param options.user {User}
    * @param options.origin {string}   the relying party's origin
+   * @returns {Promise<string>}   the recorded activity's id
+   */
+  async addHistoryLogin({
+    user,
+    origin
+  }: {
+    user: User
+    origin: string
+  }): Promise<string> {
+    return await this.#recordActivity(id =>
+      buildHistoryLogin({ user, origin, id })
+    )
+  }
+
+  /**
+   * Records (in the `wallet-activity` collection) a Grant activity: the user
+   * connected an app through App Connect, or granted an agent storage access
+   * from the interaction-URL page, delegating the listed capabilities. The
+   * recorded zcap ids are the hook for revocation: the WAS server exposes a
+   * Space-scoped revocation endpoint, so a grant can be retired before its
+   * expiry.
+   *
+   * @param options {object}
+   * @param options.user {User}
+   * @param options.origin {string}   the requester's origin, or the
+   *   interaction-URL page's `EXTERNAL_REQUEST_ORIGIN` marker
    * @param options.grants {Array<{ id: string; target: string;
    *   allowedActions: string[]; expires: string; zcap?: IZcap }>}   each grant
    *   carries its display summary plus, when available, the full delegated
    *   capability document (`zcap`) kept verbatim so it can be revoked later
    * @param [options.appConnect] {{ name: string; firstRun: boolean;
-   *   appUrl?: string }}   set for an App Connect login: the app's display
-   *   name, whether the app key was minted on this connect (first run) or
-   *   matched (returning), and the validated request's `appUrl` -- what tells
-   *   two apps sharing an origin apart
+   *   appUrl?: string }}   set for an App Connect connection: the app's
+   *   display name, whether the app key was minted on this connect (first
+   *   run) or matched (returning), and the validated request's `appUrl` --
+   *   what tells two apps sharing an origin apart
    * @param [options.actor] {{ name: string }}   the requester's self-declared
    *   display name on a standalone capability request, recorded as
    *   `object.actor`
    * @returns {Promise<string>}   the recorded activity's id, which
    *   `deleteHistoryActivity` takes to remove it again
    */
-  async addHistoryLogin({
+  async addHistoryGrant({
     user,
     origin,
     grants,
@@ -3637,15 +3664,15 @@ export class StorageManager {
     actor?: { name: string }
   }): Promise<string> {
     return await this.#recordActivity(id =>
-      buildHistoryLogin({ user, origin, grants, appConnect, actor, id })
+      buildHistoryGrant({ user, origin, grants, appConnect, actor, id })
     )
   }
 
   /**
    * Records (in the `wallet-activity` collection) the Login activity for a
    * local sign-in: the user opened their own wallet, no relying party
-   * involved. `addHistoryLogin` above stays the RP-login builder (an origin
-   * and its grants); this one carries only the actor, so both wallets record
+   * involved. `addHistoryLogin` above is the RP-login builder (an origin);
+   * this one carries only the actor, so both wallets record
    * the same summary for the same event.
    *
    * @param options {object}
@@ -3710,7 +3737,7 @@ export class StorageManager {
    * @param [options.revoked] {number}   how many grants were revoked
    * @param [options.skipped] {number}   how many grants needed no revocation
    * @param [options.created] {string}   the `created` stamp, when the caller
-   *   needs a specific one (the agent revocation floors it past the Login it
+   *   needs a specific one (the agent revocation floors it past the Grant it
    *   retires, so a clock behind the granting client still hides the row)
    * @returns {Promise<void>}
    */
@@ -3790,7 +3817,7 @@ export class StorageManager {
 
   /**
    * Revokes the storage grants a connected app received through App Connect.
-   * Scans the `Login` activities for App Connect records matching the app's
+   * Scans the `Grant` activities for App Connect records matching the app's
    * `origin`, collects the full delegated capabilities recorded on them that
    * were delegated to the app's `subjectDid`, and revokes each one via the
    * Space's root capability (the Space controller can revoke anything it
@@ -4028,7 +4055,7 @@ export class StorageManager {
   /**
    * Revokes the storage grants recorded for a connected agent: the
    * capabilities delegated to `controller` on the interaction-URL request
-   * page's Login activities. There is no app key to delete; the epoch
+   * page's Grant activities. There is no app key to delete; the epoch
    * rotation off the agent's recipient key is the separate
    * {@link revokeAgentCollectionRecipients} stage. Per capability this is `#revokeZcaps`'s
    * contract: a grant the verified document reads as dead is skipped without
@@ -4188,7 +4215,7 @@ export class StorageManager {
    * is rotated off the agent's recipient key in one `removeRecipient` call
    * that also revokes the unexpired pull-axis grants. Every listed private
    * collection whose `generator.id` is the agent's did:key is a candidate
-   * beside the recorded grants' targets, so a collection whose Login activity
+   * beside the recorded grants' targets, so a collection whose Grant activity
    * is gone is still rotated. The retiring kid is derived from the agent's
    * `did:key` controller, as provisioning derived it, so the revoke needs
    * nothing the agent holds. A controller the derivation refuses was never
@@ -4210,7 +4237,7 @@ export class StorageManager {
     controller: string
     items?: HistoryItems
   }): Promise<RecipientRotationOutcome> {
-    const granteeKid = StorageManager.#granteeRosterKid(controller)
+    const granteeKid = granteeRecipientId(controller)
     if (!this.#remoteStore || !granteeKid) {
       return { collections: 0, rotated: 0, failed: 0, revokedIds: [] }
     }
@@ -4220,7 +4247,7 @@ export class StorageManager {
       granteeKid,
       items,
       // The collections provisioned for this agent, stamped with its did:key,
-      // whether or not a Login activity still records the grant.
+      // whether or not a Grant activity still records the grant.
       listing: { read: () => this.listCollections(), attributedTo: controller }
     })
   }
@@ -4230,7 +4257,7 @@ export class StorageManager {
    * collections for one grantee, then rotates each whose current epoch still
    * carries the grantee's roster kid (see
    * {@link revokeAppCollectionRecipients} for the contract). `matches` picks
-   * the grantee's Login activities. `listing.read` reads the Space's
+   * the grantee's Grant activities. `listing.read` reads the Space's
    * collection listing, read once only when there is a candidate to filter
    * or `attributedTo` names a grantee. A collection the listing reports
    * public is no candidate, since a public collection carries no key-epoch
@@ -4243,7 +4270,7 @@ export class StorageManager {
    * left to do.
    *
    * @param options {object}
-   * @param options.matches {Function}   the Login-object predicate
+   * @param options.matches {Function}   the Grant-object predicate
    * @param options.controller {string}   the grantee did:key
    * @param options.granteeKid {string}   the grantee's roster kid
    * @param [options.items] {HistoryItems}
@@ -4543,7 +4570,7 @@ export class StorageManager {
    * wallet admitted to the collection, and resolves `null` for any other kid
    * the roster lists, so a junk entry receives no wrap of the fresh epoch
    * key. The admitted set is the owner (this session's vault KAK), every
-   * grantee a recorded Login grant targeting the collection was delegated
+   * grantee a recorded Grant activity targeting the collection was delegated
    * to, expired grants included since a recipient entry outlives its grant,
    * and every reader a recorded `CollectionShare` names for it, unless a
    * `CollectionUnshare` for the pair supersedes that share
@@ -4583,7 +4610,7 @@ export class StorageManager {
     })
     const admitted = StorageManager.#shareReaders({ collectionId, items })
     for (const { doc } of items.entries) {
-      if (!doc.type?.includes('Login')) {
+      if (!doc.type?.includes(ACTIVITY_TYPE.Grant)) {
         continue
       }
       const zcaps = (doc.object as { zcaps?: unknown } | undefined)?.zcaps
@@ -4602,7 +4629,7 @@ export class StorageManager {
           ? zcap.controller
           : [zcap.controller]
         for (const controller of controllers) {
-          const kid = controller && StorageManager.#granteeRosterKid(controller)
+          const kid = controller && granteeRecipientId(controller)
           if (kid) {
             admitted.add(kid)
           }
@@ -4663,7 +4690,7 @@ export class StorageManager {
     }
     const candidatesOf = grantees.map(({ controller, targets }) => {
       const candidates = new Set<string>()
-      if (StorageManager.#granteeRosterKid(controller)) {
+      if (granteeRecipientId(controller)) {
         for (const target of targets) {
           const collectionId = this.#rotatableCollectionOf(target)
           if (collectionId) {
@@ -4721,7 +4748,7 @@ export class StorageManager {
       })
     )
     return grantees.map(({ controller }, index) => {
-      const recipientId = StorageManager.#granteeRosterKid(controller)
+      const recipientId = granteeRecipientId(controller)
       const collectionIds: string[] = []
       let failed = 0
       for (const collectionId of candidatesOf[index]) {
@@ -4737,25 +4764,6 @@ export class StorageManager {
       }
       return { controller, collectionIds, failed }
     })
-  }
-
-  /**
-   * A grantee's own roster kid, derived the way provisioning derives it.
-   * Undefined for a controller the derivation cannot handle. Such a
-   * controller was never escrowed anywhere (resolution refuses it for a
-   * provisioned collection), so there is nothing to rotate: an agent granted
-   * only a public collection under a non-did:key controller is the case this
-   * admits.
-   *
-   * @param controller {string}   the grantee DID
-   * @returns {string | undefined}
-   */
-  static #granteeRosterKid(controller: string): string | undefined {
-    try {
-      return x25519RecipientFromDidKey({ did: controller }).id
-    } catch {
-      return undefined
-    }
   }
 
   /**
@@ -4806,7 +4814,7 @@ export class StorageManager {
 
   /**
    * The full delegated zcaps recorded for one grantee, scanned from the
-   * `Login` history activities `matches` accepts: those whose recorded `zcap`
+   * `Grant` history activities `matches` accepts: those whose recorded `zcap`
    * was delegated to `controller` and has not already expired by its own
    * `expires` (wallet-core's `delegationExpired`, beyond the revocation
    * clock-skew margin; an absent or unparseable
@@ -4817,7 +4825,7 @@ export class StorageManager {
    * `unrevocable` counts the legacy summary-only records alone, the one kind
    * that may still be live: nothing can be POSTed for it, so it ends only at
    * its own expiry. A summary-only record names no controller, so it is
-   * counted on a Login whose full capabilities name this controller, or name
+   * counted on a Grant whose full capabilities name this controller, or name
    * none at all. `expired` carries the grants dropped for expiry alone:
    * nothing to revoke, but they still name the collections the grantee may
    * remain a key-epoch recipient of. The predicate is what tells the two
@@ -4826,7 +4834,7 @@ export class StorageManager {
    * `appConnect`).
    *
    * @param options {object}
-   * @param options.matches {Function}   the Login-object predicate
+   * @param options.matches {Function}   the Grant-object predicate
    * @param options.controller {string}   the grantee the grants were
    *   delegated to
    * @param options.items {HistoryItems}   the
@@ -4859,7 +4867,7 @@ export class StorageManager {
     let skipped = 0
     let unrevocable = 0
     for (const { doc } of items.entries) {
-      if (!doc.type?.includes('Login')) {
+      if (!doc.type?.includes(ACTIVITY_TYPE.Grant)) {
         continue
       }
       const object = doc.object as
@@ -4903,7 +4911,7 @@ export class StorageManager {
         }
         zcaps.push(zcap)
       }
-      // A Login naming only other controllers is another grantee's.
+      // A Grant naming only other controllers is another grantee's.
       if (namesController || !namesOther) {
         skipped += legacy
         unrevocable += legacy
@@ -6700,7 +6708,7 @@ export class StorageManager {
 
   /**
    * Removes every Resource carrying one activity id. An approval uses it to take
-   * back the Login it persisted before provisioning, when the rest of the
+   * back the Grant it persisted before provisioning, when the rest of the
    * approval fails before anything is delivered.
    *
    * @param options {object}

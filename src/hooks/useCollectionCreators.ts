@@ -4,13 +4,15 @@
  * load is non-blocking: a failure is logged and reads as no creators, so the
  * line falls back to the stamped origin rather than the page failing. It runs
  * only where the line can name an app: a session with remote storage and at
- * least one `generator` to look up. Callers hand in app stamps alone (those
- * carrying an `origin`); an agent's stamp names itself.
+ * least one app stamp to look up. An agent's stamp names itself, and is
+ * dropped by the reader.
  */
 import {
   lookupCollectionCreators,
   type CollectionCreator
 } from '@/lib/connectedApps'
+import { appGeneratorIds } from '@/lib/collectionAttribution'
+import type { CollectionGenerator } from '@interop/was-client'
 import { createLogger } from '@/lib/log'
 import type { HistoryItems, StorageManager } from '@/stores/storageManager'
 import { useAsyncLoad } from './useAsyncLoad'
@@ -26,8 +28,8 @@ const NO_CREATORS: ReadonlyMap<string, CollectionCreator> = new Map()
 /**
  * @param options {object}
  * @param [options.storage] {StorageManager}   the session's storage
- * @param options.generators {string[]}   the `generator.id` DIDs to look up; an
- *   empty list leaves the load off
+ * @param options.generators {Array<CollectionGenerator | undefined>}   the
+ *   collections' stamps; a list with no app stamp leaves the load off
  * @param [options.items] {HistoryItems}
  *   the activity history, when the caller has already read it; the load then
  *   runs no history read of its own
@@ -43,13 +45,15 @@ export function useCollectionCreators({
   enabled = true
 }: {
   storage?: StorageManager
-  generators: string[]
+  generators: Array<CollectionGenerator | undefined>
   items?: HistoryItems
   enabled?: boolean
 }): ReadonlyMap<string, CollectionCreator> {
-  // A value key, so a caller rebuilding the same list each render does not
-  // re-run the load.
-  const generatorsKey = [...new Set(generators)].sort().join(' ')
+  // A value key over the app stamps' ids, so a caller rebuilding the same
+  // list each render does not re-run the load.
+  const generatorsKey = [...new Set(appGeneratorIds(generators))]
+    .sort()
+    .join(' ')
   const active =
     enabled && generatorsKey !== '' && Boolean(storage?.hasRemoteStorage)
   const { data, error } = useAsyncLoad(
@@ -57,12 +61,11 @@ export function useCollectionCreators({
       if (!storage) {
         return NO_CREATORS
       }
-      return lookupCollectionCreators({
-        storage,
-        generators: generatorsKey.split(' '),
-        items
-      })
+      return lookupCollectionCreators({ storage, generators, items })
     },
+    // `generatorsKey` stands in for `generators`: the load re-runs when the
+    // app stamps' ids change, not when the caller rebuilds an equal list.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
     [storage, items, generatorsKey],
     {
       enabled: active,

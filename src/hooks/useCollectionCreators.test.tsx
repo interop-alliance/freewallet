@@ -3,7 +3,7 @@
  * existing-collection reading, the Storage page's collection listing, and the
  * collection contents page's "Created by" line -- read one resolver
  * (`lookupCollectionCreators`). A creator whose app key a disconnect deleted
- * is named by its recorded Login on all three.
+ * is named by its recorded Grant on all three.
  */
 import { act } from 'react'
 import { createRoot, type Root } from 'react-dom/client'
@@ -36,7 +36,7 @@ const NOTES: StorageCollection = {
 /**
  * A storage double for an account whose `notes` collection was created by an
  * app since disconnected: `app-connections` is empty, and the only record
- * naming the app is the App Connect Login that delegated grants to its DID.
+ * naming the app is the App Connect Grant that delegated grants to its DID.
  */
 function storageDouble() {
   return {
@@ -54,9 +54,9 @@ function storageDouble() {
       unreadable: 0,
       entries: [
         {
-          id: 'login-1',
+          id: 'grant-1',
           doc: {
-            type: ['Login'],
+            type: ['Grant'],
             created: '2026-07-01T00:00:00Z',
             object: {
               origin: CREATOR_ORIGIN,
@@ -122,7 +122,7 @@ describe('a disconnected creator across the attribution surfaces', () => {
     vi.restoreAllMocks()
   })
 
-  it('is named by its recorded Login on every surface', async () => {
+  it('is named by its recorded Grant on every surface', async () => {
     const storage = storageDouble()
     const session = { storage } as unknown as Session
 
@@ -164,7 +164,7 @@ describe('a disconnected creator across the attribution surfaces', () => {
     const contents = await renderHook(() =>
       useCollectionCreators({
         storage: session.storage,
-        generators: [CREATOR_DID]
+        generators: [NOTES.generator]
       })
     )
     const contentsCreator: CollectionCreator | undefined = contents

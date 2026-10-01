@@ -19,11 +19,12 @@ import {
   lookupCollectionCreators,
   type CollectionCreator
 } from '@/lib/connectedApps'
-import { isAppGenerator, recordedCreatorOf } from '@/lib/collectionAttribution'
+import { recordedCreatorOf } from '@/lib/collectionAttribution'
 import { createLogger } from '@/lib/log'
 import {
   existingCollectionsFrom,
   resolveGrants,
+  urlNamesExistingCollection,
   type CollectionAttribution,
   type ResolvedGrant
 } from './processZcaps'
@@ -87,12 +88,15 @@ export async function attributeExistingCollections({
   // already list the grantee. `encrypted` on the first pass marks a standard
   // encrypted collection, known without a metadata read.
   const rosterIds = new Map<string, { knownEncrypted: boolean }>()
-  for (const { descriptor, target } of grants) {
+  for (const grant of grants) {
+    const { descriptor, target } = grant
     if (
-      typeof descriptor.invocationTarget === 'string' &&
       descriptor.controller &&
       target.collectionId &&
-      resolution.collections.has(target.collectionId)
+      urlNamesExistingCollection({
+        grant,
+        collections: resolution.collections
+      })
     ) {
       rosterIds.set(target.collectionId, {
         knownEncrypted:
@@ -170,13 +174,11 @@ export async function attributeExistingCollections({
     ...knownEncryptedIds.map(readRoster)
   ])
   // A stamp carrying both `url` and `name` answers the consent row on its
-  // own, so only the other app stamps are joined against the wallet's
-  // records.
+  // own, so only the other stamps are joined against the wallet's records.
   const generators = [...reads.values()].flatMap(
     ({ attribution: { generator } }) =>
-      isAppGenerator(generator) &&
-      (generator.url === undefined || generator.name === undefined)
-        ? [generator.id]
+      generator?.url === undefined || generator.name === undefined
+        ? [generator]
         : []
   )
   let creators: ReadonlyMap<string, CollectionCreator> = new Map()

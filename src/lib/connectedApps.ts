@@ -4,12 +4,12 @@
  * wallet holds a self-issued app-key credential for it (in the encrypted
  * `app-connections` collection, kept apart from the user's own credentials
  * because each Resource carries that app's private seed) and each connect wrote
- * a Login activity to `wallet-activity` recording the display name and the
+ * a Grant activity to `wallet-activity` recording the display name and the
  * storage grants.
  *
  * `listConnectedApps` joins those two sources into one entry per app-key
  * credential: the credential supplies the origin, subject DID, and connected
- * date; the latest matching Login activity supplies the raw display name, the
+ * date; the latest matching Grant activity supplies the raw display name, the
  * grant summaries, and the last-connected timestamp. The join is on the
  * credential's `appUrl`, which every mint and every connect records, so
  * several apps sharing an origin get their own attribution.
@@ -26,7 +26,7 @@
  * `lookupCollectionCreators` reads the same two sources the other way round:
  * given the `generator.id` DIDs stamped on existing collections, it answers each
  * with the creating app's display name and canonical `appUrl`, from the app
- * key where the app is still connected and from its App Connect Login
+ * key where the app is still connected and from its App Connect Grant
  * activities where it is not. It is the one reader behind every surface that
  * names a collection's creator: the consent row's existing-collection
  * reading, the Storage page's collection listing, and the collection
@@ -49,7 +49,7 @@
  * The same page lists connected AGENTS: grantees that answered an
  * interaction-URL request rather than an App Connect popup, so they hold no
  * app key and no attested origin. `listConnectedAgents` joins those rows out
- * of the activity history alone -- the latest agent-grant Login per grantee
+ * of the activity history alone -- the latest agent Grant per grantee
  * did:key, hidden again by a Revoke activity naming the same controller.
  * It keeps a row whose grants have all expired while any of them targets
  * an encrypted collection, since the agent's key stays in that collection's
@@ -69,11 +69,14 @@ import {
   type GrantSignerState
 } from '@interop/wallet-core/clients'
 import type { AccountSignerCheck } from '@interop/wallet-core/clientAnnex'
+import { ACTIVITY_TYPE } from '@interop/wallet-core/space'
 import {
   delegationExpired,
   delegationProofKeyId
 } from '@interop/wallet-core/webvh'
 import type { IZcap } from '@interop/data-integrity-core'
+import type { CollectionGenerator } from '@interop/was-client'
+import { appGeneratorIds } from '@/lib/collectionAttribution'
 import {
   appKeyAppUrl,
   appKeyOrigin,
@@ -87,7 +90,7 @@ import {
 
 /**
  * One storage capability an app was granted, summarized as recorded on the
- * App Connect Login activity's `object.zcaps`.
+ * App Connect Grant activity's `object.zcaps`.
  */
 export interface AppGrant {
   id: string
@@ -115,7 +118,7 @@ export type { AccountSignerCheck } from '@interop/wallet-core/clientAnnex'
 
 /**
  * A connected application, joined from its app-key credential and the latest
- * matching App Connect Login activity.
+ * matching App Connect Grant activity.
  */
 export interface ConnectedApp {
   /**
@@ -149,7 +152,7 @@ export interface ConnectedApp {
    */
   grants: AppGrant[]
   /**
-   * The latest matching connect's timestamp, if a Login activity was found.
+   * The latest matching connect's timestamp, if a Grant activity was found.
    */
   lastConnectedAt?: string
 }
@@ -175,23 +178,23 @@ function stringField(value: unknown, key: string): string | undefined {
 }
 
 /**
- * The origin an App Connect Login activity recorded, when it is one.
+ * The origin an App Connect Grant activity recorded, when it is one.
  *
  * @param object {unknown}   the activity's `object` member
  * @returns {string | undefined}
  */
-function loginOrigin(object: unknown): string | undefined {
+function grantOrigin(object: unknown): string | undefined {
   return stringField(object, 'origin')
 }
 
 /**
- * The display name an App Connect Login activity recorded
+ * The display name an App Connect Grant activity recorded
  * (`object.appConnect.name`), when present.
  *
  * @param object {unknown}   the activity's `object` member
  * @returns {string | undefined}
  */
-function loginAppName(object: unknown): string | undefined {
+function grantAppName(object: unknown): string | undefined {
   if (!object || typeof object !== 'object') {
     return undefined
   }
@@ -199,14 +202,14 @@ function loginAppName(object: unknown): string | undefined {
 }
 
 /**
- * The `appUrl` an App Connect Login activity recorded
+ * The `appUrl` an App Connect Grant activity recorded
  * (`object.appConnect.appUrl`). Every connect writes one; a record carrying
  * none is not a row this listing can attribute to an app.
  *
  * @param object {unknown}   the activity's `object` member
  * @returns {string | undefined}
  */
-function loginAppUrl(object: unknown): string | undefined {
+function grantAppUrl(object: unknown): string | undefined {
   if (!object || typeof object !== 'object') {
     return undefined
   }
@@ -214,13 +217,13 @@ function loginAppUrl(object: unknown): string | undefined {
 }
 
 /**
- * The grant summaries an App Connect Login activity recorded
+ * The grant summaries an App Connect Grant activity recorded
  * (`object.zcaps`), normalized to {@link AppGrant}s.
  *
  * @param object {unknown}   the activity's `object` member
  * @returns {AppGrant[]}
  */
-function loginGrants(object: unknown): AppGrant[] {
+function recordedGrants(object: unknown): AppGrant[] {
   if (!object || typeof object !== 'object' || !('zcaps' in object)) {
     return []
   }
@@ -316,48 +319,47 @@ export function deriveGrantsState({
 }
 
 /**
- * Whether an activity is an App Connect Login: a `Login` activity carrying an
- * `appConnect` member (distinguishing it from a plain "Login with Wallet" and
- * from an agent-grant Login).
+ * Whether an activity is an App Connect Grant: a `Grant` activity carrying an
+ * `appConnect` member (distinguishing it from an agent Grant).
  *
  * @param options {object}
  * @param options.doc {{ type?: string[]; object?: unknown }}
  * @returns {boolean}
  */
-function isAppConnectLogin({
+function isAppConnectGrant({
   doc
 }: {
   doc: { type?: string[]; object?: unknown }
 }): boolean {
   return (
     Array.isArray(doc.type) &&
-    doc.type.includes('Login') &&
-    loginAppName(doc.object) !== undefined
+    doc.type.includes(ACTIVITY_TYPE.Grant) &&
+    grantAppName(doc.object) !== undefined
   )
 }
 
 /**
- * Whether an activity is the App Connect Login for a given origin.
+ * Whether an activity is the App Connect Grant for a given origin.
  *
  * @param options {object}
  * @param options.doc {{ type?: string[]; object?: unknown }}
  * @param options.origin {string}
  * @returns {boolean}
  */
-function isAppConnectLoginFor({
+function isAppConnectGrantFor({
   doc,
   origin
 }: {
   doc: { type?: string[]; object?: unknown }
   origin: string
 }): boolean {
-  return isAppConnectLogin({ doc }) && loginOrigin(doc.object) === origin
+  return isAppConnectGrant({ doc }) && grantOrigin(doc.object) === origin
 }
 
 /**
  * Lists the user's connected applications, one per app-key credential in the
  * `app-connections` collection, joined with the latest matching App Connect
- * Login activity.
+ * Grant activity.
  *
  * @param options {object}
  * @param options.storage {StorageManager}
@@ -390,19 +392,19 @@ export async function listConnectedApps({
   // `object.appConnect.appUrl`, and it is what tells two apps sharing an
   // origin apart.
   type HistoryItem = (typeof history.entries)[number]
-  const latestLoginByAppUrl = new Map<string, HistoryItem>()
+  const latestGrantByAppUrl = new Map<string, HistoryItem>()
   for (const item of history.entries) {
-    const origin = loginOrigin(item.doc.object)
-    if (!origin || !isAppConnectLoginFor({ doc: item.doc, origin })) {
+    const origin = grantOrigin(item.doc.object)
+    if (!origin || !isAppConnectGrantFor({ doc: item.doc, origin })) {
       continue
     }
-    const appUrl = loginAppUrl(item.doc.object)
+    const appUrl = grantAppUrl(item.doc.object)
     if (appUrl === undefined) {
       continue
     }
-    const current = latestLoginByAppUrl.get(appUrl)
+    const current = latestGrantByAppUrl.get(appUrl)
     if (!current || (current.doc.created ?? '') < (item.doc.created ?? '')) {
-      latestLoginByAppUrl.set(appUrl, item)
+      latestGrantByAppUrl.set(appUrl, item)
     }
   }
 
@@ -419,9 +421,9 @@ export async function listConnectedApps({
       continue
     }
 
-    // The latest matching App Connect Login supplies the raw display name, the
+    // The latest matching App Connect Grant supplies the raw display name, the
     // grants, and the last-connected timestamp.
-    const latestLogin = latestLoginByAppUrl.get(appUrl)
+    const latestGrant = latestGrantByAppUrl.get(appUrl)
 
     const vcName = (credential as { name?: unknown }).name
     const strippedName =
@@ -429,7 +431,7 @@ export async function listConnectedApps({
         ? vcName.slice(0, -APP_KEY_NAME_SUFFIX.length)
         : undefined
     const name =
-      (latestLogin && loginAppName(latestLogin.doc.object)) ??
+      (latestGrant && grantAppName(latestGrant.doc.object)) ??
       strippedName ??
       origin
 
@@ -442,8 +444,8 @@ export async function listConnectedApps({
       appUrl,
       subjectDid: subject,
       connectedAt: typeof issuanceDate === 'string' ? issuanceDate : undefined,
-      grants: latestLogin ? loginGrants(latestLogin.doc.object) : [],
-      lastConnectedAt: latestLogin?.doc.created
+      grants: latestGrant ? recordedGrants(latestGrant.doc.object) : [],
+      lastConnectedAt: latestGrant?.doc.created
     })
   }
 
@@ -649,7 +651,7 @@ async function rotateThenRevokeGrants<Outcome>({
  */
 export interface CollectionCreator {
   /**
-   * The display name the app's latest App Connect Login recorded.
+   * The display name the app's latest App Connect Grant recorded.
    */
   name: string
   /**
@@ -668,19 +670,19 @@ export interface CollectionCreator {
  * What the wallet's own records say about the applications that created a
  * set of collections, by the `generator.id` did:key stamped on each: the display
  * name and the canonical `appUrl`. A connected app answers from its app key
- * and latest Login ({@link listConnectedApps}), with its app-key cid. A
+ * and latest Grant ({@link listConnectedApps}), with its app-key cid. A
  * disconnected one has no app key left, since removing it is what a
- * disconnect does, so its App Connect Login activities answer instead: the
+ * disconnect does, so its App Connect Grant activities answer instead: the
  * latest one whose recorded grants were delegated to that DID supplies both
  * members. A creator neither source knows is absent from the result, and the
- * surface names its origin. Callers hand in app stamps alone (those carrying
- * a `generator.origin`). An agent's stamp has no app key or App Connect Login
- * to answer it, and names itself.
+ * surface names its origin. Only an app stamp (one carrying a
+ * `generator.origin`) is looked up. An agent's stamp has no app key or App
+ * Connect Grant to answer it, and names itself, so it is dropped here.
  *
  * @param options {object}
  * @param options.storage {StorageManager}
- * @param options.generators {Iterable<string>}   the `generator.id` DIDs to look
- *   up
+ * @param options.generators {Iterable<CollectionGenerator | undefined>}   the
+ *   collections' stamps, an unstamped collection's `undefined` included
  * @param [options.items] {HistoryItems}
  *   the activity history, when the caller has already read it
  * @param [options.appKeys] {Awaited<ReturnType<StorageManager['listAppKeys']>>}
@@ -696,11 +698,11 @@ export async function lookupCollectionCreators({
   appKeys
 }: {
   storage: StorageManager
-  generators: Iterable<string>
+  generators: Iterable<CollectionGenerator | undefined>
   items?: HistoryItems
   appKeys?: Awaited<ReturnType<StorageManager['listAppKeys']>>
 }): Promise<ReadonlyMap<string, CollectionCreator>> {
-  const wanted = new Set(generators)
+  const wanted = new Set(appGeneratorIds(generators))
   const creators = new Map<string, CollectionCreator>()
   if (wanted.size === 0) {
     return creators
@@ -723,29 +725,29 @@ export async function lookupCollectionCreators({
       })
     }
   }
-  // The rest are disconnected: the latest App Connect Login that recorded
+  // The rest are disconnected: the latest App Connect Grant that recorded
   // grants delegated to the DID still names the app.
-  const latestLoginByController = new Map<
+  const latestGrantByController = new Map<
     string,
     { created: string; name: string; appUrl: string }
   >()
   for (const { doc } of history.entries) {
-    if (!isAppConnectLogin({ doc })) {
+    if (!isAppConnectGrant({ doc })) {
       continue
     }
-    const controller = loginGrantController(doc.object)
+    const controller = grantController(doc.object)
     if (!controller || !wanted.has(controller) || creators.has(controller)) {
       continue
     }
-    const appUrl = loginAppUrl(doc.object)
-    const name = loginAppName(doc.object)
+    const appUrl = grantAppUrl(doc.object)
+    const name = grantAppName(doc.object)
     const created = doc.created ?? ''
-    const current = latestLoginByController.get(controller)
+    const current = latestGrantByController.get(controller)
     if (appUrl && name && (!current || current.created < created)) {
-      latestLoginByController.set(controller, { created, name, appUrl })
+      latestGrantByController.set(controller, { created, name, appUrl })
     }
   }
-  for (const [controller, { name, appUrl }] of latestLoginByController) {
+  for (const [controller, { name, appUrl }] of latestGrantByController) {
     creators.set(controller, { name, appUrl })
   }
   return creators
@@ -790,13 +792,13 @@ export interface ConnectedAgent {
 }
 
 /**
- * The self-declared agent name a Login activity recorded (`object.actor.name`),
+ * The self-declared agent name a Grant activity recorded (`object.actor.name`),
  * when present.
  *
  * @param object {unknown}   the activity's `object` member
  * @returns {string | undefined}
  */
-function loginAgentName(object: unknown): string | undefined {
+function grantAgentName(object: unknown): string | undefined {
   if (!object || typeof object !== 'object') {
     return undefined
   }
@@ -804,7 +806,7 @@ function loginAgentName(object: unknown): string | undefined {
 }
 
 /**
- * The grantee did:key a Login activity's recorded grants were delegated to:
+ * The grantee did:key a Grant activity's recorded grants were delegated to:
  * the `controller` of the first recorded full capability. The request page's
  * precheck (`precheckExternalRequest`) refuses a request whose capability
  * queries name more than one `controller`, and each grant is delegated to its
@@ -814,7 +816,7 @@ function loginAgentName(object: unknown): string | undefined {
  * @param object {unknown}   the activity's `object` member
  * @returns {string | undefined}
  */
-function loginGrantController(object: unknown): string | undefined {
+function grantController(object: unknown): string | undefined {
   if (!object || typeof object !== 'object') {
     return undefined
   }
@@ -837,7 +839,7 @@ function loginGrantController(object: unknown): string | undefined {
 }
 
 /**
- * Whether an activity is an agent-grant Login: a `Login` whose object is an
+ * Whether an activity is an agent Grant: a `Grant` whose object is an
  * agent's (`isAgentActivityObject`: the interaction-URL origin marker and no
  * `appConnect` member), carrying at least one recorded full capability
  * (without one there is nothing to list or revoke).
@@ -846,16 +848,16 @@ function loginGrantController(object: unknown): string | undefined {
  * @param options.doc {{ type?: string[]; object?: unknown }}
  * @returns {boolean}
  */
-export function isAgentGrantLogin({
+export function isAgentGrant({
   doc
 }: {
   doc: { type?: string[]; object?: unknown }
 }): boolean {
   return (
     Array.isArray(doc.type) &&
-    doc.type.includes('Login') &&
+    doc.type.includes(ACTIVITY_TYPE.Grant) &&
     isAgentActivityObject(doc.object) &&
-    loginGrantController(doc.object) !== undefined
+    grantController(doc.object) !== undefined
   )
 }
 
@@ -936,7 +938,7 @@ async function expiredRowsToDrop({
 
 /**
  * Whether an activity is an agent-grant Revoke: the activity
- * {@link revokeAgentAccess} writes. Scoped exactly like the agent Login side
+ * {@link revokeAgentAccess} writes. Scoped exactly like the agent Grant side
  * -- the interaction-URL origin marker, no `appConnect` member -- and carrying
  * a grantee `controller`, so an app revocation (or any other Revoke that
  * happens to name a controller) can never hide an agent row.
@@ -952,69 +954,69 @@ function isAgentRevoke({
 }): boolean {
   return (
     Array.isArray(doc.type) &&
-    doc.type.includes('Revoke') &&
+    doc.type.includes(ACTIVITY_TYPE.Revoke) &&
     isAgentActivityObject(doc.object) &&
     stringField(doc.object, 'controller') !== undefined
   )
 }
 
 /**
- * Whether a Revoke hides a Login in the agent join. Deliberately explicit
- * about the missing stamps: a Login carrying no `created` is never hidden (its
+ * Whether a Revoke hides a Grant in the agent join. Deliberately explicit
+ * about the missing stamps: a Grant carrying no `created` is never hidden (its
  * age is unknowable, and hiding a row silently loses a revocable grant), and a
  * Revoke carrying none never hides. The comparison stays `>=` -- the Revoke
- * writer stamps a forward floor above the Login it retires, so a tie can only
+ * writer stamps a forward floor above the Grant it retires, so a tie can only
  * be someone else's stamp, and a tie there means the revocation is at least as
  * new as the grant.
  *
  * @param options {object}
- * @param [options.loginCreated] {string}
+ * @param [options.grantCreated] {string}
  * @param [options.revokeCreated] {string}
  * @returns {boolean}
  */
-function revokeHidesLogin({
-  loginCreated,
+function revokeHidesGrant({
+  grantCreated,
   revokeCreated
 }: {
-  loginCreated?: string
+  grantCreated?: string
   revokeCreated?: string
 }): boolean {
-  if (!loginCreated || !revokeCreated) {
+  if (!grantCreated || !revokeCreated) {
     return false
   }
-  return revokeCreated >= loginCreated
+  return revokeCreated >= grantCreated
 }
 
 /**
- * The agent-grant Logins in the activity history, grouped by grantee
+ * The agent Grants in the activity history, grouped by grantee
  * controller, minus those a matching agent Revoke hides
- * ({@link revokeHidesLogin}). A controller whose every Login is hidden is
- * absent, so each group holds at least one Login.
+ * ({@link revokeHidesGrant}). A controller whose every Grant is hidden is
+ * absent, so each group holds at least one Grant.
  *
  * @param options {object}
  * @param options.items {HistoryItems}
- * @returns {Map<string, HistoryItems['entries']>}   the live Logins, by
+ * @returns {Map<string, HistoryItems['entries']>}   the live Grants, by
  *   controller
  */
-function liveAgentLogins({
+function liveAgentGrants({
   items
 }: {
   items: HistoryItems
 }): Map<string, HistoryItems['entries']> {
-  const loginsByController = new Map<string, HistoryItems['entries']>()
+  const rowsByController = new Map<string, HistoryItems['entries']>()
   const latestRevokeByController = new Map<string, string>()
   for (const item of items.entries) {
     const { doc } = item
-    if (isAgentGrantLogin({ doc })) {
-      const controller = loginGrantController(doc.object)
+    if (isAgentGrant({ doc })) {
+      const controller = grantController(doc.object)
       if (!controller) {
         continue
       }
-      const existing = loginsByController.get(controller)
+      const existing = rowsByController.get(controller)
       if (existing) {
         existing.push(item)
       } else {
-        loginsByController.set(controller, [item])
+        rowsByController.set(controller, [item])
       }
       continue
     }
@@ -1032,11 +1034,11 @@ function liveAgentLogins({
   }
 
   const live = new Map<string, HistoryItems['entries']>()
-  for (const [controller, logins] of loginsByController) {
+  for (const [controller, rows] of rowsByController) {
     const revokeCreated = latestRevokeByController.get(controller)
-    const unhidden = logins.filter(
+    const unhidden = rows.filter(
       ({ doc }) =>
-        !revokeHidesLogin({ loginCreated: doc.created, revokeCreated })
+        !revokeHidesGrant({ grantCreated: doc.created, revokeCreated })
     )
     if (unhidden.length > 0) {
       live.set(controller, unhidden)
@@ -1046,16 +1048,16 @@ function liveAgentLogins({
 }
 
 /**
- * The newest of a non-empty set of Logins by `created` stamp. A Login with no
+ * The newest of a non-empty set of Grants by `created` stamp. A Grant with no
  * stamp sorts oldest.
  *
- * @param logins {HistoryItems['entries']}   at least one Login
+ * @param rows {HistoryItems['entries']}   at least one Grant
  * @returns {HistoryItems['entries'][number]}
  */
-function newestLogin(
-  logins: HistoryItems['entries']
+function newestGrant(
+  rows: HistoryItems['entries']
 ): HistoryItems['entries'][number] {
-  return logins.reduce((newest, item) =>
+  return rows.reduce((newest, item) =>
     (newest.doc.created ?? '') < (item.doc.created ?? '') ? item : newest
   )
 }
@@ -1063,9 +1065,9 @@ function newestLogin(
 /**
  * Which of the given controllers this account has granted storage to through
  * an interaction-URL request and not since revoked: a controller with at
- * least one agent-grant Login no later agent Revoke hides. Each entry carries
- * the newest such Login's self-declared name and `created` stamp, the same
- * newest-Login rule {@link listConnectedAgents} applies.
+ * least one agent Grant no later agent Revoke hides. Each entry carries
+ * the newest such Grant's self-declared name and `created` stamp, the same
+ * newest-Grant rule {@link listConnectedAgents} applies.
  *
  * Unlike the listing, this reads no key-epoch roster for fully expired rows.
  * The claim it backs is only "you granted this key before and have not
@@ -1087,15 +1089,15 @@ export function findKnownAgents({
   items: HistoryItems
   controllers: string[]
 }): Map<string, { name?: string; grantedAt?: string }> {
-  const live = liveAgentLogins({ items })
+  const live = liveAgentGrants({ items })
   const known = new Map<string, { name?: string; grantedAt?: string }>()
   for (const controller of controllers) {
-    const logins = live.get(controller)
-    if (!logins) {
+    const rows = live.get(controller)
+    if (!rows) {
       continue
     }
-    const latest = newestLogin(logins)
-    const name = loginAgentName(latest.doc.object)
+    const latest = newestGrant(rows)
+    const name = grantAgentName(latest.doc.object)
     known.set(controller, {
       ...(name !== undefined && { name }),
       ...(latest.doc.created !== undefined && {
@@ -1111,12 +1113,12 @@ export function findKnownAgents({
  * request, one row per grantee did:key.
  *
  * The join is over the activity history alone (there is no credential to hang
- * a row off): every agent-grant Login for a controller that a matching Revoke
+ * a row off): every agent Grant for a controller that a matching Revoke
  * does not hide contributes its grants, deduplicated by capability id, and
- * `grantedAt` is the newest of those Logins. The union is what the row counts,
+ * `grantedAt` is the newest of those Grants. The union is what the row counts,
  * expires, and checks signers against -- one controller can hold live grants
- * from several requests, and the revocation scans every Login too, so a
- * latest-Login-only view would under-report what is about to be revoked. A row
+ * from several requests, and the revocation scans every Grant too, so a
+ * latest-Grant-only view would under-report what is about to be revoked. A row
  * whose every recorded grant has already expired is kept, flagged `expired`,
  * while any grant targets an encrypted collection of this Space: the agent's
  * key stays in that collection's key-epoch roster until a revocation rotates
@@ -1124,7 +1126,7 @@ export function findKnownAgents({
  * something outside this Space. That check reads the governed descriptor of
  * each distinct collection the expired rows' grants target, once however many
  * rows target it, and only when some row has fully expired. A later re-grant writes a newer
- * Login and lists again.
+ * Grant and lists again.
  *
  * @param options {object}
  * @param options.storage {StorageManager}
@@ -1144,14 +1146,14 @@ export async function listConnectedAgents({
 
   const now = Date.now()
   const agents: ConnectedAgent[] = []
-  for (const [controller, live] of liveAgentLogins({ items: history })) {
-    // The union of every live Login's grants, deduplicated by capability id:
+  for (const [controller, live] of liveAgentGrants({ items: history })) {
+    // The union of every live Grant's grants, deduplicated by capability id:
     // one controller can hold grants from several requests, and the newest
     // request is not necessarily the one with the longest-lived grants.
     const grants: AppGrant[] = []
     const seen = new Set<string>()
     for (const { doc } of live) {
-      for (const grant of loginGrants(doc.object)) {
+      for (const grant of recordedGrants(doc.object)) {
         if (grant.id && seen.has(grant.id)) {
           continue
         }
@@ -1163,10 +1165,10 @@ export async function listConnectedAgents({
     }
     const expired = allGrantsExpired({ grants, now })
 
-    // The newest live Login supplies the display members and the granted
+    // The newest live Grant supplies the display members and the granted
     // stamp; the grants above are the union across all of them.
-    const latest = newestLogin(live)
-    const name = loginAgentName(latest.doc.object)
+    const latest = newestGrant(live)
+    const name = grantAgentName(latest.doc.object)
     agents.push({
       controller,
       ...(name !== undefined && { name }),
@@ -1220,7 +1222,7 @@ export async function listConnectedAgents({
  * `revokeAgentGrants` before the Revoke is recorded, so the row stays listed.
  *
  * The recorded Revoke is stamped with a forward floor -- one millisecond past
- * the row's newest Login when this clock is behind it -- so the listing's
+ * the row's newest Grant when this clock is behind it -- so the listing's
  * hide-on-revoke join cannot be defeated by skew between the client that
  * granted and the client that revokes.
  *
@@ -1287,13 +1289,13 @@ export async function revokeAgentAccess({
 
 /**
  * The `created` stamp for an agent Revoke: now, floored to one millisecond
- * past the Login it retires when this client's clock is behind the client that
+ * past the Grant it retires when this client's clock is behind the client that
  * granted. Both stamps are wall-clock from possibly different machines, and
- * the listing hides a Login only for a Revoke at or after it, so without the
+ * the listing hides a Grant only for a Revoke at or after it, so without the
  * floor a slow clock would write a revocation the listing ignores.
  *
  * @param options {object}
- * @param [options.grantedAt] {string}   the row's newest Login `created`
+ * @param [options.grantedAt] {string}   the row's newest Grant `created`
  * @returns {string}   an ISO stamp
  */
 function revokeStampAfter({ grantedAt }: { grantedAt?: string }): string {

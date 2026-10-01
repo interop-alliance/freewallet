@@ -17,7 +17,9 @@
   save confirm retries the write, and keeps the pending record when the
   retry fails, so the next login's spend resume drops them. The spend
   resume's confirm does the same. The transient spend retries the write
-  once in its tail.
+  once in its tail. That retry opens a record the first write already
+  re-sealed to the rotated user key (a PUT that landed with its response
+  lost) instead of failing on the pre-rotation key.
 - Account deletion from a transient session over a stale-sealed
   unlock-methods registry unwraps the roster with the standing credential's
   key rather than the per-visit key, so its in-place repair no longer
@@ -138,6 +140,14 @@
 
 ### Changed
 
+- Agent grants and App Connect connections are recorded as `Grant`
+  activities, with the same object shape as before. A `Login` activity now
+  records only a plain "Login with Wallet" or a wallet login. The
+  Applications listing, the collection-creator lookup, both revocation
+  stages, and the History page's Applications tab key on `Grant`. Uses
+  wallet-core's new `addHistoryGrant`. `StorageManager.addHistoryLogin`
+  takes no `grants`; the row's `zcaps` is always empty. Requires
+  `@interop/wallet-core` 0.93.0.
 - The did:webvh identity doc prices the account log's growth: bytes per
   entry by enrolled client and standing credential, entries per ceremony,
   and the failure mode at the server's upload limit.

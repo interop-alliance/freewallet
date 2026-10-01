@@ -140,7 +140,7 @@ export function ApplicationsPage() {
   )
 
   // The app rows come from `app-connections` and the grant state (the
-  // orphaned marker included) from the Login activities in
+  // orphaned marker included) from the Grant activities in
   // `wallet-activity`; on a fresh browser either pull can land after the
   // mount read, so re-list when one settles.
   const reloadAfterPull = useCallback(() => {

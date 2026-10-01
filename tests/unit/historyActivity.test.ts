@@ -40,3 +40,62 @@ describe('credentialActivityInfo', () => {
     expect(classifyActivity(doc)).toBe('other')
   })
 })
+
+describe('classifyActivity', () => {
+  it('sorts an App Connect Grant under applications', () => {
+    expect(
+      classifyActivity(
+        activity({
+          type: ['Grant'],
+          summary: 'Connected Demo App (https://app.example) to wallet.',
+          object: {
+            origin: 'https://app.example',
+            zcaps: [],
+            appConnect: { name: 'Demo App', firstRun: false }
+          }
+        })
+      )
+    ).toBe('applications')
+  })
+
+  it('sorts an agent Grant under applications', () => {
+    expect(
+      classifyActivity(
+        activity({
+          type: ['Grant'],
+          summary: 'Granted storage access to research-bot.',
+          object: {
+            origin: 'n/a (API request)',
+            zcaps: [],
+            actor: { name: 'research-bot' }
+          }
+        })
+      )
+    ).toBe('applications')
+  })
+
+  it('sorts a plain Login under login', () => {
+    expect(
+      classifyActivity(
+        activity({
+          type: ['Login'],
+          summary: 'Logged in to https://rp.example with wallet.',
+          object: { origin: 'https://rp.example', zcaps: [] }
+        })
+      )
+    ).toBe('login')
+    expect(
+      classifyActivity(
+        activity({ type: ['Login'], summary: 'Logged in to wallet.' })
+      )
+    ).toBe('login')
+  })
+
+  it('sorts a Revoke under applications', () => {
+    expect(
+      classifyActivity(
+        activity({ type: ['Revoke'], summary: 'Revoked agent access.' })
+      )
+    ).toBe('applications')
+  })
+})

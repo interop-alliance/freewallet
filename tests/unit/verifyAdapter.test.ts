@@ -26,7 +26,12 @@ const CREDENTIAL = {
 } as never
 
 function check(checkId: string, outcome: CheckOutcome): CheckResult {
-  return { check: checkId, suite: checkId.split('.')[0], outcome }
+  return {
+    id: checkId,
+    check: checkId,
+    suite: checkId.split('.')[0],
+    outcome
+  }
 }
 
 function coreResult(results: CheckResult[]): CredentialVerificationResult {
@@ -231,6 +236,7 @@ describe('verify.ts adapter', () => {
     coreVerifyMock.mockResolvedValue(
       coreResult([
         {
+          id: 'parsing.envelope',
           check: 'parsing.envelope',
           suite: 'parsing',
           fatal: true,

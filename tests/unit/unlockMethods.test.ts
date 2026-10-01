@@ -1452,6 +1452,108 @@ describe('refreshTransientManageCapability', () => {
   })
 })
 
+describe('updateUnlockMethodsWithClient re-sealing to a write key', () => {
+  /**
+   * The one-entry registry the re-seal tests start from.
+   *
+   * @returns {UnlockMethodsRecord}
+   */
+  function seedRecord(): UnlockMethodsRecord {
+    return {
+      version: 1,
+      webAuthnUserId: 'AAAAAAAAAAAAAAAAAAAAAA',
+      methods: [
+        {
+          type: 'passphrase',
+          createdAt: '2026-08-19T00:00:00.000Z',
+          unlockSpaceId: 'unlock-space-abc'
+        } as PassphraseUnlockMethod
+      ]
+    }
+  }
+
+  it('opens a record a lost-response write already sealed to the write key', async () => {
+    // The transient recovery spend's retry: the first PUT landed, so the
+    // record is sealed to the rotated key while the retry still reads with
+    // the pre-rotation one.
+    const oldUserKey = await mintUserKey()
+    const newUserKey = await mintUserKey()
+    await updateUnlockMethodsWithClient({
+      zcapClient: {} as never,
+      spaceId: DATA_SPACE_ID,
+      userKey: newUserKey,
+      mutate: () => seedRecord()
+    })
+    vi.clearAllMocks()
+
+    const written = await updateUnlockMethodsWithClient({
+      zcapClient: {} as never,
+      spaceId: DATA_SPACE_ID,
+      userKey: oldUserKey,
+      writeUserKey: newUserKey,
+      mutate: existing => ({
+        ...existing!,
+        methods: [
+          ...existing!.methods,
+          { ...seedRecord().methods[0], unlockSpaceId: 'unlock-space-def' }
+        ]
+      })
+    })
+
+    expect(written!.methods.map(method => method.unlockSpaceId)).toEqual([
+      'unlock-space-abc',
+      'unlock-space-def'
+    ])
+    expect(putUnlockMethodsRecord).toHaveBeenCalledOnce()
+    const after = await getUnlockMethodsWithClient({
+      zcapClient: {} as never,
+      spaceId: DATA_SPACE_ID,
+      userKey: newUserKey
+    })
+    expect(after!.methods).toHaveLength(2)
+  })
+
+  it('refuses a record neither key opens with the read key error', async () => {
+    const oldUserKey = await mintUserKey()
+    const newUserKey = await mintUserKey()
+    await updateUnlockMethodsWithClient({
+      zcapClient: {} as never,
+      spaceId: DATA_SPACE_ID,
+      userKey: await mintUserKey(),
+      mutate: () => seedRecord()
+    })
+
+    await expect(
+      updateUnlockMethodsWithClient({
+        zcapClient: {} as never,
+        spaceId: DATA_SPACE_ID,
+        userKey: oldUserKey,
+        writeUserKey: newUserKey,
+        mutate: existing => existing
+      })
+    ).rejects.toThrow()
+  })
+
+  it('does not fall back without a write key', async () => {
+    const userKey = await mintUserKey()
+    await updateUnlockMethodsWithClient({
+      zcapClient: {} as never,
+      spaceId: DATA_SPACE_ID,
+      userKey: await mintUserKey(),
+      mutate: () => seedRecord()
+    })
+
+    await expect(
+      updateUnlockMethodsWithClient({
+        zcapClient: {} as never,
+        spaceId: DATA_SPACE_ID,
+        userKey,
+        mutate: existing => existing
+      })
+    ).rejects.toThrow()
+  })
+})
+
 describe('the standing delegation scalar pairs (FW-194)', () => {
   it('carries the delegatedClients pair forward through a backfill upsert', async () => {
     const base: UnlockMethodsRecord = {

@@ -82,6 +82,10 @@ import {
 } from '@interop/wallet-core/testing'
 import { mintUserKey, userKeyVaultKeys } from '@interop/wallet-core/keys'
 import { EXTERNAL_REQUEST_ORIGIN } from '@/lib/walletRequest/externalRequest'
+import {
+  addHistoryLogin as buildHistoryLogin,
+  type WalletActivity
+} from '@interop/wallet-core/space'
 import type { WASRemoteStore } from './wasRemoteStore'
 import type { StorageCollection } from '@/lib/storage'
 
@@ -158,7 +162,7 @@ async function generateAppIdentity(): Promise<{
 }
 
 /**
- * Records an App Connect Login granting one app read access to `app-docs`,
+ * Records an App Connect Grant granting one app read access to `app-docs`,
  * carrying the delegated capability, so the grant admits the app to that
  * collection's roster.
  */
@@ -172,7 +176,7 @@ async function recordAppGrant(
 ): Promise<void> {
   const future = new Date(Date.now() + 1_000_000).toISOString()
   const target = 'https://was.example/space/s-space/app-docs'
-  await storage.addHistoryLogin({
+  await storage.addHistoryGrant({
     user,
     origin,
     grants: [
@@ -191,6 +195,39 @@ async function recordAppGrant(
     ],
     appConnect: { name: origin, firstRun: true }
   })
+}
+
+/**
+ * Seeds a Login row that carries capabilities, a shape no `addHistory*`
+ * wrapper writes (a plain login delegates none) but an account may hold.
+ * Written past the wrappers, as the account holds it.
+ */
+async function seedLoginWithZcaps({
+  storage,
+  user,
+  origin,
+  id,
+  zcaps
+}: {
+  storage: StorageManager
+  user: User
+  origin: string
+  id: string
+  zcaps: Parameters<StorageManager['addHistoryGrant']>[0]['grants']
+}): Promise<void> {
+  const activity: WalletActivity = {
+    ...buildHistoryLogin({ user, origin, id }),
+    object: { origin, zcaps }
+  }
+  const outcome = await storage.importActivity({
+    activity,
+    held: {
+      contactHeads: new Map(),
+      contactRevisions: new Map(),
+      activities: new Map()
+    }
+  })
+  expect(outcome).toBe('accepted')
 }
 
 /**
@@ -1332,7 +1369,7 @@ describe('StorageManager.revokeAppGrants', () => {
     } as unknown as WASRemoteStore
   }
 
-  async function seedLogin(
+  async function seedGrant(
     storage: StorageManager,
     user: User,
     grants: Array<{
@@ -1343,7 +1380,7 @@ describe('StorageManager.revokeAppGrants', () => {
       zcap?: IZcap
     }>
   ) {
-    await storage.addHistoryLogin({
+    await storage.addHistoryGrant({
       user,
       origin: APP_ORIGIN,
       grants,
@@ -1373,7 +1410,7 @@ describe('StorageManager.revokeAppGrants', () => {
     const future = new Date(Date.now() + 1_000_000).toISOString()
     const past = new Date(Date.now() - 1_000_000).toISOString()
 
-    await seedLogin(storage, user, [
+    await seedGrant(storage, user, [
       {
         id: 'g-active',
         target: 'https://was.example/space/x/private-credentials',
@@ -1427,7 +1464,7 @@ describe('StorageManager.revokeAppGrants', () => {
     })
     const future = new Date(Date.now() + 1_000_000).toISOString()
 
-    await seedLogin(storage, user, [
+    await seedGrant(storage, user, [
       {
         id: 'g-other',
         target: 'https://was.example/space/x/private-credentials',
@@ -1471,7 +1508,7 @@ describe('StorageManager.revokeAppGrants', () => {
     })
     const future = new Date(Date.now() + 1_000_000).toISOString()
 
-    await seedLogin(storage, user, [
+    await seedGrant(storage, user, [
       {
         id: 'g-active',
         target: 'https://was.example/space/x/private-credentials',
@@ -1510,7 +1547,7 @@ describe('StorageManager.revokeAppGrants', () => {
       })
       const future = new Date(Date.now() + 1_000_000).toISOString()
 
-      await seedLogin(storage, user, [
+      await seedGrant(storage, user, [
         {
           id: 'g-refused',
           target: 'https://was.example/space/x/private-credentials',
@@ -1541,7 +1578,7 @@ describe('StorageManager.revokeAppGrants', () => {
       }
     })
     const future = new Date(Date.now() + 1_000_000).toISOString()
-    await storage.addHistoryLogin({
+    await storage.addHistoryGrant({
       user,
       origin: EXTERNAL_REQUEST_ORIGIN,
       grants: [
@@ -1575,13 +1612,51 @@ describe('StorageManager.revokeAppGrants', () => {
     })
   })
 
+  it('ignores an agent-shaped grant recorded on a Login', async () => {
+    const posted: string[] = []
+    const { storage, user } = await revokeStorage(async zcap => {
+      posted.push((zcap as { id: string }).id)
+    })
+    const future = new Date(Date.now() + 1_000_000).toISOString()
+    // Only a Grant carries a grantee's capabilities; a Login row with the
+    // same object is no record the revocation reads.
+    await seedLoginWithZcaps({
+      storage,
+      user,
+      origin: EXTERNAL_REQUEST_ORIGIN,
+      id: 'login-with-grant',
+      zcaps: [
+        {
+          id: 'g-login',
+          target: 'https://was.example/space/x/private-credentials',
+          allowedActions: ['GET'],
+          expires: future,
+          zcap: recordedGrant({ id: 'z-login', expires: future })
+        }
+      ]
+    })
+
+    const outcome = await storage.revokeAgentGrants({
+      controller: APP_SUBJECT
+    })
+
+    expect(outcome).toEqual({
+      revoked: 0,
+      withdrawn: 0,
+      skipped: 0,
+      unrevocable: 0,
+      revokedIds: []
+    })
+    expect(posted).toEqual([])
+  })
+
   it('counts a grant the rotation already revoked without a second POST', async () => {
     const posted: string[] = []
     const { storage, user } = await revokeStorage(async zcap => {
       posted.push((zcap as { id: string }).id)
     })
     const future = new Date(Date.now() + 1_000_000).toISOString()
-    await seedLogin(storage, user, [
+    await seedGrant(storage, user, [
       {
         id: 'g-rotated',
         target: 'https://was.example/space/s-space/app-docs',
@@ -1622,7 +1697,7 @@ describe('StorageManager.revokeAppGrants', () => {
     )
     const future = new Date(Date.now() + 1_000_000).toISOString()
 
-    await seedLogin(storage, user, [
+    await seedGrant(storage, user, [
       {
         id: 'g-one',
         target: 'https://was.example/space/x/private-credentials',
@@ -1672,7 +1747,7 @@ describe('StorageManager.revokeAppGrants', () => {
     )
     const past = new Date(Date.now() - 60 * 60 * 1000).toISOString()
 
-    await seedLogin(storage, user, [
+    await seedGrant(storage, user, [
       {
         id: 'g-expired',
         target: 'https://was.example/space/x/private-credentials',
@@ -1705,7 +1780,7 @@ describe('StorageManager.revokeAppGrants', () => {
     )
     const future = new Date(Date.now() + 1_000_000).toISOString()
 
-    await seedLogin(storage, user, [
+    await seedGrant(storage, user, [
       {
         id: 'g-swapped',
         target: 'https://was.example/space/x/private-credentials',
@@ -1754,7 +1829,7 @@ describe('StorageManager.revokeAppGrants', () => {
     )
     const future = new Date(Date.now() + 1_000_000).toISOString()
 
-    await seedLogin(storage, user, [
+    await seedGrant(storage, user, [
       {
         id: 'g-rotted',
         target: 'https://was.example/space/x/private-credentials',
@@ -1797,7 +1872,7 @@ describe('StorageManager.revokeAppGrants', () => {
     )
     const future = new Date(Date.now() + 1_000_000).toISOString()
 
-    await seedLogin(storage, user, [
+    await seedGrant(storage, user, [
       {
         id: 'g-orphaned',
         target: 'https://was.example/space/x/private-credentials',
@@ -1837,7 +1912,7 @@ describe('StorageManager.revokeAppGrants', () => {
     })
     const future = new Date(Date.now() + 1_000_000).toISOString()
 
-    await seedLogin(storage, user, [
+    await seedGrant(storage, user, [
       {
         id: 'g-orphaned',
         target: 'https://was.example/space/x/private-credentials',
@@ -1878,7 +1953,7 @@ describe('StorageManager.revokeAppGrants', () => {
     })
     const future = new Date(Date.now() + 1_000_000).toISOString()
 
-    await seedLogin(storage, user, [
+    await seedGrant(storage, user, [
       {
         id: 'g-active',
         target: 'https://was.example/space/x/private-credentials',
@@ -2234,7 +2309,7 @@ describe('StorageManager.revokeAppCollectionRecipients', () => {
 
     const future = new Date(Date.now() + 1_000_000).toISOString()
     const target = 'https://was.example/space/s-space/app-docs'
-    await storage.addHistoryLogin({
+    await storage.addHistoryGrant({
       user,
       origin: APP_ORIGIN,
       grants: [
@@ -2311,7 +2386,7 @@ describe('StorageManager.revokeAppCollectionRecipients', () => {
     // yields nothing to revoke.
     const past = new Date(Date.now() - 1_000_000).toISOString()
     const target = 'https://was.example/space/s-space/app-docs'
-    await storage.addHistoryLogin({
+    await storage.addHistoryGrant({
       user,
       origin: APP_ORIGIN,
       grants: [
@@ -2522,7 +2597,7 @@ describe('StorageManager.revokeAppCollectionRecipients', () => {
 
     const future = new Date(Date.now() + 1_000_000).toISOString()
     const target = 'https://was.example/space/s-space/app-docs'
-    await storage.addHistoryLogin({
+    await storage.addHistoryGrant({
       user,
       origin: APP_ORIGIN,
       grants: [
@@ -2543,7 +2618,7 @@ describe('StorageManager.revokeAppCollectionRecipients', () => {
     })
     // The co-admitted app's own recorded grant is what vouches for its
     // roster entry when the rotation re-wraps the fresh epoch.
-    await storage.addHistoryLogin({
+    await storage.addHistoryGrant({
       user,
       origin: 'https://other.example',
       grants: [
@@ -2586,6 +2661,90 @@ describe('StorageManager.revokeAppCollectionRecipients', () => {
     expect((revoked as Array<{ id: string }>).map(zcap => zcap.id)).toEqual([
       'z-app-docs'
     ])
+  })
+
+  it('does not admit a grantee whose grant is recorded on a Login', async () => {
+    const owner = await generateKey()
+    const app = await generateAppIdentity()
+    const other = await generateAppIdentity()
+    const stores = memoryDescriptorStores()
+    const { remoteStore } = makeFakeRemote({ stores })
+    const descriptors = await provisionGovernedCollections(owner, stores)
+    const ciphers = await buildCiphers(owner, descriptors)
+    const { localStore, user } = await initLocalStore(ciphers)
+    const storage = new StorageManager({
+      persistence: browserLocalSessionPersistence(),
+      localStore,
+      remoteStore,
+      descriptorLogs: descriptorLogsFrom(stores),
+      ciphers,
+      vaultKeys: owner,
+      descriptors
+    })
+
+    await storage.provisionEncryptedCollection({
+      collectionId: 'app-docs',
+      recipient: app.recipient
+    })
+    await storage.provisionEncryptedCollection({
+      collectionId: 'app-docs',
+      recipient: other.recipient
+    })
+
+    const future = new Date(Date.now() + 1_000_000).toISOString()
+    const target = 'https://was.example/space/s-space/app-docs'
+    await storage.addHistoryGrant({
+      user,
+      origin: APP_ORIGIN,
+      grants: [
+        {
+          id: 'g-app-docs',
+          target,
+          allowedActions: ['GET', 'HEAD'],
+          expires: future,
+          zcap: recordedGrant({
+            id: 'z-app-docs',
+            invocationTarget: target,
+            expires: future,
+            controller: app.did
+          })
+        }
+      ],
+      appConnect: { name: 'Example App', firstRun: true }
+    })
+    // The other grantee's capability sits on a Login row, which vouches for
+    // no roster entry.
+    await seedLoginWithZcaps({
+      storage,
+      user,
+      origin: 'https://other.example',
+      id: 'login-other-docs',
+      zcaps: [
+        {
+          id: 'g-other-docs',
+          target,
+          allowedActions: ['GET', 'HEAD'],
+          expires: future,
+          zcap: recordedGrant({
+            id: 'z-other-docs',
+            invocationTarget: target,
+            expires: future,
+            controller: other.did
+          })
+        }
+      ]
+    })
+
+    const outcome = await storage.revokeAppCollectionRecipients({
+      origin: APP_ORIGIN,
+      subjectDid: app.did
+    })
+
+    expect(outcome).toMatchObject({ collections: 1, rotated: 1, failed: 0 })
+    const after = await remoteStore.collectionEncryption({
+      collectionId: 'app-docs'
+    })
+    expect(currentEpochKids(after!)).toEqual([owner.keyAgreementKey.id])
   })
 
   it('wraps the fresh epoch to no roster entry the wallet did not admit', async () => {
@@ -2631,7 +2790,7 @@ describe('StorageManager.revokeAppCollectionRecipients', () => {
 
     const future = new Date(Date.now() + 1_000_000).toISOString()
     const target = 'https://was.example/space/s-space/app-docs'
-    await storage.addHistoryLogin({
+    await storage.addHistoryGrant({
       user,
       origin: APP_ORIGIN,
       grants: [
@@ -2652,7 +2811,7 @@ describe('StorageManager.revokeAppCollectionRecipients', () => {
     })
     // The co-admitted app's own recorded grant is what vouches for its
     // roster entry when the rotation re-wraps the fresh epoch.
-    await storage.addHistoryLogin({
+    await storage.addHistoryGrant({
       user,
       origin: 'https://other.example',
       grants: [
@@ -2944,7 +3103,7 @@ describe('StorageManager.revokeAppCollectionRecipients', () => {
 
     const future = new Date(Date.now() + 1_000_000).toISOString()
     const target = 'https://was.example/space/s-space/app-docs'
-    await storage.addHistoryLogin({
+    await storage.addHistoryGrant({
       user,
       origin: APP_ORIGIN,
       grants: [
@@ -3036,7 +3195,7 @@ describe('StorageManager.revokeAppCollectionRecipients', () => {
       })
 
       const future = new Date(Date.now() + 1_000_000).toISOString()
-      await storage.addHistoryLogin({
+      await storage.addHistoryGrant({
         user,
         origin: APP_ORIGIN,
         grants: [
@@ -3075,7 +3234,7 @@ describe('StorageManager.revokeAppCollectionRecipients', () => {
 describe('StorageManager.revokeAgentCollectionRecipients', () => {
   /**
    * A storage manager over a fake remote, holding one private collection
-   * provisioned for `agent`, with the grant recorded on an agent Login.
+   * provisioned for `agent`, with the grant recorded on an agent Grant.
    *
    * @param agent {Awaited<ReturnType<typeof generateAppIdentity>>}
    * @returns {Promise<object>}
@@ -3119,7 +3278,7 @@ describe('StorageManager.revokeAgentCollectionRecipients', () => {
     })
     const future = new Date(Date.now() + 1_000_000).toISOString()
     const target = 'https://was.example/space/s-space/agent-notes'
-    await storage.addHistoryLogin({
+    await storage.addHistoryGrant({
       user,
       origin: EXTERNAL_REQUEST_ORIGIN,
       grants: [
@@ -3207,7 +3366,7 @@ describe('StorageManager.revokeAgentCollectionRecipients', () => {
     const { storage, user } = await agentGrantStorage(agent)
     const future = new Date(Date.now() + 1_000_000).toISOString()
     const target = 'https://was.example/space/s-space/other-notes'
-    await storage.addHistoryLogin({
+    await storage.addHistoryGrant({
       user,
       origin: EXTERNAL_REQUEST_ORIGIN,
       grants: [
@@ -3241,12 +3400,12 @@ describe('StorageManager.revokeAgentCollectionRecipients', () => {
     })
   })
 
-  it("counts a summary-only entry on the agent's own Login as unrevocable", async () => {
+  it("counts a summary-only entry on the agent's own Grant as unrevocable", async () => {
     const agent = await generateAppIdentity()
     const { storage, user } = await agentGrantStorage(agent)
     const future = new Date(Date.now() + 1_000_000).toISOString()
     const target = 'https://was.example/space/s-space/agent-notes'
-    await storage.addHistoryLogin({
+    await storage.addHistoryGrant({
       user,
       origin: EXTERNAL_REQUEST_ORIGIN,
       grants: [
@@ -3279,7 +3438,7 @@ describe('StorageManager.revokeAgentCollectionRecipients', () => {
     const agent = await generateAppIdentity()
     const { storage } = await agentGrantStorage(agent)
 
-    // The app predicate matches an App Connect Login alone, so the agent's
+    // The app predicate matches an App Connect Grant alone, so the agent's
     // interaction-URL grant is no candidate there.
     const outcome = await storage.revokeAppCollectionRecipients({
       origin: EXTERNAL_REQUEST_ORIGIN,
@@ -3550,7 +3709,7 @@ describe('StorageManager.revokeAgentCollectionRecipients', () => {
     const collectionEncryption = vi.spyOn(stores.source, 'collectionEncryption')
     const publicTarget = 'https://was.example/space/s-space/agent-public'
     const future = new Date(Date.now() + 1_000_000).toISOString()
-    await storage.addHistoryLogin({
+    await storage.addHistoryGrant({
       user,
       origin: EXTERNAL_REQUEST_ORIGIN,
       grants: [
@@ -3602,11 +3761,11 @@ describe('StorageManager.revokeAgentCollectionRecipients', () => {
     expect(readIds).not.toContain('agent-public')
   })
 
-  it('rotates a collection its generator stamp names, with no Login recording a grant', async () => {
+  it('rotates a collection its generator stamp names, with no Grant recording it', async () => {
     const agent = await generateAppIdentity()
     const { owner, storage, remoteStore, setCollections } =
       await agentGrantStorage(agent)
-    // A second collection provisioned for the agent, whose Login activity is
+    // A second collection provisioned for the agent, whose Grant activity is
     // gone: only its `generator` stamp names the agent.
     await storage.provisionEncryptedCollection({
       collectionId: 'agent-drafts',

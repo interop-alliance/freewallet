@@ -2,7 +2,7 @@
  * @vitest-environment node
  *
  * The agent half of the connected-grantee model: which activities list as
- * a connected agent (`listConnectedAgents` -- the Login predicate, the Revoke
+ * a connected agent (`listConnectedAgents` -- the Grant predicate, the Revoke
  * join, the all-expired rule (drop, or keep while a granted collection's
  * current key epoch lists the agent), and the name / key-fingerprint fallback), and
  * the revocation `revokeAgentAccess` performs (the server revocation before
@@ -13,7 +13,7 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import {
   findKnownAgents,
-  isAgentGrantLogin,
+  isAgentGrant,
   listConnectedAgents,
   revokeAgentAccess,
   revokeAppAccess,
@@ -28,7 +28,7 @@ const FUTURE = '2099-01-01T00:00:00.000Z'
 const PAST = '2000-01-01T00:00:00.000Z'
 
 /**
- * One recorded grant entry, as the request page writes it onto the Login
+ * One recorded grant entry, as the request page writes it onto the Grant
  * activity's `object.zcaps`.
  */
 function grantEntry({
@@ -59,10 +59,10 @@ function grantEntry({
 }
 
 /**
- * An agent-grant Login activity, as the interaction-URL request page records
+ * An agent Grant activity, as the interaction-URL request page records
  * one.
  */
-function agentLogin({
+function agentGrant({
   created = '2026-08-01T00:00:00.000Z',
   name,
   zcaps = [grantEntry()]
@@ -72,10 +72,10 @@ function agentLogin({
   zcaps?: unknown[]
 } = {}) {
   return {
-    id: `login-${created}`,
+    id: `grant-${created}`,
     doc: {
-      id: `login-${created}`,
-      type: ['Login'],
+      id: `grant-${created}`,
+      type: ['Grant'],
       created,
       object: {
         origin: EXTERNAL_REQUEST_ORIGIN,
@@ -114,9 +114,9 @@ const NOTES_COLLECTION = 'https://was.example/space/s/notes/'
 const PUBLIC_COLLECTION = 'https://was.example/space/s/public-notes/'
 
 describe('listConnectedAgents', () => {
-  it('lists an agent-grant Login', async () => {
+  it('lists an agent Grant', async () => {
     const agents = await listConnectedAgents({
-      storage: storageWith([agentLogin({ name: 'Deploy bot' })])
+      storage: storageWith([agentGrant({ name: 'Deploy bot' })])
     })
     expect(agents).toHaveLength(1)
     expect(agents[0]).toMatchObject({
@@ -130,20 +130,20 @@ describe('listConnectedAgents', () => {
 
   it('falls back to the grantee key when no name was declared', async () => {
     const agents = await listConnectedAgents({
-      storage: storageWith([agentLogin()])
+      storage: storageWith([agentGrant()])
     })
     expect(agents[0].name).toBeUndefined()
     expect(agents[0].controller).toBe(AGENT_DID)
   })
 
-  it('does not list an App Connect Login', async () => {
-    const appConnect = agentLogin()
+  it('does not list an App Connect Grant', async () => {
+    const appConnect = agentGrant()
     ;(appConnect.doc.object as Record<string, unknown>).origin =
       'https://app.example'
     ;(appConnect.doc.object as Record<string, unknown>).appConnect = {
       name: 'Demo App'
     }
-    expect(isAgentGrantLogin({ doc: appConnect.doc })).toBe(false)
+    expect(isAgentGrant({ doc: appConnect.doc })).toBe(false)
     expect(
       await listConnectedAgents({ storage: storageWith([appConnect]) })
     ).toEqual([])
@@ -159,13 +159,22 @@ describe('listConnectedAgents', () => {
         object: { origin: 'https://verifier.example' }
       }
     }
-    expect(isAgentGrantLogin({ doc: didAuth.doc })).toBe(false)
+    expect(isAgentGrant({ doc: didAuth.doc })).toBe(false)
     expect(
       await listConnectedAgents({ storage: storageWith([didAuth]) })
     ).toEqual([])
   })
 
-  it('hides a row whose Revoke is at or after the Login', async () => {
+  it('does not list an agent-shaped row recorded as a Login', async () => {
+    const login = agentGrant({ name: 'Deploy bot' })
+    login.doc.type = ['Login']
+    expect(isAgentGrant({ doc: login.doc })).toBe(false)
+    expect(
+      await listConnectedAgents({ storage: storageWith([login]) })
+    ).toEqual([])
+  })
+
+  it('hides a row whose Revoke is at or after the Grant', async () => {
     const revoke = {
       id: 'revoke-1',
       doc: {
@@ -181,7 +190,7 @@ describe('listConnectedAgents', () => {
     }
     expect(
       await listConnectedAgents({
-        storage: storageWith([agentLogin(), revoke])
+        storage: storageWith([agentGrant(), revoke])
       })
     ).toEqual([])
   })
@@ -198,9 +207,9 @@ describe('listConnectedAgents', () => {
     }
     const agents = await listConnectedAgents({
       storage: storageWith([
-        agentLogin(),
+        agentGrant(),
         revoke,
-        agentLogin({ created: '2026-08-02T00:00:00.000Z', name: 'Again' })
+        agentGrant({ created: '2026-08-02T00:00:00.000Z', name: 'Again' })
       ])
     })
     expect(agents).toHaveLength(1)
@@ -208,7 +217,7 @@ describe('listConnectedAgents', () => {
   })
 
   it('drops an expired row whose grants name no collection of this Space', async () => {
-    const expired = agentLogin({
+    const expired = agentGrant({
       zcaps: [grantEntry({ expires: PAST })]
     })
     expect(
@@ -219,7 +228,7 @@ describe('listConnectedAgents', () => {
   it('keeps and flags an expired row still listed in a current key epoch', async () => {
     // The agent's key stays in the collection's key-epoch roster, so the row
     // must stay reachable for Revoke, which rotates the epoch off it.
-    const expired = agentLogin({
+    const expired = agentGrant({
       zcaps: [
         grantEntry({
           id: 'urn:zcap:pub',
@@ -254,10 +263,10 @@ describe('listConnectedAgents', () => {
     const other = 'did:key:z6MkOtherAgent'
     const storage = storageWith(
       [
-        agentLogin({
+        agentGrant({
           zcaps: [grantEntry({ expires: PAST, target: NOTES_COLLECTION })]
         }),
-        agentLogin({
+        agentGrant({
           created: '2026-08-02T00:00:00.000Z',
           zcaps: [
             grantEntry({
@@ -285,7 +294,7 @@ describe('listConnectedAgents', () => {
   })
 
   it('drops an expired row no current key epoch lists', async () => {
-    const expired = agentLogin({
+    const expired = agentGrant({
       zcaps: [grantEntry({ expires: PAST, target: NOTES_COLLECTION })]
     })
     expect(
@@ -294,7 +303,7 @@ describe('listConnectedAgents', () => {
   })
 
   it('keeps an expired row when a key epoch cannot be read', async () => {
-    const expired = agentLogin({
+    const expired = agentGrant({
       zcaps: [grantEntry({ expires: PAST, target: PUBLIC_COLLECTION })]
     })
     const agents = await listConnectedAgents({
@@ -305,7 +314,7 @@ describe('listConnectedAgents', () => {
   })
 
   it('keeps an expired row when there is no remote store', async () => {
-    const expired = agentLogin({
+    const expired = agentGrant({
       zcaps: [grantEntry({ expires: PAST, target: PUBLIC_COLLECTION })]
     })
     // With no remote store, `granteeRosterCollections` reports one failed
@@ -321,7 +330,7 @@ describe('listConnectedAgents', () => {
 
   it('reads no key epoch and flags nothing when a grant is live', async () => {
     const storage = storageWith([
-      agentLogin({
+      agentGrant({
         zcaps: [
           grantEntry({
             id: 'urn:zcap:old',
@@ -350,7 +359,7 @@ describe('listConnectedAgents', () => {
     summaryStale.expires = PAST
     expect(
       await listConnectedAgents({
-        storage: storageWith([agentLogin({ zcaps: [summaryStale] })])
+        storage: storageWith([agentGrant({ zcaps: [summaryStale] })])
       })
     ).toHaveLength(1)
 
@@ -358,21 +367,21 @@ describe('listConnectedAgents', () => {
     zcapExpired.expires = FUTURE
     expect(
       await listConnectedAgents({
-        storage: storageWith([agentLogin({ zcaps: [zcapExpired] })])
+        storage: storageWith([agentGrant({ zcaps: [zcapExpired] })])
       })
     ).toEqual([])
   })
 
-  it('unions the grants of every live Login for the controller', async () => {
+  it('unions the grants of every live Grant for the controller', async () => {
     // The newest request's grant has lapsed, but an older request's has not:
-    // the row stays, carrying both, since the revocation scans every Login.
+    // the row stays, carrying both, since the revocation scans every Grant.
     const agents = await listConnectedAgents({
       storage: storageWith([
-        agentLogin({
+        agentGrant({
           created: '2026-08-01T00:00:00.000Z',
           zcaps: [grantEntry({ id: 'urn:zcap:old', expires: FUTURE })]
         }),
-        agentLogin({
+        agentGrant({
           created: '2026-08-02T00:00:00.000Z',
           name: 'Deploy bot',
           zcaps: [grantEntry({ id: 'urn:zcap:new', expires: PAST })]
@@ -388,18 +397,18 @@ describe('listConnectedAgents', () => {
     expect(agents[0].grantedAt).toBe('2026-08-02T00:00:00.000Z')
   })
 
-  it('deduplicates a grant recorded on two Logins', async () => {
+  it('deduplicates a grant recorded on two Grant activities', async () => {
     const agents = await listConnectedAgents({
       storage: storageWith([
-        agentLogin({ created: '2026-08-01T00:00:00.000Z' }),
-        agentLogin({ created: '2026-08-02T00:00:00.000Z' })
+        agentGrant({ created: '2026-08-01T00:00:00.000Z' }),
+        agentGrant({ created: '2026-08-02T00:00:00.000Z' })
       ])
     })
     expect(agents[0].grants).toHaveLength(1)
   })
 
-  it('never hides a Login that carries no created stamp', async () => {
-    const undated = agentLogin()
+  it('never hides a Grant that carries no created stamp', async () => {
+    const undated = agentGrant()
     delete (undated.doc as { created?: string }).created
     const revoke = {
       id: 'revoke-1',
@@ -445,7 +454,7 @@ describe('listConnectedAgents', () => {
       }
     }
     const agents = await listConnectedAgents({
-      storage: storageWith([agentLogin(), appRevoke, foreignRevoke])
+      storage: storageWith([agentGrant(), appRevoke, foreignRevoke])
     })
     expect(agents).toHaveLength(1)
   })
@@ -457,11 +466,11 @@ describe('findKnownAgents', () => {
       typeof findKnownAgents
     >[0]['items']
 
-  it('returns the newest live Login name and stamp for a known controller', () => {
+  it('returns the newest live Grant name and stamp for a known controller', () => {
     const known = findKnownAgents({
       items: items([
-        agentLogin({ name: 'Old name' }),
-        agentLogin({ created: '2026-08-03T00:00:00.000Z', name: 'Deploy bot' })
+        agentGrant({ name: 'Old name' }),
+        agentGrant({ created: '2026-08-03T00:00:00.000Z', name: 'Deploy bot' })
       ]),
       controllers: [AGENT_DID]
     })
@@ -471,7 +480,7 @@ describe('findKnownAgents', () => {
     })
   })
 
-  it('hides a controller whose later Revoke covers every Login', () => {
+  it('hides a controller whose later Revoke covers every Grant', () => {
     const revoke = {
       id: 'revoke-1',
       doc: {
@@ -482,15 +491,15 @@ describe('findKnownAgents', () => {
       }
     }
     const known = findKnownAgents({
-      items: items([agentLogin({ name: 'Deploy bot' }), revoke]),
+      items: items([agentGrant({ name: 'Deploy bot' }), revoke]),
       controllers: [AGENT_DID]
     })
     expect(known.size).toBe(0)
   })
 
-  it('returns no name when the Login recorded none', () => {
+  it('returns no name when the Grant recorded none', () => {
     const known = findKnownAgents({
-      items: items([agentLogin()]),
+      items: items([agentGrant()]),
       controllers: [AGENT_DID]
     })
     expect(known.get(AGENT_DID)).toEqual({
@@ -498,17 +507,17 @@ describe('findKnownAgents', () => {
     })
   })
 
-  it('omits a controller with no agent Login', () => {
+  it('omits a controller with no agent Grant', () => {
     const known = findKnownAgents({
-      items: items([agentLogin()]),
+      items: items([agentGrant()]),
       controllers: ['did:key:z6MkStranger']
     })
     expect(known.has('did:key:z6MkStranger')).toBe(false)
     expect(known.has(AGENT_DID)).toBe(false)
   })
 
-  it('does not count an App Connect Login', () => {
-    const appConnect = agentLogin({ name: 'Demo App' })
+  it('does not count an App Connect Grant', () => {
+    const appConnect = agentGrant({ name: 'Demo App' })
     ;(appConnect.doc.object as Record<string, unknown>).origin =
       'https://app.example'
     ;(appConnect.doc.object as Record<string, unknown>).appConnect = {
@@ -711,7 +720,7 @@ describe('revokeAgentAccess', () => {
     expect(storage.addHistoryAgentRevoke).not.toHaveBeenCalled()
   })
 
-  it('floors the Revoke stamp past the Login when the clock is behind', async () => {
+  it('floors the Revoke stamp past the Grant when the clock is behind', async () => {
     const storage = agentStorage({
       revokeAgentGrants: vi.fn(async () => ({
         revoked: 1,

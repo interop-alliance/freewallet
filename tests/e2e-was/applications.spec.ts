@@ -188,7 +188,7 @@ async function loginViaForm(page: Page, passphrase: string) {
 /**
  * Opens `/applications` and waits for the given app row to appear, remounting
  * the page (dashboard and back -- never `reload()`, which logs out) until
- * background replication has pulled the popup-written credential and Login
+ * background replication has pulled the popup-written credential and Grant
  * activity into the local store.
  */
 async function openApplicationsWithApp(page: Page, appName: string) {

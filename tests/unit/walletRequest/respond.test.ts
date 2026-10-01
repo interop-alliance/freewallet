@@ -1,8 +1,9 @@
 // @vitest-environment node
 /**
  * Unit tests for the CHAPI `get` response sequence
- * (`src/lib/walletRequest/respond.ts`): the Login activity is persisted before
- * anything is delivered externally, a failed history write with granted
+ * (`src/lib/walletRequest/respond.ts`): the request's activity (a Grant for
+ * an App Connect connection or a capability request, a plain Login for a
+ * DIDAuth-only request) is persisted before anything is delivered externally, a failed history write with granted
  * capabilities fails closed (nothing delivered), and the typed failure reasons
  * the popup renders. `processRequest` and the exchange delivery are mocked.
  */
@@ -92,6 +93,13 @@ function makeSession() {
         }
         return 'login-1'
       }),
+      addHistoryGrant: vi.fn(async () => {
+        state.calls.push('addHistoryGrant')
+        if (state.historyThrows) {
+          throw new Error('history write failed')
+        }
+        return 'grant-1'
+      }),
       deleteHistoryActivity: vi.fn(async () => {
         state.calls.push('deleteHistoryActivity')
         if (state.deleteThrows) {
@@ -154,7 +162,7 @@ describe('composeAndDeliverResponse', () => {
       respond({ exchangeUrl: 'https://verifier.example/exchange/1' })
     ).rejects.toMatchObject({ reason: 'processFailed' })
     // Nothing was delivered, so the signed delegations stay inert.
-    expect(state.calls).toEqual(['processRequest', 'addHistoryLogin'])
+    expect(state.calls).toEqual(['processRequest', 'addHistoryGrant'])
   })
 
   it('still responds when the history write fails with no capabilities granted', async () => {
@@ -162,6 +170,26 @@ describe('composeAndDeliverResponse', () => {
     const response = await respond()
     expect(response.verifiablePresentation).toBeTruthy()
     expect(state.calls).toEqual(['processRequest', 'addHistoryLogin'])
+  })
+
+  it('records a DIDAuth-only request as a plain Login with no grants', async () => {
+    const session = makeSession()
+    await respond({ session })
+    expect(session.storage.addHistoryLogin).toHaveBeenCalledWith({
+      user: { id: 'did:key:zUser' },
+      origin: 'https://app.example'
+    })
+    expect(session.storage.addHistoryGrant).not.toHaveBeenCalled()
+  })
+
+  it('records nothing for a request that asked for no DIDAuth or grant', async () => {
+    const session = makeSession()
+    await respond({
+      session,
+      requestProfile: { ...profile, didAuth: false }
+    })
+    expect(session.storage.addHistoryLogin).not.toHaveBeenCalled()
+    expect(session.storage.addHistoryGrant).not.toHaveBeenCalled()
   })
 
   it('reports an unavailable zcap target with its own reason', async () => {
@@ -173,7 +201,7 @@ describe('composeAndDeliverResponse', () => {
     )
   })
 
-  it('records the validated appUrl on an App Connect Login activity', async () => {
+  it('records the validated appUrl on an App Connect Grant activity', async () => {
     state.appConnectResult = { firstRun: true }
     const session = makeSession()
     const appConnectProfile = {
@@ -188,7 +216,8 @@ describe('composeAndDeliverResponse', () => {
 
     await respond({ session, requestProfile: appConnectProfile })
 
-    expect(session.storage.addHistoryLogin).toHaveBeenCalledWith(
+    expect(session.storage.addHistoryLogin).not.toHaveBeenCalled()
+    expect(session.storage.addHistoryGrant).toHaveBeenCalledWith(
       expect.objectContaining({
         origin: 'https://app.example',
         appConnect: {
@@ -243,10 +272,10 @@ describe('composeAndDeliverResponse', () => {
       exchangeUrl: 'https://was.example/workflows/ephemeral/exchanges/1'
     })
 
-    expect(session.storage.addHistoryLogin).toHaveBeenCalledWith(
+    expect(session.storage.addHistoryGrant).toHaveBeenCalledWith(
       expect.objectContaining({ origin: 'n/a (API request)' })
     )
-    expect(session.storage.addHistoryLogin).not.toHaveBeenCalledWith(
+    expect(session.storage.addHistoryGrant).not.toHaveBeenCalledWith(
       expect.objectContaining({ actor: expect.anything() })
     )
   })
@@ -275,7 +304,7 @@ describe('composeAndDeliverResponse', () => {
       exchangeUrl: 'https://was.example/workflows/ephemeral/exchanges/1'
     })
 
-    expect(session.storage.addHistoryLogin).toHaveBeenCalledWith(
+    expect(session.storage.addHistoryGrant).toHaveBeenCalledWith(
       expect.objectContaining({
         origin: 'n/a (API request)',
         actor: { name: 'research-bot' }
@@ -297,7 +326,7 @@ describe('composeAndDeliverResponse', () => {
       appConnect: null
     } as unknown as typeof profile
 
-    it('persists the Login before escrow, once, carrying the signed zcaps', async () => {
+    it('persists the Grant before escrow, once, carrying the signed zcaps', async () => {
       state.provisions = true
       state.zcaps = [agentZcap]
       const session = makeSession()
@@ -308,12 +337,12 @@ describe('composeAndDeliverResponse', () => {
       })
       expect(state.calls).toEqual([
         'processRequest',
-        'addHistoryLogin',
+        'addHistoryGrant',
         'provisionEncryptedCollection',
         'deliverPresentation'
       ])
-      expect(session.storage.addHistoryLogin).toHaveBeenCalledTimes(1)
-      expect(session.storage.addHistoryLogin).toHaveBeenCalledWith(
+      expect(session.storage.addHistoryGrant).toHaveBeenCalledTimes(1)
+      expect(session.storage.addHistoryGrant).toHaveBeenCalledWith(
         expect.objectContaining({
           grants: [
             expect.objectContaining({ id: 'urn:zcap:1', zcap: agentZcap })
@@ -332,10 +361,10 @@ describe('composeAndDeliverResponse', () => {
           exchangeUrl: 'https://verifier.example/exchange/1'
         })
       ).rejects.toMatchObject({ reason: 'processFailed' })
-      expect(state.calls).toEqual(['processRequest', 'addHistoryLogin'])
+      expect(state.calls).toEqual(['processRequest', 'addHistoryGrant'])
     })
 
-    it('removes the early Login when provisioning fails after it', async () => {
+    it('removes the early Grant when provisioning fails after it', async () => {
       state.provisions = true
       state.zcaps = [agentZcap]
       state.provisionThrows = new Error('provisioning failed')
@@ -347,20 +376,20 @@ describe('composeAndDeliverResponse', () => {
           exchangeUrl: 'https://verifier.example/exchange/1'
         })
       ).rejects.toMatchObject({ reason: 'processFailed' })
-      // Nothing is delivered, so the Login naming the signed grant goes.
+      // Nothing is delivered, so the Grant naming the signed grant goes.
       expect(state.calls).toEqual([
         'processRequest',
-        'addHistoryLogin',
+        'addHistoryGrant',
         'provisionEncryptedCollection',
         'deleteHistoryActivity'
       ])
-      expect(session.storage.addHistoryLogin).toHaveBeenCalledTimes(1)
+      expect(session.storage.addHistoryGrant).toHaveBeenCalledTimes(1)
       expect(session.storage.deleteHistoryActivity).toHaveBeenCalledWith({
-        id: 'login-1'
+        id: 'grant-1'
       })
     })
 
-    it('keeps the original failure when the Login removal fails', async () => {
+    it('keeps the original failure when the Grant removal fails', async () => {
       state.provisions = true
       state.zcaps = [agentZcap]
       state.provisionThrows = new Error('provisioning failed')
@@ -373,7 +402,7 @@ describe('composeAndDeliverResponse', () => {
       expect(state.calls.at(-1)).toBe('deleteHistoryActivity')
     })
 
-    it('removes nothing when processing fails before any Login persist', async () => {
+    it('removes nothing when processing fails before any Grant persist', async () => {
       state.processThrows = new Error('boom')
       const session = makeSession()
       await expect(
@@ -382,7 +411,7 @@ describe('composeAndDeliverResponse', () => {
       expect(session.storage.deleteHistoryActivity).not.toHaveBeenCalled()
     })
 
-    it('records the App Connect result on the early Login', async () => {
+    it('records the App Connect result on the early Grant', async () => {
       state.provisions = true
       state.zcaps = [agentZcap]
       state.appConnectResult = { firstRun: false }
@@ -399,8 +428,8 @@ describe('composeAndDeliverResponse', () => {
 
       await respond({ session, requestProfile: appConnectProfile })
 
-      expect(session.storage.addHistoryLogin).toHaveBeenCalledTimes(1)
-      expect(session.storage.addHistoryLogin).toHaveBeenCalledWith(
+      expect(session.storage.addHistoryGrant).toHaveBeenCalledTimes(1)
+      expect(session.storage.addHistoryGrant).toHaveBeenCalledWith(
         expect.objectContaining({
           appConnect: {
             name: 'Text Editor',

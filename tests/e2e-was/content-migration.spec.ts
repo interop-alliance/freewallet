@@ -14,7 +14,7 @@
  * What the cells assert is what migrates and what does not. Content travels:
  * B lists A's credential and A's contact. Nothing else does: the walk reads
  * the file alone, so no request reaches A's Space while it runs, and no
- * `Login` or `CollectionShare` activity lands, so the importing account's
+ * `Grant` or `CollectionShare` activity lands, so the importing account's
  * Applications page names no app of A's and its shares dialog names no reader
  * of A's. The importing account's own disconnect and unshare still complete
  * afterwards, which is the check that the migrated Resources did not poison the

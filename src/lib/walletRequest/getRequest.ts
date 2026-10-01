@@ -9,7 +9,7 @@
  * The popup's one requester signal is the origin the CHAPI mediator attests
  * off the message event. A value that does not parse, or that parses to an
  * opaque origin, is no attestation at all: the consent screen would name
- * nobody and an approval would record a Login activity attributed to nobody,
+ * nobody and an approval would record an activity attributed to nobody,
  * so it is refused here rather than rendered as a blank label.
  *
  * A plain `get` request delegates no capabilities. Storage grants go only to

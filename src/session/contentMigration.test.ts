@@ -449,20 +449,21 @@ describe('migrateContent', () => {
           }),
           authorityActivityResource({ id: 'a-5', type: 'Login' }),
           authorityActivityResource({ id: 'a-6', type: 'Revoke' }),
-          authorityActivityResource({ id: 'a-7', type: 'CollectionShare' })
+          authorityActivityResource({ id: 'a-7', type: 'CollectionShare' }),
+          authorityActivityResource({ id: 'a-8', type: 'Grant' })
         ]
       }
     ])
 
     const result = await migrateContent({ session, bundle, secret })
     expect(result.report.collections[WALLET_ACTIVITY_COLLECTION]).toMatchObject(
-      { accepted: 4, skipped: 3 }
+      { accepted: 4, skipped: 4 }
     )
 
     const { entries: items } = await session.storage.listHistoryItems()
     const ids = items.map(({ doc }) => doc.id)
     expect(ids).toEqual(expect.arrayContaining(['a-1', 'a-2', 'a-3', 'a-4']))
-    for (const absent of ['a-5', 'a-6', 'a-7']) {
+    for (const absent of ['a-5', 'a-6', 'a-7', 'a-8']) {
       expect(ids).not.toContain(absent)
     }
     const landed = items.find(({ doc }) => doc.id === 'a-3')?.doc

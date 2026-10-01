@@ -153,7 +153,7 @@ describe('StorageManager app-key collection surface', () => {
   })
 
   it('writes no credential-created activity for a minted app key', async () => {
-    // The app-connect Login activity is the record of the connection; an app
+    // The App Connect Grant activity is the record of the connection; an app
     // key is not a credential the user acquired, so History gets no row.
     const { storage } = await makeStorage()
     const { credential } = await mintAppKeyCredential({ app, origin })

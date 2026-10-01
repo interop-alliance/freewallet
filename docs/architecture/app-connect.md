@@ -142,7 +142,9 @@ wallet-provided `appConnect: { firstRun }` member (a JSON-literal term in
 the VP `@context`), all before signing so the DIDAuth proof covers them
 (`processAppConnect` in `src/lib/walletRequest/appConnect.ts`).
 `WalletGetPage` renders an app-centric consent panel in place of the three
-generic sections, and approval records an app-connect Login activity.
+generic sections, and approval records an App Connect `Grant` activity. A
+plain "Login with Wallet" that grants nothing records a `Login` activity
+instead.
 
 The response VP does not take the holder dispatch above.
 `processAppConnect` passes an explicit holder override, so the holder and
@@ -237,7 +239,7 @@ empty attribution and reads `unattributed`. The second pass also joins the
 creating app (`creatorApp: { name, appUrl }`) onto an app stamp's
 `generator.id` from the wallet's own records (`lookupCollectionCreators` in
 `src/lib/connectedApps.ts`). The app key answers while the creator is
-connected. Once it is not, the App Connect Login activities that recorded
+connected. Once it is not, the App Connect Grant activities that recorded
 grants to its DID answer, since a disconnect deletes the app key. The
 storage browser's "Created by" line reads the same join, so a creator is
 named the same way on both. The CHAPI get popup has already listed
@@ -256,7 +258,7 @@ The reading carries the creator's display name (`creatorName`): the stamped
 `generator.name`, else the name the join recovers. The row names the creator
 by it, or by `generator.origin` otherwise. A stamp with no `origin` names an
 agent. The join skips it, since an agent holds no app key and writes no App
-Connect Login, and an unnamed one is named by its shortened `generator.id`. A public collection carries no roster and reports no
+Connect Grant, and an unnamed one is named by its shortened `generator.id`. A public collection carries no roster and reports no
 reading. The same metadata read says whether the collection carries an
 `encryption` descriptor. A string target admits the grantee to no roster,
 so on an encrypted collection the row gets the ciphertext note once the
@@ -288,7 +290,7 @@ grants still supply the capabilities the rotation revokes on its pull axis.
 
 The recorded grants are written before any grantee is escrowed. Approval
 signs every delegation first, which is local and needs no target to exist.
-When some grant shares or provisions a collection, the Login activity is
+When some grant shares or provisions a collection, the Grant activity is
 then persisted with the signed grants and the connect's `firstRun`. Only
 after that is each share escrowed and each collection provisioned
 (`beforeProvision` in `processZcaps`, wired in
@@ -296,14 +298,14 @@ after that is each share escrowed and each collection provisioned
 collection, whose `generator.id` still names its first creator: the recorded
 grants are the only source that names it for the second app. A failed
 persist fails the request with nothing escrowed. A share or provisioning
-step that fails after the persist fails the request too, and the Login is
+step that fails after the persist fails the request too, and the Grant is
 removed again, since nothing was delivered. If that removal fails, the
-Login stays, naming a grant whose collection may not list the app.
+Grant stays, naming a grant whose collection may not list the app.
 Revocation tolerates that: it
 skips a collection whose current key epoch does not list the grantee, and a
 collection that was never created reads as having no epochs. A request with
-nothing to provision persists its Login after compose, as before. Either way
-one request writes one Login.
+nothing to provision persists its Grant after compose, as before. Either way
+one request writes one Grant.
 
 A collection the rotation could not re-key, or a collection listing that
 could not be read, keeps the disconnect incomplete: the app-key row stays
@@ -360,7 +362,7 @@ ciphertext-only read.
 epoch-key recipient entry, one signed append on the collection's governing
 log) are granted together. `StorageManager.delegateShareGrant` signs the
 zcap with the request's other grants, and it rides back in the response
-VP's `zcap` array. Once the Login records it,
+VP's `zcap` array. Once the Grant records it,
 `StorageManager.shareCollection` escrows the reader and records the share.
 It refuses a zcap that is not read-only on that collection, so no code path
 grants one axis without the other.
@@ -370,7 +372,7 @@ shareable standard collections: every `WALLET_STANDARD_COLLECTIONS` entry
 whose roster spec carries `shareable: true`, so today `private-credentials`,
 `contacts`, and `contacts-history`. `app-connections` is encrypted but never
 shareable, its Resources carrying app seeds. Neither is `wallet-activity`. Its
-Login and collection-share activities carry each delegated capability verbatim,
+Grant and collection-share activities carry each delegated capability verbatim,
 proof and capability chain included, so one reader of it would learn every
 connected app and agent, with its targets, verbs, and expiry, and would hold
 the capability documents themselves. The flag gates new shares only. A
