@@ -25,9 +25,10 @@
  * generation the account document points at.
  * `lookupCollectionCreators` reads the same two sources the other way round:
  * given the `generator.id` DIDs stamped on existing collections, it answers each
- * with the creating app's display name and canonical `appUrl`, from the app
- * key where the app is still connected and from its App Connect Grant
- * activities where it is not. It is the one reader behind every surface that
+ * app stamp with the creating app's display name and canonical `appUrl`, from
+ * the app key where the app is still connected and from its App Connect Grant
+ * activities where it is not. An agent's stamp, the other kind of requester,
+ * is not looked up. It is the one reader behind every surface that
  * names a collection's creator: the consent row's existing-collection
  * reading, the Storage page's collection listing, and the collection
  * contents page.
@@ -667,9 +668,10 @@ export interface CollectionCreator {
 }
 
 /**
- * What the wallet's own records say about the applications that created a
- * set of collections, by the `generator.id` did:key stamped on each: the display
- * name and the canonical `appUrl`. A connected app answers from its app key
+ * What the wallet's own records say about the requesters (each an app,
+ * service, or agent) that created a set of collections, by the `generator.id`
+ * DID stamped on each. Only an app stamp gets an answer here: the display name
+ * and the canonical `appUrl`. A connected app answers from its app key
  * and latest Grant ({@link listConnectedApps}), with its app-key cid. A
  * disconnected one has no app key left, since removing it is what a
  * disconnect does, so its App Connect Grant activities answer instead: the

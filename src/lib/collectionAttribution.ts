@@ -1,6 +1,6 @@
 /**
- * Attributing a stored collection to the party it was provisioned for, for
- * the storage browser's "Created by" line.
+ * Attributing a stored collection to the requester (an app, service, or
+ * agent) it was provisioned for, for the storage browser's "Created by" line.
  *
  * The signal is the Collection Metadata object's `generator`. App Connect
  * provisioning stamps the app's did:key as `id` beside the Web origin it was

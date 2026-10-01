@@ -33,7 +33,7 @@ type WalletResponseFailureReason =
   'zcapUnavailable' | 'appKeysUnreadable' | 'processFailed' | 'exchangeFailed'
 
 /**
- * A response that was refused before anything reached the relying party. When
+ * A response that was refused before anything reached the requester. When
  * `reason` is `processFailed` after a failed history write, nothing has been
  * delivered: the already-signed delegations stay inert rather than
  * unrevocable. When `reason` is `exchangeFailed`, the request's activity is
@@ -154,7 +154,7 @@ async function recordRequestActivity({
  * caller, since only it holds the CHAPI event.
  *
  * Ordering: history/zcap persistence precedes every external delivery, so the
- * relying party can never hold live delegated capabilities that lack a
+ * requester can never hold live delegated capabilities that lack a
  * revocation hook. It also precedes every key-epoch escrow: when a grant
  * provisions a collection, the Grant is persisted from inside
  * `processRequest`, once the delegations are signed and before the grantee
@@ -163,7 +163,7 @@ async function recordRequestActivity({
  * removed again, since nothing was delivered and its grants stay inert. The
  * Grant activity is the stored record App Connect
  * revocation re-reads the zcap documents from, and both the exchange POST and
- * the CHAPI response hand the relying party the VP with its embedded,
+ * the CHAPI response hand the requester the VP with its embedded,
  * already-signed `zcap` array. Persisting last would let a delivered grant
  * outlive a failed (or torn-down) history write with no way to revoke it from
  * the sharing panel.
@@ -274,7 +274,7 @@ export async function composeAndDeliverResponse({
   // The Grant activity is the stored record App Connect revocation re-reads
   // the zcap documents from, so it must be persisted BEFORE any external
   // delivery -- both the exchange POST below and the CHAPI response hand the
-  // relying party the VP with its embedded, already-signed `zcap` array, so
+  // requester the VP with its embedded, already-signed `zcap` array, so
   // the revocation hook has to exist first. Persisting last would let a
   // delivered grant outlive a failed (or torn-down) history write with no way
   // to revoke it from the sharing panel.

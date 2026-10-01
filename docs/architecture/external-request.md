@@ -17,7 +17,7 @@ ordinary grant engine, and POSTs the unsigned zcap-only presentation back
 with the exchange URL. Its consent rows carry the same existing-collection
 reading the popup's rows do, through the same hook (`useAttributedGrants`)
 and second resolution pass (`attributeExistingCollections`). A collection
-another application created names that application. An interaction-URL
+another requester (an app, service, or agent) created names that requester. An interaction-URL
 grant that creates a collection, public or private, stamps its `generator`
 with the agent's did:key as `id`, and the request's self-declared
 `agent.name` as `name` when it carries one (`provisionFor` in

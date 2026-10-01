@@ -206,21 +206,24 @@ string target. The user is always a recipient of an encrypted collection
 in their own Space, and any future exception needs its own explicit consent
 surface.
 
-Two applications may name the same private collection, since a request
-names it by `name` alone. The second is admitted exactly as a reconnecting
-app is: the idempotent provisioning escrows its key-agreement key into every
-key epoch the collection has, so it reads what the first app stored. That is
+Two requesters (each an app, service, or agent) may name the same private
+collection, since a request names it by `name` alone. The second is admitted
+exactly as a reconnecting requester is: the idempotent provisioning escrows
+its key-agreement key into every key epoch the collection has, so it reads
+what the first requester stored. That is
 the decided policy, and the consent row is what keeps it from being
 silent. `resolveInvocationTarget` reports, on a target naming a private
 collection that already stands, an `existing` reading of its creator: the
 requester's own did:key (`this-app`), a key the same application held
 earlier (`this-application`, the site reconnecting after a disconnect), a
-different application (`other`), or nothing stamped (`unattributed`). The
+different requester (`other`), or nothing stamped (`unattributed`). The
 signal is the `generator` object stamped at creation, read off each named
-collection's own Collection Metadata object. App Connect stamps
+collection's own Collection Metadata object. Its `id` is always the
+creating requester's DID. App Connect stamps
 `{ id, origin, url, name }`: the app's did:key, its attested origin, its
-canonical app URL, and its display name. An interaction-URL grant stamps a
-collection it creates with `{ id, name }`: the agent's did:key, and its
+canonical app URL, and its display name. An interaction-URL grant comes
+from an agent, one kind of requester, and stamps a collection it creates
+with `{ id, name }`: the agent's did:key, and its
 self-declared `agent.name` when the request carries one.
 The lean Space listing grant resolution consults does not carry it. A collection entry
 in the resolution snapshot therefore carries an optional `attribution`, and

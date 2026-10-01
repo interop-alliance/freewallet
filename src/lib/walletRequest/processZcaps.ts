@@ -1,10 +1,9 @@
 /**
  * Zcap request processing for App Connect and the interaction-URL page:
- * resolves each requested
- * capability's abstract `invocationTarget` descriptor onto the user's own WAS
- * Space, delegates a capability to the relying party's DID, and provisions
- * any missing RP collection. Every delegation is signed before any collection
- * is provisioned, so the caller can persist the signed grants before a
+ * resolves each requested capability's abstract `invocationTarget` descriptor
+ * onto the user's own WAS Space, delegates a capability to the requester's
+ * DID (an app, service, or agent), and provisions any missing requester
+ * collection. Every delegation is signed before any collection is provisioned, so the caller can persist the signed grants before a
  * provisioning step escrows the grantee into a key epoch. All delegations are rooted at the user's Space root
  * capability (`urn:zcap:root:<spaceUrl>`); targets outside the Space are
  * unsatisfiable by construction.
@@ -18,19 +17,19 @@
  *
  * - a protected wallet collection -- the standard collections
  *   (`private-credentials`, `public-credentials`, `wallet-activity`) plus the
- *   account's grantable system collection (`id`) -- read-only: an RP may read
- *   but not rewrite or delete the user's own credentials or published
+ *   account's grantable system collection (`id`) -- read-only: a requester may
+ *   read but not rewrite or delete the user's own credentials or published
  *   identity;
  * - a share -- read-only (see below);
- * - a public collection -- the full vocabulary, the same as a private RP
- *   collection: published content is still the RP's own data, and
+ * - a public collection -- the full vocabulary, the same as a private requester
+ *   collection: published content is still the requester's own data, and
  *   un-publishing (`DELETE`) or revising (`PUT`) it is as much data management
  *   as publishing it. Retraction removes the stored copy, not copies already
  *   fetched -- the nature of publication, not a reason to forbid it. The
  *   consent warning and the shorter write TTL are what bound it;
- * - an RP-provisioned private collection -- the full vocabulary, subject to the
- *   consent screen and the shorter write TTL. It is provisioned encrypted,
- *   with the user as recipient zero and the grantee's identity key-agreement
+ * - a requester-provisioned private collection -- the full vocabulary,
+ *   subject to the consent screen and the shorter write TTL. It is
+ *   provisioned encrypted, with the user as recipient zero and the grantee's identity key-agreement
  *   key (derived from its `did:key` controller) escrowed beside it, so a
  *   controller that derivation cannot handle makes the grant unsatisfiable.
  *
@@ -175,17 +174,17 @@ type TargetClass =
  */
 const ACTION_CEILINGS: Record<TargetClass, readonly WasAction[]> = {
   // The user's own credentials, activity log, and published DID artifacts:
-  // readable by an RP, not writable by one.
+  // readable by a requester, not writable by one.
   'protected-collection': ['GET', 'HEAD'],
   // A share hands over decryption as well as fetch; it is never a write grant.
   share: ['GET', 'HEAD'],
-  // The full vocabulary, the same as a private RP collection (per the App
-  // Connect spec's descriptor registry): published content is still the RP's
+  // The full vocabulary, the same as a private requester collection (per the App
+  // Connect spec's descriptor registry): published content is still the requester's
   // own data, and un-publishing is as much data management as publishing.
   // Retraction removes the stored copy, not copies already fetched -- the
   // nature of publication, not a reason to forbid it.
   'public-collection': ['GET', 'HEAD', 'POST', 'PUT', 'DELETE'],
-  // An RP-provisioned private collection is the RP's own data: the full
+  // A requester-provisioned private collection is the requester's own data: the full
   // vocabulary, bounded by the consent screen and the shorter write TTL.
   collection: ['GET', 'HEAD', 'POST', 'PUT', 'DELETE']
 }
@@ -294,10 +293,12 @@ type ProvisionedByRequest = ReadonlyMap<string, { isPublic: boolean }>
 /**
  * A collection's attribution as grant resolution reads it: the `generator`
  * object provisioning stamps on the Collection Metadata object at creation
- * (`id`, the did:key of the party the collection was provisioned for;
- * `origin`, the Web origin that DID was bound to; `url`, the app's canonical
- * app URL; `name`, its display name). App Connect stamps all four. An
- * interaction-URL agent grant stamps `id` and at most `name`. Beside it sits
+ * (`id`, the did:key of the requester the collection was provisioned for;
+ * `origin`, the Web origin that DID was bound to, present only for an
+ * origin-bound app; `url`, the app's canonical app URL; `name`, the
+ * requester's display name). App Connect stamps all four. An interaction-URL
+ * grant comes from an agent, one kind of requester, and stamps `id` and at
+ * most `name`. Beside it sits
  * the creating app as the wallet's own records know it, joined onto
  * `generator.id` by the caller (`lookupCollectionCreators` in
  * `lib/connectedApps.ts`). The join is the fallback for an app stamp without
@@ -458,7 +459,7 @@ function existingCollectionReading({
  * collection the Space already serves world-readable (the public-collection
  * class -- the same full-vocabulary ceiling, but named so the consent warning
  * fires and the collection is never re-provisioned, however the request
- * spelled the target), and only then the full RP-collection class.
+ * spelled the target), and only then the full requester-collection class.
  *
  * @param options {object}
  * @param options.collectionId {string}
@@ -498,12 +499,12 @@ interface ResolvedTarget {
   targetClass?: TargetClass
   // The concrete WAS URL to delegate against (absent when unsatisfiable).
   invocationTarget?: string
-  // A named RP collection that does not exist yet and must be provisioned.
+  // A named requester collection that does not exist yet and must be provisioned.
   needsProvisioning: boolean
-  // The WAS collection id, when the target is a (standard or RP) collection.
+  // The WAS collection id, when the target is a (standard or requester) collection.
   collectionId?: string
   // An encrypted collection the grantee does not join the key roster of, so
-  // the RP will only see ciphertext: a standard EDV collection, or an
+  // the requester will only see ciphertext: a standard EDV collection, or an
   // existing encrypted collection a string target names, whose current key
   // epoch does not already list the grantee. On a string target this can be
   // true with the epoch unread (a standard collection before the attribution
@@ -737,7 +738,7 @@ function standardCollection(
  * refusing it here. was-client's `collectionPath` throws a `ValidationError`
  * on one, so admitting it would throw out of resolution instead of refusing
  * the grant, and `${spaceUrl}/meta` is the Space Metadata object, which a
- * full-vocabulary collection grant would hand an RP write access to -- the
+ * full-vocabulary collection grant would hand a requester write access to -- the
  * Space's `controller` included.
  *
  * @param [name] {string}
@@ -870,7 +871,7 @@ function classifySpaceTarget({
  * - `{ type: 'https://w3id.org/byoe#public-collection', name }` -- like `https://w3id.org/byoe#private-collection`
  *   but classed public-collection: provisioned plaintext with a world-readable
  *   (PublicCanRead) policy. Unsatisfiable on a protected wallet collection --
- *   an RP must never be able to flip the user's own collections public -- and
+ *   a requester must never be able to flip the user's own collections public -- and
  *   unsatisfiable on any existing collection that is not already public: a
  *   public collection is only ever created public, never converted. The
  *   idempotent re-grant on an already-public collection stays satisfiable,
@@ -879,7 +880,7 @@ function classifySpaceTarget({
  *   but classed share: the grantee also joins the collection's key-epoch
  *   roster, so it can decrypt what it fetches. `name` must be one of the
  *   SHAREABLE standard collections; anything else (a plaintext collection, an
- *   RP collection, a never-grantable collection) is unsatisfiable -- a share
+ *   requester collection, a never-grantable collection) is unsatisfiable -- a share
  *   is only meaningful where an epoch roster exists;
  * - anything else -- unsatisfiable, including the reserved
  *   `https://w3id.org/byoe#space` type: no grant reaches the whole Space.
@@ -998,7 +999,7 @@ function resolveTargetForm({
     // A URL naming an existing collection (or a Resource inside one) is
     // capped like its `https://w3id.org/byoe#private-collection` descriptor
     // form. The target is re-emitted through the builders, so the grant names
-    // the canonical form whatever bytes the RP sent. It admits the grantee to
+    // the canonical form whatever bytes the requester sent. It admits the grantee to
     // no key roster. An encrypted collection therefore reads as ciphertext to
     // it, unless its current key epoch already lists the grantee. A standard
     // collection is known encrypted by its roster entry, any other by its own
@@ -1062,7 +1063,7 @@ function resolveTargetForm({
       invocationTarget: collectionTargetIn({ space, collectionId: name }),
       // A protected collection -- a standard one or the `id` system
       // collection -- is provisioned and maintained by the
-      // wallet itself, never here. An existing private RP collection still
+      // wallet itself, never here. An existing private requester collection still
       // flags provisioning: the provisioning step is idempotent and is what
       // re-admits a reconnecting grantee to an existing collection's
       // recipient roster. The same step admits a DIFFERENT grantee naming the
@@ -1092,7 +1093,7 @@ function resolveTargetForm({
       return UNSATISFIABLE
     }
     // A public grant on a protected wallet collection is refused
-    // unconditionally: an RP must never be able to make the user's own
+    // unconditionally: a requester must never be able to make the user's own
     // credentials, activity log, or published identity world-readable.
     if (isProtectedCollection(name)) {
       return UNSATISFIABLE
@@ -1126,7 +1127,7 @@ function resolveTargetForm({
     // is never shareable, since its Resources are the connected apps' private
     // seeds, and so does `wallet-activity`, whose Resources carry the account's
     // delegated capabilities verbatim. Everything else -- a plaintext
-    // collection, an RP collection, a made-up name -- has no roster to escrow a
+    // collection, a requester collection, a made-up name -- has no roster to escrow a
     // reader into.
     const shared = standardCollection(name)
     if (!shared?.encryption || !shared.shareable) {
@@ -1365,10 +1366,10 @@ export function resolveGrants({
 }
 
 /**
- * Delegates capabilities to the relying parties named in the requests, on the
+ * Delegates capabilities to the requesters named in the requests, on the
  * consent-approved path. Signs each satisfiable grant rooted at the user's
  * Space root capability first, then awaits `beforeProvision` with the signed
- * grants, then escrows the shares and provisions the RP collections the
+ * grants, then escrows the shares and provisions the requester collections the
  * grants need. Both escrow the grantee into key epochs, so the caller's
  * record of the grants must exist before they run. Requires a session with a
  * remote Space. Unsatisfiable grants are skipped (they never reach a
@@ -1540,7 +1541,7 @@ export async function processZcaps({
    * provisioned encrypted: the user's vault KAK is recipient zero and the
    * grantee's identity KAK is escrowed beside it. A public-collection grant
    * provisions plaintext with the collection-level PublicCanRead policy, which
-   * the wallet (holding the Space root) sets because the RP's delegated zcap
+   * the wallet (holding the Space root) sets because the requester's delegated zcap
    * could not.
    *
    * On the App Connect path a collection this call creates also carries its
@@ -1548,13 +1549,14 @@ export async function processZcaps({
    * requesting origin as `origin`, the app's canonical app URL as `url` (when it has no query or
    * fragment, which the server refuses there), and
    * the app's display name as `name` when it gave one. So the storage browser
-   * can name the application a collection belongs to, and a reconnecting app
+   * can name the requester a collection belongs to, and a reconnecting app
    * is told apart from another app on its origin. A
    * collection that already stands keeps whatever attribution it has, since
    * was-client's ensure stamps it on the guarded create only: the re-admit pass that adds a second
-   * app to an existing private collection cannot rename its creator.
+   * requester to an existing private collection cannot rename its creator.
    *
-   * On the interaction-URL agent path a collection this call creates, public
+   * On the interaction-URL path the requester is an agent. A collection this
+   * call creates there, public
    * or private, is stamped too, with the agent did:key as `id` and the request's
    * self-declared `agent.name` as `name` when it carried one. It has no
    * `origin` or `url`, since the path has no attested origin and no app URL.

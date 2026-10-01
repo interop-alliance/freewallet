@@ -140,6 +140,11 @@
 
 ### Changed
 
+- The docs and JSDoc call the party a collection is provisioned for the
+  requester, an app, service, or agent, in place of "the app", and no
+  longer assume it has a Web origin. The App Connect spec defines the term
+  and the VPR-root `agent` member; the WAS spec's `generator` definition
+  follows. Prose only.
 - Agent grants and App Connect connections are recorded as `Grant`
   activities, with the same object shape as before. A `Login` activity now
   records only a plain "Login with Wallet" or a wallet login. The

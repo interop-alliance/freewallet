@@ -462,24 +462,27 @@ helpers, which join onto the storage server's base path, so on a sub-path
 deployment (a server URL like `https://host/was`) the link addresses exactly
 the resource replication wrote, with per-segment encoding.
 
-A collection provisioned for a connected application carries its attribution
-on the Collection Metadata object, as one `generator` object: `id`, the app's
-did:key; `origin`, the Web origin that DID was bound to; `url`, the app's
-canonical app URL; and `name`, its display name. App Connect provisioning
-stamps it when it creates the collection, taking `url` and `name` from the
-validated request's `app`, the source the app-key credential records. The
-content migration stamps it too, on an app collection it creates. It copies
-the bundle's value as it stands, and nothing verifies it. The stamp only
-labels the consent row and the listings, and grants nothing. A collection
-that already stands keeps its attribution, so a second app admitted to it
-does not rename the creator. An interaction-URL grant stamps a collection
-it creates, public or private, with the agent's did:key as `id`, and the
-request's self-declared `agent.name` as `name` when it carries one. That
-stamp has no `origin` or `url`. The listing carries the object whole to every surface. A surface
-names the creator by `generator.name` first. A stamp with no `origin` names
-an agent, which holds no app key and writes no App Connect Grant, so an
-unnamed one is shown by its shortened `generator.id` and never looked up.
-For an app stamp without a name, one reader, `lookupCollectionCreators`
+A collection provisioned for a requester (an app, service, or agent)
+carries its attribution on the Collection Metadata object, as one
+`generator` object. Its `id` is the requester's DID. Its `origin` is the Web
+origin that DID was bound to, present only for an origin-bound app. Its
+`url` is the app's canonical app URL, and `name` is the requester's display
+name. App Connect provisioning stamps it when it creates the collection,
+taking `url` and `name` from the validated request's `app`, the source the
+app-key credential records. The content migration stamps it too, on an
+app collection it creates. It copies the bundle's value as it
+stands, and nothing verifies it. The stamp only labels the consent row and
+the listings, and grants nothing. A collection that already stands keeps
+its attribution, so a second requester admitted to it does not rename the
+creator. An interaction-URL grant comes from an agent, one kind of
+requester. It stamps a collection it creates, public or private, with the
+agent's did:key as `id`, and the request's self-declared `agent.name` as
+`name` when it carries one. That stamp has no `origin` or `url`. The
+listing carries the object whole to every surface. A surface names the
+creator by `generator.name` first. A stamp with no `origin` names an agent,
+which holds no app key and writes no App Connect Grant, so an unnamed one
+is shown by its shortened `generator.id` and never looked up. For an app
+stamp without a name, one reader, `lookupCollectionCreators`
 (`src/lib/connectedApps.ts`), names the app behind `generator.id`, for the
 consent row, the Storage page's listing, and the collection contents page.
 A connected app answers from its app key. A disconnected one answers from
@@ -935,7 +938,8 @@ Containment hierarchy (remote mode): **Space > Collection > Resource**.
   popup. The mediator is `authn.io`.
 - **App Connect** -- the one-popup app login: a CHAPI `get` whose VPR
   carries an `AppConnectQuery`, answered in one signed presentation with an
-  app-key credential plus capabilities delegated to its subject DID.
+  app-key credential plus capabilities delegated to its subject DID. Its
+  requester is an origin-bound app, attested by the CHAPI mediator.
 - **App key** -- a self-issued credential holding a 32-byte seed in
   `credentialSubject.seed`, bound to a requesting origin
   (`credentialSubject.origin`) and the application's canonical URL
@@ -948,11 +952,19 @@ Containment hierarchy (remote mode): **Space > Collection > Resource**.
   `controller`, or an entry in a collection's key-epoch roster. It is a
   cache rather than the account's durable state, so state reconstructible
   from a client alone is a defect. Avoid: device, device id, durable client.
-- **Agent** -- a connected app that mints its own did:key and asks for
-  scoped, expiring, revocable grants through a standalone
-  `AuthorizationCapabilityQuery`, naming itself as `controller`. It holds
-  neither the user key nor the unlock credential and is not a wallet client.
-  Avoid: transient client (the annex inventory), agent client, bot.
+- **Requester** -- the party that sends an App Connect or interaction-URL
+  request and receives the grants: an app, service, or agent. A collection
+  provisioned for it records it as the `generator` on the Collection
+  Metadata object, with its DID as `generator.id`. Text about the App
+  Connect exchange itself (the app-key credential, the attested origin,
+  `appUrl`) still says "app". Avoid: requesting app, calling app, client
+  app.
+- **Agent** -- a requester that mints its own did:key and asks for scoped,
+  expiring, revocable grants through a standalone
+  `AuthorizationCapabilityQuery`, naming itself as `controller`. It holds no
+  app key, no user key, and no unlock credential, and is not a wallet
+  client. Avoid: transient client (the annex inventory), agent
+  client, bot.
 - **`writerId`** -- an unkeyed, clearable, unrecoverable attribution label
   saying which writing agent produced a revision, used to attribute history
   and break last-write-wins ties. It is minted per browser profile in

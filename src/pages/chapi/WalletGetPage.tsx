@@ -545,7 +545,7 @@ export function WalletGetPage() {
   /**
    * Approves the request: the compose / persist-the-Login-activity / deliver
    * sequence runs in `composeAndDeliverResponse` (which owns the ordering that
-   * keeps a delegated capability from ever reaching the relying party before
+   * keeps a delegated capability from ever reaching the requester before
    * its revocation hook exists), and the composed presentation is then
    * returned over the CHAPI channel -- the one leg only this page can perform,
    * since only it holds the CHAPI event.
