@@ -47,6 +47,15 @@
 
 ### Changed
 
+- Every read of a sibling unlock credential's Space mints a GET-only child
+  of the entry's management zcap on both kinds of acting session; a
+  remembered session no longer invokes the stored multi-verb parent
+  directly. The sibling record reader, `unlockEntryReaderFor`, reports the
+  pre-flight refusal instead of `undefined`, so a remembered session's
+  pending-entry discovery skips an entry whose stored zcap is expired,
+  foreign-controlled, stale, or lacks GET, as a transient session already
+  did. The last-client transition's pre-pivot guard refuses on that same
+  refusal.
 - The standing unlock fields a registry entry records are built by one
   helper, `standingUnlockFields`, over wallet-core's
   `recordedDelegationFields` for the delegation key ids and expiries, in

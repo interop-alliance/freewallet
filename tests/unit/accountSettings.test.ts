@@ -102,12 +102,15 @@ const state = vi.hoisted(() => ({
   // The same read-only refusal for a GET child: a management zcap allowing
   // DELETE but not GET leaves its Space deletable and unprobeable.
   entryGetRefusal: {} as Record<string, string>,
-  // Every single-verb capability minted, in order.
+  // Every single-verb capability minted, in order. A GET child minted by the
+  // sibling record reader names the keyring record; any other names the
+  // parent's own target.
   mints: [] as {
     shape: 'root' | 'child'
     verb: string
     spaceId: string
     controller?: string
+    target?: 'keyring-record'
   }[],
   wipeOutcome: 'deleted' as 'deleted' | 'not-found',
   // Whether the account Space's world-readable log still answers -- the 404
@@ -542,6 +545,51 @@ vi.mock('@/session/keyring', () => ({
 }))
 
 vi.mock('@/session/unlockMethods', async importOriginal => {
+  /**
+   * One child mint of an entry's management zcap, refused by the per-Space
+   * state and recorded with the verb, the ladder controller if any, and the
+   * target the sibling reader tags.
+   *
+   * @param options {object}
+   * @param options.entry {object}
+   * @param [options.signer] {object}
+   * @param options.verb {string}
+   * @param [options.target] {string}
+   * @returns {Promise<string | object>}
+   */
+  async function siblingInvocation({
+    entry,
+    signer,
+    verb,
+    target
+  }: {
+    entry: { unlockSpaceId: string }
+    signer?: { invoker?: unknown; zcapClient: unknown; controller: string }
+    verb: string
+    target?: 'keyring-record'
+  }) {
+    const refusal =
+      verb === 'GET'
+        ? state.entryGetRefusal[entry.unlockSpaceId]
+        : state.entryRefusal[entry.unlockSpaceId]
+    if (refusal) {
+      return refusal
+    }
+    const spaceId = entry.unlockSpaceId
+    state.mints.push({
+      shape: 'child',
+      verb,
+      spaceId,
+      ...(signer ? { controller: signer.controller } : {}),
+      ...(target ? { target } : {})
+    })
+    state.calls.push(`mintChild:${verb}:${spaceId}`)
+    return {
+      zcapClient:
+        signer?.invoker ?? signer?.zcapClient ?? zcapStub('management-client'),
+      capability: { id: `urn:uuid:child-${verb}-${spaceId}`, spaceId }
+    }
+  }
   const actual =
     await importOriginal<typeof import('@/session/unlockMethods')>()
   return {
@@ -592,39 +640,22 @@ vi.mock('@/session/unlockMethods', async importOriginal => {
     // The one-verb child mint over an entry's management zcap, refused by
     // the same per-Space state the read-only refusal reads, and recorded as
     // the child mint it makes.
-    unlockSpaceVerbInvocation: vi.fn(
-      async ({
-        entry,
-        signer,
-        verb
+    unlockSpaceVerbInvocation: vi.fn(siblingInvocation),
+    // The shared sibling record reader: the same mint, a GET child tagged as
+    // naming the keyring record.
+    unlockEntryReaderFor: vi.fn(
+      ({
+        signer
       }: {
-        entry: { unlockSpaceId: string }
         signer?: { invoker?: unknown; zcapClient: unknown; controller: string }
-        verb: string
-      }) => {
-        const refusal =
-          verb === 'GET'
-            ? state.entryGetRefusal[entry.unlockSpaceId]
-            : state.entryRefusal[entry.unlockSpaceId]
-        if (refusal) {
-          return refusal
-        }
-        const spaceId = entry.unlockSpaceId
-        state.mints.push({
-          shape: 'child',
-          verb,
-          spaceId,
-          ...(signer ? { controller: signer.controller } : {})
-        })
-        state.calls.push(`mintChild:${verb}:${spaceId}`)
-        return {
-          zcapClient:
-            signer?.invoker ??
-            signer?.zcapClient ??
-            zcapStub('management-client'),
-          capability: { id: `urn:uuid:child-${verb}-${spaceId}`, spaceId }
-        }
-      }
+      }) =>
+        (entry: { unlockSpaceId: string }) =>
+          siblingInvocation({
+            entry,
+            signer,
+            verb: 'GET',
+            target: 'keyring-record'
+          })
     ),
     getUnlockMethods: vi.fn(
       async ({
@@ -836,23 +867,6 @@ vi.mock('@interop/wallet-core/clientAnnex', async importOriginal => ({
       state.mints.push({ shape: 'child', verb, spaceId, controller })
       state.calls.push(`mintChild:${verb}:${spaceId}`)
       return { id: `urn:uuid:child-${verb}-${spaceId}`, spaceId }
-    }
-  ),
-  // The keyring read mint is the GET child by another name; it records as
-  // one so the walk's call order reads the same whichever mint the reader
-  // takes.
-  mintUnlockKeyringReadCapability: vi.fn(
-    async ({
-      parent,
-      controller
-    }: {
-      parent: { spaceId?: string }
-      controller: string
-    }) => {
-      const spaceId = parent.spaceId ?? 'unknown'
-      state.mints.push({ shape: 'child', verb: 'GET', spaceId, controller })
-      state.calls.push(`mintChild:GET:${spaceId}`)
-      return { id: `urn:uuid:child-GET-${spaceId}`, spaceId }
     }
   ),
   mintSpaceRootVerbCapability: vi.fn(
@@ -1535,6 +1549,33 @@ describe('deleteAccount (the transient walk)', () => {
       // (w) the local half.
       'snapshotWipeTargets',
       'executeLocalWipe'
+    ])
+  })
+
+  it('reads the sibling records and probes the sibling Spaces through the shared reader', async () => {
+    const outcome = await deleteAccount({
+      session: makeSession({ transient: true }),
+      passphrase: PASSPHRASE
+    })
+    expect(outcome.result).toBe('deleted')
+    // Both GET children carry the ladder signer. The pending-entry discovery
+    // names the keyring record, and the existence probe names the Space.
+    expect(
+      state.mints.filter(mint => mint.shape === 'child' && mint.verb === 'GET')
+    ).toEqual([
+      {
+        shape: 'child',
+        verb: 'GET',
+        spaceId: 'unlock-space-x',
+        controller: LADDER_DID_KEY,
+        target: 'keyring-record'
+      },
+      {
+        shape: 'child',
+        verb: 'GET',
+        spaceId: PASSKEY_SPACE,
+        controller: LADDER_DID_KEY
+      }
     ])
   })
 
@@ -2648,8 +2689,10 @@ describe('deleteAccount (the remembered and scope-skipped sessions)', () => {
     expect(state.calls).toEqual([
       'verifyUnlockSecret',
       'stopSync',
-      // The pending-entry check reads each record through the stored
-      // management zcap itself, so a remembered session mints nothing for it.
+      // The pending-entry check reads each record under a GET child of the
+      // stored management zcap, minted by the session's own signer, the same
+      // shared reader the transient walk takes.
+      'mintChild:GET:unlock-space-x',
       `probe:${ANNEX_SPACE_A}`,
       `probe:${ACTING_SPACE}`,
       `mintChild:GET:${PASSKEY_SPACE}`,
@@ -2661,6 +2704,30 @@ describe('deleteAccount (the remembered and scope-skipped sessions)', () => {
       `deleteUnlockLocalState:${ACTING_SPACE}`,
       'snapshotWipeTargets',
       'executeLocalWipe'
+    ])
+  })
+
+  it('reads the sibling records and probes the sibling Spaces through the shared reader', async () => {
+    state.registry = deletionRegistry()
+    state.annexHistory = [annexHistoryEntry(ANNEX_SPACE_A)]
+    const outcome = await deleteAccount({
+      session: makeSession(),
+      passphrase: PASSPHRASE
+    })
+    expect(outcome.result).toBe('deleted')
+    // The pending-entry discovery names the keyring record and the existence
+    // probe names the Space. Both GET children are minted with no ladder
+    // controller: the enrolled session delegates to the parent's own.
+    expect(
+      state.mints.filter(mint => mint.shape === 'child' && mint.verb === 'GET')
+    ).toEqual([
+      {
+        shape: 'child',
+        verb: 'GET',
+        spaceId: 'unlock-space-x',
+        target: 'keyring-record'
+      },
+      { shape: 'child', verb: 'GET', spaceId: PASSKEY_SPACE }
     ])
   })
 

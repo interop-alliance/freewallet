@@ -2409,10 +2409,7 @@ async function runAccountDeletion({
       try {
         const pending = await findPendingPassphraseEntries({
           registry,
-          readerFor: unlockEntryReaderFor({
-            session,
-            ...(deleter ? { signer: deleter } : {})
-          })
+          readerFor: unlockEntryReaderFor({ session, signer: deleter })
         })
         for (const entry of pending) {
           unnamed.push({ reason: 'pending-entry', method: entry.type })
@@ -2530,7 +2527,7 @@ async function runAccountDeletion({
         const probe = await unlockSpaceVerbInvocation({
           session,
           entry,
-          ...(deleter ? { signer: deleter } : {}),
+          signer: deleter,
           verb: 'GET'
         })
         if (typeof probe === 'string') {

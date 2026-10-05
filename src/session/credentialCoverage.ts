@@ -24,8 +24,6 @@
  * The detectors therefore return findings; each caller decides what a finding
  * means.
  */
-import type { IZcap } from '@interop/data-integrity-core'
-import type { ZcapClient } from '@interop/ezcap'
 import { getUnlockKeyring } from '@interop/wallet-core/keyring'
 import {
   unlockKeyVmId,
@@ -41,7 +39,8 @@ import { WAS_SERVER_URL } from '@/app.config'
 import { wasServiceDescription } from '@/lib/wasService'
 import type {
   PassphraseUnlockMethod,
-  UnlockMethod
+  UnlockMethod,
+  UnlockSpaceInvocation
 } from '@/session/unlockMethods'
 
 /**
@@ -115,10 +114,10 @@ export function credentialKeyAgreementVmIds({
  *
  * @param options {object}
  * @param options.registry {{ methods?: unknown[] } | null}
- * @param options.readerFor {Function}   the entry's record reader: the signing
- *   client and the capability its record GET rides (the stored management zcap
- *   on a remembered session, a GET-only child of it on a transient one).
- *   Returning `undefined` skips the entry as unsettleable
+ * @param options.readerFor {Function}   the entry's record reader: the client
+ *   that sends the record GET and the GET-only child of the stored management
+ *   zcap it invokes, naming the keyring record. Returning a refusal skips the
+ *   entry as unsettleable
  * @returns {Promise<PassphraseUnlockMethod[]>}   the pending-shaped entries
  */
 export async function findPendingPassphraseEntries({
@@ -126,9 +125,7 @@ export async function findPendingPassphraseEntries({
   readerFor
 }: {
   registry: { methods?: unknown[] } | null
-  readerFor: (
-    entry: PassphraseUnlockMethod
-  ) => Promise<{ zcapClient: ZcapClient; capability: IZcap } | undefined>
+  readerFor: (entry: PassphraseUnlockMethod) => Promise<UnlockSpaceInvocation>
 }): Promise<PassphraseUnlockMethod[]> {
   const entries = (
     (registry?.methods ?? []) as PassphraseUnlockMethod[]
@@ -143,7 +140,7 @@ export async function findPendingPassphraseEntries({
       continue
     }
     const reader = await readerFor(entry)
-    if (!reader) {
+    if (typeof reader === 'string') {
       continue
     }
     let sealedToEntry: boolean

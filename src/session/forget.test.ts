@@ -120,8 +120,9 @@ vi.mock('@/session/unlockMethods', async () => {
     getUnlockMethods: vi.fn(),
     managementZcapClient: vi.fn(() => ({ managementZcapClient: true })),
     refreshStandingDelegationFields: vi.fn(),
-    // The shared sibling-record reader, in its enrolled-client shape: the
-    // stored management zcap, invoked by the session's own signer.
+    // The shared sibling-record reader, stubbed to hand back the stored
+    // management zcap with the session's own signer; the record read is
+    // faked below, so the capability's shape is not under test here.
     unlockEntryReaderFor: vi.fn(
       () => async (entry: { manageCapability?: unknown }) => ({
         zcapClient: { managementZcapClient: true },
@@ -131,8 +132,11 @@ vi.mock('@/session/unlockMethods', async () => {
     updateUnlockMethods: vi.fn()
   }
 })
-const { getUnlockMethods, refreshStandingDelegationFields } =
-  await import('@/session/unlockMethods')
+const {
+  getUnlockMethods,
+  refreshStandingDelegationFields,
+  unlockEntryReaderFor
+} = await import('@/session/unlockMethods')
 
 vi.mock('@/session/recovery', () => ({
   recoveryEntriesOf: vi.fn(() => [])
@@ -956,6 +960,35 @@ describe('forgetThisBrowser (the ceremony grades)', () => {
       forgetThisBrowser({ session, lastClient: true })
     ).rejects.toMatchObject({ name: 'PendingRetirementForgetError' })
     warn.mockRestore()
+    expect(vi.mocked(forgetLastEnrolledClient)).not.toHaveBeenCalled()
+    expect(vi.mocked(executeLocalWipe)).not.toHaveBeenCalled()
+  })
+
+  it('refuses the transition on an entry whose record the reader cannot read', async () => {
+    // The reader's pre-flight refusal (a stored management zcap this session
+    // cannot mint a GET child of) is an entry the transition could not
+    // settle, so it refuses rather than running over a possible pending
+    // retirement, as the deletion walk's discovery would skip it.
+    const { session } = fakeSession()
+    vi.mocked(getUnlockMethods).mockResolvedValue({
+      methods: [
+        {
+          type: 'passphrase',
+          unlockSpaceId: 'unlock-foreign',
+          manageCapability: { id: 'urn:zcap:manage' },
+          unlockKeyAgreementKeyMultibase: 'zUnlockKak'
+        }
+      ]
+    } as never)
+    vi.mocked(unlockEntryReaderFor).mockReturnValueOnce(
+      async () => 'foreign-controller'
+    )
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
+    await expect(
+      forgetThisBrowser({ session, lastClient: true })
+    ).rejects.toThrow(/cannot carry a read \(foreign-controller\)/)
+    warn.mockRestore()
+    expect(vi.mocked(getUnlockKeyring)).not.toHaveBeenCalled()
     expect(vi.mocked(forgetLastEnrolledClient)).not.toHaveBeenCalled()
     expect(vi.mocked(executeLocalWipe)).not.toHaveBeenCalled()
   })

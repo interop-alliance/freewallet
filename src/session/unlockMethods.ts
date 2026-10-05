@@ -1402,25 +1402,32 @@ export function unlockSpaceCapabilityRefusal({
 }
 
 /**
+ * The sender and the capability one request on a SIBLING unlock Space rides:
+ * the client that sends it and the one-verb child of the entry's stored
+ * management zcap it invokes, or the pre-flight refusal that kept it off the
+ * wire.
+ */
+export type UnlockSpaceInvocation =
+  UnlockSpaceCapabilityRefusal | { zcapClient: ZcapClient; capability: IZcap }
+
+/**
  * How a caller reads a SIBLING credential's unlock record: the client that
- * sends the GET, plus the capability it invokes. One shape for both kinds of
- * acting session, so the two callers that settle a registry entry against its
+ * sends the GET, plus the GET-only child of the stored management zcap it
+ * invokes, naming the keyring record. One reader for both kinds of acting
+ * session, so the two callers that settle a registry entry against its
  * record (the account-deletion walk's pending-entry discovery, and the
- * pre-pivot pending-entry refusal the last-client transition and the
- * ladder-branch disconnect share) cannot drift.
+ * pre-pivot refusal the last-client transition and the ladder-branch
+ * disconnect share) cannot drift.
  *
- * An enrolled client invokes the stored management zcap itself. A session
- * acting through a standing credential's ladder cannot: that capability is
- * delegated to the account DID, and the ladder VM carries no invocation
- * relation. It mints a GET-only child of the stored capability instead and
- * sends it as the ladder VM's own bare did:key. The child names the keyring
- * record itself: its `invocationTarget` is that Resource's URL beneath the
- * unlock Space (`keyring/keyring.json`) and its `allowedAction` is exactly
- * `['GET']`, which is what the server's ladder clause admits for a Resource
- * read. A bare `GET` child names the Space Metadata object instead, so it
- * reads no record. A parent that allows no GET makes the entry unreadable
- * rather than refusing the caller, so the reader resolves `undefined` and the
- * caller decides.
+ * The child is wallet-core's `mintUnlockKeyringReadCapability`, so its target
+ * and the URL the record read addresses come from the same constants. The
+ * server's ladder clause admits a Resource read only in that shape; the bare
+ * GET child `unlockSpaceVerbInvocation` mints names the Space Metadata
+ * object and reads no record. Delegator, sender, and pre-flight are the
+ * ones every sibling request shares, so a remembered session mints a child
+ * here too rather than invoking the stored multi-verb parent. A parent that
+ * cannot carry a GET makes the entry unreadable rather than refusing the
+ * caller: the reader resolves the refusal, and the caller decides.
  *
  * @param options {object}
  * @param options.session {Session}
@@ -1429,7 +1436,7 @@ export function unlockSpaceCapabilityRefusal({
  * @param options.signer.zcapClient {ZcapClient}   the delegating signer
  * @param options.signer.invoker {ZcapClient}   the client that sends the GET
  * @param options.signer.controller {string}   the delegatee DID
- * @returns {Function}   `(entry) => Promise<{ zcapClient, capability } | undefined>`
+ * @returns {Function}   `(entry) => Promise<UnlockSpaceInvocation>`
  */
 export function unlockEntryReaderFor({
   session,
@@ -1437,44 +1444,31 @@ export function unlockEntryReaderFor({
 }: {
   session: Session
   signer?: { zcapClient: ZcapClient; invoker: ZcapClient; controller: string }
-}): (
-  entry: UnlockMethod
-) => Promise<{ zcapClient: ZcapClient; capability: IZcap } | undefined> {
-  return async (entry: UnlockMethod) => {
-    const parent = entry.manageCapability as IZcap
-    if (!signer) {
-      return {
-        zcapClient: managementZcapClient({ session, capability: parent }),
-        capability: parent
-      }
-    }
-    if (unlockSpaceCapabilityRefusal({ session, entry, signer, verb: 'GET' })) {
-      return undefined
-    }
-    return {
-      zcapClient: signer.invoker,
-      capability: await mintUnlockKeyringReadCapability({
-        zcapClient: signer.zcapClient,
-        parent,
-        controller: signer.controller,
-        ttlMs: DELETION_ZCAP_TTL_MS
-      })
-    }
-  }
+}): (entry: UnlockMethod) => Promise<UnlockSpaceInvocation> {
+  return async (entry: UnlockMethod) =>
+    siblingSpaceInvocation({
+      session,
+      entry,
+      signer,
+      verb: 'GET',
+      mint: options => mintUnlockKeyringReadCapability(options)
+    })
 }
 
 /**
  * Mints a one-verb child of an entry's management zcap and names the client
  * that sends it: the one mint every request on a SIBLING unlock Space rides,
- * whether the deletion walk's DELETE, its discovery probe's GET, or the
- * backup export's POST. The storage server admits a delegated Space request
- * only when the capability's `invocationTarget` is exactly the Space URL and
- * its `allowedAction` is exactly the one verb, so the stored multi-verb
- * capability is a parent to delegate from, never a capability to invoke. The
- * child's target is the parent's own bytes, its lifetime the deletion TTL
- * clamped to the parent's `expires`, and nothing stores it: it is minted
- * immediately before its one request and dropped, so a torn run owes no
- * revocation.
+ * whether the deletion walk's DELETE, its existence probe's GET, or the
+ * backup export's POST. The record read (`unlockEntryReaderFor`) shares the
+ * same sender, delegator, and pre-flight and differs only in its mint. The
+ * storage server admits a ladder-signed delegation, and any Space DELETE,
+ * only when the capability's `allowedAction` is exactly the one verb, so the
+ * stored multi-verb capability is a parent to delegate from and is not
+ * invoked itself, on either kind of acting session. The child's target is
+ * the parent's own bytes for a DELETE, POST or PUT, and the Space Metadata
+ * object for a GET. Its lifetime is the deletion TTL, cut short at the
+ * parent's `expires`. Nothing stores it: it is minted immediately before its
+ * one request and dropped, so a torn run owes no revocation.
  *
  * The delegatee is the delegator itself -- the account DID the parent already
  * names -- unless the caller supplies its own signer, which is how a session
@@ -1505,7 +1499,7 @@ export function unlockEntryReaderFor({
  *   request; defaults to the delegating signer
  * @param options.signer.controller {string}
  * @param options.verb {string}   the one verb the child carries
- * @returns {Promise<UnlockSpaceCapabilityRefusal | object>}   the refusal, or
+ * @returns {Promise<UnlockSpaceInvocation>}   the refusal, or
  *   `{ zcapClient, capability }`: the sender and the child it invokes
  */
 export async function unlockSpaceVerbInvocation({
@@ -1518,9 +1512,50 @@ export async function unlockSpaceVerbInvocation({
   entry: UnlockMethod
   signer?: { zcapClient: ZcapClient; invoker?: ZcapClient; controller: string }
   verb: 'GET' | 'POST' | 'PUT' | 'DELETE'
-}): Promise<
-  UnlockSpaceCapabilityRefusal | { zcapClient: ZcapClient; capability: IZcap }
-> {
+}): Promise<UnlockSpaceInvocation> {
+  return siblingSpaceInvocation({
+    session,
+    entry,
+    signer,
+    verb,
+    mint: options => mintSpaceVerbCapability({ ...options, verb })
+  })
+}
+
+/**
+ * The shared half of `unlockSpaceVerbInvocation` and `unlockEntryReaderFor`:
+ * the pre-flight refusal, the delegator and sender resolution, and the
+ * expired-parent mapping around one mint of a child of the entry's stored
+ * management zcap.
+ *
+ * @param options {object}
+ * @param [options.session] {Session}
+ * @param options.entry {UnlockMethod}
+ * @param [options.signer] {object}
+ * @param options.verb {string}   the verb the pre-flight checks the parent
+ *   carries
+ * @param options.mint {Function}   mints the child from the delegating
+ *   signer, the parent, the delegatee, and the deletion TTL
+ * @returns {Promise<UnlockSpaceInvocation>}
+ */
+async function siblingSpaceInvocation({
+  session,
+  entry,
+  signer,
+  verb,
+  mint
+}: {
+  session?: Session
+  entry: UnlockMethod
+  signer?: { zcapClient: ZcapClient; invoker?: ZcapClient; controller: string }
+  verb: 'GET' | 'POST' | 'PUT' | 'DELETE'
+  mint: (options: {
+    zcapClient: ZcapClient
+    parent: IZcap
+    controller: string
+    ttlMs: number
+  }) => Promise<IZcap>
+}): Promise<UnlockSpaceInvocation> {
   const refusal = unlockSpaceCapabilityRefusal({
     ...(session ? { session } : {}),
     entry,
@@ -1548,10 +1583,9 @@ export async function unlockSpaceVerbInvocation({
   try {
     return {
       zcapClient: invoker,
-      capability: await mintSpaceVerbCapability({
+      capability: await mint({
         zcapClient: delegator,
         parent,
-        verb,
         controller: controller as string,
         ttlMs: DELETION_ZCAP_TTL_MS
       })

@@ -216,13 +216,19 @@ entry's management zcap, the parent's `invocationTarget` copied verbatim. A
 remembered session root-invokes the account and annex Spaces and signs a
 sibling's child with the enrolled client's own account key.
 
-Reading a sibling's record takes a different child. The walk's pending-entry
-discovery and the last-client transition's pre-pivot refusal both go through
-`unlockEntryReaderFor`, which on a ladder-anchored session mints a GET-only
-child naming the keyring record: `invocationTarget` is that Resource's URL
-beneath the unlock Space, and `allowedAction` is exactly `['GET']`. The Space
-existence probes keep the bare `GET`, whose target is the Space Metadata
-object.
+Every read of a sibling's Space mints a GET-only child of the entry's
+management zcap and invokes that child, on both kinds of acting session, so
+the stored multi-verb parent is delegated from and is not sent. On a
+ladder-anchored session the ladder VM signs the child and its bare did:key
+sends it. On a remembered session the enrolled client's own account key does
+both, even though the server would admit the parent invoked directly there,
+so the pre-flight refusals and the child shape read the same on both. The
+walk's existence probe takes the bare `GET` child, whose target is the Space
+Metadata object. The pending-entry discovery and the last-client
+transition's pre-pivot refusal go through `unlockEntryReaderFor`, whose child
+names the keyring record: `invocationTarget` is that Resource's URL beneath
+the unlock Space, and `allowedAction` is exactly `['GET']`, the only shape
+the server admits for a ladder-signed Resource read.
 
 Five states on a sibling refuse locally before anything is minted and are
 reported as named residues rather than refusing the run or skipping in

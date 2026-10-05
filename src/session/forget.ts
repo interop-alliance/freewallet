@@ -1094,7 +1094,12 @@ function derivableReplicaPrefixes(): Set<string> {
  * is unsettleable either way and passes: it is a bare entry, not a pending
  * one. A record that cannot be read, parsed, or read for its recipients
  * refuses too, with the registry-read refusal's reasoning -- the transition
- * must not run over an entry it could not settle.
+ * must not run over an entry it could not settle. So does an entry whose
+ * stored management zcap the sibling reader refuses to mint a read child of
+ * (expired, foreign-controlled, stale, or lacking GET): the deletion walk
+ * skips such an entry, since the account Space's deletion is its mender,
+ * but this ceremony ends every remembered login, so nothing would mend a
+ * pending retirement it ran over.
  *
  * @param options {object}
  * @param options.session {Session}
@@ -1110,12 +1115,19 @@ export async function assertNoPendingPassphraseEntry({
   registry: { methods?: unknown[] } | null
   signer?: LadderDeleter
 }): Promise<void> {
+  const reader = unlockEntryReaderFor({ session, signer })
   const pending = await findPendingPassphraseEntries({
     registry,
-    readerFor: unlockEntryReaderFor({
-      session,
-      ...(signer ? { signer } : {})
-    })
+    readerFor: async entry => {
+      const read = await reader(entry)
+      if (typeof read === 'string') {
+        throw new Error(
+          'Could not read the sign-in record the unlock-methods registry ' +
+            `names: its management capability cannot carry a read (${read}).`
+        )
+      }
+      return read
+    }
   })
   if (pending.length > 0) {
     throw new PendingRetirementForgetError()
