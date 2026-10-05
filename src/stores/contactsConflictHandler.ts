@@ -2,7 +2,7 @@
  * The RxDB binding for the mutable `contacts` collection's conflict rule. Every
  * other synced collection is immutable and content-addressed, so a write-write
  * conflict is impossible there and RxDB's default handler (always keep the
- * remote master) is never exercised. A contact head document is genuinely
+ * remote primary) is never exercised. A contact head document is genuinely
  * overwritten in place under a stable resource id, so two replicas CAN race on
  * the same Resource -- and the default handler would silently drop one side's
  * edit.

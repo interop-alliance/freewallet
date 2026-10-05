@@ -1,11 +1,12 @@
 /**
- * The store-side reader for the account's capability-gated logs: the user key
- * wrap-set roster (`key-map/user-key.jsonl`) and a client annex generation's
- * log (`<gen-id>/did.jsonl`).
+ * The store-side reader for the account's logs: the user key wrap-set roster
+ * (`key-map/user-key.jsonl`), a client annex generation's log
+ * (`<gen-id>/did.jsonl`), the account log (`id/did.jsonl`), and each
+ * encrypted collection's governing descriptor log.
  *
- * Neither is world-readable, and neither can be fetched from a test runner:
- * the roster and the annex sit behind the account's zcap authority, and a
- * transient visit's own authority lives only inside the page (or the
+ * The roster and the annex log are not world-readable, and neither can be
+ * fetched from a test runner: they sit behind the account's zcap authority,
+ * and a transient visit's own authority lives only inside the page (or the
  * harness actor's tab memory). So the assertions read the teaching server's
  * FileSystem backend off disk, the way `storeOracle.ts` already answers
  * "does this Space still exist?". A resource is one file inside its
@@ -24,8 +25,18 @@
  */
 import fs from 'node:fs/promises'
 import path from 'node:path'
-import { parseVersionedVm, vmFragmentOf } from '@interop/vh-resource-log'
-import { delegatedClientsPointer } from '@interop/wallet-core/clientAnnex'
+import {
+  latestAssertionRemovalIndex,
+  parseVersionedVm,
+  vmFragmentOf
+} from '@interop/vh-resource-log'
+import { fakeController } from '@interop/vh-resource-log/testing'
+import {
+  clientAnnexDidParts,
+  delegatedClientsPointer
+} from '@interop/wallet-core/clientAnnex'
+import { encryptedWalletCollectionIds } from '@interop/wallet-core/space/collections'
+import type { CollectionEncryption } from '@interop/was-client'
 import { storedSpacesDir } from './storeOracle'
 
 /**
@@ -292,9 +303,9 @@ export async function readAnnexGeneration({
 }
 
 /**
- * The annex Space id and generation id a `#DelegatedClients` pointer names.
- * The pointer is the annex DID, whose method-specific id ends
- * `:space:<spaceId>:<generationId>`.
+ * The annex Space id and generation id a `#DelegatedClients` pointer names,
+ * parsed by wallet-core's `clientAnnexDidParts`, which throws on a pointer
+ * that is not an annex DID.
  *
  * @param options {object}
  * @param options.pointer {string}   the pointer's `serviceEndpoint`
@@ -304,14 +315,8 @@ export function annexLocationOf({ pointer }: { pointer: string }): {
   annexSpaceId: string
   generationId: string
 } {
-  const match = /:space:([^:]+):(gen-[^:]+)$/.exec(pointer)
-  if (!match) {
-    throw new Error(`Not a client annex pointer: "${pointer}".`)
-  }
-  return {
-    annexSpaceId: decodeURIComponent(match[1]!),
-    generationId: match[2]!
-  }
+  const { spaceId, generationId } = clientAnnexDidParts({ did: pointer })
+  return { annexSpaceId: spaceId, generationId }
 }
 
 /**
@@ -526,18 +531,50 @@ function keysOf(
 }
 
 /**
- * The account log (`id/did.jsonl`) as the store holds it: each version's
- * `versionId` and the key multibases its document lists under
- * `assertionMethod` and under `capabilityInvocation`, oldest first. Each did:webvh entry's `state` is the
- * whole document at that version, and a verification method's fragment is
- * its public key multibase, so a reference and an embedded method compare as
- * key material.
+ * Each version of a stored account log: its `versionId` and the key
+ * multibases its document lists under `assertionMethod` and under
+ * `capabilityInvocation`, oldest first. Each did:webvh entry's `state` is
+ * the whole document at that version, and a verification method's fragment
+ * is its public key multibase, so a reference and an embedded method compare
+ * as key material.
+ *
+ * @param options {object}
+ * @param options.log {StoredLogEntry[]}   the stored account log
+ * @returns {Array<{ versionId: string, assertionKeys: Set<string>,
+ *   invocationKeys: Set<string> }>}
+ */
+export function accountLogVersionsOf({
+  log
+}: {
+  log: Array<StoredLogEntry & { state?: object }>
+}): Array<{
+  versionId: string
+  assertionKeys: Set<string>
+  invocationKeys: Set<string>
+}> {
+  return log.map(entry => {
+    const state = entry.state as
+      | {
+          assertionMethod?: Array<string | { id: string }>
+          capabilityInvocation?: Array<string | { id: string }>
+        }
+      | undefined
+    return {
+      versionId: entry.versionId,
+      assertionKeys: keysOf(state?.assertionMethod),
+      invocationKeys: keysOf(state?.capabilityInvocation)
+    }
+  })
+}
+
+/**
+ * The account log (`id/did.jsonl`) as the store holds it, through
+ * {@link accountLogVersionsOf}.
  *
  * @param options {object}
  * @param options.dataDir {string}   the server's data root
  * @param options.spaceId {string}   the account Space id
- * @returns {Promise<Array<{ versionId: string, assertionKeys: Set<string>,
- *   invocationKeys: Set<string> }>>}
+ * @returns {Promise<ReturnType<typeof accountLogVersionsOf>>}
  */
 export async function readAccountLogVersions({
   dataDir,
@@ -545,64 +582,124 @@ export async function readAccountLogVersions({
 }: {
   dataDir: string
   spaceId: string
-}): Promise<
-  Array<{
-    versionId: string
-    assertionKeys: Set<string>
-    invocationKeys: Set<string>
-  }>
-> {
-  const log = (await readStoredLog({
-    dataDir,
-    spaceId,
-    collectionId: 'id',
-    resourceId: 'did.jsonl'
-  })) as Array<
-    StoredLogEntry & {
-      state?: {
-        assertionMethod?: Array<string | { id: string }>
-        capabilityInvocation?: Array<string | { id: string }>
-      }
-    }
-  >
-  return log.map(entry => ({
-    versionId: entry.versionId,
-    assertionKeys: keysOf(entry.state?.assertionMethod),
-    invocationKeys: keysOf(entry.state?.capabilityInvocation)
-  }))
+}): Promise<ReturnType<typeof accountLogVersionsOf>> {
+  return accountLogVersionsOf({
+    log: await readStoredLog({
+      dataDir,
+      spaceId,
+      collectionId: 'id',
+      resourceId: 'did.jsonl'
+    })
+  })
 }
 
 /**
  * The account log's latest membership change: the largest index into its
  * versions whose `assertionMethod` key set lost a member against its
- * predecessor's, or `0` when no version ever removed one. This is the index
- * the sealing sweep compares a collection log's head against
- * (`latestAssertionRemovalIndex` in `@interop/vh-resource-log`), computed
- * here from the stored log rather than from a verified controller view.
+ * predecessor's, or `0` when no version ever removed one. The index is
+ * `latestAssertionRemovalIndex` from `@interop/vh-resource-log`, the one the
+ * sealing sweep compares a log's head against, run over a controller view
+ * built from the stored log rather than from a verified one.
  *
  * @param options {object}
- * @param options.versions {Array<{ assertionKeys: Set<string> }>}   from
- *   `readAccountLogVersions`
- * @returns {number}
+ * @param options.versions {Array<{ versionId: string,
+ *   assertionKeys: Set<string> }>}   from `readAccountLogVersions`
+ * @returns {Promise<number>}
  */
-export function latestAssertionRemovalIndexOf({
+export async function accountLogRemovalIndex({
   versions
 }: {
-  versions: Array<{ assertionKeys: Set<string> }>
-}): number {
-  let removalIndex = 0
-  versions.forEach(({ assertionKeys }, index) => {
-    if (index === 0) {
-      return
-    }
-    for (const key of versions[index - 1]!.assertionKeys) {
-      if (!assertionKeys.has(key)) {
-        removalIndex = index
-        break
-      }
-    }
+  versions: Array<{ versionId: string; assertionKeys: Set<string> }>
+}): Promise<number> {
+  return await latestAssertionRemovalIndex({
+    controller: fakeController({
+      versions: versions.map(version => ({
+        versionId: version.versionId,
+        keys: [...version.assertionKeys]
+      }))
+    })
   })
-  return removalIndex
+}
+
+/**
+ * Where a stored resource log's head entry anchors: the account log version
+ * its first proof names, and the key that signed it. A resource log entry's
+ * proof names its signer as a versioned verification-method DID URL,
+ * `<account did>?versionId=<account versionId>#<key multibase>`.
+ * `anchorIndex` is that versionId's position in the account log, or `-1`
+ * when the account log carries no such version.
+ *
+ * @param options {object}
+ * @param options.lines {string[]}   the log's stored lines, oldest first,
+ *   at least one
+ * @param options.accountVersionIds {string[]}   the account log's
+ *   versionIds, oldest first
+ * @returns {{ entries: number, anchorVersionId: string | undefined,
+ *   anchorIndex: number, signerKey: string | undefined }}
+ */
+function headAnchorOf({
+  lines,
+  accountVersionIds
+}: {
+  lines: string[]
+  accountVersionIds: string[]
+}): {
+  entries: number
+  anchorVersionId: string | undefined
+  anchorIndex: number
+  signerKey: string | undefined
+} {
+  const head = JSON.parse(lines[lines.length - 1]!) as {
+    proof?:
+      { verificationMethod?: string } | Array<{ verificationMethod?: string }>
+  }
+  const proof = Array.isArray(head.proof) ? head.proof[0] : head.proof
+  const parsed =
+    proof?.verificationMethod === undefined
+      ? undefined
+      : parseVersionedVm(proof.verificationMethod)
+  const anchorVersionId = parsed?.controllerVersionId
+  return {
+    entries: lines.length,
+    anchorVersionId,
+    anchorIndex:
+      anchorVersionId === undefined
+        ? -1
+        : accountVersionIds.indexOf(anchorVersionId),
+    signerKey: parsed?.keyMultibase
+  }
+}
+
+/**
+ * The user key roster log's head anchor (see {@link headAnchorOf}), or
+ * `undefined` when the account holds no roster.
+ *
+ * @param options {object}
+ * @param options.dataDir {string}   the server's data root
+ * @param options.spaceId {string}   the account Space id
+ * @param options.accountVersionIds {string[]}   the account log's
+ *   versionIds, oldest first
+ * @returns {Promise<ReturnType<typeof headAnchorOf> | undefined>}
+ */
+export async function readRosterLogHeadAnchor({
+  dataDir,
+  spaceId,
+  accountVersionIds
+}: {
+  dataDir: string
+  spaceId: string
+  accountVersionIds: string[]
+}): Promise<ReturnType<typeof headAnchorOf> | undefined> {
+  const text = await readStoredResource({
+    dataDir,
+    spaceId,
+    collectionId: 'key-map',
+    resourceId: 'user-key.jsonl'
+  })
+  const lines = (text ?? '').split('\n').filter(line => line.trim().length > 0)
+  return lines.length === 0
+    ? undefined
+    : headAnchorOf({ lines, accountVersionIds })
 }
 
 /**
@@ -634,56 +731,22 @@ export async function readCollectionLogHeadAnchor({
   spaceId: string
   collectionId: string
   accountVersionIds: string[]
-}): Promise<
-  | {
-      entries: number
-      anchorVersionId: string | undefined
-      anchorIndex: number
-      signerKey: string | undefined
-    }
-  | undefined
-> {
+}): Promise<ReturnType<typeof headAnchorOf> | undefined> {
   const lines = await readCollectionLogLines({
     dataDir,
     spaceId,
     collectionId
   })
-  if (lines.length === 0) {
-    return undefined
-  }
-  const head = JSON.parse(lines[lines.length - 1]!) as {
-    proof?:
-      { verificationMethod?: string } | Array<{ verificationMethod?: string }>
-  }
-  const proof = Array.isArray(head.proof) ? head.proof[0] : head.proof
-  const parsed =
-    proof?.verificationMethod === undefined
-      ? undefined
-      : parseVersionedVm(proof.verificationMethod)
-  const anchorVersionId = parsed?.controllerVersionId
-  return {
-    entries: lines.length,
-    anchorVersionId,
-    anchorIndex:
-      anchorVersionId === undefined
-        ? -1
-        : accountVersionIds.indexOf(anchorVersionId),
-    signerKey: parsed?.keyMultibase
-  }
+  return lines.length === 0
+    ? undefined
+    : headAnchorOf({ lines, accountVersionIds })
 }
 
 /**
  * The encrypted collections every signup provisions: the synced ones and the
- * `connections` directory.
+ * `connections` directory, as wallet-core's provision roster derives them.
  */
-export const ENCRYPTED_STANDARD_COLLECTIONS = [
-  'private-credentials',
-  'wallet-activity',
-  'contacts',
-  'contacts-history',
-  'app-keys',
-  'connections'
-]
+export const ENCRYPTED_STANDARD_COLLECTIONS = encryptedWalletCollectionIds()
 
 /**
  * Where every encrypted standard collection's descriptor log head stands
@@ -717,7 +780,7 @@ export async function readCollectionSealState({
 }> {
   const versions = await readAccountLogVersions({ dataDir, spaceId })
   const accountVersionIds = versions.map(version => version.versionId)
-  const removalIndex = latestAssertionRemovalIndexOf({ versions })
+  const removalIndex = await accountLogRemovalIndex({ versions })
   const heads: Record<
     string,
     Awaited<ReturnType<typeof readCollectionLogHeadAnchor>>
@@ -739,4 +802,63 @@ export async function readCollectionSealState({
       versions[versions.length - 1]?.invocationKeys ?? new Set(),
     heads
   }
+}
+
+/**
+ * A collection's governing descriptor log head as the store holds it: the
+ * head entry's `state`, the collection's whole `encryption` descriptor at its
+ * latest version. Undefined when the collection holds no log.
+ *
+ * @param options {object}
+ * @param options.dataDir {string}   the server's data root
+ * @param options.spaceId {string}   the account Space id
+ * @param options.collectionId {string}   e.g. `contacts`
+ * @returns {Promise<CollectionEncryption | undefined>}
+ */
+export async function readCollectionDescriptor({
+  dataDir,
+  spaceId,
+  collectionId
+}: {
+  dataDir: string
+  spaceId: string
+  collectionId: string
+}): Promise<CollectionEncryption | undefined> {
+  const lines = await readCollectionLogLines({
+    dataDir,
+    spaceId,
+    collectionId
+  })
+  if (lines.length === 0) {
+    return undefined
+  }
+  const head = JSON.parse(lines[lines.length - 1]!) as {
+    state?: CollectionEncryption
+  }
+  return head.state
+}
+
+/**
+ * The user key roster's head state: the whole roster descriptor at the log's
+ * latest version, or undefined when the account holds no roster.
+ *
+ * @param options {object}
+ * @param options.dataDir {string}   the server's data root
+ * @param options.spaceId {string}   the account Space id
+ * @returns {Promise<CollectionEncryption | undefined>}
+ */
+export async function readUserKeyRosterDescriptor({
+  dataDir,
+  spaceId
+}: {
+  dataDir: string
+  spaceId: string
+}): Promise<CollectionEncryption | undefined> {
+  const log = await readStoredLog({
+    dataDir,
+    spaceId,
+    collectionId: 'key-map',
+    resourceId: 'user-key.jsonl'
+  })
+  return log[log.length - 1]?.state as CollectionEncryption | undefined
 }

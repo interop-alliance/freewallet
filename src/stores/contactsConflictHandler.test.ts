@@ -189,10 +189,12 @@ describe('the contacts conflict binding', () => {
 
   it('treats a revision-only difference as a real difference', async () => {
     // The equality RxDB asks for before it resolves anything must count the
-    // server's validator: this replica's own write comes back off the feed
-    // byte-identical but under a new `etag`, and a state that compared equal
-    // would leave every later conditional write sending a stale `If-Match`.
-    // The package default compares it; nothing here overrides it.
+    // server's validator. Against a server that answers a write with a body,
+    // the ack write-back stamps the `etag` into the row and the feed echo then
+    // compares equal and is skipped. Against a server that answers `204`, the
+    // echo is the only carrier of the new `etag`, so a state that compared
+    // equal would leave every later conditional write sending a stale
+    // `If-Match`. The package default compares it; nothing here overrides it.
     const handler = createContactsConflictHandler({
       getCipher: () => undefined
     })

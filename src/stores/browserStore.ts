@@ -655,10 +655,11 @@ export class BrowserStore {
    * The entries come back in resource id order, which carries no meaning. A
    * caller that needs an order sorts the decrypted entries by a member of the
    * payload itself. No member of the resource replica is a usable order key.
-   * Its `updatedAt` is the server's content stamp once the echo arrives, and
-   * a `/meta`-only write leaves it unchanged. A locally edited resource
-   * replica holds a stamp triple no server minted until its echo arrives, so
-   * `updatedAtCounter` and `originId` are no order key either.
+   * Its `updatedAt` is the server's content stamp once the write's ack or
+   * the feed's echo arrives, and a `/meta`-only write leaves it unchanged. A
+   * locally edited resource replica holds a stamp triple no server minted
+   * until the ack or the echo arrives, so `updatedAtCounter` and `originId`
+   * are no order key either.
    *
    * A resource replica whose envelope will not decrypt under the current KAK
    * (corrupted, replicated verbatim from another identity, or written under a

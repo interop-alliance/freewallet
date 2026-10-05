@@ -317,3 +317,31 @@ export async function buildServerStateAccount<
   })
   return account as Awaited<ReturnType<ServerStateBuilders[Shape]>>
 }
+
+/**
+ * The torn state of an account left pointing at a deleted annex generation:
+ * the collection the document's `#DelegatedClients` pointer names is deleted
+ * by a live remembered actor, which root-invokes the auxiliary Space, the
+ * way a stale GC pass collects it. The actor stays live.
+ *
+ * @param options {object}
+ * @param options.actor {WalletActor}   a remembered actor on the account
+ * @returns {Promise<void>}
+ */
+export async function deletePointedGeneration({
+  actor
+}: {
+  actor: WalletActor
+}): Promise<void> {
+  const { pointedClientAnnexReach } = await import('@/session/annexReach')
+  await actor.run(async session => {
+    const reach = await pointedClientAnnexReach({
+      session,
+      pointer: session.profile.accountPointer!
+    })
+    await reach!.was
+      .space(reach!.spaceId)
+      .collection(reach!.generationId)
+      .delete()
+  })
+}

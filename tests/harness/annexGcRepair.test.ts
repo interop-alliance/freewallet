@@ -12,7 +12,10 @@
  */
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 import { startWalletHarness, type WalletHarness } from './walletHarness'
-import { buildEnrolledClientAccount } from './accountBuilder'
+import {
+  buildEnrolledClientAccount,
+  deletePointedGeneration
+} from './accountBuilder'
 import { readPointedAnnexGeneration } from '../shared/storedLogs'
 
 describe('the annex GC repairs a pointer naming a deleted generation', () => {
@@ -43,17 +46,7 @@ describe('the annex GC repairs a pointer naming a deleted generation', () => {
     })
     expect(breaker.kind).toBe('remembered')
     expect((await breaker.settled()).failures).toEqual([])
-    const { pointedClientAnnexReach } = await import('@/session/annexReach')
-    await breaker.run(async session => {
-      const reach = await pointedClientAnnexReach({
-        session,
-        pointer: session.profile.accountPointer!
-      })
-      await reach!.was
-        .space(reach!.spaceId)
-        .collection(reach!.generationId)
-        .delete()
-    })
+    await deletePointedGeneration({ actor: breaker })
     await breaker.logout()
 
     const repairer = await harness.logIn({

@@ -29,6 +29,9 @@ import {
   captureLocalStorageKeys,
   expectNoStorageResidue
 } from '../shared/storageResidue'
+import { auditInvariants, expectInvariantsHold } from '../shared/invariantAudit'
+import { accountSpaceIdFrom } from './storeOracle'
+import { WAS_E2E_DATA_DIR } from './wasDataDir'
 
 // Matches `playwright.was.config.ts` (APP_PORT). Manually created contexts do
 // not inherit the config's `use.baseURL`, so pass it explicitly.
@@ -103,6 +106,15 @@ test.describe.serial('transient login residue', () => {
       const baseline = await transientLogin(page, passphrase)
       await addCredentialViaPaste(page)
       await ceremonyEvents.expectNoFailedMenders({ page })
+      // The store-side half beside the mend report: the account the visit
+      // left audits clean over the run's own data dir. The rows that need a
+      // key holder are skipped here.
+      expectInvariantsHold({
+        audit: await auditInvariants({
+          dataDir: WAS_E2E_DATA_DIR,
+          spaceId: await accountSpaceIdFrom(page)
+        })
+      })
       // The logging seam's storage-tier invariant: the visit above ran the
       // wired loggers (the dev ring buffer holds events), and exercising
       // the dev handle's setFilter writes nothing browser-local -- the

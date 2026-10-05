@@ -44,6 +44,18 @@
   context it opens, and attaches them on failure. Logger lines and bare
   dependency lines are kept as separate lanes. It replaces the per-spec
   collectors in the two forget specs.
+- An invariant auditor for tests (`tests/shared/invariantAudit.ts`). A
+  census sorts the 36 declared mender-registry invariants into stored-state
+  (15), key-holder (13), browser-local (4), and unchecked (4) kinds.
+  `auditInvariants` reads an account off the server's data dir, runs the
+  key-holder rows through a port the harness builds from a live actor, and
+  returns the violated ids with evidence plus the skipped ids with reasons.
+  `expectInvariantsHold` holds the violated set to an exact allowlist. The
+  checks call the same wallet-core predicates and `src/session` detectors
+  the menders use. Harness tests audit every built account shape clean, and
+  two torn states (a pointer at a deleted annex generation, a signup whose
+  KMS stage was refused) violated with the expected ids; the WAS Playwright
+  transient-login spec audits beside `expectNoFailedMenders`.
 
 ### Changed
 
