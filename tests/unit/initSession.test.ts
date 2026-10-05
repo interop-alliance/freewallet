@@ -51,7 +51,11 @@ vi.mock('@/stores/storageManager', () => ({
 
 import { ensureKeystore } from '@/lib/kms'
 import { StorageManager } from '@/stores/storageManager'
-import { agentsFromSeed } from '@interop/was-client/identity'
+import {
+  BOOTSTRAP_HANDLE,
+  BOOTSTRAP_KEY_NAME,
+  agentsFromSeed
+} from '@interop/was-client/identity'
 import { initGuestSession, initSessionFromSeed } from '@/session/initSession'
 
 const KEYSTORE_ID = `${KMS_SERVER_URL}/keystores/z6QkKeystore`
@@ -67,8 +71,8 @@ function randomSeed(): Uint8Array {
 async function expectedDid(seed: Uint8Array): Promise<string> {
   const agent = await CapabilityAgent.fromSeed({
     seed,
-    handle: 'bootstrap',
-    keyName: 'boostrap-key'
+    handle: BOOTSTRAP_HANDLE,
+    keyName: BOOTSTRAP_KEY_NAME
   })
   return agent.id
 }

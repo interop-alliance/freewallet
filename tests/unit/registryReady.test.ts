@@ -19,7 +19,7 @@
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
-import { CapabilityAgent } from '@interop/capability-agent'
+import { agentsFromSeed } from '@interop/was-client/identity'
 
 const state = vi.hoisted(() => ({
   wasUrl: 'https://was.example.test' as string | undefined,
@@ -190,12 +190,8 @@ function makeFakeStorage() {
 }
 
 async function didFromSeed(seed: Uint8Array): Promise<string> {
-  const agent = await CapabilityAgent.fromSeed({
-    seed,
-    handle: 'bootstrap',
-    keyName: 'boostrap-key'
-  })
-  return agent.id
+  const { controllerDid } = await agentsFromSeed({ seed })
+  return controllerDid
 }
 
 function randomSeed(): Uint8Array {

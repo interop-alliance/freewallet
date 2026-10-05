@@ -59,6 +59,11 @@
 
 ### Changed
 
+- **BREAKING**: `@interop/was-client` moves to `^0.92.0` and
+  `@interop/wallet-core` to `^0.102.0`, which rename the data-identity key
+  name to `'bootstrap-key'`. Every wallet client's did:key derives from its
+  seed under that name, so every existing account's identity changes. No
+  migration is provided; dev and e2e WAS data dirs must be re-created.
 - Every read of a sibling unlock credential's Space mints a GET-only child
   of the entry's management zcap on both kinds of acting session; a
   remembered session no longer invokes the stored multi-verb parent

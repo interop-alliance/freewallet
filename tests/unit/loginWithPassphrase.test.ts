@@ -12,7 +12,7 @@
  * check exercises the true did:key.
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { CapabilityAgent } from '@interop/capability-agent'
+import { agentsFromSeed } from '@interop/was-client/identity'
 
 // The deployment axis: a WAS server or the local-only build. It decides
 // whether a popup's descriptor cache is a cache at all, so the popup tests
@@ -141,12 +141,8 @@ let fakeStorage = makeFakeStorage()
  * keyring record carries for its enrolling client.
  */
 async function didFromSeed(seed: Uint8Array): Promise<string> {
-  const agent = await CapabilityAgent.fromSeed({
-    seed,
-    handle: 'bootstrap',
-    keyName: 'boostrap-key'
-  })
-  return agent.id
+  const { controllerDid } = await agentsFromSeed({ seed })
+  return controllerDid
 }
 
 function randomSeed(): Uint8Array {
