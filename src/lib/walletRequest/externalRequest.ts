@@ -36,15 +36,8 @@ import {
   type ExistingCollections,
   type ResolvedGrant
 } from './processZcaps'
+import { EXTERNAL_REQUEST_URL_PARAM } from './externalRequestPath'
 import type { IVPRDetails, WalletRequestProfile } from './types'
-
-/**
- * The deep-link route the CLI prints (`--wallet <url>`), and the query
- * parameter carrying the percent-encoded interaction URL. Both are published
- * conventions once a skill ships them.
- */
-export const EXTERNAL_REQUEST_PATH = '/external/request'
-export const EXTERNAL_REQUEST_URL_PARAM = 'url'
 
 /**
  * The `origin` recorded on the Grant activity for a grant answered through
@@ -123,19 +116,6 @@ export class ExternalRequestRefusedError extends Error {
     this.name = 'ExternalRequestRefusedError'
     this.refusal = refusal
   }
-}
-
-/**
- * The in-app path for an interaction URL: the deep link the CLI prints, and
- * where the paste box and the QR scanner send one.
- *
- * @param options {object}
- * @param options.url {string}   the interaction URL
- * @returns {string}
- */
-export function externalRequestPath({ url }: { url: string }): string {
-  const params = new URLSearchParams({ [EXTERNAL_REQUEST_URL_PARAM]: url })
-  return `${EXTERNAL_REQUEST_PATH}?${params.toString()}`
 }
 
 /**

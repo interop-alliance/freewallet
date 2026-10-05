@@ -127,6 +127,11 @@
 
 ### Fixed
 
+- `pnpm run test:e2e:was` loads every spec again. The interaction-URL deep
+  link builder (`externalRequestPath`) and its route constants moved to the
+  dependency-free `src/lib/walletRequest/externalRequestPath.ts`, so the
+  agent-grant spec no longer pulls the logging wiring (and its
+  `import.meta.env` read) into the Playwright runner.
 - The annex GC on a remembered login no longer deletes the generation the
   account points at when another client swapped it after this login read the
   account log. It compares against the pointer wallet-core re-reads before

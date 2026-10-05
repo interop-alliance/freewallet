@@ -14,7 +14,6 @@ import {
   barredGrants,
   EXTERNAL_REQUEST_ORIGIN,
   ExternalRequestRefusedError,
-  externalRequestPath,
   interactionUrlFromSearch,
   namesExistingCollectionByUrl,
   openExternalRequest,
@@ -22,6 +21,7 @@ import {
   refuseEnrolledClientController,
   unreadableGrants
 } from './externalRequest'
+import { externalRequestPath } from './externalRequestPath'
 import {
   existingCollectionsFrom,
   resolveGrants,

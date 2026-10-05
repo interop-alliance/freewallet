@@ -29,7 +29,7 @@ import { LoadingSpinner } from '@/components/LoadingSpinner'
 import { SearchField } from '@/components/SearchField'
 import { ScanCredentialQrDialog } from '@/components/ScanCredentialQrDialog'
 import type { WalletInputOutcome } from '@/lib/resolveWalletInput'
-import { externalRequestPath } from '@/lib/walletRequest/externalRequest'
+import { externalRequestPath } from '@/lib/walletRequest/externalRequestPath'
 import type { StoredCredential } from '@/types/credential'
 import { createLogger } from '@/lib/log'
 import {

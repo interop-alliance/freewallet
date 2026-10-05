@@ -61,6 +61,8 @@ src/lib/            Pure business logic (no React)
     externalRequest.ts  The interaction-URL entry point's pure half: the
                     deep-link parser, exchange opening, and pre-consent
                     refusal matrix
+    externalRequestPath.ts  The deep-link route and query-parameter
+                    contract, dependency free so e2e specs can import it
     storeRequest.ts The store popup's pre-login DID-Auth check
     appConnect.ts   App Connect processing: the app-key credential found or
                     minted, and the capabilities delegated to it

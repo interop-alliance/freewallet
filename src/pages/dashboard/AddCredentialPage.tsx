@@ -11,7 +11,7 @@ import { DashboardLayout } from '@/components/DashboardLayout'
 import { CredentialJsonUploadPanel } from '@/components/CredentialJsonFileUpload'
 import { resolveCredentialsFromJsonFiles } from '@/lib/resolveCredentialJsonFiles'
 import { resolveWalletInput } from '@/lib/resolveWalletInput'
-import { externalRequestPath } from '@/lib/walletRequest/externalRequest'
+import { externalRequestPath } from '@/lib/walletRequest/externalRequestPath'
 import { resolveCredentialsInputErrorMessage } from '@/lib/resolveCredentialsInputErrorMessage'
 import { dashboardStyles } from '@/styles/appStyles'
 

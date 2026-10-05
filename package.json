@@ -52,7 +52,7 @@
     "@interop/wallet-core": "^0.101.1",
     "@interop/wallet-request": "^0.4.1",
     "@interop/was-client": "^0.91.0",
-    "@interop/was-sync": "^0.8.1",
+    "@interop/was-sync": "^0.8.2",
     "@interop/webkms-client": "^15.0.2",
     "@interop/x25519-key-agreement-key": "^5.4.1",
     "@mui/lab": "9.0.0-beta.8",

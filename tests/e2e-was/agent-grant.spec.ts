@@ -18,7 +18,7 @@ import {
   pollEphemeralExchange
 } from '@interop/wallet-request'
 import type { IZcap } from '@interop/wallet-request'
-import { externalRequestPath } from '@/lib/walletRequest/externalRequest'
+import { externalRequestPath } from '@/lib/walletRequest/externalRequestPath'
 import {
   fillSettled,
   readConnectionsDirectory,
