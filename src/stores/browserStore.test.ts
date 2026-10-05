@@ -8,6 +8,8 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { addSink, captureSink } from '@interop/logger'
 import type { IVerifiableCredential } from '@interop/data-integrity-core'
+import { createRxDatabase, type RxCollection } from 'rxdb/plugins/core'
+import { replicateRxCollection } from 'rxdb/plugins/replication'
 import { getRxStorageMemory } from 'rxdb/plugins/storage-memory'
 import type { User } from '@/types/auth'
 import { cidFrom } from '@interop/was-client/sync'
@@ -309,20 +311,56 @@ describe('BrowserStore (local active replica)', () => {
     expect(await localStore.hasPublicCredential({ cid })).toBe(true)
   })
 
-  it('lists history items oldest first', async () => {
+  it("lists history items oldest first by the activity's own created", async () => {
     const { localStore } = await initLocalStore()
+    // Resource id order and the rows' own `updatedAt` both run against the
+    // activities' `created`, so only a sort on the payload passes.
     await localStore.addHistoryItem({
-      resourceId: 'first',
-      activity: { summary: 'one' }
+      resourceId: 'b-first',
+      activity: { summary: 'one', created: '2026-01-01T00:00:00.000Z' }
     })
     await localStore.addHistoryItem({
-      resourceId: 'second',
-      activity: { summary: 'two' }
+      resourceId: 'a-second',
+      activity: { summary: 'two', created: '2026-01-02T00:00:00.000Z' }
+    })
+    await localStore.rxCollection('walletActivity').insert({
+      id: 'c-zeroth',
+      updatedAt: '2027-01-01T00:00:00.000Z',
+      data: { summary: 'zero', created: '2025-12-31T00:00:00.000Z' } as Json
     })
 
     const { entries: items } = await localStore.listHistoryItems()
-    expect(items.map(({ doc }) => doc.summary)).toEqual(['one', 'two'])
-    expect(items.map(({ id }) => id)).toEqual(['first', 'second'])
+    expect(items.map(({ doc }) => doc.summary)).toEqual(['zero', 'one', 'two'])
+    expect(items.map(({ id }) => id)).toEqual([
+      'c-zeroth',
+      'b-first',
+      'a-second'
+    ])
+  })
+
+  it("lists contacts oldest first by the head's own updatedAt", async () => {
+    const { localStore } = await initLocalStore()
+    // The rows' own `updatedAt` and their resource ids both run against the
+    // heads' payload `updatedAt`.
+    const heads = [
+      { id: 'a-newer', at: '2026-03-01T00:00:00.000Z', row: '2026-01-01' },
+      { id: 'b-older', at: '2026-02-01T00:00:00.000Z', row: '2026-01-02' }
+    ]
+    for (const head of heads) {
+      await localStore.rxCollection('contacts').insert({
+        id: head.id,
+        updatedAt: `${head.row}T00:00:00.000Z`,
+        data: {
+          contactId: head.id,
+          updatedAt: head.at,
+          writerId: 'writer-0',
+          contact: { displayName: head.id }
+        } as Json
+      })
+    }
+
+    const contacts = await localStore.listContacts()
+    expect(contacts.map(({ id }) => id)).toEqual(['b-older', 'a-newer'])
   })
 
   it('throws a clear error when collections are not initialized', async () => {
@@ -396,6 +434,31 @@ describe('BrowserStore (encrypted collections)', () => {
       await localStore.rxCollection('privateCredentials').find().exec()
     ).toHaveLength(3)
     expect(await localStore.listCredentials()).toHaveLength(3)
+  })
+
+  it('lists credentials oldest first by validFrom, then by the proof created', async () => {
+    const { localStore } = await initLocalStore({ ciphers: encryptedCiphers() })
+    const newest = {
+      ...makeCredential('Newest'),
+      validFrom: '2026-03-01T00:00:00Z'
+    }
+    const oldest = {
+      ...makeCredential('Oldest'),
+      proof: { type: 'DataIntegrityProof', created: '2026-01-01T00:00:00Z' }
+    } as unknown as IVerifiableCredential
+    const middle = {
+      ...makeCredential('Middle'),
+      validFrom: '2026-02-01T00:00:00Z',
+      proof: { type: 'DataIntegrityProof', created: '2025-01-01T00:00:00Z' }
+    } as unknown as IVerifiableCredential
+    for (const credential of [newest, oldest, middle]) {
+      const cid = await cidFrom({ doc: credential })
+      await localStore.addCredential({ cid, credential })
+    }
+    const names = (await localStore.listCredentials()).map(
+      ({ vc }) => (vc.credentialSubject as { name: string }).name
+    )
+    expect(names).toEqual(['Oldest', 'Middle', 'Newest'])
   })
 
   it('re-inserts after a delete (cid index is maintained on removal)', async () => {
@@ -583,13 +646,22 @@ describe('BrowserStore (encrypted collections)', () => {
 
   it('stores history as envelopes, preserving activity ids and order', async () => {
     const { localStore } = await initLocalStore({ ciphers: encryptedCiphers() })
-    await localStore.addHistoryItem({
-      resourceId: 'first',
-      activity: { id: 'first', summary: 'one' }
-    })
+    // Written newest first, so insertion order runs against `created`.
     await localStore.addHistoryItem({
       resourceId: 'second',
-      activity: { id: 'second', summary: 'two' }
+      activity: {
+        id: 'second',
+        summary: 'two',
+        created: '2026-01-02T00:00:00.000Z'
+      }
+    })
+    await localStore.addHistoryItem({
+      resourceId: 'first',
+      activity: {
+        id: 'first',
+        summary: 'one',
+        created: '2026-01-01T00:00:00.000Z'
+      }
     })
 
     const resources = await localStore
@@ -2629,5 +2701,171 @@ describe('wipeStorage (cross-tab teardown and verified completion)', () => {
     await wiper.wipeStorage()
     // The sibling's close() runs off the message task, asynchronously.
     await vi.waitFor(() => expect(sibling.db).toBeUndefined())
+  })
+})
+
+/**
+ * The synced-doc schema an earlier was-sync shipped at the same RxDB schema
+ * version: a required integer `version` member in place of today's server
+ * write stamp. RxDB hashes it differently from `syncedDocSchema()`.
+ */
+const earlierSyncedDocSchema = {
+  version: 0,
+  primaryKey: 'id',
+  type: 'object',
+  properties: {
+    id: { type: 'string', maxLength: 256 },
+    updatedAt: { type: 'string', maxLength: 64 },
+    version: { type: 'integer', minimum: 0 },
+    data: { type: 'object', additionalProperties: true }
+  },
+  required: ['id', 'updatedAt', 'version'],
+  indexes: ['updatedAt']
+} as const
+
+/**
+ * Runs one pull-only replication of a collection to its initial sync, then
+ * cancels it. The pull handler serves `documents` once under a checkpoint
+ * that lies past every row, and records the checkpoint each pull resumed
+ * from. RxDB stores that checkpoint in the collection's
+ * `rx-replication-meta-*` storage instance, keyed by the identifier.
+ *
+ * @param options {object}
+ * @param options.collection {RxCollection}
+ * @param options.documents {Array<Record<string, unknown>>}
+ * @returns {Promise<unknown[]>}   the checkpoint each pull resumed from
+ */
+async function runPullOnlyReplication({
+  collection,
+  documents
+}: {
+  collection: RxCollection
+  documents: Array<Record<string, unknown>>
+}): Promise<unknown[]> {
+  const resumedFrom: unknown[] = []
+  let served = false
+  const replication = replicateRxCollection({
+    collection,
+    replicationIdentifier: 'schema-forget-test',
+    live: false,
+    pull: {
+      async handler(lastCheckpoint: unknown) {
+        resumedFrom.push(lastCheckpoint)
+        if (served) {
+          return { documents: [], checkpoint: lastCheckpoint }
+        }
+        served = true
+        return {
+          documents: documents.map(doc => ({ ...doc, _deleted: false })),
+          checkpoint: { cursor: 'past-every-row' }
+        }
+      }
+    }
+  })
+  await replication.awaitInitialReplication()
+  await replication.cancel()
+  return resumedFrom
+}
+
+describe('BrowserStore replica whose stored schema RxDB refuses', () => {
+  it('forgets the whole replica, its replication checkpoint with it', async () => {
+    const storage = getRxStorageMemory()
+    const dbPrefix = 'schema-forget-a'
+    const user: User = { id: 'did:key:z6MkSchemaForget' }
+    // A replica written under the earlier schema, holding one row and a
+    // replication checkpoint past it, then closed as a logout leaves it.
+    const earlier = await createRxDatabase({
+      name: `${dbPrefix}-wallet-db`,
+      storage,
+      multiInstance: false
+    })
+    const { privateCredentials } = await earlier.addCollections({
+      privateCredentials: { schema: earlierSyncedDocSchema }
+    })
+    const firstRun = await runPullOnlyReplication({
+      collection: privateCredentials,
+      documents: [
+        {
+          id: 'earlier-row',
+          updatedAt: '2026-01-01T00:00:00.000Z',
+          version: 3,
+          data: { note: 'earlier' }
+        }
+      ]
+    })
+    expect(firstRun[0]).toBeUndefined()
+    expect(await privateCredentials.find().exec()).toHaveLength(1)
+    await earlier.close()
+
+    const store = new BrowserStore({ dbPrefix, storage })
+    openStores.push(store)
+    const capture = captureSink()
+    const removeSink = addSink(capture.sink)
+    try {
+      await store.ensureUserCollections({ user })
+    } finally {
+      removeSink()
+    }
+
+    // The row is gone, and so is the checkpoint: the first pull of the
+    // same replication starts from nothing rather than past every row.
+    const collection = store.rxCollection('privateCredentials')
+    expect(await collection.find().exec()).toEqual([])
+    const secondRun = await runPullOnlyReplication({
+      collection,
+      documents: []
+    })
+    expect(secondRun[0]).toBeUndefined()
+    const forgetEvent = capture.events.find(event =>
+      JSON.stringify(event).includes('Forgetting the local replica')
+    )
+    expect(JSON.stringify(forgetEvent)).toContain(`${dbPrefix}-wallet-db`)
+    expect(JSON.stringify(forgetEvent)).toContain('privateCredentials')
+  })
+
+  it('keeps a replica whose stored schema matches, checkpoint included', async () => {
+    const storage = getRxStorageMemory()
+    const dbPrefix = 'schema-forget-b'
+    const user: User = { id: 'did:key:z6MkSchemaKeep' }
+    const writer = new BrowserStore({ dbPrefix, storage })
+    await writer.ensureUserCollections({ user })
+    const credential = makeCredential('Kept')
+    const cid = await cidFrom({ doc: credential })
+    await writer.addCredential({ cid, credential })
+    const firstRun = await runPullOnlyReplication({
+      collection: writer.rxCollection('publicCredentials'),
+      documents: [
+        {
+          id: 'pulled-row',
+          updatedAt: '2026-01-01T00:00:00.000Z',
+          data: { note: 'pulled' }
+        }
+      ]
+    })
+    expect(firstRun[0]).toBeUndefined()
+    await writer.close()
+
+    const store = new BrowserStore({ dbPrefix, storage })
+    openStores.push(store)
+    const capture = captureSink()
+    const removeSink = addSink(capture.sink)
+    try {
+      await store.ensureUserCollections({ user })
+    } finally {
+      removeSink()
+    }
+
+    expect(await store.listCredentials()).toEqual([{ cid, vc: credential }])
+    expect(
+      await store.rxCollection('publicCredentials').findOne('pulled-row').exec()
+    ).not.toBeNull()
+    const secondRun = await runPullOnlyReplication({
+      collection: store.rxCollection('publicCredentials'),
+      documents: []
+    })
+    expect(secondRun[0]).toEqual({ cursor: 'past-every-row' })
+    expect(JSON.stringify(capture.events)).not.toContain(
+      'Forgetting the local replica'
+    )
   })
 })

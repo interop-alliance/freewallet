@@ -2,8 +2,8 @@
  * BrowserStore: the wallet's always-on local storage backend -- the ACTIVE
  * replica. Owns one RxDB (Dexie/IndexedDB) database per user holding every
  * standard wallet collection (`private-credentials`, `public-credentials`,
- * `wallet-activity`) on the generic synced-doc schema
- * (`{ id, updatedAt, data }`). All page reads and writes land here,
+ * `wallet-activity`) on the generic synced-doc schema (`{ id, updatedAt,
+ * data }` plus the server's write stamp). All page reads and writes land here,
  * online or offline, guest or not; when a remote WAS Space is configured, the
  * sync controller replicates these same RxDB collections to it in the
  * background (see `src/stores/syncController.ts`).
@@ -46,6 +46,7 @@ import { classifyDecryptFailure } from '@/lib/decryptFailure'
 import type { StoredAppKey, StoredCredential } from '@/types/credential'
 import type { StoredContact } from '@/types/contact'
 import type { WalletActivity } from '@/stores/storageManager'
+import { errorNameOf } from '@interop/wallet-core/menders'
 import { createLogger } from '@/lib/log'
 
 const log = createLogger('fw:storage:browser')
@@ -92,6 +93,55 @@ const contactsHistoryIndexSchema = {
   required: ['id', 'contactId'],
   indexes: ['contactId']
 } as const
+
+/**
+ * The timestamp a credential listing orders by: the credential's `validFrom`,
+ * or its proof's `created` when it has no `validFrom`. A VC with several
+ * proofs takes the first one's.
+ *
+ * @param vc {IVerifiableCredential}
+ * @returns {string | undefined}
+ */
+function credentialTimestamp(vc: IVerifiableCredential): string | undefined {
+  if (vc.validFrom !== undefined) {
+    return vc.validFrom
+  }
+  const proof = Array.isArray(vc.proof) ? vc.proof[0] : vc.proof
+  return proof?.created
+}
+
+/**
+ * Orders two timestamps a decrypted payload carries, oldest first. They are
+ * compared as parsed instants. When either side is absent or unparseable, or
+ * the instants are equal, the raw strings are compared instead, and an absent
+ * one sorts first. A list read sorts on these payload members because no
+ * member of the resource replica itself is an order key (see
+ * `BrowserStore.#decryptedResources`).
+ *
+ * @param first {string | undefined}
+ * @param second {string | undefined}
+ * @returns {number}
+ */
+function compareTimestampsOldestFirst(
+  first: string | undefined,
+  second: string | undefined
+): number {
+  const firstInstant = Date.parse(first ?? '')
+  const secondInstant = Date.parse(second ?? '')
+  if (
+    Number.isFinite(firstInstant) &&
+    Number.isFinite(secondInstant) &&
+    firstInstant !== secondInstant
+  ) {
+    return firstInstant - secondInstant
+  }
+  const firstStamp = first ?? ''
+  const secondStamp = second ?? ''
+  if (firstStamp === secondStamp) {
+    return 0
+  }
+  return firstStamp < secondStamp ? -1 : 1
+}
 
 /**
  * The local active replica of the wallet's standard collections, stored in
@@ -285,6 +335,18 @@ export class BrowserStore {
    * with one reads the remote collection directly, so its database opens no
    * collection for it (RxDB caps the collections one process holds open).
    *
+   * RxDB stores a hash of each collection's schema. It refuses (`DB6`) to
+   * open a collection whose stored hash differs at the same schema version.
+   * The synced-doc schema ships at version 0 with no migration strategy, so
+   * a replica created under an earlier shape is forgotten here. The whole
+   * database is removed, and the collections are added again on a fresh one.
+   * Removing the database also removes each collection's connected storages.
+   * Those are the `rx-replication-meta-*` instances that hold the replication
+   * checkpoint, so the next replication re-pulls every Resource from the
+   * Space. A guest or no-WAS session has no Space, so its forgotten replica
+   * is lost. Writes not yet pushed when the replica is forgotten are lost
+   * too. The forget runs once per call, and a second refusal propagates.
+   *
    * @param options {object}
    * @param options.user {User}
    * @param [options.localDirectory] {boolean}   open the local `connections`
@@ -298,7 +360,51 @@ export class BrowserStore {
     user: User
     localDirectory?: boolean
   }) {
-    const db = await createRxDatabase({
+    let db = await this.#createDatabase()
+    try {
+      await this.#addCollections({ db, localDirectory })
+    } catch (err) {
+      if (errorNameOf(err) !== 'RxError (DB6)') {
+        throw err
+      }
+      log.warn(
+        'Forgetting the local replica, since its stored schema no longer ' +
+          'matches. The Space is re-pulled.',
+        {
+          database: db.name,
+          collection: (err as { parameters?: { collection?: unknown } })
+            .parameters?.collection,
+          err
+        }
+      )
+      // A sibling tab still on the earlier schema holds the database open,
+      // and an IndexedDB delete blocks behind that connection. This store's
+      // own listener closes first, so the broadcast cannot close the
+      // database opened below.
+      this.#teardownChannel?.close()
+      this.#teardownChannel = undefined
+      this.#broadcastTeardown()
+      await db.remove()
+      this.#collections = undefined
+      this.#contactsHistoryIndex = undefined
+      this.#connections = undefined
+      db = await this.#createDatabase()
+      await this.#addCollections({ db, localDirectory })
+    }
+    this.db = db
+    this.#listenForTeardown()
+    log.info('Initialized local wallet collections for user', {
+      userId: user.id
+    })
+  }
+
+  /**
+   * Creates (or opens) the RxDB database that holds this user's replica.
+   *
+   * @returns {Promise<RxDatabase>}
+   */
+  async #createDatabase(): Promise<RxDatabase> {
+    return await createRxDatabase({
       name: `${this.dbPrefix}-wallet-db`,
       storage: this.#storage,
       closeDuplicates: true,
@@ -308,6 +414,27 @@ export class BrowserStore {
       // this tab directly.
       multiInstance: false
     })
+  }
+
+  /**
+   * Adds the standard collections, the local-only `contacts-history`
+   * projection index, and the local `connections` directory when asked, to
+   * an open database, and holds them on this store. Throws RxDB's `DB6`
+   * refusal when a stored collection's schema hash differs from the one
+   * passed here.
+   *
+   * @param options {object}
+   * @param options.db {RxDatabase}
+   * @param options.localDirectory {boolean}
+   * @returns {Promise<void>}
+   */
+  async #addCollections({
+    db,
+    localDirectory
+  }: {
+    db: RxDatabase
+    localDirectory: boolean
+  }): Promise<void> {
     // One local collection per standard wallet collection, all on the generic
     // synced-doc schema. `contacts` -- the one mutable, overwritten-in-place
     // collection -- gets the shared last-write-wins conflict handler; the
@@ -351,11 +478,6 @@ export class BrowserStore {
       this.#connections =
         directoryCollections.connections as unknown as RxCollection<SyncedDoc>
     }
-    this.db = db
-    this.#listenForTeardown()
-    log.info('Initialized local wallet collections for user', {
-      userId: user.id
-    })
   }
 
   /**
@@ -431,11 +553,12 @@ export class BrowserStore {
   }
 
   /**
-   * Inserts a resource replica if absent (or previously deleted). Local writes
-   * stamp `updatedAt` so new resource replicas sort into the change feed;
-   * `version` is server-authoritative and unknown until a pull, so `0` is the
-   * local placeholder (the replication create path sends `If-None-Match: *`,
-   * not this value).
+   * Inserts a resource replica if absent (or previously deleted). A local
+   * write carries only `id`, a wall-clock `updatedAt`, the optional `epoch`,
+   * and `data`. The server mints the rest of the write stamp
+   * (`updatedAtCounter`, `originId`, and the nested `meta` stamp), and the
+   * write's ack or the feed's echo fills it in, replacing `updatedAt` with the
+   * server's value. The replication create path sends `If-None-Match: *`.
    *
    * @param options {object}
    * @param options.logicalKey {string}
@@ -524,11 +647,18 @@ export class BrowserStore {
 
   /**
    * The single decrypt-read skeleton shared by every collection: reads the live
-   * resource replicas in the requested order, decrypting envelope resource
-   * replicas (through the per-collection cache) and passing legacy plaintext
-   * ones through, and sorts each decrypt failure into one of four buckets so a
-   * caller stays tolerant of a single bad resource replica rather than failing
-   * the whole read.
+   * resource replicas, decrypting envelope resource replicas (through the
+   * per-collection cache) and passing legacy plaintext ones through, and sorts
+   * each decrypt failure into one of four buckets so a caller stays tolerant of
+   * a single bad resource replica rather than failing the whole read.
+   *
+   * The entries come back in resource id order, which carries no meaning. A
+   * caller that needs an order sorts the decrypted entries by a member of the
+   * payload itself. No member of the resource replica is a usable order key.
+   * Its `updatedAt` is the server's content stamp once the echo arrives, and
+   * a `/meta`-only write leaves it unchanged. A locally edited resource
+   * replica holds a stamp triple no server minted until its echo arrives, so
+   * `updatedAtCounter` and `originId` are no order key either.
    *
    * A resource replica whose envelope will not decrypt under the current KAK
    * (corrupted, replicated verbatim from another identity, or written under a
@@ -563,7 +693,6 @@ export class BrowserStore {
    *
    * @param options {object}
    * @param options.logicalKey {string}
-   * @param options.sort {'asc' | 'desc'}   `updatedAt` order
    * @param [options.cache] {boolean}   memoize decrypts by resource id
    *   (default true); pass false for a mutable, rewritten-in-place collection
    * @returns {Promise<{ entries: Array<{ resourceId: string; data: Json;
@@ -573,11 +702,9 @@ export class BrowserStore {
    */
   async #decryptedResources({
     logicalKey,
-    sort,
     cache = true
   }: {
     logicalKey: string
-    sort: 'asc' | 'desc'
     cache?: boolean
   }): Promise<{
     entries: Array<{ resourceId: string; data: Json; fromEnvelope: boolean }>
@@ -586,9 +713,7 @@ export class BrowserStore {
     noEpochKeyResourceIds: string[]
     integrityResourceIds: string[]
   }> {
-    const docs = await this.rxCollection(logicalKey)
-      .find({ sort: [{ updatedAt: sort }] })
-      .exec()
+    const docs = await this.rxCollection(logicalKey).find().exec()
     const cipher = this.#ciphers?.[logicalKey]
     const decryptCache = cache ? this.#cacheFor(logicalKey) : undefined
     const entries: Array<{
@@ -833,9 +958,11 @@ export class BrowserStore {
   }
 
   /**
-   * Reads every live `private-credentials` resource replica, oldest first,
-   * decrypting envelope resource replicas and passing legacy plaintext ones
-   * through. Each entry keeps its resource id (the write/delete key) alongside
+   * Reads every live `private-credentials` resource replica, decrypting
+   * envelope resource replicas and passing legacy plaintext ones through. The
+   * entries are sorted oldest first by the credential's `validFrom`, or by its
+   * proof's `created` when it has no `validFrom`. Each entry keeps its
+   * resource id (the write/delete key) alongside
    * the credential's content cid (the page-facing key): for an envelope
    * resource replica the cid is recomputed from the decrypted VC, for a
    * plaintext one it IS the resource id.
@@ -882,10 +1009,7 @@ export class BrowserStore {
       unknownEpochResourceIds,
       noEpochKeyResourceIds,
       integrityResourceIds
-    } = await this.#decryptedResources({
-      logicalKey: 'privateCredentials',
-      sort: 'asc'
-    })
+    } = await this.#decryptedResources({ logicalKey: 'privateCredentials' })
     const entries: Array<{
       resourceId: string
       cid: string
@@ -919,6 +1043,12 @@ export class BrowserStore {
     }
     this.#credentialCidIndex = cidIndex
     this.#credentialsIndexed = true
+    entries.sort((first, second) =>
+      compareTimestampsOldestFirst(
+        credentialTimestamp(first.vc),
+        credentialTimestamp(second.vc)
+      )
+    )
     return {
       entries,
       undecryptableResourceIds,
@@ -1105,8 +1235,10 @@ export class BrowserStore {
   }
 
   /**
-   * Lists the stored VCs, oldest first, collapsing duplicate resource replicas
-   * that carry the same credential (same content cid) to their oldest copy.
+   * Lists the stored VCs in resource id order, collapsing duplicate resource
+   * replicas that carry the same credential (same content cid) to one copy. A
+   * VC carries no timestamp of its own, so the list has no chronological
+   * order.
    *
    * @returns {Promise<Array<StoredCredential>>}
    */
@@ -1135,8 +1267,10 @@ export class BrowserStore {
   }
 
   /**
-   * Reads every live `app-keys` resource replica, oldest first,
-   * resolving each to its content cid + decrypted app-key credential -- the
+   * Reads every live `app-keys` resource replica in resource id order (an
+   * app-key credential carries no timestamp of its own, and every caller
+   * matches by cid), resolving each to its content cid + decrypted app-key
+   * credential -- the
    * app-key sibling of {@link _credentialEntries}, without the session-wide cid
    * index: the collection holds one resource replica per connected app, so a
    * full scan per call is cheap. Envelope resource replicas are decrypted
@@ -1166,10 +1300,7 @@ export class BrowserStore {
       unknownEpochResourceIds,
       noEpochKeyResourceIds,
       integrityResourceIds
-    } = await this.#decryptedResources({
-      logicalKey: 'appKeys',
-      sort: 'asc'
-    })
+    } = await this.#decryptedResources({ logicalKey: 'appKeys' })
     const entries: Array<{
       resourceId: string
       cid: string
@@ -1236,8 +1367,8 @@ export class BrowserStore {
   }
 
   /**
-   * Lists the stored app-key credentials, oldest first, collapsing duplicate
-   * resource replicas carrying the same credential to their oldest copy.
+   * Lists the stored app-key credentials in resource id order, collapsing
+   * duplicate resource replicas carrying the same credential to one copy.
    *
    * @returns {Promise<Array<StoredAppKey>>}
    */
@@ -1450,11 +1581,12 @@ export class BrowserStore {
   }
 
   /**
-   * Lists the `wallet-activity` log entries, oldest first, decrypting envelope
-   * resource replicas and passing legacy plaintext ones through. Each item's
-   * `id` is the activity's own id (a uuid minted at record time); duplicate
-   * resource replicas carrying the same activity are collapsed to their oldest
-   * copy.
+   * Lists the `wallet-activity` log entries, oldest first by the activity's
+   * own `created` timestamp, decrypting envelope resource replicas and passing
+   * legacy plaintext ones through. An activity with no `created` sorts first.
+   * Each item's `id` is the activity's own id (a uuid minted at record time);
+   * duplicate resource replicas carrying the same activity are collapsed to
+   * the first copy in that order.
    *
    * A resource replica whose envelope will not decrypt under the current KAK is
    * skipped (logged) rather than rejecting the whole read, so one poisoned
@@ -1480,19 +1612,26 @@ export class BrowserStore {
       noEpochKeyResourceIds,
       integrityResourceIds,
       undecryptableResourceIds
-    } = await this.#decryptedResources({
-      logicalKey: 'walletActivity',
-      sort: 'asc'
-    })
+    } = await this.#decryptedResources({ logicalKey: 'walletActivity' })
     const unreadable =
       unknownEpochResourceIds.length +
       noEpochKeyResourceIds.length +
       integrityResourceIds.length +
       undecryptableResourceIds.length
+    const activities = entries
+      .map(({ resourceId, data }) => ({
+        resourceId,
+        activity: data as WalletActivity
+      }))
+      .sort((first, second) =>
+        compareTimestampsOldestFirst(
+          first.activity.created,
+          second.activity.created
+        )
+      )
     const seen = new Set<string>()
     const items: Array<{ id: string; doc: WalletActivity }> = []
-    for (const { resourceId, data } of entries) {
-      const activity = data as WalletActivity
+    for (const { resourceId, activity } of activities) {
       const id = activity.id ?? resourceId
       if (seen.has(id)) {
         continue
@@ -1510,8 +1649,8 @@ export class BrowserStore {
   /**
    * Every `wallet-activity` resource replica carrying one activity id, resource
    * ids included -- the write-side lookup the migration import needs, where
-   * {@link listHistoryItems} collapses duplicates to their oldest copy and
-   * hides the rest. The activity id lives inside the encrypted body, so this is
+   * {@link listHistoryItems} collapses duplicates to one copy and hides the
+   * rest. The order is resource id order, which no caller depends on. The activity id lives inside the encrypted body, so this is
    * a decrypt scan (FW-545 tracks a stored index that would replace it).
    *
    * @param options {object}
@@ -1524,8 +1663,7 @@ export class BrowserStore {
     id: string
   }): Promise<Array<{ resourceId: string; doc: WalletActivity }>> {
     const { entries } = await this.#decryptedResources({
-      logicalKey: 'walletActivity',
-      sort: 'asc'
+      logicalKey: 'walletActivity'
     })
     const found: Array<{ resourceId: string; doc: WalletActivity }> = []
     for (const { resourceId, data } of entries) {
@@ -1567,7 +1705,8 @@ export class BrowserStore {
    * resource id is NOT content-derived -- it is a stable id minted at creation
    * ({@link addContact}) -- so this simply reflects the current set of resource
    * replicas (`_updateDoc` rewrites a resource replica's body in place rather
-   * than replacing it), no cid-based dedupe needed.
+   * than replacing it), no cid-based dedupe needed. The heads come back oldest
+   * first by the head payload's own `updatedAt`.
    *
    * A resource replica whose envelope will not decrypt under the current KAK is
    * skipped, and an unknown-epoch one is skipped uncached for a descriptor
@@ -1590,20 +1729,26 @@ export class BrowserStore {
     const { entries, unknownEpochResourceIds } = await this.#decryptedResources(
       {
         logicalKey: 'contacts',
-        sort: 'asc',
         cache: false
       }
     )
     this.#unknownEpochContacts = unknownEpochResourceIds.length
-    return entries.map(({ resourceId, data }) => ({
-      resourceId,
-      head: upgradeContactHeadPayload(data as unknown as ContactHeadPayload)
-    }))
+    return entries
+      .map(({ resourceId, data }) => ({
+        resourceId,
+        head: upgradeContactHeadPayload(data as unknown as ContactHeadPayload)
+      }))
+      .sort((first, second) =>
+        compareTimestampsOldestFirst(
+          first.head.updatedAt,
+          second.head.updatedAt
+        )
+      )
   }
 
   /**
    * Reads the stored `contacts` resource replicas as head payloads, oldest
-   * first -- the existence lookup the migration import needs. A head's
+   * first by the head's own `updatedAt` -- the existence lookup the migration import needs. A head's
    * `writerId` and its exact payload, which the {@link StoredContact}
    * projection drops, are what the import's content check compares.
    *
@@ -1616,7 +1761,7 @@ export class BrowserStore {
   }
 
   /**
-   * Lists the stored contacts, oldest first.
+   * Lists the stored contacts, oldest first by the head's own `updatedAt`.
    *
    * @returns {Promise<Array<StoredContact>>}
    */
@@ -1973,9 +2118,7 @@ export class BrowserStore {
   }: {
     contactId: string
   }): Promise<Array<ContactRevisionPayload>> {
-    const docs = await this.rxCollection('contactsHistory')
-      .find({ sort: [{ updatedAt: 'desc' }] })
-      .exec()
+    const docs = await this.rxCollection('contactsHistory').find().exec()
     const indexEntries = (await this.#contactsHistoryIndex?.find().exec()) ?? []
     const contactIdByResource = new Map<string, string>(
       indexEntries.map(entry => [entry.id, entry.contactId])
@@ -2084,10 +2227,7 @@ export class BrowserStore {
    */
   async listAllContactRevisions(): Promise<Array<ContactRevisionPayload>> {
     const { entries, unknownEpochResourceIds } = await this.#decryptedResources(
-      {
-        logicalKey: 'contactsHistory',
-        sort: 'desc'
-      }
+      { logicalKey: 'contactsHistory' }
     )
     this.#unknownEpochContactsHistory = unknownEpochResourceIds.length
     return entries.map(({ data }) =>

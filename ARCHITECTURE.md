@@ -349,10 +349,21 @@ docs/architecture/session-persistence.md, and "Remote-direct popup storage" in
 docs/architecture/chapi.md). One local database per user holds every standard
 collection (`private-credentials`, `public-credentials`, `wallet-activity`,
 `contacts`, `contacts-history`, `app-keys`) on the generic synced-doc
-schema (`{ id, updatedAt, data }`, `syncedDocSchema` from
-`@interop/was-sync`). RxDB hashes that schema and refuses a replica whose stored
-hash differs, so its shape is browser-local stored state rather than a code
-detail.
+schema (`syncedDocSchema` from `@interop/was-sync`). Its shape is
+`{ id, updatedAt, data }` plus optional members the server assigns or
+reports: the rest of the write stamp (`updatedAtCounter`, `originId`), the
+nested `meta` stamp and the `custom` body, `createdBy`, `epoch`, and the
+`etag` and `metaEtag` validators. A local write carries only `id`,
+`updatedAt`, `data`, and an optional `epoch`, and the write's ack or the
+feed's echo fills in the rest. RxDB hashes that schema and refuses a replica
+whose stored hash differs, so its shape is browser-local stored state rather
+than a code detail. `BrowserStore` forgets a replica RxDB refuses on its
+schema hash. It removes the whole database, the replication checkpoint
+included, and the next replication re-pulls it from the Space. Writes not yet
+pushed are lost. A guest or no-WAS session has no Space to re-pull from, so
+its replica is lost whole. No member of a resource replica is an order key,
+so a listing that needs an order sorts on a timestamp in the decrypted
+payload.
 
 The encrypted collections, all of the above except `public-credentials`, store
 **EDV envelopes**: encrypted at rest locally and opaque to the server. A
@@ -1142,8 +1153,8 @@ base64url(SHA-256(unlock did:key))` (a discovery convention).
   over RxDB / IndexedDB (Dexie), holding every standard wallet collection on
   the generic synced-doc schema. A transient session constructs none.
 - **Resource replica** -- the local replica's copy of one remote Resource:
-  one synced document (`{ id, updatedAt, data }`) in a
-  `BrowserStore` collection. Its `id` is the Resource's id, and `data` holds
+  one synced document (`{ id, updatedAt, data }` plus the server's write
+  stamp and validators) in a `BrowserStore` collection. Its `id` is the Resource's id, and `data` holds
   the stored body verbatim, an EDV envelope on an encrypted collection.
   Replication keeps it in step with the Resource in both directions. A
   replica-less session holds none and reads the Resource directly. Avoid:

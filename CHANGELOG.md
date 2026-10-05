@@ -71,7 +71,16 @@
 - The resource replica no longer carries a per-document `version` member.
   `@interop/was-sync` 0.8.0 replaced it with the server write stamp, and the
   local writes and tests that still set it are updated to the shape it
-  declares. An existing replica is forgotten and re-pulled at the next login.
+  declares.
+- A replica RxDB refuses on its schema hash, as every replica made before
+  `@interop/was-sync` 0.8.0's stamped schema is, is forgotten at the next
+  login and re-pulled from the Space. The whole database goes, its
+  replication checkpoint included. Local writes not yet pushed at the update
+  are lost, and a guest or no-WAS session's replica is lost whole.
+- The local replica sorts the history by each activity's `created` and the
+  contacts by each head's own `updatedAt`, in place of the replica's
+  `updatedAt`. Credentials sort by `validFrom`, or by the proof's `created`
+  when there is none. App keys list in resource id order.
 - Three mender declarations now name the authority their standing converger
   needs. `roster-wraps-exactly-the-document-key-set` and
   `standard-collections-are-provisioned` are declared `enrolled`.
