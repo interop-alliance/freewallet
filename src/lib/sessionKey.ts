@@ -365,6 +365,12 @@ export async function deleteUnlockLocalState({
   spaceId: string
   idb?: IDBFactory
 }): Promise<void> {
+  // Guarded: with no factory handed in and no global IndexedDB (node, where
+  // a harness runs a transient session), this runtime holds no session
+  // database, so there is nothing of the method to delete.
+  if (idb === undefined && typeof indexedDB === 'undefined') {
+    return
+  }
   const exists = await sessionDatabaseExists({ idb }).catch(() => true)
   if (!exists) {
     return

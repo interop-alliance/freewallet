@@ -31,11 +31,19 @@
  *   no mender by declaration, so there is no clean second audit to take.
  *   The second audit, after a transient visit, asserts the gap still stands
  *   with exactly that id.
+ * - The shape gate: a ladder-anchored and an enrolled server-state account
+ *   each skip exactly the rows whose `standsOn` excludes their shape.
+ * - Two key-holder rows over a state a test builds: a passkey removal whose
+ *   unlock Space delete the server refused leaves that Space standing
+ *   (`no-unlock-space-outlives-its-credential`), and a writer registered
+ *   past its inactivity window stands violated until the page's listing
+ *   read sweeps it (`no-registered-writer-outlives-its-expiry`).
  *
  * Run: `pnpm run test:harness`.
  */
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 import type { InvariantId } from '@interop/wallet-core/menders'
+import type { PasskeyUnlockMethod } from '@/session/unlockMethods'
 import {
   auditInvariants,
   expectInvariantsHold,
@@ -59,9 +67,15 @@ import {
 } from './walletHarness'
 
 /**
+ * One day, in milliseconds.
+ */
+const DAY_MS = 24 * 60 * 60 * 1000
+
+/**
  * Asserts a key-holder audit checked every `key-holder` row and every
  * key-holder half: what it skipped is only the browser-local and unchecked
- * rows the census says nothing reaches.
+ * rows the census says nothing reaches, and the rows whose `standsOn`
+ * excludes the account's shape.
  *
  * @param options {object}
  * @param options.audit {InvariantAudit}
@@ -75,9 +89,25 @@ function expectKeyHolderRowsChecked({
   const reachable = audit.skipped.filter(
     ({ id }) =>
       INVARIANT_CENSUS[id].kind !== 'browser-local' &&
-      INVARIANT_CENSUS[id].kind !== 'unchecked'
+      INVARIANT_CENSUS[id].kind !== 'unchecked' &&
+      (audit.shape === undefined ||
+        INVARIANT_CENSUS[id].standsOn.includes(audit.shape))
   )
   expect(reachable, 'rows a key holder should have settled').toEqual([])
+}
+
+/**
+ * The ids an audit skipped on its shape gate, sorted.
+ *
+ * @param options {object}
+ * @param options.audit {InvariantAudit}
+ * @returns {InvariantId[]}
+ */
+function shapeSkippedIds({ audit }: { audit: InvariantAudit }): InvariantId[] {
+  return audit.skipped
+    .filter(({ reason }) => reason.startsWith('The row stands on '))
+    .map(({ id }) => id)
+    .sort()
 }
 
 describe('the invariant auditor', () => {
@@ -95,7 +125,12 @@ describe('the invariant auditor', () => {
     const passphrase = `audit-signup-${crypto.randomUUID()}-Zz9!`
     const signup = await harness.signUp({ passphrase })
     expect((await signup.settled()).failures).toEqual([])
-    const withHolder = await auditActor({ harness, actor: signup, passphrase })
+    const withHolder = await auditActor({
+      harness,
+      actor: signup,
+      passphrase,
+      retiredUnlockSpaceIds: []
+    })
     expectInvariantsHold({ audit: withHolder })
     expectKeyHolderRowsChecked({ audit: withHolder })
     await signup.logout()
@@ -109,7 +144,12 @@ describe('the invariant auditor', () => {
     const visit = await harness.logIn({ passphrase, name: 'transient visit' })
     expect(visit.kind).toBe('transient')
     expect((await visit.settled()).failures).toEqual([])
-    const afterVisit = await auditActor({ harness, actor: visit, passphrase })
+    const afterVisit = await auditActor({
+      harness,
+      actor: visit,
+      passphrase,
+      retiredUnlockSpaceIds: []
+    })
     expectInvariantsHold({ audit: afterVisit })
     expectKeyHolderRowsChecked({ audit: afterVisit })
     await visit.logout()
@@ -174,7 +214,13 @@ describe('the invariant auditor', () => {
       })
       const actor = await harness.logIn({ ...credential, profile, name: shape })
       expect((await actor.settled()).failures, shape).toEqual([])
-      const audit = await auditActor({ harness, actor, ...credential })
+      // None of the builders retires a credential.
+      const audit = await auditActor({
+        harness,
+        actor,
+        ...credential,
+        retiredUnlockSpaceIds: []
+      })
       expectInvariantsHold({ audit })
       expectKeyHolderRowsChecked({ audit })
       await actor.logout()
@@ -256,7 +302,8 @@ describe('the invariant auditor', () => {
     const repaired = await auditActor({
       harness,
       actor: repairer,
-      passphrase: account.passphrase
+      passphrase: account.passphrase,
+      retiredUnlockSpaceIds: []
     })
     expectInvariantsHold({ audit: repaired })
     expectKeyHolderRowsChecked({ audit: repaired })
@@ -294,5 +341,175 @@ describe('the invariant auditor', () => {
       audit: await auditInvariants({ dataDir: harness.dataDir, spaceId }),
       allow: ['account-document-publishes-an-authentication-key']
     })
+  })
+
+  it('the shape gate skips the rows whose standsOn excludes the account shape', async () => {
+    const ladderAnchored = await buildServerStateAccount({
+      harness,
+      shape: 'passphrase'
+    })
+    const ladderAudit = await auditInvariants({
+      dataDir: harness.dataDir,
+      spaceId: ladderAnchored.spaceId
+    })
+    expect(ladderAudit.shape).toBe('ladder-anchored')
+    // The browser-local enrolled-only rows keep their census reason.
+    expect(shapeSkippedIds({ audit: ladderAudit })).toEqual([
+      'registry-records-the-committed-ladder-rung'
+    ])
+
+    const enrolled = await buildServerStateAccount({
+      harness,
+      shape: 'enrolled-client'
+    })
+    const enrolledAudit = await auditInvariants({
+      dataDir: harness.dataDir,
+      spaceId: enrolled.spaceId
+    })
+    expect(enrolledAudit.shape).toBe('enrolled')
+    expect(shapeSkippedIds({ audit: enrolledAudit })).toEqual([
+      'acting-credential-manage-zcap-is-current',
+      'keystore-controller-is-the-account-did',
+      'registry-records-the-establishing-credential',
+      'roster-and-collection-epochs-exist'
+    ])
+  })
+
+  it('an unlock Space whose delete the server refused outlives the removed passkey', async () => {
+    const outlives: InvariantId = 'no-unlock-space-outlives-its-credential'
+    const account = await buildPasskeyAccount({ harness })
+    const actor = await harness.logIn({
+      passphrase: account.passphrase,
+      name: 'removes the passkey'
+    })
+    expect((await actor.settled()).failures).toEqual([])
+    const { getUnlockMethods } = await import('@/session/unlockMethods')
+    const { removeAccountPasskey } = await import('@/session/accountSettings')
+    const registry = await actor.run(session => getUnlockMethods({ session }))
+    const entry = registry?.methods.find(
+      (method): method is PasskeyUnlockMethod => method.type === 'passkey'
+    )
+    if (entry === undefined) {
+      throw new Error('The passkey account holds no passkey entry.')
+    }
+    const { unlockSpaceId } = entry
+
+    // Named while the registry still names it, the Space is a live
+    // credential's, and the row holds.
+    const beforeRemoval = await auditActor({
+      harness,
+      actor,
+      passphrase: account.passphrase,
+      retiredUnlockSpaceIds: [unlockSpaceId]
+    })
+    expect(beforeRemoval.held).toContain(outlives)
+
+    // The server answers the Space delete with the masked 404, so the
+    // removal reports the Space as a residue and drops the registry entry.
+    const refusal = harness.faults.refuse({
+      match: record =>
+        record.method === 'DELETE' && record.path.includes(unlockSpaceId),
+      status: 404,
+      times: Infinity
+    })
+    await actor.run(session => removeAccountPasskey({ session, entry }))
+    await refusal.fired
+
+    const afterRemoval = await auditActor({
+      harness,
+      actor,
+      passphrase: account.passphrase,
+      retiredUnlockSpaceIds: [unlockSpaceId]
+    })
+    expect(
+      afterRemoval.violated.find(({ id }) => id === outlives)?.evidence
+    ).toEqual({ outlived: [unlockSpaceId] })
+    // Without the retired credential's Space named, the row cannot be
+    // scoped to this account.
+    const unscoped = await auditActor({
+      harness,
+      actor,
+      passphrase: account.passphrase
+    })
+    expect(unscoped.skipped.map(({ id }) => id)).toContain(outlives)
+    await actor.logout()
+  })
+
+  it('a writer registered past its inactivity window stands violated until the listing read sweeps it', async () => {
+    const outlives: InvariantId = 'no-registered-writer-outlives-its-expiry'
+    const account = await buildEnrolledClientAccount({ harness })
+    const actor = await harness.logIn({
+      passphrase: account.passphrase,
+      profile: account.enrolledProfile,
+      name: 'registers a stale writer'
+    })
+    expect(actor.kind).toBe('remembered')
+    expect((await actor.settled()).failures).toEqual([])
+    const { enrolledCeremonyContext } =
+      await import('@/session/accountCeremonyContext')
+    const { readDirectoryListing } = await import('@/session/clients')
+    const { connectionWritersMend } =
+      await import('@/session/menders/encounterSites')
+    const { CONNECTION_WRITER_POLICY, registerConnectionWriter } =
+      await import('@interop/wallet-core/connections')
+
+    // Registered and last seen a day past the inactivity window, as its
+    // second session under the account.
+    const lastSeen = new Date(
+      Date.now() - CONNECTION_WRITER_POLICY.inactiveAfterMs - DAY_MS
+    )
+    const writerId = `stale-writer-${crypto.randomUUID()}`
+    const outcome = await actor.run(async session => {
+      const context = enrolledCeremonyContext({ session })
+      if (context === null) {
+        throw new Error('The remembered session holds no enrolled context.')
+      }
+      const accountDid = context.pointer.did
+      const { store, hmacKey } = await session.storage.connectionsDirectory()
+      return await registerConnectionWriter({
+        store,
+        hmacKey,
+        local: {
+          get: async () => ({
+            accountDid,
+            writerId,
+            firstSessionAt: new Date(lastSeen.getTime() - DAY_MS).toISOString()
+          }),
+          put: async () => {}
+        },
+        accountDid,
+        did: context.keyAgent.id,
+        writerId,
+        label: 'Harness',
+        listedInDocument: true,
+        sessionStartedAt: lastSeen,
+        now: lastSeen
+      })
+    })
+    expect(outcome).toBe('registered')
+
+    const stale = await auditActor({
+      harness,
+      actor,
+      passphrase: account.passphrase
+    })
+    const evidence = stale.violated.find(({ id }) => id === outlives)
+      ?.evidence as { markedInactive: Array<{ writerId: string }> } | undefined
+    expect(evidence?.markedInactive.map(writer => writer.writerId)).toEqual([
+      writerId
+    ])
+
+    // The page's listing read runs the writer sweep's encounter.
+    await actor.run(async session => {
+      await readDirectoryListing({ session })
+      await connectionWritersMend({ session })
+    })
+    const swept = await auditActor({
+      harness,
+      actor,
+      passphrase: account.passphrase
+    })
+    expect(swept.held).toContain(outlives)
+    await actor.logout()
   })
 })

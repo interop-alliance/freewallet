@@ -9,8 +9,9 @@
  * refusal is the re-seal repair's detector), the verified account log
  * (`refreshVerifiedAccountLog`), the declarations' own `holdsWhen` detectors
  * on `MENDER_INVARIANTS` (`findPendingPassphraseEntries`,
- * `documentListsCredential`, `checkRecoveryHealth`), and
- * `findUnrecordedCredentials`.
+ * `documentListsCredential`, `checkRecoveryHealth`),
+ * `findUnrecordedCredentials`, and the writer sweep
+ * (`sweepConnectionWriters`), run over a store whose write is a no-op.
  *
  * The acting credential's unlock record is encrypted to that credential
  * alone, so the two rows about its account pointer need the credential
@@ -19,6 +20,12 @@
  * writes nothing), and one that does not gets them skipped. The standing
  * delegations are read off the served record too when it is available, and
  * off the session's standing members otherwise.
+ *
+ * An unlock Space names no account, and a retired credential leaves the
+ * registry, so `no-unlock-space-outlives-its-credential` needs the caller to
+ * say which unlock Spaces the account's retired credentials had. A test that
+ * hands them in (an empty list when it retired none) gets the row checked,
+ * and one that does not gets it skipped.
  *
  * Every read runs through `actor.run`, so what it logs is attributed to the
  * actor's tab. The modules under `src/` are imported inside the builder, after
@@ -49,6 +56,7 @@ async function loadPortModules() {
   const keys = await import('@interop/wallet-core/keys')
   const webvh = await import('@interop/wallet-core/webvh')
   const clientAnnex = await import('@interop/wallet-core/clientAnnex')
+  const connections = await import('@interop/wallet-core/connections')
   const resourceLog = await import('@interop/vh-resource-log')
   const unlockMethods = await import('@/session/unlockMethods')
   const verifiedLog = await import('@/session/verifiedLog')
@@ -68,6 +76,8 @@ async function loadPortModules() {
     zcapExpiring: webvh.zcapExpiring,
     delegatedClientsDelegationSpaceId:
       clientAnnex.delegatedClientsDelegationSpaceId,
+    readConnections: connections.readConnections,
+    sweepConnectionWriters: connections.sweepConnectionWriters,
     memoryResourceLogPinStore: resourceLog.memoryResourceLogPinStore,
     getUnlockMethods: unlockMethods.getUnlockMethods,
     isStandingCredentialEntry: unlockMethods.isStandingCredentialEntry,
@@ -160,14 +170,20 @@ async function declaredDetector({
  * @param [options.credential] {UnlockCredential}   the actor's acting
  *   unlock credential, derived; without it the rows about the served unlock
  *   record are skipped
+ * @param [options.retiredUnlockSpaceIds] {string[]}   the unlock Space ids
+ *   of every credential the account has retired, as the caller knows them,
+ *   or an empty list when it retired none; without it
+ *   `no-unlock-space-outlives-its-credential` is skipped
  * @returns {Promise<InvariantKeyHolder>}
  */
 export async function actorKeyHolder({
   actor,
-  credential
+  credential,
+  retiredUnlockSpaceIds
 }: {
   actor: WalletActor
   credential?: UnlockCredential
+  retiredUnlockSpaceIds?: string[]
 }): Promise<InvariantKeyHolder> {
   const modules = await loadPortModules()
   const { profile } = actor.session
@@ -490,7 +506,70 @@ export async function actorKeyHolder({
           id: 'saved-recovery-codes-locate-their-account',
           deps: { session }
         })
+      ),
+    // The store lists every unlock Space by its type, of every account, and
+    // nothing in one names its account. The compared set is scoped to this
+    // account by the caller's own knowledge: the unlock Spaces of the
+    // credentials it retired. Such a Space violates the row when the store
+    // still holds it and no live registry entry names it. One the registry
+    // still names is a credential not yet retired, which is another row's.
+    'no-unlock-space-outlives-its-credential': async ({ account }) => {
+      if (retiredUnlockSpaceIds === undefined) {
+        return undetermined(
+          "No retired credential's unlock Space was named to the key holder, and an unlock Space carries no plaintext link to its account."
+        )
+      }
+      const registry = await readRegistry()
+      const live = new Set(
+        (registry?.methods ?? []).map(method => method.unlockSpaceId)
       )
+      const stored = new Set(account.unlockSpaceIds)
+      const outlived = retiredUnlockSpaceIds.filter(
+        unlockSpaceId => stored.has(unlockSpaceId) && !live.has(unlockSpaceId)
+      )
+      return outlived.length === 0 ? holds() : violated({ outlived })
+    },
+    // `sweepConnectionWriters`, the sweep the encounter registration runs,
+    // over the listing the page reads (without the page's hold, so no real
+    // sweep starts) and a store whose write is a no-op. A writer the dry
+    // sweep would mark inactive or drop is the violation.
+    'no-registered-writer-outlives-its-expiry': async ({ now }) => {
+      const listing = await actor.run(async session => {
+        const { store, hmacKey } = await session.storage.connectionsDirectory()
+        return await modules.readConnections({ store, hmacKey })
+      })
+      if (listing === null) {
+        return undetermined('The connections directory could not be listed.')
+      }
+      const store = {
+        put: async () => ({})
+      } as unknown as Parameters<
+        PortModules['sweepConnectionWriters']
+      >[0]['store']
+      const swept = await modules.sweepConnectionWriters({
+        store,
+        listing,
+        now: new Date(now)
+      })
+      const where = (writerId: string) => ({
+        writerId,
+        resourceId: listing.entries.find(item =>
+          item.entry.writers.some(writer => writer.writerId === writerId)
+        )?.resourceId
+      })
+      if (swept.markedInactive.length > 0 || swept.dropped.length > 0) {
+        return violated({
+          markedInactive: swept.markedInactive.map(where),
+          dropped: swept.dropped.map(where)
+        })
+      }
+      const unopened = [...listing.unreadable, ...listing.unparseable]
+      return unopened.length === 0
+        ? holds()
+        : undetermined(
+            `The writers of ${unopened.length} connections entries could not be read.`
+          )
+    }
   }
   return { name: actor.name, checks }
 }
@@ -505,18 +584,23 @@ export async function actorKeyHolder({
  *   with, so the served unlock record can be read
  * @param [options.passkey] {TestPasskey}   the passkey the actor logged in
  *   with, likewise
+ * @param [options.retiredUnlockSpaceIds] {string[]}   the unlock Space ids
+ *   of the credentials the account has retired, or an empty list when it
+ *   retired none (see `actorKeyHolder`)
  * @returns {Promise<InvariantAudit>}
  */
 export async function auditActor({
   harness,
   actor,
   passphrase,
-  passkey
+  passkey,
+  retiredUnlockSpaceIds
 }: {
   harness: WalletHarness
   actor: WalletActor
   passphrase?: string
   passkey?: TestPasskey
+  retiredUnlockSpaceIds?: string[]
 }): Promise<InvariantAudit> {
   const { deriveUnlockCredential, KEYRING_KDF, PASSKEY_KDF } =
     await loadPortModules()
@@ -540,6 +624,10 @@ export async function auditActor({
   return await auditInvariants({
     dataDir: harness.dataDir,
     spaceId: actor.spaceId,
-    keyHolder: await actorKeyHolder({ actor, credential })
+    keyHolder: await actorKeyHolder({
+      actor,
+      credential,
+      retiredUnlockSpaceIds
+    })
   })
 }

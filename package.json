@@ -49,7 +49,7 @@
     "@interop/verifier-core": "^3.7.0",
     "@interop/vh-resource-log": "^0.6.1",
     "@interop/wallet-backup": "^0.5.1",
-    "@interop/wallet-core": "^0.102.0",
+    "@interop/wallet-core": "link:../wallet-core",
     "@interop/wallet-request": "^0.4.1",
     "@interop/was-client": "^0.92.0",
     "@interop/was-sync": "^0.8.2",

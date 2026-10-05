@@ -1,9 +1,10 @@
 // @vitest-environment node
 /**
  * The invariant census (`tests/shared/invariantCensus.ts`) against the mender
- * registry's declarations: one row per declared invariant and no other, a
- * reason on every row a reader cannot check, and a stored check in the
- * auditor for exactly the rows the census calls `stored`.
+ * registry's declarations: one row per declared invariant and no other, each
+ * row's `standsOn` the declaration's own, a reason on every row a reader
+ * cannot check, and a stored check in the auditor for exactly the rows the
+ * census calls `stored`.
  */
 import { describe, expect, it } from 'vitest'
 import { MENDER_INVARIANTS } from '../../src/session/menders/index.js'
@@ -29,6 +30,14 @@ describe('the invariant census', () => {
     expect([...STORED_CHECK_IDS].sort()).toEqual(
       censusIdsOfKind({ kind: 'stored' }).sort()
     )
+  })
+
+  it("copies each declaration's standsOn", () => {
+    for (const declaration of MENDER_INVARIANTS) {
+      expect(INVARIANT_CENSUS[declaration.id].standsOn, declaration.id).toEqual(
+        declaration.standsOn
+      )
+    }
   })
 
   it('names a key-holder half only on a stored row', () => {

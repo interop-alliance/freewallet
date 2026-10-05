@@ -22,12 +22,19 @@
  * a reason another row covers) reports the row as skipped rather than
  * violated. The exception is a row whose missing state IS the violation.
  *
+ * The shape gate: the audited account's shape is read off its stored
+ * document (`enrolled` when the document lists an enrolled client,
+ * `ladder-anchored` when it lists none and publishes a ladder VM), and a row
+ * whose census `standsOn` excludes that shape is skipped with the shape as
+ * the reason, since no violation of it stands un-mended on that shape. With
+ * no stored document, or one that is neither shape, the gate is not applied.
+ *
  * The auditor reports and nothing else: it writes nothing, mends nothing, and
  * is registered on no chain. This module imports nothing under `src/`, so the
  * Playwright process can load it beside `expectNoFailedMenders`.
  */
 import { relationIds, vmFragmentOf } from '@interop/vh-resource-log'
-import type { InvariantId } from '@interop/wallet-core/menders'
+import type { AccountShape, InvariantId } from '@interop/wallet-core/menders'
 import {
   CLIENT_ANNEX_SPACE_TYPE,
   clientAnnexGcDue,
@@ -38,6 +45,7 @@ import {
   GENERATION_ID_PREFIX,
   generationQuiet
 } from '@interop/wallet-core/clientAnnex'
+import { UNLOCK_SPACE_TYPE } from '@interop/wallet-core/keyring'
 import {
   currentEpochOf,
   enrolledClientRosterRecipients,
@@ -51,7 +59,9 @@ import {
   accountLogDids,
   commitmentMatchesKey,
   credentialKeyAgreementMethods,
+  enrolledClientVmIds,
   ensureDidWebProjection,
+  ladderVmIds,
   MULTIKEY_COMMITMENT_VM_TYPE,
   standingZcapStale
 } from '@interop/wallet-core/webvh'
@@ -105,7 +115,9 @@ export type InvariantCheckOutcome =
  * check: whether the Space stands, the account log with its versions, its
  * head document, and the DID it resolves to, the user key roster's head
  * descriptor, the Space's live collections with each governed one's head
- * descriptor, and the annex generation the head points at with its log.
+ * descriptor, the annex generation the head points at with its log, the
+ * account's shape, and every unlock Space the store holds (of any account,
+ * since an unlock Space names none).
  */
 export interface StoredAccount {
   readonly dataDir: string
@@ -126,6 +138,8 @@ export interface StoredAccount {
   readonly pointedAnnex:
     { annexSpaceId: string; generationId: string } | undefined
   readonly pointedLog: AccountLog
+  readonly shape: AccountShape | undefined
+  readonly unlockSpaceIds: string[]
 }
 
 /**
@@ -153,6 +167,7 @@ export interface InvariantKeyHolder {
  */
 export interface InvariantAudit {
   readonly spaceId: string
+  readonly shape: AccountShape | undefined
   readonly violated: Array<{ id: InvariantId; evidence: unknown }>
   readonly held: InvariantId[]
   readonly skipped: Array<{ id: InvariantId; reason: string }>
@@ -238,6 +253,60 @@ function currentEpochKids({
   } catch {
     return undefined
   }
+}
+
+/**
+ * The account's shape, read off its head document by wallet-core's two
+ * relation readers: `enrolled` when `enrolledClientVmIds` names a member,
+ * `ladder-anchored` when it names none and `ladderVmIds` names one. No
+ * wallet-core export decides the shape itself, so this composes the
+ * definition `ACCOUNT_SHAPES` states from the readers the listing and the
+ * ladder recognition use. Undefined when there is no document, or when it
+ * publishes neither.
+ *
+ * @param options {object}
+ * @param options.doc {object | undefined}   the account log's head document
+ * @returns {AccountShape | undefined}
+ */
+function accountShapeOf({
+  doc
+}: {
+  doc: (AnnexDocument & Record<string, unknown>) | undefined
+}): AccountShape | undefined {
+  if (doc === undefined) {
+    return undefined
+  }
+  const relations = doc as Parameters<typeof ladderVmIds>[0]['doc']
+  if (enrolledClientVmIds({ doc: relations }).length > 0) {
+    return 'enrolled'
+  }
+  return ladderVmIds({ doc: relations }).length > 0
+    ? 'ladder-anchored'
+    : undefined
+}
+
+/**
+ * Every unlock Space the store holds: a Space whose metadata object carries
+ * each member of `UNLOCK_SPACE_TYPE`, which is how an unlock Space is
+ * recognized from its metadata alone.
+ *
+ * @param options {object}
+ * @param options.dataDir {string}
+ * @returns {Promise<string[]>}
+ */
+async function listStoredUnlockSpaceIds({
+  dataDir
+}: {
+  dataDir: string
+}): Promise<string[]> {
+  const unlockSpaceIds: string[] = []
+  for (const spaceId of await listStoredSpaceIds({ dataDir })) {
+    const meta = await readStoredSpaceMeta({ dataDir, spaceId })
+    if (UNLOCK_SPACE_TYPE.every(type => meta?.type?.includes(type))) {
+      unlockSpaceIds.push(spaceId)
+    }
+  }
+  return unlockSpaceIds
 }
 
 /**
@@ -883,7 +952,9 @@ async function readStoredAccount({
     pointedLog:
       pointedAnnex === undefined
         ? []
-        : await readGenerationLog({ dataDir, ...pointedAnnex })
+        : await readGenerationLog({ dataDir, ...pointedAnnex }),
+    shape: accountShapeOf({ doc }),
+    unlockSpaceIds: await listStoredUnlockSpaceIds({ dataDir })
   }
 }
 
@@ -939,18 +1010,28 @@ export async function auditInvariants({
   keyHolder?: InvariantKeyHolder
   now?: number
 }): Promise<InvariantAudit> {
+  const account = await readStoredAccount({ dataDir, spaceId })
   const audit: InvariantAudit = {
     spaceId,
+    shape: account.shape,
     violated: [],
     held: [],
     skipped: []
   }
-  const account = await readStoredAccount({ dataDir, spaceId })
   for (const [id, row] of Object.entries(INVARIANT_CENSUS) as Array<
     [InvariantId, InvariantCensusRow]
   >) {
     if (row.kind === 'browser-local' || row.kind === 'unchecked') {
       audit.skipped.push({ id, reason: `${row.kind}: ${row.reason}` })
+      continue
+    }
+    if (account.shape !== undefined && !row.standsOn.includes(account.shape)) {
+      audit.skipped.push({
+        id,
+        reason:
+          `The row stands on ${row.standsOn.join(' and ')} accounts, ` +
+          `and this account is ${account.shape}.`
+      })
       continue
     }
     // Once the account Space is gone only the rows about what outlives it
@@ -1048,6 +1129,7 @@ export function expectInvariantsHold({
   }
   const lines = [
     `The invariant audit of Space ${audit.spaceId} does not match its allowlist.`,
+    `Account shape: ${audit.shape ?? 'unknown'}`,
     ...(unexpected.length > 0
       ? [`Violated and not allowed: ${unexpected.join(', ')}`]
       : []),

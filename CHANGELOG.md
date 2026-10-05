@@ -46,7 +46,9 @@
   collectors in the two forget specs.
 - An invariant auditor for tests (`tests/shared/invariantAudit.ts`). A
   census sorts the 36 declared mender-registry invariants into stored-state
-  (15), key-holder (13), browser-local (4), and unchecked (4) kinds.
+  (15), key-holder (15), browser-local (4), and unchecked (2) kinds, and
+  carries each declaration's `standsOn`, so a row is skipped on an account
+  shape no violation of it stands on.
   `auditInvariants` reads an account off the server's data dir, runs the
   key-holder rows through a port the harness builds from a live actor, and
   returns the violated ids with evidence plus the skipped ids with reasons.
@@ -56,6 +58,10 @@
   two torn states (a pointer at a deleted annex generation, a signup whose
   KMS stage was refused) violated with the expected ids; the WAS Playwright
   transient-login spec audits beside `expectNoFailedMenders`.
+  The key-holder port checks an unlock Space outliving its retired
+  credential (the caller names the retired credentials' unlock Spaces, since
+  an unlock Space names no account) and a registered writer past its
+  inactivity window (wallet-core's writer sweep, run without writing).
 
 ### Changed
 
