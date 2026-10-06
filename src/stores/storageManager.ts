@@ -2515,7 +2515,7 @@ export class StorageManager {
    *
    * @returns {Promise<{ appKeys: StoredAppKey[]; skipped: {
    *   unknownEpoch: number; noEpochKey: number; undecryptable: number;
-   *   integrity: number } }>}
+   *   integrity: number; plaintext: number } }>}
    */
   async listAppKeys(): Promise<{
     appKeys: StoredAppKey[]
@@ -2524,6 +2524,7 @@ export class StorageManager {
       noEpochKey: number
       undecryptable: number
       integrity: number
+      plaintext: number
     }
   }> {
     // Unknown-epoch Resources mean the cipher may be built from a stale
@@ -2539,7 +2540,8 @@ export class StorageManager {
           unknownEpoch: this.#store.unknownEpochAppKeys,
           noEpochKey: this.#store.noEpochKeyAppKeys,
           undecryptable: this.#store.undecryptableAppKeys,
-          integrity: this.#store.integrityAppKeys
+          integrity: this.#store.integrityAppKeys,
+          plaintext: this.#store.plaintextAppKeys
         }
         return {
           value: { appKeys, skipped },
@@ -2925,6 +2927,22 @@ export class StorageManager {
   }
 
   /**
+   * The count of `private-credentials` Resources the most recent
+   * {@link listCredentials} read had to skip because their body is not an
+   * envelope at all, though the collection is encrypted. Every session builds
+   * a cipher for every encrypted standard collection, so such a body is a
+   * defect in the stored data. Surfaced on the dashboard apart from
+   * {@link undecryptableCredentials}, and never purgeable, like
+   * {@link integrityCredentials}: nothing about such a body says it is
+   * garbage.
+   *
+   * @returns {number}
+   */
+  get plaintextCredentials(): number {
+    return this.#store.plaintextCredentials
+  }
+
+  /**
    * Removes the local `private-credentials` resource replicas that could not
    * be decrypted, so the user can clear what can never be shown. Returns the
    * number of resource replicas removed.
@@ -2958,6 +2976,18 @@ export class StorageManager {
    */
   get integrityAppKeys(): number {
     return this.#store.integrityAppKeys
+  }
+
+  /**
+   * The count of `app-keys` Resources the most recent {@link listAppKeys}
+   * read had to skip because their body is not an envelope at all, though the
+   * collection is encrypted. Never purged, and load-bearing on the match path
+   * for the same reason as {@link integrityAppKeys}.
+   *
+   * @returns {number}
+   */
+  get plaintextAppKeys(): number {
+    return this.#store.plaintextAppKeys
   }
 
   /**

@@ -41,6 +41,18 @@ for it. Deleting the key would leave the app's zcaps live, and its
 key-epoch membership in every collection its `generator` stamp does not
 name. Such a key stays in place.
 
+The rule extends to `inbox` (the cleartext audiences design, 2026-10-05).
+It joins the provision roster after `connections`, signup provisions it
+on every path, and nothing backfills it. An account that lacks it refuses
+a connection request before consent with `noInbox`. An inbox the wallet
+cannot trust, one that is public, carries an `encryption` descriptor, or
+carries a `generator` stamp, is refused and counts as absent, and no
+migration renames it. The three torn states, an older account with no
+inbox, an account whose user deleted it, and an adopted untrusted inbox,
+are declared under the provisioning invariant's gap row, with the
+transient-session provisioning alternative below as the one build that
+would close them.
+
 ## Rejected Alternatives
 
 - **A transient session provisions missing roster collections.** It
@@ -81,6 +93,10 @@ name. Such a key stays in place.
   keeps both of that collection's exits open onto its seed, the public
   link and the share, and a public copy stays world-readable. The app
   behind it keeps its grants until they expire.
+- A transient-only account cannot connect an agent until a remembered
+  login has run once on it, and the `noInbox` copy says so. An existing
+  agent entry has no pairwise seed and gains one at its next connection
+  request.
 - The invariant `app-keys-live-only-in-app-connections` is retired from
   the mender registry and from wallet-core's invariant-id census. The
   residue is no gap the registry tracks.
@@ -101,3 +117,7 @@ Reopen this decision when one or more of the following holds:
   key has no grants in the directory to revoke. The Decision, a new
   Rejected Alternative, and the Consequences state what such a key now
   leaves in place.
+- 2026-10-05: Extended from the directory to the `inbox` collection the
+  cleartext audiences design adds to the roster. A refinement: the same
+  rule applied to a second roster member, with its three torn states
+  declared.

@@ -379,7 +379,11 @@ is refused rather than opened, so a host cannot answer one resource with
 another's envelope. Such a Resource is counted in its own bucket, apart from the
 purgeable one: producing it takes no keys, so a host that could have it
 collected as garbage could have the wallet destroy recoverable data. The
-dashboard reports it and offers no removal. Page-facing identity stays the
+dashboard reports it and offers no removal. A body that is not an envelope at
+all, served from an encrypted collection, is refused the same way: nothing
+authenticates it, so it is skipped, counted in a third non-purged bucket, and
+reported with no removal. The only plaintext passthrough left is a collection
+built with no cipher. Page-facing identity stays the
 credential `cid` or activity `id`, recovered by decrypting at read time. JWE
 encryption is nondeterministic, so dedupe keys on that content identity rather
 than on the resource id. `public-credentials` is plaintext and keyed directly by

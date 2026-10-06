@@ -52,7 +52,13 @@ const CAPABILITY_QUERY = {
 async function fakeSession({
   appKeys = [],
   credentials = [],
-  skipped = { unknownEpoch: 0, noEpochKey: 0, undecryptable: 0, integrity: 0 }
+  skipped = {
+    unknownEpoch: 0,
+    noEpochKey: 0,
+    undecryptable: 0,
+    integrity: 0,
+    plaintext: 0
+  }
 }: {
   appKeys?: StoredAppKey[]
   credentials?: StoredCredential[]
@@ -61,6 +67,7 @@ async function fakeSession({
     noEpochKey: number
     undecryptable: number
     integrity: number
+    plaintext: number
   }
 } = {}): Promise<{ session: Session; added: unknown[]; deleted: string[] }> {
   const keyAgent = await CapabilityAgent.fromSecret({
@@ -150,7 +157,8 @@ describe('processAppConnect', () => {
         unknownEpoch: 0,
         noEpochKey: 1,
         undecryptable: 0,
-        integrity: 0
+        integrity: 0,
+        plaintext: 0
       }
     })
 
@@ -177,7 +185,8 @@ describe('processAppConnect', () => {
         unknownEpoch: 1,
         noEpochKey: 0,
         undecryptable: 0,
-        integrity: 0
+        integrity: 0,
+        plaintext: 0
       }
     })
 
@@ -200,7 +209,8 @@ describe('processAppConnect', () => {
         unknownEpoch: 0,
         noEpochKey: 0,
         undecryptable: 2,
-        integrity: 0
+        integrity: 0,
+        plaintext: 0
       }
     })
 
@@ -226,7 +236,8 @@ describe('processAppConnect', () => {
         unknownEpoch: 0,
         noEpochKey: 0,
         undecryptable: 0,
-        integrity: 1
+        integrity: 1,
+        plaintext: 0
       }
     })
 
@@ -236,6 +247,33 @@ describe('processAppConnect', () => {
         session,
         origin: ORIGIN,
         challenge: 'challenge-skip-3',
+        domain: ORIGIN,
+        didAuthRequested: true
+      })
+    ).rejects.toThrow(AppKeysUnreadableError)
+    expect(added).toHaveLength(0)
+  })
+
+  it('refuses to mint when the scan skipped a plaintext row', async () => {
+    // A body that is not an envelope in the encrypted collection is refused
+    // rather than read, so it is skipped like a misbound row. Treating it as
+    // "absent" would mint a second identity for the app.
+    const { session, added } = await fakeSession({
+      skipped: {
+        unknownEpoch: 0,
+        noEpochKey: 0,
+        undecryptable: 0,
+        integrity: 0,
+        plaintext: 1
+      }
+    })
+
+    await expect(
+      processAppConnect({
+        appConnect: { app: APP, capabilityQueries: [CAPABILITY_QUERY] },
+        session,
+        origin: ORIGIN,
+        challenge: 'challenge-skip-4',
         domain: ORIGIN,
         didAuthRequested: true
       })
@@ -257,7 +295,8 @@ describe('processAppConnect', () => {
         unknownEpoch: 1,
         noEpochKey: 1,
         undecryptable: 1,
-        integrity: 1
+        integrity: 1,
+        plaintext: 1
       }
     })
 

@@ -40,6 +40,17 @@ membership source, since the current-key-set rule makes the document the
 authority on who is a client. It reads only names and labels from the
 directory.
 
+Consent is not the only recording site (the cleartext audiences design,
+2026-10-05). The renewal pass records a re-minted agent grant on the
+entry in one compare-and-swap with its pending push, and
+`delegateAudienceGrant`'s caller records a member grant on the member's
+entry. Each writes a Grant activity after the entry write, so the audit
+trail shows every auto-renewal and every audience membership. A grant
+the owner restores at a ceremony dialog or on the Notifications page is
+recorded as a fresh consent with its own Grant activity. The order is
+the same at every site: the entry first, the activity after, nothing
+deciding reads the activity.
+
 ## Rejected Alternatives
 
 - **Keep the history log as the index.** The status quo and the lost-row
@@ -73,3 +84,10 @@ Reopen this decision when one or more of the following holds:
    under its own authority, making a wallet-side record redundant.
 2. The directory is replicated (0035 reopened), so a replica merge rule
    has to decide which grants survive a conflict.
+
+## Changelog
+
+- 2026-10-05: Named the two recording sites outside consent, the renewal
+  pass and the audience member grant, each writing its Grant activity
+  after the entry write. A refinement of "at consent"; the rule and its
+  order are unchanged.

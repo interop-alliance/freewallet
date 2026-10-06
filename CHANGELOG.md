@@ -138,6 +138,14 @@
 
 ### Fixed
 
+- A body that is not an EDV envelope, read from an encrypted collection
+  (credentials, app keys, wallet activity, contact heads, contact revisions)
+  on either storage backend, is refused rather than returned as the record.
+  It is skipped, logged, and counted in its own non-purged bucket beside the
+  integrity one, and the dashboard reports it with no removal. A collection
+  built with no cipher still reads plaintext. The contacts conflict resolver
+  (wallet-core 0.103.0) treats such a head as unreachable too, so a queued
+  envelope push wins over a plaintext server copy instead of being dropped.
 - `pnpm run test:e2e:was` loads every spec again. The interaction-URL deep
   link builder (`externalRequestPath`) and its route constants moved to the
   dependency-free `src/lib/walletRequest/externalRequestPath.ts`, so the

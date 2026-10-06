@@ -1,11 +1,12 @@
 /**
  * The one classifier over a failed envelope decrypt. Every store that reads
- * encrypted Resources sorts a decrypt failure into the same four buckets, and
- * each bucket has its own handling: an unknown-epoch Resource is skipped
+ * encrypted Resources sorts an unreadable Resource into the same five buckets,
+ * and each bucket has its own handling: an unknown-epoch Resource is skipped
  * uncached and drives a descriptor refresh, a Resource this wallet holds no
  * epoch key for is skipped but is real data no refresh can reach, a Resource
- * that fails its integrity check is skipped and never collected, and anything
- * else is purgeable garbage.
+ * that fails its integrity check is skipped and never collected, a plaintext
+ * body in an encrypted collection is skipped and never collected, and
+ * anything else is purgeable garbage.
  *
  * The integrity bucket narrows what is left in the purgeable one. A Resource
  * sealed under a KAK this wallet holds no key for raises `KeyUnwrapError`, and
@@ -19,8 +20,15 @@ import {
   isUnknownEpochError
 } from '@interop/was-client/sync'
 
+/**
+ * The bucket an unreadable Resource of an encrypted collection lands in.
+ * `plaintext` names a body that is not an envelope at all, so no decrypt was
+ * attempted. The stores assign it before calling the cipher, and
+ * `classifyDecryptFailure` never returns it. Like `integrity`, it is never
+ * purged: nothing about such a body says it is garbage.
+ */
 export type DecryptFailure =
-  'unknown-epoch' | 'no-epoch-key' | 'integrity' | 'undecryptable'
+  'unknown-epoch' | 'no-epoch-key' | 'integrity' | 'plaintext' | 'undecryptable'
 
 /**
  * Sorts one decrypt failure into its bucket. The verdict is decided by the

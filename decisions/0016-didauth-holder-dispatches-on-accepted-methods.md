@@ -70,7 +70,16 @@ implementation: the post-login refusal replaces the consent panel and
 adds no step, screen, or click to the flow.
 
 The dispatch itself never throws. The external-request delivery path
-resolves a signer it never uses, and has no refusal surface. The CHAPI
+runs no dispatch. It signs no DID-Auth response, since it refuses a
+request carrying a DIDAuthentication query. It does sign one response
+outside the dispatch (the cleartext audiences design, 2026-10-05): a
+connection request's presentation carries the wallet's pairwise did:key
+toward the agent as `holder`, signed by that key over the request's
+`challenge` with no `domain`, through wallet-request's switch to sign
+with the existing `presentationSigner` when no DID Auth query is
+present. That proof binds the agent's invitation to the key and answers
+no DIDAuthentication query, so the three rules above do not apply to
+it. Every other interaction-URL response stays unsigned. The CHAPI
 store page has one for the request it will not sign at all: it checks the
 exchange's DID-Auth request before the login form renders, and refuses on
 the request's shape, on a missing or mismatched `domain`, and on a
@@ -146,3 +155,9 @@ Reopen this decision when one or more of the following holds:
   DID-Auth requests it will not sign (shape, `domain`, delivery origin).
   The dispatch still never throws, and the store page still surfaces a
   dispatch failure as a raw message.
+
+- 2026-10-05: The external-request path gained one signed response, a
+  connection request's presentation with the pairwise did:key as holder.
+  A refinement: it runs outside the dispatch and answers no DID-Auth
+  query. The App Connect pin in rule 2 is unchanged here; moving it to
+  the pairwise key is a separate reopening.

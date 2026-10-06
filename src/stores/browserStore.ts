@@ -200,6 +200,13 @@ export class BrowserStore {
   // host-misbehavior signal the binding check exists to catch: they are
   // counted, never cached, never purged, and drive no descriptor refresh.
   #integrityCredentials = 0
+  // Count of `private-credentials` resource replicas the most recent list read
+  // had to skip because their body is not an envelope at all, though the
+  // collection has a cipher. Every session builds a cipher for every encrypted
+  // standard collection, so such a body is a defect in the stored data, and
+  // nothing about it says it is garbage: like the integrity counter above, they
+  // are counted, never cached, never purged, and drive no descriptor refresh.
+  #plaintextCredentials = 0
   // Session-lifetime decrypt cache, keyed first by logical collection key and
   // then by resource id, holding each envelope resource replica's decrypted
   // plaintext so a resource replica is decrypted at most once per session.
@@ -260,6 +267,11 @@ export class BrowserStore {
   // load-bearing for the same reason as the epoch counters: an app key read as
   // absent would mint a second identity for the app.
   #integrityAppKeys = 0
+  // Count of `app-keys` resource replicas the most recent
+  // {@link listAppKeys} call had to skip because their body is not an
+  // envelope though the collection has a cipher -- the app-key sibling of
+  // `#plaintextCredentials`, never purged.
+  #plaintextAppKeys = 0
   // The content cid of each decrypted `app-keys` envelope resource
   // replica, keyed by resource id (the app-key sibling of
   // `#credentialCidByResource`). The collection holds one resource replica per
@@ -648,9 +660,10 @@ export class BrowserStore {
   /**
    * The single decrypt-read skeleton shared by every collection: reads the live
    * resource replicas, decrypting envelope resource replicas (through the
-   * per-collection cache) and passing legacy plaintext ones through, and sorts
-   * each decrypt failure into one of four buckets so a caller stays tolerant of
-   * a single bad resource replica rather than failing the whole read.
+   * per-collection cache), and sorts each unreadable resource replica into one
+   * of five buckets so a caller stays tolerant of a single bad resource replica
+   * rather than failing the whole read. A collection with no cipher is
+   * plaintext by construction, and its bodies pass through as they are.
    *
    * The entries come back in resource id order, which carries no meaning. A
    * caller that needs an order sorts the decrypted entries by a member of the
@@ -678,12 +691,17 @@ export class BrowserStore {
    * envelope did not authenticate, or the host served it under an id it was not
    * sealed for) is collected in `integrityResourceIds` and NOT cached: it is the
    * host's misbehavior rather than the resource replica's, so it is never
-   * purged and drives no refresh.
+   * purged and drives no refresh. A resource replica whose body is not an
+   * envelope at all, in a collection that has a cipher, is collected in
+   * `plaintextResourceIds` without a decrypt and NOT cached: every session
+   * builds a cipher for every encrypted standard collection, so it is a defect
+   * in the stored data rather than a legacy mode. It is never returned as an
+   * entry, never purged, and drives no refresh.
    *
-   * `fromEnvelope` distinguishes a decrypted envelope resource replica from a
-   * plaintext passthrough, which the credential caller needs (a plaintext
-   * resource replica is keyed by its content cid, an envelope one's cid is
-   * recomputed from the plaintext).
+   * `fromEnvelope` distinguishes a decrypted envelope resource replica from the
+   * passthrough of a collection with no cipher, which the credential caller
+   * needs (a resource replica of a cipher-less collection is keyed by its
+   * content cid, an envelope one's cid is recomputed from the plaintext).
    *
    * The decrypt cache is keyed by resource id, which is sound only for the
    * content-addressed collections (a resource replica's content -- and thus its
@@ -699,7 +717,7 @@ export class BrowserStore {
    * @returns {Promise<{ entries: Array<{ resourceId: string; data: Json;
    *   fromEnvelope: boolean }>; undecryptableResourceIds: string[];
    *   unknownEpochResourceIds: string[]; noEpochKeyResourceIds: string[];
-   *   integrityResourceIds: string[] }>}
+   *   integrityResourceIds: string[]; plaintextResourceIds: string[] }>}
    */
   async #decryptedResources({
     logicalKey,
@@ -713,6 +731,7 @@ export class BrowserStore {
     unknownEpochResourceIds: string[]
     noEpochKeyResourceIds: string[]
     integrityResourceIds: string[]
+    plaintextResourceIds: string[]
   }> {
     const docs = await this.rxCollection(logicalKey).find().exec()
     const cipher = this.#ciphers?.[logicalKey]
@@ -726,6 +745,7 @@ export class BrowserStore {
     const unknownEpochResourceIds: string[] = []
     const noEpochKeyResourceIds: string[] = []
     const integrityResourceIds: string[] = []
+    const plaintextResourceIds: string[] = []
     // Every resource replica's decrypt is independent, so they run together;
     // the loop below then walks them in list order, keeping the entry ordering
     // and the per-replica failure buckets exactly as a sequential pass produced
@@ -733,8 +753,11 @@ export class BrowserStore {
     const decrypted = await Promise.all(
       docs.map(async doc => {
         const { id, data } = doc.toMutableJSON()
-        if (!cipher || !isEncryptedEnvelope(data)) {
+        if (!cipher) {
           return { id, plaintext: data as Json, fromEnvelope: false }
+        }
+        if (!isEncryptedEnvelope(data)) {
+          return { id, fromEnvelope: false, notEnvelope: true }
         }
         const cached = decryptCache?.get(id)
         if (cached !== undefined) {
@@ -752,7 +775,18 @@ export class BrowserStore {
         }
       })
     )
-    for (const { id, plaintext, fromEnvelope, err } of decrypted) {
+    for (const { id, plaintext, fromEnvelope, notEnvelope, err } of decrypted) {
+      if (notEnvelope) {
+        // A body that is not an envelope, in a collection with a cipher. It is
+        // refused rather than read as the record: skipped (uncached) and never
+        // purged.
+        log.warn('Refusing a plaintext body in an encrypted collection', {
+          logicalKey,
+          id
+        })
+        plaintextResourceIds.push(id)
+        continue
+      }
       if (err) {
         const failure = classifyDecryptFailure(err)
         if (failure === 'unknown-epoch') {
@@ -805,7 +839,8 @@ export class BrowserStore {
       undecryptableResourceIds,
       unknownEpochResourceIds,
       noEpochKeyResourceIds,
-      integrityResourceIds
+      integrityResourceIds,
+      plaintextResourceIds
     }
   }
 
@@ -922,6 +957,19 @@ export class BrowserStore {
   }
 
   /**
+   * The count of `private-credentials` resource replicas the most recent
+   * {@link listCredentials} call had to skip because their body is not an
+   * envelope at all, though the collection has a cipher. Like
+   * {@link integrityCredentials} these resource replicas are never purged:
+   * nothing about such a body says it is garbage.
+   *
+   * @returns {number}
+   */
+  get plaintextCredentials(): number {
+    return this.#plaintextCredentials
+  }
+
+  /**
    * The count of `contacts` resource replicas the most recent
    * {@link listContacts} scan had to skip for the same reason, so the facade's
    * shared epoch-refresh path can rebuild the ciphers and re-read after a rekey
@@ -960,13 +1008,14 @@ export class BrowserStore {
 
   /**
    * Reads every live `private-credentials` resource replica, decrypting
-   * envelope resource replicas and passing legacy plaintext ones through. The
+   * envelope resource replicas, or passing every body through when the
+   * collection has no cipher. The
    * entries are sorted oldest first by the credential's `validFrom`, or by its
    * proof's `created` when it has no `validFrom`. Each entry keeps its
    * resource id (the write/delete key) alongside
    * the credential's content cid (the page-facing key): for an envelope
-   * resource replica the cid is recomputed from the decrypted VC, for a
-   * plaintext one it IS the resource id.
+   * resource replica the cid is recomputed from the decrypted VC, in a
+   * cipher-less collection it IS the resource id.
    *
    * A single resource replica whose envelope does not decrypt under the current
    * KAK (corrupted, replicated verbatim from another identity, or written under
@@ -988,10 +1037,14 @@ export class BrowserStore {
    * not garbage: it is never purged, and no descriptor refresh can make it
    * readable.
    *
+   * A resource replica whose body is not an envelope, though the collection
+   * has a cipher, is collected in `plaintextResourceIds`. It is never read as
+   * a credential and never purged.
+   *
    * @returns {Promise<{ entries: Array<{ resourceId: string; cid: string;
    *   vc: IVerifiableCredential }>; undecryptableResourceIds: string[];
    *   unknownEpochResourceIds: string[]; noEpochKeyResourceIds: string[];
-   *   integrityResourceIds: string[] }>}
+   *   integrityResourceIds: string[]; plaintextResourceIds: string[] }>}
    */
   async #credentialEntries(): Promise<{
     entries: Array<{
@@ -1003,13 +1056,15 @@ export class BrowserStore {
     unknownEpochResourceIds: string[]
     noEpochKeyResourceIds: string[]
     integrityResourceIds: string[]
+    plaintextResourceIds: string[]
   }> {
     const {
       entries: decrypted,
       undecryptableResourceIds,
       unknownEpochResourceIds,
       noEpochKeyResourceIds,
-      integrityResourceIds
+      integrityResourceIds,
+      plaintextResourceIds
     } = await this.#decryptedResources({ logicalKey: 'privateCredentials' })
     const entries: Array<{
       resourceId: string
@@ -1031,7 +1086,8 @@ export class BrowserStore {
           (await cidFrom({ doc: vc }))
         this.#credentialCidByResource.set(resourceId, cid)
       } else {
-        // A plaintext resource replica IS keyed by its content cid.
+        // A resource replica of a cipher-less collection IS keyed by its
+        // content cid.
         cid = resourceId
       }
       let resourceIds = cidIndex.get(cid)
@@ -1055,7 +1111,8 @@ export class BrowserStore {
       undecryptableResourceIds,
       unknownEpochResourceIds,
       noEpochKeyResourceIds,
-      integrityResourceIds
+      integrityResourceIds,
+      plaintextResourceIds
     }
   }
 
@@ -1220,9 +1277,9 @@ export class BrowserStore {
    * KAK). Returns the number of resource replicas removed.
    *
    * Only the `undecryptableResourceIds` bucket is purged. Unknown-epoch resource
-   * replicas, ones this wallet holds no epoch key for, and ones that failed
-   * their integrity check are real data (or a host's misbehavior over real
-   * data) and are left in place.
+   * replicas, ones this wallet holds no epoch key for, ones that failed their
+   * integrity check, and plaintext bodies in this encrypted collection are
+   * real data (or a host's misbehavior over real data) and are left in place.
    *
    * @returns {Promise<number>}
    */
@@ -1249,12 +1306,14 @@ export class BrowserStore {
       undecryptableResourceIds,
       unknownEpochResourceIds,
       noEpochKeyResourceIds,
-      integrityResourceIds
+      integrityResourceIds,
+      plaintextResourceIds
     } = await this.#credentialEntries()
     this.#undecryptableCredentials = undecryptableResourceIds.length
     this.#unknownEpochCredentials = unknownEpochResourceIds.length
     this.#noEpochKeyCredentials = noEpochKeyResourceIds.length
     this.#integrityCredentials = integrityResourceIds.length
+    this.#plaintextCredentials = plaintextResourceIds.length
     const seen = new Set<string>()
     const credentials: StoredCredential[] = []
     for (const { cid, vc } of entries) {
@@ -1275,14 +1334,15 @@ export class BrowserStore {
    * app-key sibling of {@link _credentialEntries}, without the session-wide cid
    * index: the collection holds one resource replica per connected app, so a
    * full scan per call is cheap. Envelope resource replicas are decrypted
-   * (their cid recomputed and memoized per resource id), plaintext ones pass
-   * through keyed by their resource id. Resource replicas that will not decrypt
-   * are skipped exactly as in the credential scan.
+   * (their cid recomputed and memoized per resource id), and in a cipher-less
+   * collection every body passes through keyed by its resource id. Resource
+   * replicas that will not decrypt, and plaintext bodies under a cipher, are
+   * skipped exactly as in the credential scan.
    *
    * @returns {Promise<{ entries: Array<{ resourceId: string; cid: string;
    *   vc: IVerifiableCredential }>; undecryptableResourceIds: string[];
    *   unknownEpochResourceIds: string[]; noEpochKeyResourceIds: string[];
-   *   integrityResourceIds: string[] }>}
+   *   integrityResourceIds: string[]; plaintextResourceIds: string[] }>}
    */
   async #appKeyEntries(): Promise<{
     entries: Array<{
@@ -1294,13 +1354,15 @@ export class BrowserStore {
     unknownEpochResourceIds: string[]
     noEpochKeyResourceIds: string[]
     integrityResourceIds: string[]
+    plaintextResourceIds: string[]
   }> {
     const {
       entries: decrypted,
       undecryptableResourceIds,
       unknownEpochResourceIds,
       noEpochKeyResourceIds,
-      integrityResourceIds
+      integrityResourceIds,
+      plaintextResourceIds
     } = await this.#decryptedResources({ logicalKey: 'appKeys' })
     const entries: Array<{
       resourceId: string
@@ -1316,7 +1378,8 @@ export class BrowserStore {
           (await cidFrom({ doc: vc }))
         this.#appKeyCidByResource.set(resourceId, cid)
       } else {
-        // A plaintext resource replica IS keyed by its content cid.
+        // A resource replica of a cipher-less collection IS keyed by its
+        // content cid.
         cid = resourceId
       }
       entries.push({ resourceId, cid, vc })
@@ -1326,7 +1389,8 @@ export class BrowserStore {
       undecryptableResourceIds,
       unknownEpochResourceIds,
       noEpochKeyResourceIds,
-      integrityResourceIds
+      integrityResourceIds,
+      plaintextResourceIds
     }
   }
 
@@ -1379,12 +1443,14 @@ export class BrowserStore {
       undecryptableResourceIds,
       unknownEpochResourceIds,
       noEpochKeyResourceIds,
-      integrityResourceIds
+      integrityResourceIds,
+      plaintextResourceIds
     } = await this.#appKeyEntries()
     this.#unknownEpochAppKeys = unknownEpochResourceIds.length
     this.#noEpochKeyAppKeys = noEpochKeyResourceIds.length
     this.#undecryptableAppKeys = undecryptableResourceIds.length
     this.#integrityAppKeys = integrityResourceIds.length
+    this.#plaintextAppKeys = plaintextResourceIds.length
     const seen = new Set<string>()
     const appKeys: StoredAppKey[] = []
     for (const { cid, vc, resourceId } of entries) {
@@ -1463,6 +1529,19 @@ export class BrowserStore {
 
   /**
    * The count of `app-keys` resource replicas the most recent
+   * {@link listAppKeys} call had to skip because their body is not an
+   * envelope at all, though the collection has a cipher. Never purged, and
+   * load-bearing on the match path for the same reason as
+   * {@link integrityAppKeys}.
+   *
+   * @returns {number}
+   */
+  get plaintextAppKeys(): number {
+    return this.#plaintextAppKeys
+  }
+
+  /**
+   * The count of `app-keys` resource replicas the most recent
    * {@link listAppKeys} call had to skip because their envelope would not
    * decrypt at all. Purgeable via {@link purgeUndecryptableAppKeys}.
    *
@@ -1479,8 +1558,10 @@ export class BrowserStore {
    * replicas removed.
    *
    * Only the `undecryptableResourceIds` bucket is purged. Unknown-epoch resource
-   * replicas and ones this wallet holds no epoch key for are real data -- an
-   * app's only identity, in this collection -- and are left in place.
+   * replicas, ones this wallet holds no epoch key for, ones that failed their
+   * integrity check, and plaintext bodies in this encrypted collection are
+   * real data -- an app's only identity, in this collection -- and are left in
+   * place.
    *
    * @returns {Promise<number>}
    */
@@ -1589,7 +1670,8 @@ export class BrowserStore {
    * duplicate resource replicas carrying the same activity are collapsed to
    * the first copy in that order.
    *
-   * A resource replica whose envelope will not decrypt under the current KAK is
+   * A resource replica whose envelope will not decrypt under the current KAK,
+   * or whose body is not an envelope though the collection has a cipher, is
    * skipped (logged) rather than rejecting the whole read, so one poisoned
    * resource replica cannot hang the history page. The counts describe this
    * same read: `unknownEpoch` for the facade's descriptor refresh, and
@@ -1612,12 +1694,14 @@ export class BrowserStore {
       unknownEpochResourceIds,
       noEpochKeyResourceIds,
       integrityResourceIds,
+      plaintextResourceIds,
       undecryptableResourceIds
     } = await this.#decryptedResources({ logicalKey: 'walletActivity' })
     const unreadable =
       unknownEpochResourceIds.length +
       noEpochKeyResourceIds.length +
       integrityResourceIds.length +
+      plaintextResourceIds.length +
       undecryptableResourceIds.length
     const activities = entries
       .map(({ resourceId, data }) => ({
@@ -1701,8 +1785,8 @@ export class BrowserStore {
   }
 
   /**
-   * Reads every live `contacts` resource replica, decrypting envelope ones and
-   * passing legacy plaintext ones through. Unlike credentials, a contact's
+   * Reads every live `contacts` resource replica, decrypting envelope ones (a
+   * cipher-less collection's bodies pass through). Unlike credentials, a contact's
    * resource id is NOT content-derived -- it is a stable id minted at creation
    * ({@link addContact}) -- so this simply reflects the current set of resource
    * replicas (`_updateDoc` rewrites a resource replica's body in place rather
@@ -1710,9 +1794,10 @@ export class BrowserStore {
    * first by the head payload's own `updatedAt`.
    *
    * A resource replica whose envelope will not decrypt under the current KAK is
-   * skipped, and an unknown-epoch one is skipped uncached for a descriptor
-   * refresh to pick up -- the shared {@link #decryptedResources} tolerance (and its
-   * decrypt cache) that the credential and history reads use.
+   * skipped, a plaintext body under a cipher is refused and skipped, and an
+   * unknown-epoch one is skipped uncached for a descriptor refresh to pick
+   * up -- the shared {@link #decryptedResources} tolerance that the credential
+   * and history reads use.
    *
    * Every head passes through `upgradeContactHeadPayload` (as does
    * {@link loadContact}'s point read), so a resource replica written before the
@@ -1783,8 +1868,9 @@ export class BrowserStore {
    * decrypt (the resource id IS the RxDB primary key), never the
    * full-collection scan {@link listContacts} pays. Mirrors the scan's
    * per-replica tolerance: a resource replica whose envelope will not decrypt
-   * under the current KAK (or fails its integrity check) resolves to
-   * `undefined`, exactly as the scan would have skipped it. One whose envelope
+   * under the current KAK (or fails its integrity check), or whose body is not
+   * an envelope though the collection has a cipher, resolves to `undefined`,
+   * exactly as the scan would have skipped it. One whose envelope
    * names an unknown key epoch throws the cipher's `UnknownEpochError`
    * instead: possibly-fresh data behind a stale descriptor, which the
    * facade's descriptor refresh may pick up. The head passes through the same
@@ -1807,7 +1893,16 @@ export class BrowserStore {
     const { data } = doc.toMutableJSON()
     const cipher = this.#ciphers?.contacts
     let raw: Json
-    if (cipher && isEncryptedEnvelope(data)) {
+    if (cipher && !isEncryptedEnvelope(data)) {
+      // Not an envelope, in a collection with a cipher: refused rather than
+      // read as the head.
+      log.warn('Refusing a plaintext body in an encrypted collection', {
+        logicalKey: 'contacts',
+        id
+      })
+      return undefined
+    }
+    if (cipher) {
       try {
         raw = (await cipher.decrypt({ id, envelope: data! })) as Json
       } catch (err) {
@@ -1913,8 +2008,10 @@ export class BrowserStore {
    * in the existing head is preserved verbatim -- it is the identity every
    * revision (on every replica) refers to, and it differs from the resource id
    * for mobile-authored contacts. Throws when the existing head is unreachable
-   * (missing resource replica, undecryptable envelope): rewriting it blind
-   * would sever the contact from its history. The decrypt's own error is
+   * (missing resource replica, undecryptable envelope, or a plaintext body
+   * though the collection has a cipher): rewriting it blind would sever the
+   * contact from its history. A plaintext body under a cipher is refused
+   * before it is read. The decrypt's own error is
    * thrown as is, before any write, so a head sealed under an unknown key
    * epoch surfaces as `UnknownEpochError` and the facade can refresh the
    * descriptor and re-run the whole update.
@@ -1940,6 +2037,16 @@ export class BrowserStore {
     }
     const { data } = doc.toMutableJSON()
     const cipherForRead = this.#ciphers?.contacts
+    // A cipher over a plaintext prior resource replica is refused before the
+    // body is read as a head: a fresh `encrypt` would mint its own id and bind
+    // it as `was.resource` while the write goes to this resource id, an
+    // envelope a Collection-handle read refuses as swapped.
+    if (cipherForRead && !isEncryptedEnvelope(data)) {
+      throw new Error(
+        `Cannot update contact "${id}": its stored head is not an encrypted ` +
+          'envelope, so it cannot be re-encrypted under its own resource id.'
+      )
+    }
     let existingHead: ContactHeadPayload
     if (isEncryptedEnvelope(data)) {
       if (!cipherForRead) {
@@ -1967,10 +2074,7 @@ export class BrowserStore {
     // resource id -- including a legacy uuid one) and advances the EDV
     // `sequence` from the prior envelope, then re-stamp the epoch so
     // replication pushes the current `Key-Epoch` for the rewritten body. With
-    // no cipher the head stays plaintext. A cipher over a plaintext prior
-    // resource replica is refused: a fresh `encrypt` would mint its own id and
-    // bind it as `was.resource` while the write goes to this resource id, an
-    // envelope a Collection-handle read refuses as swapped.
+    // no cipher the head stays plaintext.
     if (!cipherForRead) {
       await this.#updateDoc({
         logicalKey: 'contacts',
@@ -2100,8 +2204,10 @@ export class BrowserStore {
    * read is one decrypt per revision of the requested contact, and each
    * historical resource replica is decrypted at most once ever per browser.
    *
-   * Per-replica tolerance mirrors {@link #decryptedResources}: a plaintext (legacy
-   * or cipher-less) body passes through; an `UnknownEpochError` resource
+   * Per-replica tolerance mirrors {@link #decryptedResources}: a cipher-less
+   * collection's body passes through, and a body that is not an envelope though
+   * the collection has a cipher is refused, skipped, and left unindexed; an
+   * `UnknownEpochError` resource
    * replica is skipped uncached AND left unindexed, since it is possibly-fresh
    * data behind a stale descriptor that must stay retryable after a descriptor
    * refresh; a `KeyUnwrapError` one (no key for its epoch on this wallet) is
@@ -2137,8 +2243,11 @@ export class BrowserStore {
           // The whole win: another contact's revision, skipped undecrypted.
           return { id, skipped: true }
         }
-        if (!cipher || !isEncryptedEnvelope(data)) {
+        if (!cipher) {
           return { id, plaintext: data as Json, indexed }
+        }
+        if (!isEncryptedEnvelope(data)) {
+          return { id, indexed, notEnvelope: true }
         }
         const cached = decryptCache.get(id)
         if (cached !== undefined) {
@@ -2158,8 +2267,24 @@ export class BrowserStore {
     )
     const revisions: ContactRevisionPayload[] = []
     const backfill: Array<{ resourceId: string; contactId: string }> = []
-    for (const { id, skipped, plaintext, indexed, err } of decrypted) {
+    for (const {
+      id,
+      skipped,
+      plaintext,
+      indexed,
+      notEnvelope,
+      err
+    } of decrypted) {
       if (skipped) {
+        continue
+      }
+      if (notEnvelope) {
+        // Not an envelope, in a collection with a cipher: refused rather than
+        // read as a revision, and left unindexed.
+        log.warn('Refusing a plaintext body in an encrypted collection', {
+          logicalKey: 'contactsHistory',
+          id
+        })
         continue
       }
       if (err) {

@@ -31,31 +31,35 @@ import type {
  * key matched. Carries the skipped counts so the popup can say which way the
  * read failed: Resources whose key epoch is still unknown after the one
  * descriptor refresh, Resources in a known epoch this session holds no wrap
- * for, Resources whose body failed its integrity check, and envelopes that will
- * not decrypt at all.
+ * for, Resources whose body failed its integrity check, Resources whose body is
+ * not an envelope at all, and envelopes that will not decrypt at all.
  */
 export class AppKeysUnreadableError extends Error {
   unknownEpoch: number
   noEpochKey: number
   undecryptable: number
   integrity: number
+  plaintext: number
 
   constructor({
     unknownEpoch,
     noEpochKey,
     undecryptable,
-    integrity
+    integrity,
+    plaintext
   }: {
     unknownEpoch: number
     noEpochKey: number
     undecryptable: number
     integrity: number
+    plaintext: number
   }) {
     super(
       'Could not read the stored app keys: ' +
         `${unknownEpoch} resource(s) in a still-unknown key epoch, ` +
         `${noEpochKey} resource(s) in a key epoch this session holds no key for, ` +
         `${integrity} resource(s) whose body failed its integrity check, ` +
+        `${plaintext} resource(s) whose body is not an encrypted envelope, ` +
         `${undecryptable} undecryptable resource(s).`
     )
     this.name = 'AppKeysUnreadableError'
@@ -63,6 +67,7 @@ export class AppKeysUnreadableError extends Error {
     this.noEpochKey = noEpochKey
     this.undecryptable = undecryptable
     this.integrity = integrity
+    this.plaintext = plaintext
   }
 }
 
@@ -75,7 +80,8 @@ export class AppKeysUnreadableError extends Error {
  *
  * A Resource whose body failed its integrity check counts here too: it is the
  * one skip a host can produce with no keys at all, so treating it as "absent"
- * would let the host force a second identity for the app.
+ * would let the host force a second identity for the app. A Resource whose body
+ * is not an envelope counts for the same reason.
  *
  * @param options {object}
  * @param options.matched {boolean}   whether a stored app key matched
@@ -84,6 +90,7 @@ export class AppKeysUnreadableError extends Error {
  * @param options.skipped.noEpochKey {number}
  * @param options.skipped.undecryptable {number}
  * @param options.skipped.integrity {number}
+ * @param options.skipped.plaintext {number}
  * @returns {boolean}
  */
 export function appKeyMintRefused({
@@ -96,6 +103,7 @@ export function appKeyMintRefused({
     noEpochKey: number
     undecryptable: number
     integrity: number
+    plaintext: number
   }
 }): boolean {
   return (
@@ -103,7 +111,8 @@ export function appKeyMintRefused({
     (skipped.unknownEpoch > 0 ||
       skipped.noEpochKey > 0 ||
       skipped.undecryptable > 0 ||
-      skipped.integrity > 0)
+      skipped.integrity > 0 ||
+      skipped.plaintext > 0)
   )
 }
 

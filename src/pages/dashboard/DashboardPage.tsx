@@ -78,6 +78,10 @@ export function DashboardPage() {
   // takes no keys, so offering to delete it would let a host present
   // recoverable data as garbage and have the wallet destroy the evidence.
   const [integrityCount, setIntegrityCount] = useState(0)
+  // Resources stored unencrypted in the encrypted credential collection. They
+  // are refused rather than shown, and like the integrity ones get no remove
+  // affordance: nothing about such a body says it is garbage.
+  const [plaintextCount, setPlaintextCount] = useState(0)
   // Dismissing the passkey-safety notice hides it for this visit only.
   const [noticeDismissed, setNoticeDismissed] = useState(false)
   const seedReady = session?.welcomeSeedReady
@@ -116,6 +120,7 @@ export function DashboardPage() {
       setCredentials(vcs)
       setUndecryptableCount(session.storage.undecryptableCredentials)
       setIntegrityCount(session.storage.integrityCredentials)
+      setPlaintextCount(session.storage.plaintextCredentials)
       setLoadError(false)
     },
     [session]
@@ -388,6 +393,12 @@ export function DashboardPage() {
       {integrityCount > 0 && (
         <Alert severity="error" sx={{ mb: 2 }}>
           {t('dashboard.integrity', { count: integrityCount })}
+        </Alert>
+      )}
+
+      {plaintextCount > 0 && (
+        <Alert severity="error" sx={{ mb: 2 }}>
+          {t('dashboard.plaintext', { count: plaintextCount })}
         </Alert>
       )}
 

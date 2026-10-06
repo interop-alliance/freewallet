@@ -160,6 +160,7 @@ describe('StorageManager app-key collection surface', () => {
       unknownEpoch: 0,
       noEpochKey: 0,
       integrity: 0,
+      plaintext: 0,
       undecryptable: 0
     })
     // The credential-wide surfaces (the dashboard, public links, shares) must

@@ -32,6 +32,15 @@ agents. did-cli re-requests under a saved key rather than minting a new
 one each run. A lost key means a new agent identity. The old row is
 revoked like any other.
 
+The pairwise seed on an agent's entry (the cleartext audiences design,
+2026-10-05) is not agent key material. It is the wallet's own key toward
+that agent: the did:key it derives is what the wallet presents as
+`holder` to the agent and signs renewals with, and the agent never holds
+the seed. The agent's identity stays the key the agent holds and names
+as `controller`. The seed is written once, carries a keyed tag, and a
+consent that finds a different seed on the entry refuses, so no consent
+re-issues anything to whoever sent a link.
+
 ## Rejected Alternatives
 
 - A wallet-minted, wallet-custodied seed for agents, re-issued on the
@@ -61,3 +70,10 @@ revoked like any other.
    attests a web origin, so the App Connect spec's transport note can be
    filled in. A wallet-custodied agent seed can then be designed against
    that attested identifier.
+
+## Changelog
+
+- 2026-10-05: Clarified that the pairwise seed the cleartext audiences
+  design stores on an agent entry is the wallet's key toward the agent,
+  not custodied agent key material. The Decision is unchanged in
+  substance.

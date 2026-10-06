@@ -197,6 +197,38 @@ function makeFakeContentCipher(): DocCipher {
 }
 
 /**
+ * Wraps a fake DocCipher so every `decrypt` and `encryptUpdate` records the
+ * resource id it was handed. A test can then tell a body refused before any
+ * decrypt from one the cipher was asked to open and failed on.
+ *
+ * @param inner {DocCipher}
+ * @returns {{ cipher: DocCipher; decrypted: string[]; updated: string[] }}
+ */
+function recordingCipher(inner: DocCipher): {
+  cipher: DocCipher
+  decrypted: string[]
+  updated: string[]
+} {
+  const decrypted: string[] = []
+  const updated: string[] = []
+  const cipher: DocCipher = {
+    encrypt: options => inner.encrypt(options),
+    async decrypt(options) {
+      decrypted.push(options.id)
+      return await inner.decrypt(options)
+    }
+  }
+  const { encryptUpdate } = inner
+  if (encryptUpdate) {
+    cipher.encryptUpdate = async options => {
+      updated.push(options.id)
+      return await encryptUpdate.call(inner, options)
+    }
+  }
+  return { cipher, decrypted, updated }
+}
+
+/**
  * The standard cipher set for an encrypted-store test: both encrypted
  * collections get the fake cipher.
  */
@@ -679,23 +711,207 @@ describe('BrowserStore (encrypted collections)', () => {
     expect(items.map(({ id }) => id)).toEqual(['first', 'second'])
   })
 
-  it('reads legacy plaintext rows through the tolerant read paths', async () => {
-    const { localStore } = await initLocalStore({ ciphers: encryptedCiphers() })
-    // A plaintext activity resource replica pulled from a
-    // pre-encryption-descriptor remote collection.
-    await localStore.rxCollection('walletActivity').insert({
-      id: 'legacy-activity',
-      updatedAt: new Date().toISOString(),
-      data: { id: 'legacy-activity', summary: 'legacy' } as Json
+  describe('a plaintext body in an encrypted collection', () => {
+    it('is not listed as an activity and counts as unreadable', async () => {
+      const { cipher, decrypted } = recordingCipher(makeFakeCipher())
+      const { localStore } = await initLocalStore({
+        ciphers: { ...encryptedCiphers(), walletActivity: cipher }
+      })
+      await localStore.rxCollection('walletActivity').insert({
+        id: 'plaintext-activity',
+        updatedAt: new Date().toISOString(),
+        data: { id: 'plaintext-activity', summary: 'plaintext' } as Json
+      })
+
+      const { entries, unknownEpoch, unreadable } =
+        await localStore.listHistoryItems()
+      expect(entries).toEqual([])
+      expect(unknownEpoch).toBe(0)
+      expect(unreadable).toBe(1)
+      expect(
+        await localStore.findHistoryItemsByInnerId({ id: 'plaintext-activity' })
+      ).toEqual([])
+      // Refused before any decrypt, not counted after a failed one.
+      expect(decrypted).toEqual([])
     })
 
-    const { entries: items } = await localStore.listHistoryItems()
-    expect(items).toEqual([
-      {
-        id: 'legacy-activity',
-        doc: { id: 'legacy-activity', summary: 'legacy' }
+    it('is not listed as a credential and is never purged', async () => {
+      const { localStore } = await initLocalStore({
+        ciphers: encryptedCiphers()
+      })
+      const credential = makeCredential('plaintext')
+      const cid = await cidFrom({ doc: credential })
+      await localStore.rxCollection('privateCredentials').insert({
+        id: cid,
+        updatedAt: new Date().toISOString(),
+        data: credential as unknown as Json
+      })
+
+      expect(await localStore.listCredentials()).toEqual([])
+      expect(localStore.plaintextCredentials).toBe(1)
+      expect(localStore.undecryptableCredentials).toBe(0)
+      expect(localStore.integrityCredentials).toBe(0)
+      expect(await localStore.loadCredential({ cid })).toBeUndefined()
+
+      // Only the undecryptable bucket is purged; the plaintext row stays.
+      expect(await localStore.purgeUndecryptableCredentials()).toBe(0)
+      const remaining = await localStore
+        .rxCollection('privateCredentials')
+        .find()
+        .exec()
+      expect(remaining.map(resource => resource.id)).toEqual([cid])
+    })
+
+    it('is not listed as an app key and is never purged', async () => {
+      const { localStore } = await initLocalStore({
+        ciphers: encryptedCiphers()
+      })
+      const appKey = makeAppKey('https://app.example/editor')
+      const cid = await cidFrom({ doc: appKey })
+      await localStore.rxCollection('appKeys').insert({
+        id: cid,
+        updatedAt: new Date().toISOString(),
+        data: appKey as unknown as Json
+      })
+
+      expect(await localStore.listAppKeys()).toEqual([])
+      expect(localStore.plaintextAppKeys).toBe(1)
+      expect(localStore.undecryptableAppKeys).toBe(0)
+      expect(localStore.integrityAppKeys).toBe(0)
+
+      expect(await localStore.purgeUndecryptableAppKeys()).toBe(0)
+      const remaining = await localStore.rxCollection('appKeys').find().exec()
+      expect(remaining.map(resource => resource.id)).toEqual([cid])
+    })
+
+    it('is not read as a contact head', async () => {
+      const { cipher, decrypted } = recordingCipher(makeFakeContactsCipher())
+      const { localStore } = await initLocalStore({
+        ciphers: {
+          contacts: cipher,
+          contactsHistory: makeFakeContentCipher()
+        }
+      })
+      const plaintextHead = {
+        contactId: 'c-plaintext',
+        updatedAt: '2026-01-01T00:00:00.000Z',
+        writerId: 'writer-0',
+        contact: { displayName: 'Plaintext' }
       }
-    ])
+      await localStore.rxCollection('contacts').insert({
+        id: 'plaintext-head',
+        updatedAt: plaintextHead.updatedAt,
+        data: plaintextHead as Json
+      })
+
+      expect(await localStore.listContacts()).toEqual([])
+      expect(await localStore.listContactHeads()).toEqual([])
+      expect(
+        await localStore.loadContact({ id: 'plaintext-head' })
+      ).toBeUndefined()
+      // Refused before any decrypt, not skipped after a failed one.
+      expect(decrypted).toEqual([])
+    })
+
+    it('refuses to update a plaintext contact head without a decrypt', async () => {
+      const { cipher, decrypted, updated } = recordingCipher(
+        makeFakeContactsCipher()
+      )
+      const { localStore } = await initLocalStore({
+        ciphers: {
+          contacts: cipher,
+          contactsHistory: makeFakeContentCipher()
+        }
+      })
+      const plaintextHead = {
+        contactId: 'c-plaintext',
+        updatedAt: '2026-01-01T00:00:00.000Z',
+        writerId: 'writer-0',
+        contact: { displayName: 'Plaintext' }
+      }
+      await localStore.rxCollection('contacts').insert({
+        id: 'plaintext-head',
+        updatedAt: plaintextHead.updatedAt,
+        data: plaintextHead as Json
+      })
+
+      await expect(
+        localStore.updateContact({
+          id: 'plaintext-head',
+          contact: { displayName: 'Renamed' },
+          writerId: 'writer-1'
+        })
+      ).rejects.toThrow(/not an encrypted envelope/)
+      expect(decrypted).toEqual([])
+      expect(updated).toEqual([])
+
+      const resource = (await localStore
+        .rxCollection('contacts')
+        .findOne('plaintext-head')
+        .exec())!.toMutableJSON()
+      expect(resource.data).toEqual(plaintextHead)
+    })
+
+    it('surfaces no contact revision', async () => {
+      const { cipher, decrypted } = recordingCipher(makeFakeContentCipher())
+      const { localStore } = await initLocalStore({
+        ciphers: {
+          contacts: makeFakeContactsCipher(),
+          contactsHistory: cipher
+        }
+      })
+      const revision = {
+        contactId: 'c-plaintext',
+        action: 'update',
+        timestamp: '2026-01-01T00:00:00.000Z',
+        writerId: 'writer-0',
+        snapshot: { displayName: 'Plaintext' }
+      }
+      await localStore.rxCollection('contactsHistory').insert({
+        id: 'plaintext-revision',
+        updatedAt: revision.timestamp,
+        data: revision as unknown as Json
+      })
+
+      expect(
+        await localStore.listContactRevisions({ contactId: 'c-plaintext' })
+      ).toEqual([])
+      expect(await localStore.listAllContactRevisions()).toEqual([])
+      // Refused before any decrypt, not skipped after a failed one.
+      expect(decrypted).toEqual([])
+    })
+
+    it('deletes only the envelope when a plaintext row shares its cid', async () => {
+      const { localStore } = await initLocalStore({
+        ciphers: encryptedCiphers()
+      })
+      const credential = makeCredential('shared-cid')
+      const cid = await cidFrom({ doc: credential })
+      expect(await localStore.addCredential({ cid, credential })).toBe(true)
+      const [envelopeResource] = await localStore
+        .rxCollection('privateCredentials')
+        .find()
+        .exec()
+      const envelopeResourceId = envelopeResource.id
+      expect(envelopeResourceId).not.toBe(cid)
+      // A plaintext row keyed by the same cid and carrying the same VC.
+      await localStore.rxCollection('privateCredentials').insert({
+        id: cid,
+        updatedAt: new Date().toISOString(),
+        data: credential as unknown as Json
+      })
+
+      await localStore.deleteCredential({ cid })
+
+      const remaining = await localStore
+        .rxCollection('privateCredentials')
+        .find()
+        .exec()
+      expect(remaining.map(resource => resource.id)).toEqual([cid])
+      expect(remaining[0].toMutableJSON().data).toEqual(credential)
+      expect(await localStore.listCredentials()).toEqual([])
+      expect(localStore.plaintextCredentials).toBe(1)
+    })
   })
 
   /**

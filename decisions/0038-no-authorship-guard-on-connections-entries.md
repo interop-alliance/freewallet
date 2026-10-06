@@ -93,6 +93,19 @@ hook for reopening this record.
 - The history rows carried the same class of residue: a revoked party's
   genuine old grant still vouching for it at a rotation (FW-573). That was
   closed by ordering grants against Revoke records, not by signing.
+- Renewal of agent grants (record 0043 and the cleartext audiences
+  design) ends the harmlessness of a replayed entry. A replayed or
+  restored pre-revoke agent entry is unretired, carries genuine grants
+  and a live channel, and the renewal pass re-mints those grants to the
+  revoked agent. The residue is bounded: it covers only genuine grants
+  whose signing authority is still listed and whose `expires` has not
+  passed when the entry comes back. A grant a withdrawn authority signed
+  is outside silent renewal, a lapsed grant returns only by the owner's
+  tick, and the renewal's own rules close a torn revoke, a revoke racing
+  a renewal, and grants a later-revoked client planted. The pairwise
+  seed, the one member a plant could use to speak as the wallet, carries
+  its own HMAC tag under the blinded-index key, so a planted seed is
+  refused and a replayed seed is the genuine one.
 
 ## Revisit Criteria
 
@@ -100,7 +113,9 @@ Reopen this decision when one or more of the following holds:
 
 1. A reader comes to trust entry content the three rules do not bound. For
    example, a `contact` kind or an audiences producer that acts on `name`
-   or `label`.
+   or `label`. Met 2026-10-05 by agent-grant renewal; answered with the
+   bounded residue and the seed tag above, not with a signature, since
+   signing would still not stop a replay of a genuine entry.
 2. The log layer gains witnessing, or the Resource Log Profile gives a
    plain Resource a verifiable version. Rollback then becomes detectable,
    and signing would close the plant half as well.
@@ -108,3 +123,10 @@ Reopen this decision when one or more of the following holds:
 A drop in the cost of signing is not a reason to reopen. Signing would
 still buy only authorship of the free-text members, which criterion 1
 covers.
+
+## Changelog
+
+- 2026-10-05: Revisit criterion 1 was met by the renewal of agent
+  grants. The record was refined rather than reversed: no signature is
+  added, the seed gains a keyed tag, and the Consequences state the
+  bounded replay residue renewal leaves.
