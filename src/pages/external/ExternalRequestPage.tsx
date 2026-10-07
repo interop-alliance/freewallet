@@ -5,8 +5,9 @@
  * Add Credential box or scanned from a terminal QR) and answered without a
  * CHAPI popup. The `WalletGetPage` shape minus CHAPI: open the exchange behind
  * the interaction URL, classify the VPR, render the storage-access consent
- * panel, delegate through the grant engine, and POST the unsigned zcap-only
- * presentation back to the exchange.
+ * panel, delegate through the grant engine, and POST the zcap-only
+ * presentation back to the exchange. It is unsigned, except on a connection
+ * request, where the wallet's pairwise key toward the agent signs it.
  *
  * The page lives outside `ProtectedRoute` like the popups. A session already
  * live in the app is used directly; otherwise the page runs the ordinary
@@ -15,7 +16,9 @@
  * states, DID Auth, a `domain`, an `AppConnectQuery`, a delivery endpoint on
  * another origin, a grant class outside the allowlist, a plain URL on an
  * encrypted collection the agent cannot read, a grantee that is one of the
- * account's own wallet clients -- is decided in
+ * account's own wallet clients, and a connection request that is unsigned,
+ * carries no `challenge`, asks for another write or another descriptor, or
+ * meets no trusted `inbox` -- is decided in
  * `src/lib/walletRequest/externalRequest.ts` before consent renders, each
  * with its own copy. The grant is recorded on the agent's `connections`
  * entry, then on a Grant activity under the fixed `n/a (API request)` origin
@@ -46,6 +49,7 @@ import {
   isSatisfiable,
   resolveGrants,
   WalletResponseFailure,
+  type GrantRequestKind,
   type IVPRDetails,
   type WalletRequestProfile
 } from '@/lib/walletRequest'
@@ -58,6 +62,8 @@ import {
   openExternalRequest,
   precheckExternalRequest,
   refuseEnrolledClientController,
+  refuseUnattributedServer,
+  refuseUntrustedInbox,
   unreadableGrants,
   type ExternalRequestRefusal
 } from '@/lib/walletRequest/externalRequest'
@@ -70,6 +76,7 @@ import { CHAPILoginForm } from '@/pages/chapi/CHAPILoginForm'
 import { RequestSourcePanel } from '@/pages/chapi/RequestSourcePanel'
 import { ZcapGrantsPanel } from '@/pages/chapi/ZcapGrantsPanel'
 import { createLogger } from '@/lib/log'
+import { wasServiceInfo } from '@/lib/wasService'
 
 const log = createLogger('fw:request:page')
 
@@ -124,6 +131,11 @@ export function ExternalRequestPage() {
   const [exchangeUrl, setExchangeUrl] = useState<string | null>(null)
   const [deliveryHost, setDeliveryHost] = useState('')
   const [profile, setProfile] = useState<WalletRequestProfile | null>(null)
+  // A connection request (one naming the `#inbox` descriptor) or any other
+  // interaction-URL request, as the precheck classed it.
+  const [requestKind, setRequestKind] = useState<
+    'interaction-url' | 'connection-request'
+  >('interaction-url')
   const [session, setSession] = useState<Session | null>(null)
   // The consent screen's grants: the first pass at once, then the pass with
   // the existing collections' attribution read in. A plain URL naming an
@@ -136,7 +148,8 @@ export function ExternalRequestPage() {
     Map<string, { name?: string; grantedAt?: string }>
   >(new Map())
   // What the mint will actually produce: under a transient session's
-  // generation delegation each configured TTL is clamped to that parent.
+  // generation delegation each configured TTL is limited by that parent's
+  // life. The panel states the share TTL on a connection request's rows.
   const grantDays = useMemo(
     () => grantTtlDays({ session: session ?? undefined }),
     [session]
@@ -159,14 +172,18 @@ export function ExternalRequestPage() {
    * allowlist check, then renders consent. The one post-login refusal the
    * popup also has: no remote Space to delegate against. A plain URL naming
    * an existing collection holds consent behind the attribution pass, which
-   * reads the key epochs the unreadable-target refusal needs.
+   * reads the key epochs the unreadable-target refusal needs. A connection
+   * request also reads the inbox's trust, and is refused when the account
+   * has no inbox the wallet would read.
    */
   async function prepareConsent({
     loggedIn,
-    requestProfile
+    requestProfile,
+    kind
   }: {
     loggedIn: Session
     requestProfile: WalletRequestProfile
+    kind: GrantRequestKind
   }) {
     setPageState('preparing')
     await loggedIn.storage.ready()
@@ -188,7 +205,8 @@ export function ExternalRequestPage() {
       space,
       collections: existingCollectionsFrom(
         await loggedIn.storage.listCollectionPublicStates()
-      )
+      ),
+      requestKind: kind
     }
     const grants = resolveGrants(resolution)
     // The allowlist: the first point a target's class is known is after
@@ -197,14 +215,25 @@ export function ExternalRequestPage() {
       block('barredGrant')
       return
     }
+    // The account log and, on a connection request, the inbox's trust are
+    // read together; the refusals below still apply in order. A read that
+    // fails fails the preparation closed.
+    const [clientDids, inbox] = await Promise.all([
+      listedClientDids({ session: loggedIn }),
+      kind === 'connection-request' ? loggedIn.storage.readInbox() : undefined
+    ])
     // A link naming the did:key of a wallet client the account document lists
     // or ever listed is refused before consent: its grants would land on that
-    // client's `connections` entry, where no listing shows them. A log that
-    // cannot be read fails the preparation closed.
-    refuseEnrolledClientController({
-      profile: requestProfile,
-      clientDids: await listedClientDids({ session: loggedIn })
-    })
+    // client's `connections` entry, where no listing shows them.
+    refuseEnrolledClientController({ profile: requestProfile, clientDids })
+    // The inbox grant is only worth delegating into an inbox the wallet
+    // reads, by the same trust rule the inbox pass reads it under. The inbox
+    // pass attributes each message by the server's `createdBy`, so a server
+    // that does not advertise recording it is refused too.
+    if (inbox !== undefined) {
+      refuseUntrustedInbox({ trust: inbox.trust })
+      refuseUnattributedServer({ service: await wasServiceInfo() })
+    }
     // Best-effort, as on the popup: an unread epoch refuses nothing.
     const attribution = attributeGrants({
       resolution,
@@ -300,7 +329,7 @@ export function ExternalRequestPage() {
         return
       }
       const opened = await openExternalRequest({ url })
-      const checked = precheckExternalRequest({
+      const checked = await precheckExternalRequest({
         request: opened.request,
         exchangeUrl: opened.exchangeUrl
       })
@@ -308,11 +337,13 @@ export function ExternalRequestPage() {
       setExchangeUrl(opened.exchangeUrl)
       setDeliveryHost(checked.deliveryHost)
       setProfile(checked.profile)
+      setRequestKind(checked.requestKind)
       if (liveSession) {
         setSession(liveSession)
         await prepareConsent({
           loggedIn: liveSession,
-          requestProfile: checked.profile
+          requestProfile: checked.profile,
+          kind: checked.requestKind
         })
         return
       }
@@ -367,7 +398,11 @@ export function ExternalRequestPage() {
     }
     setSession(loggedIn)
     try {
-      await prepareConsent({ loggedIn, requestProfile: profile })
+      await prepareConsent({
+        loggedIn,
+        requestProfile: profile,
+        kind: requestKind
+      })
     } catch (err) {
       // The login form is gone by now, so a failed preparation is a page
       // block, not a login error.
@@ -404,7 +439,8 @@ export function ExternalRequestPage() {
         selectedVCs: [],
         exchangeUrl,
         // The one entry point that grants a standalone capability query.
-        delegateStandaloneZcaps: true
+        delegateStandaloneZcaps: true,
+        requestKind
       })
       // An empty compose (every grant turned unsatisfiable at delegation
       // time -- a collection created by another client since consent, say)
@@ -588,6 +624,7 @@ export function ExternalRequestPage() {
               ttlDays={grantDays.ttlDays}
               writeTtlDays={grantDays.writeTtlDays}
               shareTtlDays={grantDays.shareTtlDays}
+              connectionRequest={requestKind === 'connection-request'}
             />
             <Typography variant="caption" color="text.secondary">
               {t('externalRequest.exchangeVisibility')}

@@ -192,6 +192,35 @@ describe('runEncounter', () => {
     expect(registration.converge).toHaveBeenCalledTimes(1)
   })
 
+  it('runs a fresh-evidence encounter after the run in flight, not inside it', async () => {
+    const session = sessionOf()
+    let release: () => void = () => undefined
+    const held = new Promise<void>(resolve => {
+      release = resolve
+    })
+    let runs = 0
+    const registration = registrationOf(async () => {
+      runs += 1
+      if (runs === 1) {
+        await held
+      }
+      return [{ invariant: INVARIANT, outcome: 'clean', detail: { runs } }]
+    })
+    const first = runEncounter({ session, registration })
+    const fresh = runEncounter({ session, registration, freshEvidence: true })
+    await tick()
+    // The fresh run waits for the first to finish before it starts.
+    expect(registration.converge).toHaveBeenCalledTimes(1)
+    release()
+    expect(await first).toEqual([
+      { invariant: INVARIANT, outcome: 'clean', detail: { runs: 1 } }
+    ])
+    expect(await fresh).toEqual([
+      { invariant: INVARIANT, outcome: 'clean', detail: { runs: 2 } }
+    ])
+    expect(registration.converge).toHaveBeenCalledTimes(2)
+  })
+
   it('does not re-run a failed run in the same session, short of fresh evidence', async () => {
     const session = sessionOf()
     const failed = [

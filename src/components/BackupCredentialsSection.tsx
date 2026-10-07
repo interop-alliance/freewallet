@@ -7,8 +7,18 @@
  * page's export. No last-method guard is needed: the credential this session
  * entered on always stands beside a backup credential, so removing one never
  * leaves the account with no unlock method.
+ *
+ * The removal strikes the credential's ladder VM. Its confirmation dialog
+ * lists the connected agents holding a grant that VM signed, each ticked by
+ * default; an unticked agent is marked declined. Once the removal resolves,
+ * the ticked agents are restored and the Settings inbox pass runs.
  */
 import Alert from '@mui/material/Alert'
+import Button from '@mui/material/Button'
+import Dialog from '@mui/material/Dialog'
+import DialogActions from '@mui/material/DialogActions'
+import DialogContent from '@mui/material/DialogContent'
+import DialogContentText from '@mui/material/DialogContentText'
 import IconButton from '@mui/material/IconButton'
 import Stack from '@mui/material/Stack'
 import Typography from '@mui/material/Typography'
@@ -22,6 +32,12 @@ import {
   removeAccountBackupCredential
 } from '@/session/backupCredential'
 import { GenerationDelegationRenewalError } from '@/session/annexReach'
+import { retiredCredentialWithdrawnKeys } from '@/session/credentialRotation'
+import { useAgentReconnect } from '@/hooks/useAgentReconnect'
+import {
+  AgentReconnectList,
+  AgentReconnectNotice
+} from '@/components/AgentReconnectList'
 import { showToast } from '@/stores/toastStore'
 import { useAsyncLoad } from '@/hooks/useAsyncLoad'
 import { formatDate } from '@/lib/viewMappers/formatDate'
@@ -55,21 +71,47 @@ export function BackupCredentialsSection({
     return await listBackupCredentialEntries({ session })
   }, [session])
 
-  const handleRemove = async (entry: BackupCredentialUnlockMethod) => {
+  // The entry the confirm dialog is open on.
+  const [pending, setPending] = useState<BackupCredentialUnlockMethod | null>(
+    null
+  )
+  // The connected agents holding a grant the removed credential's ladder VM
+  // signed, listed in the dialog.
+  const agents = useAgentReconnect({
+    session,
+    withdrawn: pending
+      ? {
+          key: pending.unlockSpaceId,
+          keys: () =>
+            retiredCredentialWithdrawnKeys({ session, entry: pending })
+        }
+      : null
+  })
+
+  /**
+   * Runs the removal, then marks the unticked agents declined, restores the
+   * ticked agents, and runs the inbox pass. A failed removal declines
+   * nothing.
+   *
+   * @param entry {BackupCredentialUnlockMethod}
+   * @returns {Promise<void>}
+   */
+  const runRemove = async (entry: BackupCredentialUnlockMethod) => {
     if (removingSpaceId) {
-      return
-    }
-    if (!window.confirm(t('settings.backupCredentials.removeConfirm'))) {
       return
     }
     setRemovingSpaceId(entry.unlockSpaceId)
     setErrorKey(null)
     try {
-      await removeAccountBackupCredential({ session, entry })
+      await agents.runCeremony(() =>
+        removeAccountBackupCredential({ session, entry })
+      )
+      setPending(null)
       showToast({ message: t('settings.backupCredentials.removed') })
       await reload()
     } catch (err) {
       log.error('Could not remove the backup credential', { err })
+      setPending(null)
       if ((err as { name?: string }).name === 'ActingCredentialRemovalError') {
         setErrorKey('settings.backupCredentials.actingCredential')
       } else if (err instanceof GenerationDelegationRenewalError) {
@@ -113,7 +155,7 @@ export function BackupCredentialsSection({
                 size="small"
                 aria-label={t('settings.backupCredentials.remove')}
                 disabled={removingSpaceId !== null || registryRepairing}
-                onClick={() => void handleRemove(entry)}
+                onClick={() => setPending(entry)}
               >
                 <MdDeleteOutline />
               </IconButton>
@@ -127,6 +169,51 @@ export function BackupCredentialsSection({
         </Typography>
       )}
       {errorKey && <Alert severity="error">{t(errorKey)}</Alert>}
+      <AgentReconnectNotice state={agents.state} />
+
+      <Dialog
+        open={pending !== null}
+        onClose={() => {
+          if (!removingSpaceId) {
+            setPending(null)
+          }
+        }}
+        fullWidth
+      >
+        <DialogContent>
+          <DialogContentText>
+            {t('settings.backupCredentials.removeConfirm')}
+          </DialogContentText>
+          <AgentReconnectList
+            agents={agents.agents}
+            mode="tick"
+            isTicked={agents.isTicked}
+            onToggle={agents.toggle}
+            disabled={removingSpaceId !== null}
+          />
+        </DialogContent>
+        <DialogActions>
+          <Button
+            onClick={() => setPending(null)}
+            disabled={removingSpaceId !== null}
+          >
+            {t('common.cancel')}
+          </Button>
+          <Button
+            variant="contained"
+            color="error"
+            loading={removingSpaceId !== null}
+            disabled={registryRepairing || agents.loading}
+            onClick={() => {
+              if (pending) {
+                void runRemove(pending)
+              }
+            }}
+          >
+            {t('settings.backupCredentials.remove')}
+          </Button>
+        </DialogActions>
+      </Dialog>
     </Stack>
   )
 }

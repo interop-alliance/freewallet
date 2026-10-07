@@ -18,20 +18,34 @@
  * collection URL naming an encrypted collection whose current key epoch does
  * not list the agent, and a `interact.service` endpoint on another origin
  * than the exchange.
+ *
+ * A connection request is the one form that also asks for a write: POST on
+ * the wallet's `inbox`, named by the `https://w3id.org/byoe#inbox`
+ * descriptor, beside reads on audience collections named by plain URL. The
+ * wallet answers it with a presentation signed by a pairwise key, so the
+ * request must carry a VPR-root `challenge`, and it must be signed by the
+ * key of the controller it names, which keeps the wallet from minting a key
+ * toward a party that never asked. It may carry no other write and no other
+ * descriptor. Its inbox must stand and be one the wallet would read: not
+ * public, not encrypted, and stamped by no requester.
  */
 import {
   isInteractionUrl,
   openInteractionRequest,
-  presentationEndpointFor
+  presentationEndpointFor,
+  verifyCapabilityRequest
 } from '@interop/wallet-request'
 import type {
   FetchLike,
   IVPRDetails as ISpecVPRDetails
 } from '@interop/wallet-request'
 import { errorNameOf } from '@interop/wallet-core/menders'
+import type { ServiceInfo } from '@interop/was-client'
 import { isEd25519DidKey } from '@interop/was-client/edv'
 import { classifyRequest, queriesOf } from './classify'
+import { isInboxDescriptor, namesInboxTarget } from './connectionRequest'
 import {
+  asksForWrite,
   urlNamesExistingCollection,
   type ExistingCollections,
   type ResolvedGrant
@@ -75,11 +89,14 @@ export function isAgentActivityObject(object: unknown): boolean {
  * protected-collection read covers plaintext `public-credentials`. Widening
  * the list is a documented decision, not a code change. A plain collection
  * URL resolving to the `collection` class passes this list and faces one
- * more check once the key epochs are read ({@link unreadableGrants}).
+ * more check once the key epochs are read ({@link unreadableGrants}). The
+ * `inbox` class is admitted only in a connection request: the resolver
+ * produces it for no other request kind.
  */
 const ALLOWED_TARGET_CLASSES: readonly string[] = [
   'public-collection',
-  'collection'
+  'collection',
+  'inbox'
 ]
 
 /**
@@ -88,7 +105,12 @@ const ALLOWED_TARGET_CLASSES: readonly string[] = [
  * `malformedRequest`) come from opening the request; the rest come from the
  * pre-consent check over the VPR the exchange handed back.
  * `enrolledClient` is decided once the account document is read
- * ({@link refuseEnrolledClientController}).
+ * ({@link refuseEnrolledClientController}), `noInbox` and
+ * `untrustedInbox` once the inbox's metadata is read
+ * ({@link refuseUntrustedInbox}), and `noCreatorAttribution` once the
+ * server's features are read ({@link refuseUnattributedServer}). The
+ * `connection...` reasons refuse a connection request the precheck cannot
+ * accept.
  */
 export type ExternalRequestRefusal =
   | 'invalidLink'
@@ -104,6 +126,13 @@ export type ExternalRequestRefusal =
   | 'unreadableTarget'
   | 'multipleGrantees'
   | 'enrolledClient'
+  | 'connectionUnsigned'
+  | 'connectionWithoutChallenge'
+  | 'connectionWithWriteGrant'
+  | 'connectionTargetForm'
+  | 'noInbox'
+  | 'untrustedInbox'
+  | 'noCreatorAttribution'
 
 /**
  * A request this entry point refuses before anything is shown or written.
@@ -226,19 +255,28 @@ class ExchangeNetworkError extends Error {
  * host is resolved exactly the way delivery resolves it, so the consent
  * screen names where the response will actually go.
  *
+ * A connection request (one naming the `#inbox` descriptor) is then held to
+ * its own rules ({@link precheckConnectionRequest}), and the result names
+ * the request kind grant resolution takes.
+ *
  * @param options {object}
  * @param options.request {IVPRDetails}
  * @param options.exchangeUrl {string}
- * @returns {{ profile: WalletRequestProfile, deliveryHost: string }}
+ * @returns {Promise<{ profile: WalletRequestProfile, deliveryHost: string,
+ *   requestKind: 'interaction-url' | 'connection-request' }>}
  * @throws {ExternalRequestRefusedError}
  */
-export function precheckExternalRequest({
+export async function precheckExternalRequest({
   request,
   exchangeUrl
 }: {
   request: IVPRDetails
   exchangeUrl: string
-}): { profile: WalletRequestProfile; deliveryHost: string } {
+}): Promise<{
+  profile: WalletRequestProfile
+  deliveryHost: string
+  requestKind: 'interaction-url' | 'connection-request'
+}> {
   const queries = queriesOf(request)
   if (queries.length === 0) {
     throw new ExternalRequestRefusedError('malformedRequest')
@@ -300,7 +338,110 @@ export function precheckExternalRequest({
     }
     throw new ExternalRequestRefusedError('foreignDelivery', { cause: err })
   }
-  return { profile, deliveryHost }
+  if (!namesInboxTarget({ zcapRequests: profile.zcapRequests })) {
+    return { profile, deliveryHost, requestKind: 'interaction-url' }
+  }
+  await precheckConnectionRequest({ request, profile })
+  return { profile, deliveryHost, requestKind: 'connection-request' }
+}
+
+/**
+ * The connection request's own refusals, in this order: a grant naming any
+ * descriptor other than `#inbox` (`connectionTargetForm`; an audience is
+ * named by its plain container URL), a write on any target but the inbox
+ * (`connectionWithWriteGrant`), a missing VPR-root `challenge`
+ * (`connectionWithoutChallenge`; one inside the query alone does not count,
+ * since the response proof signs over the root one), and a proof that does
+ * not verify against the named controller (`connectionUnsigned`). The proof
+ * check is wallet-request's, and any failure it reports refuses.
+ *
+ * @param options {object}
+ * @param options.request {IVPRDetails}   the request as the exchange
+ *   handed it back, its `proof` included
+ * @param options.profile {WalletRequestProfile}   its classification
+ * @returns {Promise<void>}
+ * @throws {ExternalRequestRefusedError}
+ */
+async function precheckConnectionRequest({
+  request,
+  profile
+}: {
+  request: IVPRDetails
+  profile: WalletRequestProfile
+}): Promise<void> {
+  const others = profile.zcapRequests.filter(
+    ({ invocationTarget }) => !isInboxDescriptor(invocationTarget)
+  )
+  if (
+    others.some(({ invocationTarget }) => typeof invocationTarget !== 'string')
+  ) {
+    throw new ExternalRequestRefusedError('connectionTargetForm')
+  }
+  if (others.some(asksForWrite)) {
+    throw new ExternalRequestRefusedError('connectionWithWriteGrant')
+  }
+  const { challenge } = request
+  if (typeof challenge !== 'string' || challenge === '') {
+    throw new ExternalRequestRefusedError('connectionWithoutChallenge')
+  }
+  try {
+    await verifyCapabilityRequest({ request })
+  } catch (err) {
+    throw new ExternalRequestRefusedError('connectionUnsigned', { cause: err })
+  }
+}
+
+/**
+ * Refuses a connection request whose account has no `inbox` the wallet
+ * would read, from the trust reading `StorageManager.readInbox` returns:
+ * `noInbox` when the collection is absent, `untrustedInbox` when it stands
+ * but is not trusted (public, carrying an `encryption` descriptor, or
+ * carrying a `generator` stamp). Run once the session can read the Space,
+ * before consent renders.
+ *
+ * @param options {object}
+ * @param options.trust {'absent' | 'untrusted' | 'trusted'}
+ * @throws {ExternalRequestRefusedError}   `noInbox` or `untrustedInbox`
+ */
+export function refuseUntrustedInbox({
+  trust
+}: {
+  trust: 'absent' | 'untrusted' | 'trusted'
+}): void {
+  if (trust === 'absent') {
+    throw new ExternalRequestRefusedError('noInbox')
+  }
+  if (trust === 'untrusted') {
+    throw new ExternalRequestRefusedError('untrustedInbox')
+  }
+}
+
+/**
+ * The core-profile feature token by which a WAS server promises to record
+ * `createdBy` on every Resource, Collection, and Space created under a
+ * capability invocation.
+ */
+const CREATED_BY_FEATURE = 'created-by'
+
+/**
+ * Refuses a connection request on a server that does not advertise the
+ * `created-by` feature token. The inbox pass attributes each message by the
+ * `createdBy` the server records, and the token is the server's promise to
+ * record it on every Resource. Run after {@link refuseUntrustedInbox}.
+ *
+ * @param options {object}
+ * @param options.service {object}   the server's service information, of
+ *   which only `hasFeature(token)` is read
+ * @throws {ExternalRequestRefusedError}   `noCreatorAttribution`
+ */
+export function refuseUnattributedServer({
+  service
+}: {
+  service: Pick<ServiceInfo, 'hasFeature'>
+}): void {
+  if (!service.hasFeature(CREATED_BY_FEATURE)) {
+    throw new ExternalRequestRefusedError('noCreatorAttribution')
+  }
 }
 
 /**

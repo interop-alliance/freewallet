@@ -53,6 +53,7 @@ import {
 } from '@interop/wallet-core/keys'
 import {
   encryptedWalletCollectionIds,
+  INBOX_COLLECTION,
   WALLET_SPACE_PROVISION_ROSTER
 } from '@interop/wallet-core/space/collections'
 import {
@@ -72,6 +73,7 @@ import {
   listStoredCollectionIds,
   listStoredKeystores,
   listStoredSpaceIds,
+  readStoredCollection,
   readStoredKeystoreConfig,
   readStoredSpaceMeta,
   spaceExistsInStore
@@ -80,6 +82,7 @@ import {
   accountLogRemovalIndex,
   accountLogVersionsOf,
   annexLocationOf,
+  listStoredResourceIds,
   readCollectionDescriptor,
   readCollectionLogHeadAnchor,
   readRosterLogHeadAnchor,
@@ -853,6 +856,43 @@ const STORED_CHECKS: Partial<Record<InvariantId, InvariantCheck>> = {
         return unnamed.length === 0 ? holds() : violated({ unnamed })
       }
     }),
+
+  /**
+   * A trusted `inbox` (stored, not public, with no `encryption` descriptor
+   * and no `generator` stamp) holds no message. The auditor runs behind a
+   * settled login, so every stored message reads as older than the last
+   * drain's start. A message an agent posted after that drain cannot be
+   * told apart, so an audit taken while an agent posts reads it violated. An
+   * absent or untrusted `inbox` is outside the predicate, declared under
+   * `standard-collections-are-provisioned`'s gap row.
+   */
+  'inbox-is-drained': async ({ account }) => {
+    const inbox = await readStoredCollection({
+      dataDir: account.dataDir,
+      spaceId: account.spaceId,
+      collectionId: INBOX_COLLECTION
+    })
+    if (inbox === undefined) {
+      return undetermined(
+        'The account holds no inbox (standard-collections-are-provisioned).'
+      )
+    }
+    if (
+      inbox.policyType === 'PublicCanRead' ||
+      inbox.meta.encryption !== undefined ||
+      inbox.meta.generator !== undefined
+    ) {
+      return undetermined(
+        'The inbox is untrusted (standard-collections-are-provisioned).'
+      )
+    }
+    const messages = await listStoredResourceIds({
+      dataDir: account.dataDir,
+      spaceId: account.spaceId,
+      collectionId: INBOX_COLLECTION
+    })
+    return messages.length === 0 ? holds() : violated({ messages })
+  },
 
   /**
    * The sealing rule of `governed-log-heads-anchor-past-the-membership-change`,

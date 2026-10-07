@@ -1,5 +1,5 @@
 /**
- * The session bindings of the three encounter registrations the encounter
+ * The session bindings of the five encounter registrations the encounter
  * runner runs.
  *
  * The stranded-collection site. Every session's storage manager reports a
@@ -31,6 +31,14 @@
  * asked reads the run's entries through {@link connectionWritersMend}. The
  * entries go there and to the event channel, and `session.mends` does not
  * carry them.
+ *
+ * The two inbox-pass sites. Opening the Notifications page calls
+ * {@link openInboxNotifications}, which drains the inbox and renews, and
+ * resolves to the run's entries and the visit's outcome so far. The Settings
+ * page calls {@link renewAgentGrantsAfterCeremony} once a ceremony that
+ * replaces the generation delegation resolves. Each awaits the login's own
+ * pass (`session.inboxPass`) before running. The ceremony site runs past a
+ * spent budget, since a fresh delegation is evidence no earlier run saw.
  */
 import {
   readConnections,
@@ -43,9 +51,16 @@ import { isSessionDisposed } from '@/session/sessionLifecycle'
 import { sessionAuthorityKind } from '@/session/accountCeremonyContext'
 import { holdDirectoryListing } from '@/session/connectionWriters'
 import { createLogger } from '@/lib/log'
+import {
+  inboxVisitOutcome,
+  latestInboxPassOutcome,
+  type InboxPassOutcome
+} from '@/session/inboxPass'
 import { runEncounter } from './encounter.js'
 import {
   CONNECTION_WRITERS_SWEEP_ENCOUNTER,
+  INBOX_CEREMONY_ENCOUNTER,
+  INBOX_NOTIFICATIONS_ENCOUNTER,
   REGISTRY_SEAL_ENCOUNTER,
   STRANDED_COLLECTION_ENCOUNTER
 } from './registrations.js'
@@ -277,6 +292,56 @@ export function connectionWritersMend({
   session: Session
 }): Promise<MendReport<CeremonyId>> {
   return writerSweeps.get(session) ?? EMPTY_RUN
+}
+
+/**
+ * The Notifications page's site: drains the inbox and renews the connected
+ * agents' grants as an encounter, behind the login's own pass, and resolves
+ * to the run's entries and every pass's outcome this visit. A run that
+ * ended `refused` (no trusted inbox) spends the session's budget, and a
+ * later open gets that run's entries back with the visit's outcome. Never
+ * rejects.
+ *
+ * @param options {object}
+ * @param options.session {Session}
+ * @returns {Promise<{ entries: MendReport, outcome: InboxPassOutcome }>}
+ */
+export async function openInboxNotifications({
+  session
+}: {
+  session: Session
+}): Promise<{ entries: MendReport<CeremonyId>; outcome: InboxPassOutcome }> {
+  const entries = await runEncounter({
+    session,
+    registration: INBOX_NOTIFICATIONS_ENCOUNTER
+  })
+  return { entries, outcome: inboxVisitOutcome({ session }) }
+}
+
+/**
+ * The Settings site, raised once a ceremony that replaces the generation
+ * delegation resolves (a ladder-kind passphrase change or credential
+ * removal, a client revocation, the last-client transition): drains the
+ * inbox, then renews the agent grants the replacement left due, under the
+ * delegation the ceremony installed. Resolves to the run's entries and that
+ * pass's outcome, which names any agent a push could not reach. It awaits
+ * the login's own pass first and runs past a spent budget. Never rejects.
+ *
+ * @param options {object}
+ * @param options.session {Session}
+ * @returns {Promise<{ entries: MendReport, outcome: InboxPassOutcome }>}
+ */
+export async function renewAgentGrantsAfterCeremony({
+  session
+}: {
+  session: Session
+}): Promise<{ entries: MendReport<CeremonyId>; outcome: InboxPassOutcome }> {
+  const entries = await runEncounter({
+    session,
+    registration: INBOX_CEREMONY_ENCOUNTER,
+    freshEvidence: true
+  })
+  return { entries, outcome: latestInboxPassOutcome({ session }) }
 }
 
 /**

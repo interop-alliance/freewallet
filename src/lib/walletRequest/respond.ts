@@ -7,8 +7,18 @@
  * escrowed into any key epoch or any presentation leaves the wallet. The
  * ordering is the security-critical part and lives here rather than in the
  * popup page, so it is stated once and exercisable without a DOM.
+ *
+ * A connection request (an interaction-URL request naming the `#inbox`
+ * descriptor) adds one step ahead of the delegations: the wallet's pairwise
+ * seed toward the agent is read off the agent's entry, its tag checked, or
+ * minted fresh. The seed and its tag ride the entry write on whichever
+ * record path runs, and the response is signed by the seed's did:key.
  */
-import type { WalletResponse } from '@interop/wallet-request'
+import { base64urlnopad } from '@scure/base'
+import type {
+  PresentationSigner,
+  WalletResponse
+} from '@interop/wallet-request'
 import type { IVPRDetails as ISpecVPRDetails } from '@interop/wallet-request'
 import type { Session } from '@/types/auth'
 import { deliverPresentation } from './vcApiExchange'
@@ -22,7 +32,10 @@ import type {
 import { ZcapUnavailableError } from './processZcaps'
 import { AppKeysUnreadableError } from './appConnect'
 import {
+  CONNECTION_SEED_BYTES,
+  connectionDidKey,
   connectionResourceId,
+  connectionSeedTag,
   parseConnectionEntry,
   recordGrants,
   removeGrants,
@@ -290,6 +303,79 @@ async function priorEntryState({
 }
 
 /**
+ * The wallet's pairwise seed toward a connection request's agent, with its
+ * tag, and the presentation signer its did:key holds.
+ */
+type PairwiseSeed = {
+  seed: string
+  seedTag: string
+  presentationSigner: PresentationSigner
+}
+
+/**
+ * Resolves the pairwise seed for a connection request, before anything is
+ * delegated. It reads the agent's entry at the controller's id, the one
+ * direct read the directory allows at consent, since the wallet is about to
+ * grant that party. A stored seed is taken once its tag verifies under the
+ * directory's blinded-index key. An entry with no seed, or no entry, gets
+ * 32 fresh random bytes and their tag. A stored seed whose tag fails, an
+ * entry body the codec refuses, or a failed read throws, and the consent
+ * fails closed with nothing delivered and no seed written: a host that
+ * planted a seed is misbehaving, so the seed is not read as absent.
+ *
+ * Nothing is written here. The seed rides the consent's entry write, and a
+ * minted one that is rolled back with the consent is inert, since nothing
+ * outside the wallet saw its did:key.
+ *
+ * @param options {object}
+ * @param options.session {Session}
+ * @param options.did {string}   the agent's did:key, the request's one
+ *   grantee `controller`
+ * @returns {Promise<PairwiseSeed>}
+ */
+async function resolvePairwiseSeed({
+  session,
+  did
+}: {
+  session: Session
+  did: string
+}): Promise<PairwiseSeed> {
+  const { store, hmacKey } = await session.storage.connectionsDirectory()
+  const stored = await store.get({
+    resourceId: await connectionResourceId({ hmacKey, did })
+  })
+  let seed: string | undefined
+  let seedTag: string | undefined
+  if (stored !== undefined) {
+    const entry = parseConnectionEntry(stored.body)
+    if (entry === undefined) {
+      throw new Error(
+        "The agent's connections entry could not be read; its seed is " +
+          'not replaced.'
+      )
+    }
+    seed = entry.seed
+    seedTag = entry.seedTag
+  }
+  if (seed === undefined || seedTag === undefined) {
+    seed = base64urlnopad.encode(
+      crypto.getRandomValues(new Uint8Array(CONNECTION_SEED_BYTES))
+    )
+    seedTag = await connectionSeedTag({ hmacKey, seed })
+  }
+  // Verifies the tag before deriving, and throws when it fails.
+  const derived = await connectionDidKey({ hmacKey, seed, seedTag })
+  return {
+    seed,
+    seedTag,
+    presentationSigner: {
+      signer: derived.keyAgent.getSigner(),
+      holder: derived.did
+    }
+  }
+}
+
+/**
  * Writes the consent's grants on the party's `connections` entry: created,
  * or merged into, un-retired, `lastSeen` moved, each grant marked `share` or
  * `grant` (`recordGrants`). The entry is the revocation index, so this write
@@ -298,24 +384,33 @@ async function priorEntryState({
  * with wallet-core's `ConnectionKindMismatchError`, which fails the request
  * the same way.
  *
+ * On a connection request the pairwise seed and its tag are written in the
+ * same write. An entry already carrying a different seed refuses
+ * (`recordGrants`): a concurrent consent won the race, the composed
+ * response names a did:key the entry does not, and the request fails
+ * closed.
+ *
  * @param options {object}
  * @param options.session {Session}
  * @param options.party {ConsentParty}
  * @param options.zcaps {IZcap[]}   the capabilities actually delegated
  * @param options.shareZcapIds {string[]}   the ids of the share grants among
  *   them
+ * @param [options.pairwise] {PairwiseSeed}   a connection request's seed
  * @returns {Promise<void>}
  */
 async function recordConsentEntry({
   session,
   party,
   zcaps,
-  shareZcapIds
+  shareZcapIds,
+  pairwise
 }: {
   session: Session
   party: ConsentParty
   zcaps: IZcap[]
   shareZcapIds: string[]
+  pairwise?: PairwiseSeed
 }): Promise<void> {
   const shares = new Set(shareZcapIds)
   const { store, hmacKey, spaceUrl } =
@@ -333,7 +428,11 @@ async function recordConsentEntry({
     ...(party.name !== undefined && { name: party.name }),
     ...(party.origin !== undefined && { origin: party.origin }),
     ...(party.url !== undefined && { url: party.url }),
-    ...(party.appKey !== undefined && { appKey: party.appKey })
+    ...(party.appKey !== undefined && { appKey: party.appKey }),
+    ...(pairwise !== undefined && {
+      seed: pairwise.seed,
+      seedTag: pairwise.seedTag
+    })
   })
 }
 
@@ -352,6 +451,9 @@ async function recordConsentEntry({
  * party's names, and a later consent un-retires it. An entry that was live
  * before stays live. So does any entry once one of this request's grants
  * escrowed, since that grantee needs a row to revoke from.
+ *
+ * A pairwise seed the consent wrote stays on the entry. Nothing outside the
+ * wallet saw its did:key, and the next consent reuses it.
  *
  * Best-effort: a failure is logged, and the grants stay listed, which a
  * revoke then handles.
@@ -445,6 +547,12 @@ async function rollBackConsentEntry({
  * record is kept and the composed response rides on the error for manual
  * delivery.
  *
+ * A connection request first resolves the wallet's pairwise seed toward the
+ * agent (`resolvePairwiseSeed`). A seed whose tag fails refuses the consent
+ * before anything is delegated. The seed and its tag ride the entry write on
+ * whichever path records, and the response is signed by the seed's did:key
+ * over the request's `challenge`, with no `domain`.
+ *
  * This is the request consent ceremony's one entry point, for the CHAPI
  * popup and the interaction-URL page alike, and it emits the run's events.
  * The outcome is `clean` once the response is composed (and delivered, with
@@ -468,6 +576,9 @@ async function rollBackConsentEntry({
  * @param [options.delegateStandaloneZcaps] {boolean}   the interaction-URL
  *   page's opt-in to delegating a standalone capability query (see
  *   `processRequest`)
+ * @param [options.requestKind] {'interaction-url' | 'connection-request'}
+ *   the interaction-URL page's request kind, as its precheck classed it; a
+ *   connection request resolves the pairwise seed
  * @returns {Promise<WalletResponse>}   the composed response (`{}` when there
  *   was nothing to send)
  * @throws {WalletResponseFailure}   nothing was delivered
@@ -480,7 +591,8 @@ export async function composeAndDeliverResponse({
   selectedVCs,
   exchangeUrl,
   expectedAppKeyDid,
-  delegateStandaloneZcaps
+  delegateStandaloneZcaps,
+  requestKind
 }: {
   request: IVPRDetails
   session: Session
@@ -490,6 +602,7 @@ export async function composeAndDeliverResponse({
   exchangeUrl?: string | null
   expectedAppKeyDid?: string
   delegateStandaloneZcaps?: boolean
+  requestKind?: 'interaction-url' | 'connection-request'
 }): Promise<WalletResponse> {
   const events = ceremonyEvents<RequestConsentStage>({
     ceremony: 'request-consent',
@@ -506,6 +619,7 @@ export async function composeAndDeliverResponse({
       exchangeUrl,
       expectedAppKeyDid,
       delegateStandaloneZcaps,
+      requestKind,
       events
     })
   } catch (err) {
@@ -538,6 +652,7 @@ export async function composeAndDeliverResponse({
  * @param [options.exchangeUrl] {string}
  * @param [options.expectedAppKeyDid] {string}
  * @param [options.delegateStandaloneZcaps] {boolean}
+ * @param [options.requestKind] {'interaction-url' | 'connection-request'}
  * @param options.events {CeremonyEmitter}   the run's emitter
  * @returns {Promise<WalletResponse>}
  * @throws {WalletResponseFailure}
@@ -551,6 +666,7 @@ async function runRequestConsent({
   exchangeUrl,
   expectedAppKeyDid,
   delegateStandaloneZcaps,
+  requestKind,
   events
 }: {
   request: IVPRDetails
@@ -561,6 +677,7 @@ async function runRequestConsent({
   exchangeUrl?: string | null
   expectedAppKeyDid?: string
   delegateStandaloneZcaps?: boolean
+  requestKind?: 'interaction-url' | 'connection-request'
   events: CeremonyEmitter<RequestConsentStage>
 }): Promise<WalletResponse> {
   // Set once the consent is recorded ahead of escrow, so the post-compose
@@ -574,6 +691,23 @@ async function runRequestConsent({
     | undefined
   // The grants whose escrow landed, which a rollback keeps.
   const escrowed = new Set<string>()
+  // A connection request's pairwise seed, resolved before anything is
+  // delegated, so a seed that fails its tag refuses with nothing minted.
+  let pairwise: PairwiseSeed | undefined
+  if (requestKind === 'connection-request') {
+    const agent = profile.zcapRequests
+      .map(({ controller }) => controller)
+      .find((did): did is string => typeof did === 'string')
+    try {
+      if (agent === undefined) {
+        throw new Error('A connection request names no agent.')
+      }
+      pairwise = await resolvePairwiseSeed({ session, did: agent })
+    } catch (err) {
+      log.error("Could not resolve the agent's pairwise seed", { err })
+      throw new WalletResponseFailure('processFailed', { cause: err })
+    }
+  }
   let response: WalletResponse
   try {
     response = await processRequest({
@@ -583,6 +717,7 @@ async function runRequestConsent({
       selectedVCs,
       expectedAppKeyDid,
       delegateStandaloneZcaps,
+      ...(pairwise && { pairwiseSigner: pairwise.presentationSigner }),
       // Revocation finds a grantee through its `connections` entry, so the
       // entry must carry the grants before provisioning escrows the grantee
       // into a key epoch. A failed write fails the request closed: nothing
@@ -604,7 +739,13 @@ async function runRequestConsent({
               zcapIds: zcaps.map(zcap => zcap.id),
               prior: await priorEntryState({ session, party })
             }
-            await recordConsentEntry({ session, party, zcaps, shareZcapIds })
+            await recordConsentEntry({
+              session,
+              party,
+              zcaps,
+              shareZcapIds,
+              pairwise
+            })
             events.stage('record-entry', { grants: zcaps.length })
           } else if (zcaps.length > 0) {
             throw new Error(
@@ -707,7 +848,8 @@ async function runRequestConsent({
           session,
           party,
           zcaps: grantedZcaps,
-          shareZcapIds: []
+          shareZcapIds: [],
+          pairwise
         })
         events.stage('record-entry', { grants: grantedZcaps.length })
       } catch (err) {

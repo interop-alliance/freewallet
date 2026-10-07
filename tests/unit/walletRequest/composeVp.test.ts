@@ -108,7 +108,7 @@ describe('composeVp (unsigned)', () => {
   it('throws when neither VCs nor DID Auth are present', async () => {
     await expect(
       composeVP({ session, queries: [], didAuthRequested: false })
-    ).rejects.toThrow(/credentials, capabilities, or a DID Auth request/)
+    ).rejects.toThrow(/credentials, capabilities, or a signature/)
   })
 
   it('produces an unsigned VP with no proof', async () => {

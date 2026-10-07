@@ -273,6 +273,49 @@ export function clientAnnexReachFor({
 }
 
 /**
+ * The reach for the generation an account document points at, under the
+ * authority the caller acts with: through a standing credential's client
+ * identity and sibling delegation when `standing` is given (the ladder kind,
+ * whose per-visit annex VM the auxiliary Space's controller does not list),
+ * and as this session's own client otherwise (the enrolled kind). `null`
+ * when the document points at no generation.
+ *
+ * @param options {object}
+ * @param options.session {Session}
+ * @param options.pointer {ReachPointer}   the account pointer
+ * @param options.doc {object}   the account document to read the pointer out
+ *   of (a ceremony's post-edit document, or a verified one)
+ * @param [options.standing] {object}   the credential's client identity and
+ *   its annex-Space sibling delegation, on the ladder kind
+ * @returns {Promise<ClientAnnexReach | null>}
+ */
+export async function annexReachUnder({
+  session,
+  pointer,
+  doc,
+  standing
+}: {
+  session: Session
+  pointer: ReachPointer
+  doc: AccountDoc
+  standing?: {
+    standingClient: { agents: { zcapClient: ZcapClient } }
+    delegatedClients: IZcap
+  }
+}): Promise<ClientAnnexReach | null> {
+  const serviceDescription = await wasServiceDescription()
+  return standing
+    ? standingClientAnnexReachFor({
+        pointer,
+        doc,
+        standing,
+        pinStore: session.persistence.logPins,
+        serviceDescription
+      })
+    : clientAnnexReachFor({ session, pointer, doc, serviceDescription })
+}
+
+/**
  * The reach for the generation this session's account currently points at,
  * off the locally verified account log (through the session's verified-log
  * memo), or `null` when the account carries no annex inventory. The verified

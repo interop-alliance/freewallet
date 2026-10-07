@@ -4,9 +4,24 @@
  * them, entries written through wallet-core's own upsert helpers over the
  * in-memory store, the one listing read every reader resolves against, and a
  * `StorageManager` double whose directory methods run over that store.
+ *
+ * The agent grant fixtures the inbox pass and the agent reconnect tests
+ * share are signed for real (`eddsa-jcs-2022`), so the proof check the
+ * renewal and the offers reader run verifies their signatures: a grant
+ * under the Space root signed by an account key, a grant a transient session
+ * minted under a generation delegation, and a fake zcap client that signs
+ * the grants it mints the same way.
  */
 import { vi } from 'vitest'
+import type { IZcap } from '@interop/data-integrity-core'
+import { DataIntegrityProof } from '@interop/data-integrity-proof'
+import { createSignCryptosuite } from '@interop/ed25519-signature/eddsa-jcs-2022'
+import { agentsFromSeed } from '@interop/was-client/identity'
+import type { AccountSignerCheck } from '@interop/wallet-core/clientAnnex'
 import {
+  clearReceivedGrants,
+  connectionDidKey,
+  connectionSeedTag,
   readConnections,
   recordGrants,
   retireConnection,
@@ -15,7 +30,9 @@ import {
   type GrantKind,
   type ReadConnection
 } from '@interop/wallet-core/connections'
+import { webvhSigner } from '@interop/wallet-core/webvh'
 import type { StorageManager } from '@/stores/storageManager'
+import type { Session } from '@/types/auth'
 import { HMAC_KEY, memoryConnectionsStore } from './memoryConnections'
 
 /**
@@ -231,9 +248,9 @@ export async function entryOf({
 }
 
 /**
- * A `StorageManager` double over a fixture directory: the listing read and
- * the retirement run wallet-core's own reader and writer over the in-memory
- * store, and the server-side stages are spies that report every grant they
+ * A `StorageManager` double over a fixture directory: the listing read, the
+ * channel clear, and the retirement run wallet-core's own reader and writers
+ * over the in-memory store, and the server-side stages are spies that report every grant they
  * are handed as revoked on this call. The rotation reports one collection
  * re-keyed.
  *
@@ -261,7 +278,20 @@ export function directoryStorage({
         store: directory.store,
         hmacKey: HMAC_KEY
       })
-      return { listing: listing!, spaceUrl: SPACE_URL }
+      return {
+        store: directory.store,
+        hmacKey: HMAC_KEY,
+        listing: listing!,
+        spaceUrl: SPACE_URL
+      }
+    }),
+    clearConnectionChannel: vi.fn(async ({ did }: { did: string }) => {
+      calls.push('clearConnectionChannel')
+      await clearReceivedGrants({
+        store: directory.store,
+        hmacKey: HMAC_KEY,
+        did
+      })
     }),
     revokeCollectionRecipients: vi.fn(
       async (_options: { did: string; grants: ConnectionGrant[] }) => {
@@ -340,4 +370,404 @@ export function asStorageManager(
   storage: ReturnType<typeof directoryStorage>
 ): StorageManager {
   return storage as unknown as StorageManager
+}
+
+/**
+ * One day, in milliseconds.
+ */
+export const DAY_MS = 24 * 60 * 60 * 1000
+
+/**
+ * The account the agent grant fixtures belong to, its Space's root
+ * capability, and the collections and annex generation they name.
+ */
+export const ACCOUNT_DID = 'did:webvh:scid:was.example:space:s'
+export const ROOT = `urn:zcap:root:${encodeURIComponent(SPACE_URL)}`
+export const INBOX_URL = `${SPACE_URL}inbox/`
+export const NEWS_URL = `${SPACE_URL}news/`
+export const AGENT_INBOX = 'https://agent.example/space/a/inbox/'
+export const ANNEX_DID =
+  'did:webvh:scid:was.example:space:aux:gen-AAAAAAAAAAAAAAAA'
+export const POINTED_DELEGATION = 'urn:uuid:generation-delegation-current'
+
+/**
+ * An ISO time `days` from now.
+ *
+ * @param days {number}
+ * @returns {string}
+ */
+export function inDays(days: number): string {
+  return new Date(Date.now() + days * DAY_MS).toISOString()
+}
+
+/**
+ * The account's delegation keys: an enrolled client and a ladder VM the
+ * document lists under `capabilityDelegation`, and a struck key it no
+ * longer lists.
+ */
+export type AccountKeyName = 'client' | 'ladder' | 'struck'
+
+/**
+ * A delegation signer: its verification method id and its signing function.
+ */
+type FixtureSigner = ReturnType<typeof webvhSigner>
+
+/**
+ * The signer of one fixed seed under a DID.
+ *
+ * @param options {object}
+ * @param options.seedByte {number}   the byte the 32-byte seed repeats
+ * @param options.did {string}
+ * @returns {Promise<FixtureSigner>}
+ */
+async function signerOf({
+  seedByte,
+  did
+}: {
+  seedByte: number
+  did: string
+}): Promise<FixtureSigner> {
+  const { keyAgent } = await agentsFromSeed({
+    seed: new Uint8Array(32).fill(seedByte)
+  })
+  return webvhSigner({ keyAgent, did })
+}
+
+let accountSignerSet: Promise<Record<AccountKeyName, FixtureSigner>> | undefined
+
+/**
+ * The account's three delegation signers, derived once.
+ *
+ * @returns {Promise<Record<AccountKeyName, FixtureSigner>>}
+ */
+async function accountSigners(): Promise<
+  Record<AccountKeyName, FixtureSigner>
+> {
+  accountSignerSet ??= (async () => ({
+    client: await signerOf({ seedByte: 1, did: ACCOUNT_DID }),
+    ladder: await signerOf({ seedByte: 2, did: ACCOUNT_DID }),
+    struck: await signerOf({ seedByte: 3, did: ACCOUNT_DID })
+  }))()
+  return await accountSignerSet
+}
+
+/**
+ * Each account key's multibase, the fragment of its verification method id.
+ *
+ * @returns {Promise<Record<AccountKeyName, string>>}
+ */
+export async function accountKeys(): Promise<Record<AccountKeyName, string>> {
+  const signers = await accountSigners()
+  const fragment = (signer: FixtureSigner): string =>
+    signer.id.slice(signer.id.indexOf('#') + 1)
+  return {
+    client: fragment(signers.client),
+    ladder: fragment(signers.ladder),
+    struck: fragment(signers.struck)
+  }
+}
+
+/**
+ * The account signer check the agent grant fixtures verify against: the
+ * enrolled client as the one current signing key, the client and the ladder
+ * VM under `capabilityDelegation`, and the pointer naming {@link ANNEX_DID}.
+ *
+ * @returns {Promise<AccountSignerCheck>}
+ */
+export async function fixtureSignerCheck(): Promise<AccountSignerCheck> {
+  const { client, ladder } = await accountSigners()
+  const keys = await accountKeys()
+  return {
+    accountDid: ACCOUNT_DID,
+    currentSigningKeys: new Set([keys.client]),
+    doc: {
+      id: ACCOUNT_DID,
+      verificationMethod: [
+        { id: client.id, publicKeyMultibase: keys.client },
+        { id: ladder.id, publicKeyMultibase: keys.ladder }
+      ],
+      capabilityDelegation: [client.id, ladder.id]
+    },
+    clientAnnexDid: ANNEX_DID
+  } as unknown as AccountSignerCheck
+}
+
+/**
+ * A capability signed for real as a delegation: an `eddsa-jcs-2022`
+ * `DataIntegrityProof` for `capabilityDelegation`, carrying the chain.
+ *
+ * @param options {object}
+ * @param options.zcap {object}   the capability, no proof
+ * @param options.signer {FixtureSigner}
+ * @param options.capabilityChain {unknown[]}   the root id, then the
+ *   embedded parent when there is one
+ * @returns {Promise<Record<string, unknown>>}
+ */
+async function signedDelegation({
+  zcap,
+  signer,
+  capabilityChain
+}: {
+  zcap: Record<string, unknown>
+  signer: FixtureSigner
+  capabilityChain: unknown[]
+}): Promise<Record<string, unknown>> {
+  const document = { '@context': ['https://w3id.org/zcap/v1'], ...zcap }
+  const suite = new DataIntegrityProof({
+    signer: { ...signer, algorithm: 'Ed25519' },
+    cryptosuite: createSignCryptosuite()
+  } as never)
+  const proof = await suite.createProof({
+    document: structuredClone(document),
+    purpose: {
+      update: async (draft: object) => ({
+        ...draft,
+        proofPurpose: 'capabilityDelegation',
+        capabilityChain
+      })
+    },
+    proofSet: [],
+    documentLoader: async (url: string) => {
+      throw new Error(`No document is served for "${url}".`)
+    }
+  } as never)
+  return { ...document, proof }
+}
+
+/**
+ * A generation delegation an account key minted to an annex DID.
+ *
+ * @param [options] {object}
+ * @param [options.id] {string}
+ * @param [options.controller] {string}   the annex DID
+ * @param [options.signer] {AccountKeyName}
+ * @param [options.expires] {string}
+ * @returns {Promise<Record<string, unknown>>}
+ */
+export async function generationDelegation({
+  id = POINTED_DELEGATION,
+  controller = ANNEX_DID,
+  signer = 'ladder',
+  expires = inDays(330)
+}: {
+  id?: string
+  controller?: string
+  signer?: AccountKeyName
+  expires?: string
+} = {}): Promise<Record<string, unknown>> {
+  return await signedDelegation({
+    zcap: {
+      id,
+      controller,
+      parentCapability: ROOT,
+      invocationTarget: SPACE_URL,
+      allowedAction: ['GET', 'HEAD', 'PUT', 'POST', 'DELETE'],
+      expires
+    },
+    signer: (await accountSigners())[signer],
+    capabilityChain: [ROOT]
+  })
+}
+
+/**
+ * A grant this account delegated to an agent under the Space root, signed
+ * by one of its keys.
+ *
+ * @param options {object}
+ * @param options.id {string}
+ * @param [options.controller] {string}
+ * @param [options.target] {string}
+ * @param [options.actions] {string[]}
+ * @param [options.expires] {string}
+ * @param [options.signer] {AccountKeyName}
+ * @returns {Promise<Record<string, unknown>>}
+ */
+export async function rootGrant({
+  id,
+  controller = AGENT_DID,
+  target = NEWS_URL,
+  actions = ['GET', 'HEAD'],
+  expires = inDays(60),
+  signer = 'client'
+}: {
+  id: string
+  controller?: string
+  target?: string
+  actions?: string[]
+  expires?: string
+  signer?: AccountKeyName
+}): Promise<Record<string, unknown>> {
+  return await signedDelegation({
+    zcap: {
+      id,
+      controller,
+      parentCapability: ROOT,
+      invocationTarget: target,
+      allowedAction: actions,
+      expires
+    },
+    signer: (await accountSigners())[signer],
+    capabilityChain: [ROOT]
+  })
+}
+
+/**
+ * A grant a transient session minted under a generation delegation, which
+ * it embeds as the last link of its chain, signed by a per-visit key under
+ * the annex DID.
+ *
+ * @param options {object}
+ * @param options.id {string}
+ * @param [options.controller] {string}
+ * @param [options.target] {string}
+ * @param [options.actions] {string[]}
+ * @param [options.expires] {string}
+ * @param [options.parentId] {string}
+ * @param [options.parentController] {string}   the annex DID
+ * @param [options.parentSigner] {AccountKeyName}   the parent's signing key
+ * @returns {Promise<Record<string, unknown>>}
+ */
+export async function annexGrant({
+  id,
+  controller = AGENT_DID,
+  target = NEWS_URL,
+  actions = ['GET', 'HEAD'],
+  expires = inDays(300),
+  parentId = POINTED_DELEGATION,
+  parentController = ANNEX_DID,
+  parentSigner = 'ladder'
+}: {
+  id: string
+  controller?: string
+  target?: string
+  actions?: string[]
+  expires?: string
+  parentId?: string
+  parentController?: string
+  parentSigner?: AccountKeyName
+}): Promise<Record<string, unknown>> {
+  const parent = await generationDelegation({
+    id: parentId,
+    controller: parentController,
+    signer: parentSigner
+  })
+  return await signedDelegation({
+    zcap: {
+      id,
+      controller,
+      parentCapability: parentId,
+      invocationTarget: target,
+      allowedAction: actions,
+      expires
+    },
+    signer: await signerOf({ seedByte: 6, did: parentController }),
+    capabilityChain: [ROOT, parent]
+  })
+}
+
+/**
+ * A channel capability an agent delegates to the wallet's pairwise did:key:
+ * POST on the agent's own inbox.
+ *
+ * @param options {object}
+ * @param options.id {string}
+ * @param options.controller {string}   the pairwise did:key
+ * @param [options.expires] {string}
+ * @param [options.target] {string}
+ * @returns {Record<string, unknown>}
+ */
+export function channelZcap({
+  id,
+  controller,
+  expires = inDays(200),
+  target = AGENT_INBOX
+}: {
+  id: string
+  controller: string
+  expires?: string
+  target?: string
+}): Record<string, unknown> {
+  return {
+    id,
+    controller,
+    parentCapability: 'urn:zcap:root:agent',
+    invocationTarget: target,
+    allowedAction: ['POST'],
+    expires,
+    proof: {
+      type: 'Ed25519Signature2020',
+      proofPurpose: 'capabilityDelegation',
+      verificationMethod: 'did:webvh:agent#z6MkAgent',
+      capabilityChain: ['urn:zcap:root:agent']
+    }
+  }
+}
+
+/**
+ * A fresh pairwise seed, its tag, and its did:key.
+ *
+ * @returns {Promise<{ seed: string, seedTag: string, did: string }>}
+ */
+export async function pairwiseSeed(): Promise<{
+  seed: string
+  seedTag: string
+  did: string
+}> {
+  const seed = Buffer.from(crypto.getRandomValues(new Uint8Array(32))).toString(
+    'base64url'
+  )
+  const seedTag = await connectionSeedTag({ hmacKey: HMAC_KEY, seed })
+  const { did } = await connectionDidKey({ hmacKey: HMAC_KEY, seed, seedTag })
+  return { seed, seedTag, did }
+}
+
+/**
+ * A fake zcap client that mints grants with predictable ids, signed for
+ * real: under the root as the enrolled client, and under a generation
+ * delegation as a per-visit key, embedding the parent.
+ *
+ * @param [options] {object}
+ * @param [options.idPrefix] {string}   minted ids read
+ *   `urn:uuid:<idPrefix>-<n>`
+ * @returns {object}   the client and the calls it took
+ */
+export function fakeZcapClient({
+  idPrefix = 'minted'
+}: { idPrefix?: string } = {}): {
+  zcapClient: Session['profile']['zcapClient']
+  calls: Array<Record<string, unknown>>
+} {
+  const calls: Array<Record<string, unknown>> = []
+  const zcapClient = {
+    async delegate(options: {
+      capability: string | IZcap
+      invocationTarget: string
+      controller: string
+      allowedActions: string[]
+      expires: Date
+    }) {
+      calls.push(options)
+      const zcap = {
+        id: `urn:uuid:${idPrefix}-${calls.length}`,
+        controller: options.controller,
+        invocationTarget: options.invocationTarget,
+        allowedAction: options.allowedActions,
+        expires: options.expires.toISOString()
+      }
+      if (typeof options.capability === 'string') {
+        return await signedDelegation({
+          zcap: { ...zcap, parentCapability: options.capability },
+          signer: (await accountSigners()).client,
+          capabilityChain: [options.capability]
+        })
+      }
+      const parent = options.capability as { id: string; controller: string }
+      return await signedDelegation({
+        zcap: { ...zcap, parentCapability: parent.id },
+        signer: await signerOf({ seedByte: 6, did: parent.controller }),
+        capabilityChain: [ROOT, options.capability]
+      })
+    }
+  } as unknown as Session['profile']['zcapClient']
+  return { zcapClient, calls }
 }

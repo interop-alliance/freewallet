@@ -335,6 +335,10 @@ grant `'grant'`. The App Connect `Grant` activity follows, as audit trail.
 Only then is each share escrowed and each collection provisioned. Every App
 Connect writes its entry before the VP is composed, a zero-grant connect
 included, on every session kind. A guest's lands in its local directory.
+An interaction-URL connection request also writes the agent's pairwise
+`seed` and its `seedTag` in the same write, on whichever path records. An
+entry already carrying a different seed refuses the write, and the request
+fails closed (see "The connection request" in external-request.md).
 
 A failed entry write fails the request closed, with nothing escrowed and
 nothing delivered. So does an entry of another kind at the app's id, which
@@ -349,7 +353,9 @@ finds the grantee on the current epoch.
 
 When no grant escrowed, the Grant is removed too. The consent cleared the
 entry's `retired` and set its `appKey`, so an entry that was absent or
-retired before the consent is retired again (`retireConnection`). The state
+retired before the consent is retired again (`retireConnection`). A
+pairwise seed the consent wrote stays, since nothing outside the wallet saw
+its did:key, and the next consent reuses it. The state
 before the consent is read at the app's id just ahead of the write. A
 disconnected app whose reconnect failed is therefore not listed as
 connected. An entry the consent created is retired rather than deleted. It
@@ -390,8 +396,13 @@ or any grant. Its display name is the user's `label`, then the app's
 which only a consent moves. The page still lists `app-keys` for its
 health: the undecryptable and no-epoch-key warnings and the purge button
 read that scan. A row opens `/applications/:resourceId`, keyed by the
-entry's resource id. That page shows every grant on the entry, live and
-expired, newest first, and dates "Connected" from `firstSeen`. An app that
+entry's resource id. That page shows one card per grant scope (grantee,
+target, and actions), live and expired, newest first, and dates "Connected"
+from `firstSeen`. A card shows the scope's latest record, and the records a
+renewal or a later consent superseded collapse under it. The listing's
+lapse date and grant count read the latest record per scope too
+(`newestFirst` in `src/lib/connectedApps.ts`), so a renewal is neither
+counted twice nor dated by the record it replaced. An app that
 connected before the directory existed has no entry. It is not listed, and
 its grants end at their own expiry
 (`decisions/0036-no-backfill-for-the-directory.md`).
@@ -450,8 +461,9 @@ the retirement leaves no audit row. The blinded-index key is not rotated on
 revoke (see "Client revocation and the epoch cascade" in
 client-revocation.md), so the revoked app keeps the ability to compute
 blinded terms while the query endpoint stays behind the revoked pull grant.
-Revoking a connected agent runs the same stages with no app key to delete
-(see "The interaction-URL request page" in external-request.md).
+Revoking a connected agent runs the same stages with no app key to delete,
+behind one first write that empties the entry's channel (see "The agent
+connection" below).
 
 The disconnect, the agent revoke, and the unshare below are one ceremony,
 grant revocation (`grant-revocation`), with three entry points:
@@ -475,7 +487,10 @@ with `contact` reserved. Each entry sits at a resource id keyed by an HMAC
 of the party's DID under the collection's blinded-index key, so the host
 cannot probe for a guessed DID. An entry carries the party's names, every
 grant the wallet delegated to it, an app's `appKey`, and a wallet client's
-registered writers. Its grants are the revocation index, and the
+registered writers. An agent's entry also carries the pairwise `seed` and
+its `seedTag`, the channel capabilities in `grantsReceived`, the queued
+messages in `outbox`, and the `declined` marker (see "The agent
+connection" below). Its grants are the revocation index, and the
 `wallet-activity` rows are audit trail that nothing deciding about a party
 reads (`decisions/0034-the-directory-is-the-grant-index.md`). The
 directory rides the session's backend through one store seam
@@ -507,8 +522,9 @@ cascade's base set, the credential-anchored mend, and the shares listing.
 
 An entry is retired when its relationship ends: an app disconnect, an agent
 revoke, a wallet-client disconnect, or a forget. Retirement stamps
-`retired`, empties the grants, and drops `appKey`. It keeps the names, so a
-departed party still resolves. It follows the revocation that handled those
+`retired`, empties `grants`, `grantsReceived`, and `outbox`, and drops
+`appKey`. It keeps the names, the pairwise `seed` and its tag, and
+`declined`, so a departed party still resolves. It follows the revocation that handled those
 grants, and refuses when the entry has since gained a grant that revocation
 did not handle. A later consent from the same party un-retires the entry.
 
@@ -562,6 +578,209 @@ Two security properties of App Connect:
   the
   recipient key derives from the named controller, so a request cannot pair
   controller DID A with recipient key B.
+
+## The agent connection
+
+A subscription agent connects through an interaction-URL connection request
+(see "The connection request" in external-request.md). The consent gives it
+GET and HEAD on audience collections, and POST on the account's `inbox`.
+The wallet keeps a pairwise did:key toward it, derived from the `seed` on
+its connection entry. Two things keep the agent's grants alive with no
+further prompt: a channel the agent opens back to the wallet, and a renewal
+the wallet runs at login. The decisions are
+`decisions/0041-the-agents-grant-is-an-ordinary-delegated-grant-with-no-standing-anchor.md`,
+`decisions/0042-one-wallet-wide-plaintext-inbox-is-the-channel.md`,
+`decisions/0043-a-grant-signed-by-withdrawn-authority-is-renewed-only-on-the-owners-tick.md`,
+and `decisions/0044-a-partys-pending-messages-queue-on-its-connection-entry.md`.
+
+**The channel capability.** Once connected, the agent delegates POST on its
+own inbox to the wallet's pairwise did:key. It posts that capability into
+the owner's `inbox` as a `Grant` envelope: `actor` is the agent's did:key,
+and `object.zcaps` carries the capability (`inboxGrantMessage` and
+`parseInboxGrantMessage` in `@interop/wallet-core/space`). The wallet
+stores it on the agent's entry in `grantsReceived`, under `grantKind:
+'inbox'` (`recordReceivedGrants`). A record is kept only when its
+`controller` is the entry's pairwise did:key and its target lies outside
+this Space. The wallet treats a channel record as lapsed at the earlier of
+its `expires` and its `receivedAt` plus `SHARE_ZCAP_TTL_MS`. That limit
+governs the wallet's own use alone. A copy someone else holds is bounded
+only by the agent issuing no longer capability. The wallet does not verify
+a received capability's delegation chain, since the agent's server checks
+it at invocation.
+
+**The inbox pass** (`src/session/inboxPass.ts`, logger `fw:inbox`) runs
+behind each login chain's mender block and settles `session.inboxPass`
+(see "Session & auth flow" in session-and-auth.md). It also runs on the
+Settings page once a ceremony that replaces the generation delegation
+resolves. Passes on one session never overlap. A CHAPI popup, a guest, and
+a session with no Space run none. Each pass has three steps, in order.
+
+1. The drain. The pass refuses an `inbox` it does not trust (public,
+   carrying an `encryption` descriptor, or carrying a `generator` stamp)
+   and counts it as absent. It walks the listing page by page until the
+   listing is empty or the pass has read its byte cap
+   (`INBOX_DRAIN_BYTE_CAP`), and each sender has a byte budget per pass of
+   its own (`INBOX_SENDER_BYTE_BUDGET`). It reads each message's metadata
+   before its body, and refuses a message with no `createdBy`, a content
+   type other than `application/json`, or a size over
+   `INBOX_MESSAGE_MAX_BYTES`. The sender is the server-recorded
+   `createdBy`, matched in memory against the directory listing the pass
+   read, with one re-read per pass for a sender it does not find. It must
+   be an unretired agent entry carrying a seed whose tag verifies, and the
+   envelope's `actor` must equal `createdBy`. A capability that targets this
+   Space is ignored and logged, since the wallet accepts no renewed grant
+   from an agent. Every message is deleted once acted on or refused, and a
+   delete that finds it gone counts as done. A re-run stores the same
+   capability, so the drain is idempotent.
+2. The renewal. It reads the listing as the drain left it, so a channel the
+   drain just stored is seen. A candidate is an unretired agent entry
+   carrying a seed and a live channel. Of its grants, only the latest
+   record per scope is read, where a scope is the grantee, the target, and
+   the actions. Only a grant inside the renewal scope is renewed: GET and
+   HEAD on a collection, or POST on `inbox`, recorded by a consent that also
+   recorded an inbox grant. Any other grant lapses at its own TTL. A grant
+   is renewed when it is due and its proof verifies as this account's
+   against the current document (`renewalSignerCheck` on `StorageManager`).
+   A document that cannot be read renews nothing. A grant is due when its
+   `expires` falls inside the agent renewal window
+   (`AGENT_GRANT_RENEWAL_WINDOW_MS`), or when it is chained under a
+   generation delegation other than the pointed one while that delegation's
+   signer is still listed (`agentGrantDue`). The pointed delegation is read
+   from the generation log's head, not from memory. A grant already past
+   its `expires` is not due. Renewals are minted under consent's parent
+   rule (`delegateRenewalGrants`). A stale generation delegation is renewed
+   first, and when it cannot be, nothing is minted.
+3. The outbox push. Each entry's pending envelopes are POSTed through its
+   live channel, invoking that capability as the pairwise did:key, in
+   parallel up to `INBOX_PUSH_PARALLELISM` and under one time budget per
+   pass. A delivered item is removed. A network failure or a 5xx keeps it
+   for the next pass. A 401, 403, or 404 stops the pushes to that entry for
+   the pass, since a WAS host answers every capability denial with one of
+   them. The refused channel record stays on the entry, so the next pass
+   tries it again until it lapses or the agent's next invitation replaces
+   it.
+
+The renewal's pivot is `recordRenewedGrants`. Inside one compare-and-swap
+it re-reads the entry, refuses a retired one, and checks that a live
+channel still stands and that the record it renews is still the latest of
+its scope. It then appends the renewed records and queues their envelope on
+the entry's `outbox` in the same write. A check that fails discards the
+minted grant unrecorded. So a renewal whose push fails still reaches the
+agent at a later pass. The renewed record keeps the original `grantedAt`.
+The record it supersedes stays on the entry, so a revoke still reaches it,
+and is pruned once past its `expires` plus the revocation clock skew
+(`pruneSupersededGrants`). One Grant activity is written per renewed entry
+per pass, so History shows every renewal. A listing, read, write, or push
+failure grades the pass `partial`, which does not spend an encounter's
+once-per-session budget. An absent or untrusted inbox grades it `refused`.
+Each push is a direct browser request to the agent's host. So every
+connected agent learns the owner's IP address, user agent, and login
+cadence, and its server must serve cross-origin requests on its inbox.
+
+**Withdrawn authority and the owner's tick.** A grant whose parent was
+replaced while the parent's signer still stands is renewed silently. The
+annex GC's quarterly swap and the in-place generation renewal leave such
+grants, and so does a client revocation's generation swap for a grant
+under a delegation a remaining key signed. A grant whose signing authority
+was withdrawn fails the proof check and is never renewed silently. A
+genuine grant and one a stolen client planted look the same, so only the
+owner can tell them apart. Withdrawal is a client revocation, a forget, the
+departing client of the last-client transition, or a ladder VM struck by a
+passphrase change, a passkey or backup-credential removal, or a recovery
+spend.
+
+Before such a ceremony runs, its dialog lists the connected agents holding
+a grant the withdrawn key or ladder VM signed
+(`agentsSignedByWithdrawnAuthority` in `src/session/agentReconnect.ts`,
+rendered by `src/components/AgentReconnectList.tsx`). A root-anchored grant
+names its signer in its own proof, and an annex-anchored grant names its
+minter in its embedded parent's proof. A client ceremony names the client's
+signing key. A credential retirement names the credential's ladder VM,
+read the way the strike reads it: the ladder inventory attributed over the
+verified account log from the registry entry's recorded anchor, and the
+claim held against the current document (`retiredCredentialWithdrawnKeys`
+in `src/session/credentialRotation.ts`). The entry's recorded proof key
+ids are not used, since a remembered login's standing-delegation refresh
+re-mints the bridge pair under the enrolled client's key. Each agent is
+ticked by default (`useAgentReconnect` in `src/hooks/useAgentReconnect.ts`),
+and the dialog's confirm button waits until the list has been read. Once
+the ceremony succeeds, each unticked agent's entry gets the `declined`
+marker, and `reconnectAgents` restores the ticked agents. A ceremony that
+fails writes no marker. The restore re-mints each ticked agent's renewable
+grants (`renewableAgentGrants` in `src/session/inboxPass.ts`, the one
+selection the renewal and the lapsed-agent offer also read) under the
+session's current authority, with the share TTL limited by the parent. It records them through `recordGrants` as a fresh consent,
+with the envelope queued on the entry's `outbox`, and writes one Grant
+activity per agent. It reads no proof check, since the owner's tick is the
+consent. The record leaves a retired entry as stored (`unlessRetired`), so
+a revoke that landed since the listing is not undone, and that agent reads
+`not-found`. Then the Settings inbox pass runs
+(`renewAgentGrantsAfterCeremony`), which pushes the queued envelopes and
+renews the rest in place. A pass still in flight is waited out and the
+pass runs again, since the one in flight read the directory before the
+restore wrote. The dialog's notice names any agent it could not restore.
+An unticked agent's grants stay dead, and its row stays listed for
+revocation.
+
+Two ceremonies cannot restore in their own visit. The ordinary forget lists
+the agents with no tick and says their access ends, since the browser is
+leaving. The last-client transition ends the session, so it marks its
+unticked agents declined and restores none. Those markers are written once
+the transition's up-front refusals have passed and before its first write
+(`beforeFirstWrite` on `forgetThisBrowser`), under this client's authority,
+which the transition then takes away. A recovery spend runs outside
+Settings and shows no list. `lapsedAgentOffers` reads the agents such a
+ceremony, a failed restore, or a lapse left with no live grant, for a later
+visit to offer back with one tick. No page renders those offers yet.
+
+A declined agent shows a Declined chip on the Applications listing. Its
+detail page offers Restore beside Revoke. Restore runs the same re-mint as
+a fresh consent, which clears the marker, and so does a new connection
+request the owner approves. Retirement keeps the marker.
+
+**The subscriber cut.** An agent re-delegates a child of each audience
+grant to its subscribers, so every ceremony above cuts every subscriber
+child of the affected grants at once, and so does the annex GC's swap. The
+wallet's own order adds no delay. The renewal or the restore runs in the
+same login or visit. The outage is the agent's inbox-read cadence, plus its
+re-issue of each child, plus each subscriber's next fetch.
+
+**Revoking an agent** (`revokeAgentAccess` in `src/lib/connectedApps.ts`)
+runs the disconnect's stages with no app key to delete, behind one first
+write. That write empties the entry's `grantsReceived` and `outbox` in its
+own compare-and-swap (`StorageManager.clearConnectionChannel`), before any
+POST. No pass renews or pushes to an entry with no channel, so a torn
+revoke is not undone by the next login's renewal. Every grant on the entry
+is then POSTed, the inbox grant and any superseded renewal included. The
+audience collections and `inbox` are plaintext, so the rotation stage finds
+no recipient list on them and skips them. Retirement keeps the seed, and
+nothing is sent to the agent. The agent learns from its refused
+invocations, and its subscribers' children die with its grants. A later
+consent from the same agent un-retires the entry and reuses the seed, and
+the agent posts a fresh invitation. One residue is left to the re-run. A
+torn revoke whose inbox-grant POST failed leaves the agent able to post a
+fresh invitation, which the drain stores. A renewal pass before the re-run
+may then re-mint grants the first run revoked. The row stays listed, and
+the user's re-run POSTs those too.
+
+What the pairwise key does not give is unlinkability. Every grant the agent
+receives names the owner's Space URL as its target, so a returning owner
+under a new key is recognizable. A lost directory loses every seed with
+it. Renewals to those agents then stop, the Applications page lists none
+of them, and the owner is not told. A reconnect mints a new seed. The
+epoch cascade does not reach a seed either. A party whose authority the
+account withdrew keeps every seed and channel capability it read, and can
+post into an agent's inbox as the wallet until that capability expires.
+No seed rotation is built, and the mender registry declares the residue as
+an open gap (invariant `no-withdrawn-party-holds-a-live-pairwise-channel`).
+
+The authorization profile's subtree marker (`*` appended to a target) is
+not shipped yet. Every grant target is the bare container URL for now, the
+inbox grant's included, and the current server reads a bare container URL
+as covering the container's subtree. So the inbox grant is not yet the
+exact target it is meant to be. Once the marker ships, an audience grant
+takes it and the inbox grant stays bare. A renewal keeps whatever target
+form the consent recorded.
 
 ## Sharing a wallet collection (`https://w3id.org/byoe#shared-wallet-collection`)
 

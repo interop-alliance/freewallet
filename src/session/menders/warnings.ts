@@ -81,6 +81,12 @@ export const MENDER_WARNINGS: Readonly<Record<InvariantId, string>> = {
     'Could not remove the unnamed auxiliary Space; no converger is built',
   'no-registered-writer-outlives-its-expiry':
     'Could not sweep the expired connections writers; the next visit retries',
-  'every-party-with-authority-has-a-connection-entry':
-    'Could not write a missing connections entry; no converger is built'
+  'every-grantee-of-the-wallet-has-a-connection-entry':
+    'Could not write a missing connections entry; no converger is built',
+  'inbox-is-drained':
+    'Could not drain the inbox; the next login or Notifications visit retries',
+  'agent-grants-are-current':
+    "Could not renew the connected agents' grants; the next login retries",
+  'no-withdrawn-party-holds-a-live-pairwise-channel':
+    'Could not rotate a pairwise seed a withdrawn party may hold; no converger is built'
 }

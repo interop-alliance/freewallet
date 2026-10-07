@@ -303,6 +303,9 @@ export async function processAppConnect({
           // `app.appUrl` is the validated request's canonical app URL, the
           // value the app-key credential's `credentialSubject.appUrl` holds.
           app: { name: app.name, origin, appUrl: app.appUrl },
+          // App Connect never resolves the `#inbox` descriptor, so an
+          // `AppConnectQuery` naming it delegates nothing.
+          requestKind: 'app-connect',
           beforeProvision: record,
           ...(onEscrowed && { onEscrowed })
         })

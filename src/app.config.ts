@@ -17,6 +17,7 @@ import {
   WALLET_SPACE_SYSTEM_SPECS
 } from '@interop/wallet-core/space'
 import { encryptedWalletCollectionIds } from '@interop/wallet-core/space/collections'
+import { AGENT_GRANT_RENEWAL_WINDOW_MS as WALLET_CORE_AGENT_GRANT_RENEWAL_WINDOW_MS } from '@interop/wallet-core/connections'
 
 const env = import.meta.env
 
@@ -109,6 +110,33 @@ export const RP_ZCAP_WRITE_TTL_MS =
 // epoch and revokes the zcap indivisibly.
 export const SHARE_ZCAP_TTL_MS =
   (Number(env.VITE_SHARE_ZCAP_TTL_HOURS) || 8760) * 60 * 60 * 1000
+
+// The agent renewal window. A connected agent's grant (a connection request's
+// GET/HEAD on an audience collection, or POST on this Space's `inbox`) is
+// re-minted by the login-time renewal pass once its `expires` is inside this
+// window. Its own tunable, apart from wallet-core's 30-day
+// `ZCAP_RENEWAL_WINDOW_MS` that paces the bridge and recovery delegations:
+// the agent grants take the share TTL, and a window shorter than a user's
+// login cadence lets a lapse happen. Default 90 days (wallet-core's
+// `AGENT_GRANT_RENEWAL_WINDOW_MS`).
+export const AGENT_GRANT_RENEWAL_WINDOW_MS =
+  env.VITE_AGENT_GRANT_RENEWAL_WINDOW_DAYS
+    ? Number(env.VITE_AGENT_GRANT_RENEWAL_WINDOW_DAYS) * 24 * 60 * 60 * 1000
+    : WALLET_CORE_AGENT_GRANT_RENEWAL_WINDOW_MS
+
+// The inbox drain's tunables (app-internal, not wire). The drain lists the
+// `inbox` collection page by page and refuses, before reading a body, a
+// message whose metadata reports a size over the bound. A pass stops once
+// its byte cap is reached and leaves the rest for the next pass; each sender
+// has a per-pass budget of its own, so one agent's junk cannot starve
+// another's invitation behind it. Pushes to the agents' hosts run in
+// parallel up to the limit, under one time budget per pass.
+export const INBOX_DRAIN_PAGE_SIZE = 50
+export const INBOX_MESSAGE_MAX_BYTES = 64 * 1024
+export const INBOX_DRAIN_BYTE_CAP = 1024 * 1024
+export const INBOX_SENDER_BYTE_BUDGET = 256 * 1024
+export const INBOX_PUSH_PARALLELISM = 4
+export const INBOX_PUSH_TIME_BUDGET_MS = 20_000
 
 // Background-replication tuning (both optional).
 // `VITE_WAS_SYNC_RETRY_MS` -- RxDB `retryTime` backoff between failed cycles.

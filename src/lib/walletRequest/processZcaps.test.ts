@@ -3,6 +3,7 @@ import { describe, it, expect } from 'vitest'
 import {
   APP_KEYS_COLLECTION,
   CONNECTIONS_COLLECTION,
+  INBOX_COLLECTION,
   KEY_MAP_COLLECTION,
   UNLOCK_METHODS_COLLECTION,
   WALLET_SPACE_PROVISION_ROSTER
@@ -288,7 +289,10 @@ describe('never-grantable system collections', () => {
     KEY_MAP_COLLECTION.id,
     UNLOCK_METHODS_COLLECTION.id,
     APP_KEYS_COLLECTION,
-    CONNECTIONS_COLLECTION
+    CONNECTIONS_COLLECTION,
+    // Never grantable by name or URL; only the `#inbox` descriptor on a
+    // connection request reaches it.
+    INBOX_COLLECTION
   ]
   // Present in the snapshot, so a string target is refused for what it names
   // rather than for naming a missing collection.

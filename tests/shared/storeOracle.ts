@@ -212,6 +212,56 @@ export async function readStoredSpaceMeta({
 }
 
 /**
+ * One collection's stored metadata object and its own access policy: the
+ * FileSystem backend's `.collection.<collectionId>.json` and
+ * `.collection.policy.json` in the collection's directory. Undefined when
+ * the collection is not stored or is a tombstone. `policyType` is the stored
+ * policy's `type` (`PublicCanRead` on a public collection), absent when no
+ * live policy is stored.
+ *
+ * @param options {object}
+ * @param options.dataDir {string}   the server's data root
+ * @param options.spaceId {string}
+ * @param options.collectionId {string}
+ * @returns {Promise<{ meta: Record<string, unknown>, policyType?: string } |
+ *   undefined>}
+ */
+export async function readStoredCollection({
+  dataDir,
+  spaceId,
+  collectionId
+}: {
+  dataDir: string
+  spaceId: string
+  collectionId: string
+}): Promise<
+  { meta: Record<string, unknown>; policyType?: string } | undefined
+> {
+  const collectionDir = path.join(
+    storedSpacesDir({ dataDir }),
+    spaceId,
+    collectionId
+  )
+  const meta = await readJsonOrUndefined<Record<string, unknown>>(
+    path.join(collectionDir, `.collection.${collectionId}.json`)
+  )
+  if (meta === undefined || meta.deleted === true) {
+    return undefined
+  }
+  const policy = await readJsonOrUndefined<{
+    type?: unknown
+    deleted?: boolean
+  }>(path.join(collectionDir, '.collection.policy.json'))
+  const policyType =
+    policy !== undefined &&
+    policy.deleted !== true &&
+    typeof policy.type === 'string'
+      ? policy.type
+      : undefined
+  return { meta, ...(policyType !== undefined ? { policyType } : {}) }
+}
+
+/**
  * The collection ids one Space stores live: the directories under the
  * Space's own directory whose `.collection.<collectionId>.json` stands and
  * is not a tombstone. A deleted collection keeps that file, marked

@@ -68,9 +68,11 @@ const log = createLogger('fw:ui:applications')
 const PULLED_COLLECTIONS = [APP_KEYS_COLLECTION]
 
 /**
- * The soonest still-future expiry among a row's recorded grants, so the row
- * can say when its access lapses on its own. Undefined when no grant records a
- * parseable future expiry.
+ * The soonest still-future expiry among a row's grants, so the row can say
+ * when its access lapses on its own. A row's grants are the latest record per
+ * scope (`newestFirst` in `connectedApps.ts`), so a record a renewal
+ * superseded neither counts nor names the lapse date. Undefined when no grant
+ * records a parseable future expiry.
  *
  * @param options {object}
  * @param options.grants {AppGrant[]}
@@ -399,6 +401,12 @@ export function ApplicationsPage() {
                               size="small"
                               color="warning"
                               label={t('applications.orphanedChip')}
+                            />
+                          )}
+                          {agent.declined !== undefined && (
+                            <Chip
+                              size="small"
+                              label={t('applications.agentDeclinedChip')}
                             />
                           )}
                         </Stack>

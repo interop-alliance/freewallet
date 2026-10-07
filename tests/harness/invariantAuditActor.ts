@@ -10,8 +10,9 @@
  * (`refreshVerifiedAccountLog`), the declarations' own `holdsWhen` detectors
  * on `MENDER_INVARIANTS` (`findPendingPassphraseEntries`,
  * `documentListsCredential`, `checkRecoveryHealth`),
- * `findUnrecordedCredentials`, and the writer sweep
- * (`sweepConnectionWriters`), run over a store whose write is a no-op.
+ * `findUnrecordedCredentials`, the writer sweep
+ * (`sweepConnectionWriters`), run over a store whose write is a no-op, and
+ * the agent grant renewal's own predicate (`dueAgentGrants`).
  *
  * The acting credential's unlock record is encrypted to that credential
  * alone, so the two rows about its account pointer need the credential
@@ -64,6 +65,7 @@ async function loadPortModules() {
   const keyring = await import('@/session/keyring')
   const ceremonyContext = await import('@/session/accountCeremonyContext')
   const menders = await import('@/session/menders')
+  const inboxPass = await import('@/session/inboxPass')
   const zcap = await import('@/lib/zcap')
   return {
     PASSKEY_KDF: config.PASSKEY_KDF,
@@ -77,6 +79,9 @@ async function loadPortModules() {
     delegatedClientsDelegationSpaceId:
       clientAnnex.delegatedClientsDelegationSpaceId,
     readConnections: connections.readConnections,
+    agentsWithChannel: inboxPass.agentsWithChannel,
+    dueAgentGrants: inboxPass.dueAgentGrants,
+    readPointedDelegationId: inboxPass.readPointedDelegationId,
     sweepConnectionWriters: connections.sweepConnectionWriters,
     memoryResourceLogPinStore: resourceLog.memoryResourceLogPinStore,
     getUnlockMethods: unlockMethods.getUnlockMethods,
@@ -529,6 +534,52 @@ export async function actorKeyHolder({
       )
       return outlived.length === 0 ? holds() : violated({ outlived })
     },
+    // The renewal's predicate, over the listing and the account key set the
+    // renewal reads: a due, in-scope latest record that passes the proof
+    // check, on an unretired agent entry with a live channel, is the
+    // violation.
+    'agent-grants-are-current': async ({ now }) =>
+      await actor.run(async session => {
+        const { store, hmacKey, spaceUrl } =
+          await session.storage.connectionsDirectory()
+        const listing = await modules.readConnections({ store, hmacKey })
+        if (listing === null || spaceUrl === undefined) {
+          return undetermined('The connections directory could not be listed.')
+        }
+        const at = new Date(now)
+        const withChannel = await modules.agentsWithChannel({
+          entries: listing.entries,
+          hmacKey,
+          spaceUrl,
+          now: at
+        })
+        if (withChannel.length === 0) {
+          return holds()
+        }
+        const signerCheck = await session.storage.renewalSignerCheck()
+        if (signerCheck === undefined) {
+          return undetermined('The account key set could not be read.')
+        }
+        const pointedDelegationId = await modules.readPointedDelegationId({
+          session,
+          doc: signerCheck.doc
+        })
+        const { candidates } = await modules.dueAgentGrants({
+          withChannel,
+          spaceUrl,
+          signerCheck,
+          ...(pointedDelegationId !== undefined ? { pointedDelegationId } : {}),
+          now: at
+        })
+        return candidates.length === 0
+          ? holds()
+          : violated({
+              due: candidates.map(candidate => ({
+                did: candidate.read.entry.id,
+                zcapIds: candidate.due.map(grant => grant.zcapId)
+              }))
+            })
+      }),
     // `sweepConnectionWriters`, the sweep the encounter registration runs,
     // over the listing the page reads (without the page's hold, so no real
     // sweep starts) and a store whose write is a no-op. A writer the dry

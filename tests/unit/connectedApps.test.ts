@@ -433,12 +433,17 @@ describe('revokeAppAccess', () => {
       })
     ).rejects.toThrow('did not handle')
     expect(storage.addHistoryAppRevoke).not.toHaveBeenCalled()
-    // The row stays listed, carrying both grants.
+    // The row stays listed, carrying both grants: one scope, so the older
+    // record rides under the newer one.
     const app = await listedApp()
-    expect(app.grants.map(grant => grant.id).sort()).toEqual([
-      'urn:zcap:merged',
-      'urn:zcap:one'
-    ])
+    expect(
+      app.grants
+        .flatMap(grant => [
+          grant.id,
+          ...(grant.earlier ?? []).map(earlier => earlier.id)
+        ])
+        .sort()
+    ).toEqual(['urn:zcap:merged', 'urn:zcap:one'])
 
     await revokeAppAccess({ storage: asStorageManager(storage), user, app })
 
@@ -497,6 +502,7 @@ describe('revokeAgentAccess', () => {
       rotated: 1
     })
     expect(storage.calls).toEqual([
+      'clearConnectionChannel',
       'readConnectionsListing',
       'revokeCollectionRecipients',
       'revokeConnectionGrants',

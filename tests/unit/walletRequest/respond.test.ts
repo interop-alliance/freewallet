@@ -15,16 +15,24 @@
  * - An entry of another kind at the party's id refuses the consent, and the
  *   stored entry is left as it was.
  * - The typed failure reasons the popup renders.
+ * - A connection request's pairwise seed: minted or reused once its tag
+ *   verifies, written with the grants on either record path, refused when
+ *   its tag fails or a concurrent consent wrote another, and kept by a
+ *   rollback.
  *
  * `processRequest` and the exchange delivery are mocked. The directory logic
  * is wallet-core's own, over an in-memory store.
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { base64urlnopad } from '@scure/base'
 import {
+  connectionDidKey,
   connectionResourceId,
+  connectionSeedTag,
   readConnections,
   recordGrants,
-  retireConnection
+  retireConnection,
+  verifyConnectionSeedTag
 } from '@interop/wallet-core/connections'
 import type { ConnectionsStore } from '@interop/wallet-core/connections'
 import type { StorageManager } from '@/stores/storageManager'
@@ -64,7 +72,12 @@ const state = vi.hoisted(() => ({
   // The escrow steps. Empty means one step covering every grant, which
   // throws `provisionThrows` when that is set.
   escrows: [] as Array<{ zcapIds: string[]; throws?: Error }>,
-  provisionThrows: null as Error | null
+  provisionThrows: null as Error | null,
+  // The holder of the pairwise signer `processRequest` was handed, if any.
+  pairwiseHolder: undefined as string | undefined,
+  // Run inside `processRequest`, after the seed is resolved and before any
+  // record: stands in for a concurrent consent.
+  duringProcess: null as (() => Promise<void>) | null
 }))
 
 const { FakeZcapUnavailableError } = vi.hoisted(() => ({
@@ -79,8 +92,10 @@ vi.mock('@/lib/walletRequest/processRequest', () => ({
   processRequest: vi.fn(
     async ({
       beforeProvision,
-      onEscrowed
+      onEscrowed,
+      pairwiseSigner
     }: {
+      pairwiseSigner?: { holder: string }
       beforeProvision?: (options: {
         zcaps: unknown[]
         shareZcapIds: string[]
@@ -89,6 +104,8 @@ vi.mock('@/lib/walletRequest/processRequest', () => ({
       onEscrowed?: (options: { zcapIds: string[] }) => void
     }) => {
       state.calls.push('processRequest')
+      state.pairwiseHolder = pairwiseSigner?.holder
+      await state.duringProcess?.()
       if (state.processThrows) {
         throw state.processThrows
       }
@@ -303,18 +320,24 @@ function makeSession(): RespondSession {
  * @param [options.session] {RespondSession}
  * @param [options.requestProfile] {RespondProfile}
  * @param [options.requestOrigin] {string}
+ * @param [options.delegateStandaloneZcaps] {boolean}
+ * @param [options.requestKind] {'interaction-url' | 'connection-request'}
  * @returns {Promise<object>}   the composed response
  */
 async function respond({
   exchangeUrl,
   session = makeSession(),
   requestProfile = profile,
-  requestOrigin = 'https://app.example'
+  requestOrigin = 'https://app.example',
+  delegateStandaloneZcaps,
+  requestKind
 }: {
   exchangeUrl?: string
   session?: RespondSession
   requestProfile?: RespondProfile
   requestOrigin?: string
+  delegateStandaloneZcaps?: boolean
+  requestKind?: 'interaction-url' | 'connection-request'
 } = {}) {
   return composeAndDeliverResponse({
     request: { query: [] } as unknown as Parameters<
@@ -324,7 +347,9 @@ async function respond({
     profile: requestProfile,
     requestOrigin,
     selectedVCs: [],
-    exchangeUrl
+    exchangeUrl,
+    ...(delegateStandaloneZcaps !== undefined && { delegateStandaloneZcaps }),
+    ...(requestKind !== undefined && { requestKind })
   })
 }
 
@@ -377,6 +402,8 @@ beforeEach(() => {
   state.provisions = false
   state.escrows = []
   state.provisionThrows = null
+  state.pairwiseHolder = undefined
+  state.duringProcess = null
   directory = memoryConnectionsStore()
   directorySpaceUrl = SPACE_URL
   entryThrowsFrom = null
@@ -1258,5 +1285,233 @@ describe('the request consent events', () => {
       outcome: 'failed',
       reason: 'exchangeFailed'
     })
+  })
+})
+
+describe('a connection request', () => {
+  const EXCHANGE = 'https://agent.example/exchanges/1'
+  // A connection request: a read on one audience by URL, POST on the inbox.
+  const connectionProfile = {
+    didAuth: false,
+    vcQueries: [],
+    zcapRequests: [
+      {
+        referenceId: 'friends',
+        controller: AGENT,
+        invocationTarget: `${SPACE_URL}friends/`
+      },
+      {
+        referenceId: 'inbox',
+        controller: AGENT,
+        invocationTarget: { type: 'https://w3id.org/byoe#inbox' }
+      }
+    ],
+    appConnect: null,
+    agent: { name: 'Feed agent' }
+  } as unknown as RespondProfile
+
+  /**
+   * Answers the connection request through the interaction-URL path.
+   *
+   * @param options {object}
+   * @param [options.session] {RespondSession}
+   * @returns {Promise<object>}
+   */
+  function connect({ session }: { session?: RespondSession } = {}) {
+    return respond({
+      exchangeUrl: EXCHANGE,
+      requestProfile: connectionProfile,
+      requestOrigin: EXTERNAL_REQUEST_ORIGIN,
+      delegateStandaloneZcaps: true,
+      requestKind: 'connection-request',
+      ...(session && { session })
+    })
+  }
+
+  /**
+   * A seed of repeated bytes, with its tag under the test directory's key.
+   *
+   * @param fill {number}
+   * @returns {Promise<{ seed: string, seedTag: string }>}
+   */
+  async function seedOf(fill: number) {
+    const seed = base64urlnopad.encode(new Uint8Array(32).fill(fill))
+    return {
+      seed,
+      seedTag: await connectionSeedTag({ hmacKey: HMAC_KEY, seed })
+    }
+  }
+
+  /**
+   * The did:key a stored seed derives.
+   *
+   * @param options {object}
+   * @param options.seed {string}
+   * @param options.seedTag {string}
+   * @returns {Promise<string>}
+   */
+  async function didOf({ seed, seedTag }: { seed: string; seedTag: string }) {
+    return (await connectionDidKey({ hmacKey: HMAC_KEY, seed, seedTag })).did
+  }
+
+  beforeEach(() => {
+    state.zcaps = [
+      grant({ id: 'urn:zcap:friends', collection: 'friends' }),
+      {
+        ...grant({ id: 'urn:zcap:inbox', collection: 'inbox' }),
+        allowedAction: ['POST']
+      }
+    ]
+  })
+
+  it('mints a seed and its tag, writes them with the grants before delivery, and signs with its key', async () => {
+    await connect()
+    expect(state.calls).toEqual([
+      'processRequest',
+      'entryWrite',
+      'addHistoryGrant',
+      'deliverPresentation'
+    ])
+    const entry = await storedEntry({ did: AGENT })
+    const seed = entry?.seed as string
+    const seedTag = entry?.seedTag as string
+    expect(seed).toHaveLength(43)
+    expect(
+      await verifyConnectionSeedTag({ hmacKey: HMAC_KEY, seed, seedTag })
+    ).toBe(true)
+    expect(state.pairwiseHolder).toBe(await didOf({ seed, seedTag }))
+    expect(await recordedGrants({ did: AGENT })).toHaveLength(2)
+  })
+
+  it('writes the seed on the record path ahead of escrow too', async () => {
+    state.provisions = true
+    await connect()
+    expect(state.calls.indexOf('entryWrite')).toBeLessThan(
+      state.calls.findIndex(call => call.startsWith('escrow:'))
+    )
+    const entry = await storedEntry({ did: AGENT })
+    expect(entry?.seed).toBeDefined()
+    expect(state.pairwiseHolder).toBe(
+      await didOf({
+        seed: entry?.seed as string,
+        seedTag: entry?.seedTag as string
+      })
+    )
+  })
+
+  it("reuses a returning agent's seed once its tag verifies", async () => {
+    const stored = await seedOf(3)
+    await recordGrants({
+      store: directory.store,
+      hmacKey: HMAC_KEY,
+      did: AGENT,
+      kind: 'agent',
+      spaceUrl: SPACE_URL,
+      grants: [],
+      ...stored
+    })
+    await connect()
+    const entry = await storedEntry({ did: AGENT })
+    expect(entry?.seed).toBe(stored.seed)
+    expect(state.pairwiseHolder).toBe(await didOf(stored))
+  })
+
+  it('gives an entry with no seed a fresh seed and its tag', async () => {
+    await recordGrants({
+      store: directory.store,
+      hmacKey: HMAC_KEY,
+      did: AGENT,
+      kind: 'agent',
+      spaceUrl: SPACE_URL,
+      grants: []
+    })
+    await connect()
+    const entry = await storedEntry({ did: AGENT })
+    expect(entry?.seed).toHaveLength(43)
+    expect(entry?.seedTag).toHaveLength(43)
+  })
+
+  it('fails closed on a stored seed whose tag does not verify, writing nothing', async () => {
+    const stored = await seedOf(3)
+    await recordGrants({
+      store: directory.store,
+      hmacKey: HMAC_KEY,
+      did: AGENT,
+      kind: 'agent',
+      spaceUrl: SPACE_URL,
+      grants: [],
+      ...stored
+    })
+    // The host swaps in a seed of its own, with the old tag beside it.
+    const resourceId = await connectionResourceId({
+      hmacKey: HMAC_KEY,
+      did: AGENT
+    })
+    const planted = (await seedOf(4)).seed
+    const row = directory.rows.get(resourceId)!
+    directory.rows.set(resourceId, {
+      ...row,
+      body: { ...(row.body as object), seed: planted }
+    })
+    const failure = await connect().catch((err: unknown) => err)
+    expect(failure).toBeInstanceOf(WalletResponseFailure)
+    expect((failure as InstanceType<typeof WalletResponseFailure>).reason).toBe(
+      'processFailed'
+    )
+    expect(state.calls).toEqual([])
+    expect((await storedEntry({ did: AGENT }))?.seed).toBe(planted)
+  })
+
+  it('fails closed with nothing delivered when a concurrent consent wrote another seed', async () => {
+    const racing = await seedOf(9)
+    state.duringProcess = async () => {
+      await recordGrants({
+        store: directory.store,
+        hmacKey: HMAC_KEY,
+        did: AGENT,
+        kind: 'agent',
+        spaceUrl: SPACE_URL,
+        grants: [],
+        ...racing
+      })
+    }
+    const failure = await connect().catch((err: unknown) => err)
+    expect(failure).toBeInstanceOf(WalletResponseFailure)
+    expect(state.calls).not.toContain('deliverPresentation')
+    expect(state.calls).not.toContain('addHistoryGrant')
+    expect((await storedEntry({ did: AGENT }))?.seed).toBe(racing.seed)
+    expect(await recordedGrants({ did: AGENT })).toEqual([])
+  })
+
+  it('delivers nothing when the entry write fails', async () => {
+    entryThrowsFrom = 1
+    const failure = await connect().catch((err: unknown) => err)
+    expect(failure).toBeInstanceOf(WalletResponseFailure)
+    expect(state.calls).not.toContain('deliverPresentation')
+    expect(await storedEntry({ did: AGENT })).toBeUndefined()
+  })
+
+  it('leaves the seed on the entry when the consent rolls back', async () => {
+    state.historyThrows = true
+    const failure = await connect().catch((err: unknown) => err)
+    expect(failure).toBeInstanceOf(WalletResponseFailure)
+    expect(state.calls).not.toContain('deliverPresentation')
+    const entry = await storedEntry({ did: AGENT })
+    expect(entry?.retired).toBeDefined()
+    expect(entry?.seed).toHaveLength(43)
+    expect(await recordedGrants({ did: AGENT })).toEqual([])
+  })
+
+  it('mints no seed for an interaction-URL request', async () => {
+    state.zcaps = [grant({ id: 'urn:zcap:agent-data' })]
+    await respond({
+      exchangeUrl: EXCHANGE,
+      requestProfile: agentProfile,
+      requestOrigin: EXTERNAL_REQUEST_ORIGIN,
+      delegateStandaloneZcaps: true,
+      requestKind: 'interaction-url'
+    })
+    expect(state.pairwiseHolder).toBeUndefined()
+    expect((await storedEntry({ did: AGENT }))?.seed).toBeUndefined()
   })
 })

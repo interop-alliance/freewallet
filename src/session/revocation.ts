@@ -95,6 +95,26 @@ const log = createLogger('fw:session:revocation')
 export type { RevokedClientKeys } from '@interop/wallet-core/webvh'
 
 /**
+ * The signing authority a client revocation withdraws, read before it runs:
+ * the revoked client's signing key, on both branches. Grants that key signed
+ * under the Space root die by the current-key-set rule, and grants chained
+ * under a generation delegation it minted die with that delegation. The
+ * revocation's dialog lists the agents holding such grants.
+ *
+ * @param options {object}
+ * @param options.client {{ signingKeyMultibase: string }}   the row being
+ *   disconnected
+ * @returns {string[]}   the withdrawn keys, as bare multibases
+ */
+export function revokedClientWithdrawnKeys({
+  client
+}: {
+  client: { signingKeyMultibase: string }
+}): string[] {
+  return [client.signingKeyMultibase]
+}
+
+/**
  * What a completed revocation cascade reports: whether the roster actually
  * rotated on this run (a naive re-run of an already-complete revocation
  * reports `false` everywhere), the per-collection outcomes, and the

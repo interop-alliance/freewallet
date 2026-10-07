@@ -38,7 +38,8 @@
  * decrypt future writes) with their pull-axis grants revoked indivisibly,
  * then the remaining grants are revoked, then its app key is deleted on the
  * server, then its entry is retired, and then the revocation is recorded.
- * `revokeAgentAccess` runs the same sequence with no app key. The honest
+ * `revokeAgentAccess` runs the same sequence with no app key, behind one
+ * first write that empties the entry's channel and outbox. The honest
  * limitation stands: ciphertext a party already fetched stays readable to it
  * -- rotation protects only prospective writes.
  */
@@ -55,6 +56,8 @@ import {
   connectionGrants,
   connectionKindOf,
   findConnection,
+  grantScopeKey,
+  latestIndexPerScope,
   splitGrantsByExpiry,
   type ConnectionEntry,
   type ConnectionGrant,
@@ -134,6 +137,12 @@ export interface AppGrant {
    * When the consent that wrote the grant ran.
    */
   grantedAt: string
+  /**
+   * The superseded records of the same scope (same grantee, target, and
+   * actions), newest first: the records a renewal or a later consent
+   * replaced. Present only on a listing's current record, when it has any.
+   */
+  earlier?: AppGrant[]
 }
 
 /**
@@ -217,7 +226,9 @@ export interface ConnectedAgent {
    */
   origin: string
   /**
-   * Every grant on the entry, live and expired, newest first.
+   * The latest record per scope on the entry, live and expired, newest
+   * first. A superseded record rides under its scope's current one
+   * (`earlier`).
    */
   grants: AppGrant[]
   /**
@@ -238,6 +249,12 @@ export interface ConnectedAgent {
    * holds the agent's key, until a revocation rotates it away.
    */
   expired?: true
+  /**
+   * When the owner declined to keep this agent connected (the entry's
+   * `declined` marker): left unticked in a ceremony dialog, or declined as
+   * an offer. Its detail page offers Restore beside Revoke.
+   */
+  declined?: string
 }
 
 /**
@@ -293,7 +310,11 @@ function appGrantOf({
 }
 
 /**
- * Grants as the views read them, newest first by `grantedAt`.
+ * Grants as the views read them: the latest record per scope (wallet-core's
+ * `latestIndexPerScope`), newest first by `grantedAt`, each carrying the
+ * superseded records of its scope as `earlier`, newest first. A renewal adds
+ * a record beside the one it replaces, so a view reading every record would
+ * count one grant twice and name the superseded record's lapse date.
  *
  * @param options {object}
  * @param options.grants {ConnectionGrant[]}
@@ -307,9 +328,33 @@ function newestFirst({
   grants: ConnectionGrant[]
   spaceUrl?: string
 }): AppGrant[] {
-  return grants
-    .map(grant => appGrantOf({ grant, spaceUrl }))
-    .sort((first, second) => second.grantedAt.localeCompare(first.grantedAt))
+  const byGrantedAt = (first: AppGrant, second: AppGrant): number =>
+    second.grantedAt.localeCompare(first.grantedAt)
+  const latest = latestIndexPerScope({ zcaps: grants.map(grant => grant.zcap) })
+  const current = new Set(latest.values())
+  const earlier = new Map<string, AppGrant[]>()
+  grants.forEach((grant, index) => {
+    if (current.has(index)) {
+      return
+    }
+    const scope = grantScopeKey({ zcap: grant.zcap })
+    const row = appGrantOf({ grant, spaceUrl })
+    const held = earlier.get(scope)
+    if (held) {
+      held.push(row)
+    } else {
+      earlier.set(scope, [row])
+    }
+  })
+  return [...latest]
+    .map(([scope, index]) => {
+      const superseded = (earlier.get(scope) ?? []).sort(byGrantedAt)
+      return {
+        ...appGrantOf({ grant: grants[index]!, spaceUrl }),
+        ...(superseded.length > 0 && { earlier: superseded })
+      }
+    })
+    .sort(byGrantedAt)
 }
 
 /**
@@ -486,7 +531,8 @@ function agentRows({
       grantedAt: rows[0].grantedAt,
       connectedAt: entry.firstSeen,
       lastConnectedAt: entry.lastSeen,
-      ...(expired && { expired: true as const })
+      ...(expired && { expired: true as const }),
+      ...(entry.declined !== undefined && { declined: entry.declined })
     })
   }
   return agents
@@ -980,16 +1026,21 @@ export async function revokeAppAccess({
 }
 
 /**
- * Revokes a connected agent's storage grants: the collection rotation and
- * the grant POSTs run on the WAS server first, then the agent's entry is
- * retired, then the revocation is recorded. There is no app key to delete. A
- * stage that does not land throws before the retirement, so the row stays
- * listed and a retry re-runs every stage, as on the app path
- * ({@link revokeAppAccess}). The rotation covers every collection the
- * entry's grants target, one the agent was admitted to and did not create
- * included, and every collection its `generator` stamp names. The recorded
- * Revoke names the grants the run confirmed revoked; it is audit trail, and
- * the retirement is what takes the row off the listing.
+ * Revokes a connected agent's storage grants. The first write empties the
+ * entry's `grantsReceived` and `outbox` in its own compare-and-swap
+ * (`StorageManager.clearConnectionChannel`), before any POST: no pass
+ * renews or pushes to an entry with no channel, so a revoke torn after it
+ * cannot be undone by the next login's renewal. The write is durable and a
+ * re-run finds it done. Then the collection rotation and the grant POSTs run
+ * on the WAS server, then the agent's entry is retired, then the revocation
+ * is recorded. There is no app key to delete. A stage that does not land
+ * throws before the retirement, so the row stays listed and a retry re-runs
+ * every stage, as on the app path ({@link revokeAppAccess}). Every grant on
+ * the entry is POSTed, a superseded renewal included. The rotation covers
+ * every collection the entry's grants target, one the agent was admitted to
+ * and did not create included, and every collection its `generator` stamp
+ * names. The recorded Revoke names the grants the run confirmed revoked; it
+ * is audit trail, and the retirement is what takes the row off the listing.
  *
  * @param options {object}
  * @param options.storage {StorageManager}
@@ -1018,6 +1069,7 @@ export async function revokeAgentAccess({
   skipped: number
   rotated: number
 }> {
+  await storage.clearConnectionChannel({ did: agent.controller })
   const directory = await storage.readConnectionsListing()
   const { grants } = partyOf({ directory, did: agent.controller })
   const { outcome, rotated } = await rotateThenRevokeGrants({

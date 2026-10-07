@@ -44,6 +44,14 @@
  * key epoch the collection has, and the row says so before approval. The
  * reading is absent until the caller has read the collection's attribution,
  * so the row shows no note the metadata has yet to refine.
+ *
+ * The inbox grant (`https://w3id.org/byoe#inbox`, a connection request's
+ * one write) has its own row copy: it can send messages to the wallet. It
+ * gets no write banner and no warning border, since it can create a message
+ * and do nothing else. On a connection request every row states the share
+ * TTL the grant takes, and that access renews while the connection stands.
+ * Each read row also states that the agent passes read access on to people
+ * it chooses.
  */
 import Box from '@mui/material/Box'
 import Chip from '@mui/material/Chip'
@@ -67,6 +75,9 @@ function targetLabel(
   t: (key: string, opts?: Record<string, unknown>) => string
 ) {
   const { target } = grant
+  if (target.targetClass === 'inbox') {
+    return t('chapi.get.zcapTarget.inbox')
+  }
   if (target.collectionId) {
     return (
       <>
@@ -88,6 +99,47 @@ function targetLabel(
     }
   }
   return ''
+}
+
+/**
+ * A row's expiry sentence. A share's covers the fetch axis only. A
+ * connection request's grants all take the share TTL and renew while the
+ * connection stands. Any other row states its read or write TTL.
+ *
+ * @param options {object}
+ * @param options.t {Function}
+ * @param options.share {boolean}
+ * @param options.connectionRequest {boolean}
+ * @param options.write {boolean}
+ * @param options.ttlDays {number}
+ * @param options.writeTtlDays {number}
+ * @param options.shareTtlDays {number}
+ * @returns {string}
+ */
+function expiryLine({
+  t,
+  share,
+  connectionRequest,
+  write,
+  ttlDays,
+  writeTtlDays,
+  shareTtlDays
+}: {
+  t: (key: string, opts?: Record<string, unknown>) => string
+  share: boolean
+  connectionRequest: boolean
+  write: boolean
+  ttlDays: number
+  writeTtlDays: number
+  shareTtlDays: number
+}): string {
+  if (share) {
+    return t('chapi.get.zcapShareExpiry', { days: shareTtlDays })
+  }
+  if (connectionRequest) {
+    return t('chapi.get.zcapConnectionExpiry', { days: shareTtlDays })
+  }
+  return t('chapi.get.zcapExpiry', { days: write ? writeTtlDays : ttlDays })
 }
 
 // The existing-collection note per creator reading; `this-app` (the
@@ -112,12 +164,16 @@ export function ZcapGrantsPanel({
   writeTtlDays,
   shareTtlDays,
   walletMintedRecipient = false,
+  connectionRequest = false,
   heading
 }: {
   grants: ResolvedGrant[]
   ttlDays: number
   writeTtlDays: number
   shareTtlDays: number
+  // A connection request: every grant takes the share TTL and renews while
+  // the connection stands, and the agent passes read access on.
+  connectionRequest?: boolean
   // App Connect consent: the recipient identity lives in this user's wallet
   // (matched from the credential store, or about to be minted on first run),
   // and the row says so. The matched copy claims custody, not provenance --
@@ -138,10 +194,15 @@ export function ZcapGrantsPanel({
         const { target, allowedActions, descriptor, write } = grant
         const satisfiable = isSatisfiable(target)
         const share = target.targetClass === 'share'
+        // The inbox grant can only create messages, so it reads as neither
+        // an ordinary write nor a read the agent passes on.
+        const inbox = target.targetClass === 'inbox'
+        const writeWarning = write && !inbox
         const existingNote =
           target.existing && EXISTING_NOTES[target.existing.creator]
         // Warning border for public-collection and write grants.
-        const highlight = target.targetClass === 'public-collection' || write
+        const highlight =
+          target.targetClass === 'public-collection' || writeWarning
         return (
           <Box
             key={descriptor.referenceId ?? index}
@@ -222,13 +283,33 @@ export function ZcapGrantsPanel({
                   </Typography>
                 )}
 
-                {write && (
+                {writeWarning && (
                   <Typography
                     variant="caption"
                     color="warning.main"
                     sx={{ display: 'block', mt: 0.5 }}
                   >
                     {t('chapi.get.zcapWriteWarning')}
+                  </Typography>
+                )}
+
+                {inbox && (
+                  <Typography
+                    variant="caption"
+                    color="text.secondary"
+                    sx={{ display: 'block', mt: 0.5 }}
+                  >
+                    {t('chapi.get.zcapInboxNote')}
+                  </Typography>
+                )}
+
+                {connectionRequest && !inbox && !share && (
+                  <Typography
+                    variant="caption"
+                    color="text.secondary"
+                    sx={{ display: 'block', mt: 0.5 }}
+                  >
+                    {t('chapi.get.zcapConnectionPassOn')}
                   </Typography>
                 )}
 
@@ -291,11 +372,15 @@ export function ZcapGrantsPanel({
                   {/* A share's expiry covers the fetch axis only -- the epoch
                       roster entry does not expire -- so it gets its own line
                       rather than the flat "expires in N days". */}
-                  {share
-                    ? t('chapi.get.zcapShareExpiry', { days: shareTtlDays })
-                    : t('chapi.get.zcapExpiry', {
-                        days: write ? writeTtlDays : ttlDays
-                      })}{' '}
+                  {expiryLine({
+                    t,
+                    share,
+                    connectionRequest,
+                    write,
+                    ttlDays,
+                    writeTtlDays,
+                    shareTtlDays
+                  })}{' '}
                   {share
                     ? t('chapi.get.zcapShareRevokeNote')
                     : t('chapi.get.zcapRevokeNote')}

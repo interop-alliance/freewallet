@@ -27,8 +27,10 @@ import {
   MENDER_GAPS,
   MENDER_INVARIANTS,
   MENDER_SITES,
+  REMEMBERED_INBOX_TAIL,
   REMEMBERED_REGISTRATIONS,
   REMEMBERED_SEED,
+  TRANSIENT_INBOX_TAIL,
   TRANSIENT_REGISTRATIONS
 } from '../../src/session/menders/index.js'
 
@@ -91,7 +93,7 @@ describe('census completeness', () => {
 })
 
 describe('the transient-reachable set', () => {
-  it('is the twenty-one entries the design pins', () => {
+  it('is the twenty-three entries the design pins', () => {
     const reachable = transientReachableInvariants({
       registry: freewalletMenderRegistry
     })
@@ -100,9 +102,11 @@ describe('the transient-reachable set', () => {
     // Row 37 joined when it split off row 2 as the roster log's half. It is
     // counted through its ceremony-tail trigger, as row 2 was before the
     // split, and row 2 stays since its transient collection fan-out still
-    // reports it.
+    // reports it. Rows 38 and 39 joined with the inbox pass, which runs
+    // behind the transient chain's block and at two encounter sites.
     expect(reachable.map(rowOf)).toEqual([
-      1, 2, 3, 4, 5, 6, 7, 8, 10, 12, 13, 14, 15, 16, 17, 18, 25, 26, 32, 35, 37
+      1, 2, 3, 4, 5, 6, 7, 8, 10, 12, 13, 14, 15, 16, 17, 18, 25, 26, 32, 35,
+      37, 38, 39
     ])
   })
 })
@@ -114,7 +118,7 @@ describe('the gap allowlist', () => {
       derived
         .filter(gap => gap.kind === 'none')
         .map(gap => rowOf(gap.invariant))
-    ).toEqual([26, 28, 29, 30, 31, 32, 34, 36])
+    ).toEqual([26, 28, 29, 30, 31, 32, 34, 36, 40])
     // Row 2 moved out of `none` when the transient chain's collection
     // fan-out began reporting its collection half.
     // Rows 11 and 27 moved out of `none` when stage B gave each an
@@ -126,7 +130,8 @@ describe('the gap allowlist', () => {
     // backfills the connections directory. Row 20 left the census with the
     // login-time stranded app-key sweep. Row 37 entered no derived set when
     // it split off row 2: the remembered sweep reports it and its
-    // ceremony-tail trigger counts it reached.
+    // ceremony-tail trigger counts it reached. Row 40 entered `none` with
+    // its declaration: nothing rotates the pairwise seed until FW-647.
     expect(
       derived
         .filter(gap => gap.kind === 'unreachable')
@@ -263,6 +268,16 @@ describe('the code counterpart', () => {
         row: 37,
         file: 'src/session/userKeySweep.ts',
         symbol: 'sweepUserKeyToDocument'
+      },
+      {
+        row: 38,
+        file: 'src/session/inboxPass.ts',
+        symbol: 'drainInbox'
+      },
+      {
+        row: 39,
+        file: 'src/session/inboxPass.ts',
+        symbol: 'renewAgentGrants'
       }
     ]
 
@@ -289,7 +304,9 @@ describe('the code counterpart', () => {
     for (const registration of [
       REMEMBERED_SEED,
       ...REMEMBERED_REGISTRATIONS,
-      ...TRANSIENT_REGISTRATIONS
+      ...REMEMBERED_INBOX_TAIL,
+      ...TRANSIENT_REGISTRATIONS,
+      ...TRANSIENT_INBOX_TAIL
     ]) {
       for (const id of registration.reports) {
         const decl = freewalletMenderRegistry.byId(id)

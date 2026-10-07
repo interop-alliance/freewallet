@@ -411,7 +411,7 @@ export async function composeVP({
     selectedVcs: selectedVCs,
     challenge,
     domain,
-    didAuthRequested,
+    sign: didAuthRequested,
     cryptosuite,
     zcaps,
     appConnect,

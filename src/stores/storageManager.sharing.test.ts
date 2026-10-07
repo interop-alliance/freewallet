@@ -66,6 +66,7 @@ import {
   connectionResourceId,
   findConnection,
   recordGrants,
+  recordReceivedGrants,
   setConnectionLabel,
   type ConnectionEntry,
   type ConnectionGrant,
@@ -838,6 +839,8 @@ function entryBody({
       grantKind,
       grantedAt: stamp
     })),
+    grantsReceived: [],
+    outbox: [],
     writers: []
   }
 }
@@ -3180,6 +3183,137 @@ describe('StorageManager.revokeCollectionRecipients (an agent)', () => {
     expect(currentEpochKids(descriptor!)).toEqual([owner.keyAgreementKey.id])
     // Pull axis: the recorded grant was revoked with the rotation.
     expect(revokedIdsOf(revoked)).toEqual(['z-agent-notes'])
+  })
+
+  it('skips a plaintext inbox or audience target, which resolves no descriptor', async () => {
+    const agent = await generateAppIdentity()
+    const { storage } = await agentGrantStorage(agent)
+    await recordPartyGrants({
+      storage,
+      did: agent.did,
+      kind: 'agent',
+      zcaps: [
+        collectionGrant({
+          id: 'z-agent-inbox',
+          collectionId: 'inbox',
+          controller: agent.did
+        }),
+        collectionGrant({
+          id: 'z-agent-news',
+          collectionId: 'news',
+          controller: agent.did
+        })
+      ]
+    })
+
+    const { rotation } = await rotateParty({ storage, did: agent.did })
+
+    // `inbox` and the audience reach the epoch read, find no key epochs, and
+    // are skipped: neither counts as a rotation failure.
+    expect(rotation).toMatchObject({
+      collections: 3,
+      rotated: 1,
+      failed: 0
+    })
+    expect(
+      await storage.granteeRosterCollections({
+        grantees: [
+          {
+            controller: agent.did,
+            targets: [`${SPACE_URL}inbox`, `${SPACE_URL}news`]
+          }
+        ]
+      })
+    ).toEqual([{ controller: agent.did, collectionIds: [], failed: 0 }])
+  })
+
+  it('revokes an agent holding plaintext audience and inbox grants: every grant POSTed, its channel and outbox emptied, the entry retired', async () => {
+    const agent = await generateAppIdentity()
+    const pairwise = await generateAppIdentity()
+    const { storage, user, revoked } = await agentGrantStorage(agent)
+    const inboxGrant = collectionGrant({
+      id: 'z-agent-inbox',
+      collectionId: 'inbox',
+      controller: agent.did
+    })
+    const newsGrant = collectionGrant({
+      id: 'z-agent-news',
+      collectionId: 'news',
+      controller: agent.did
+    })
+    const { store, hmacKey, spaceUrl } = await storage.connectionsDirectory()
+    await recordGrants({
+      store,
+      hmacKey,
+      spaceUrl,
+      did: agent.did,
+      kind: 'agent',
+      grants: [inboxGrant, newsGrant].map(zcap => ({
+        zcap,
+        grantKind: 'grant' as const
+      })),
+      // A pending envelope, as a renewal or a restore leaves one.
+      message: {
+        type: 'Grant',
+        actor: pairwise.did,
+        object: { zcaps: [inboxGrant, newsGrant] }
+      }
+    })
+    await recordReceivedGrants({
+      store,
+      hmacKey,
+      did: agent.did,
+      pairwiseDid: pairwise.did,
+      spaceUrl: spaceUrl!,
+      grants: [
+        {
+          zcap: {
+            id: 'z-channel',
+            controller: pairwise.did,
+            parentCapability: 'urn:zcap:root:agent',
+            invocationTarget: 'https://agent.example/space/a/inbox/',
+            allowedAction: ['POST'],
+            expires: new Date(Date.now() + 1_000_000).toISOString(),
+            proof: {
+              type: 'Ed25519Signature2020',
+              proofPurpose: 'capabilityDelegation',
+              verificationMethod: 'did:webvh:agent#z6MkAgent',
+              capabilityChain: ['urn:zcap:root:agent']
+            }
+          },
+          grantKind: 'inbox'
+        }
+      ],
+      channelMaxLifetimeMs: 365 * 24 * 60 * 60 * 1000
+    })
+    const before = await readParty({ storage, did: agent.did })
+    expect(before.entry?.grantsReceived).toHaveLength(1)
+    expect(before.entry?.outbox).toHaveLength(1)
+
+    const outcome = await revokeAgentAccess({
+      storage,
+      user,
+      agent: {
+        resourceId: '',
+        controller: agent.did,
+        origin: EXTERNAL_REQUEST_ORIGIN,
+        grants: []
+      }
+    })
+
+    // The rotation re-keys the one encrypted collection; `inbox` and the
+    // audience resolve no descriptor and count no failure.
+    expect(outcome).toMatchObject({ rotated: 1 })
+    expect(revokedIdsOf(revoked).sort()).toEqual([
+      'z-agent-inbox',
+      'z-agent-news',
+      'z-agent-notes'
+    ])
+    const { entry } = await readParty({ storage, did: agent.did })
+    expect(entry?.retired).toBeDefined()
+    expect(entry?.grants).toEqual([])
+    expect(entry?.grantsReceived).toEqual([])
+    expect(entry?.outbox).toEqual([])
   })
 
   it('hands the rotated grants to the grant stage, which does not POST them again', async () => {

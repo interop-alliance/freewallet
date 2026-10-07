@@ -492,7 +492,8 @@ export function WalletGetPage() {
             space,
             collections,
             allowMissingController: true,
-            appUrl: profile.appConnect.app.appUrl
+            appUrl: profile.appConnect.app.appUrl,
+            requestKind: 'app-connect' as const
           }
           void attributeGrants({
             resolution,

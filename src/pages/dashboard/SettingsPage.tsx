@@ -61,6 +61,12 @@ import {
   passkeySupported
 } from '@/lib/passkey'
 import { forgetBrowserWalletData } from '@/session/forget'
+import { retiredCredentialWithdrawnKeys } from '@/session/credentialRotation'
+import { useAgentReconnect } from '@/hooks/useAgentReconnect'
+import {
+  AgentReconnectList,
+  AgentReconnectNotice
+} from '@/components/AgentReconnectList'
 import { PassphraseStrengthField } from '@/components/PassphraseStrengthField'
 import { formatDate } from '@/lib/viewMappers/formatDate'
 import { RecoveryCodesSection } from '@/components/RecoveryCodesSection'
@@ -300,14 +306,20 @@ export function SettingsPage() {
     setPassphraseChangeSuccess(null)
     setPassphraseChangeError(null)
     try {
+      // The struck ladder VM and the replaced generation delegation left
+      // agent grants to restore: the ticked agents' by a fresh consent, the
+      // rest by the inbox pass's renewal in place.
       const { oldPassphraseRetired, rotation, registry } =
-        await changeAccountPassphrase({
-          session,
-          oldPassphrase,
-          newPassphrase
-        })
+        await passphraseAgents.runCeremony(() =>
+          changeAccountPassphrase({
+            session,
+            oldPassphrase,
+            newPassphrase
+          })
+        )
       setOldPassphrase('')
       setNewPassphrase('')
+      setPassphraseTyped(false)
       setPassphraseRotation(rotation)
       setPassphraseChangeSuccess(oldPassphraseRetired)
       // The ceremony wrote the registry's passphrase entry itself, after the
@@ -357,6 +369,28 @@ export function SettingsPage() {
     useState<UnlockMethodsRecord | null>(null)
   const [registryLoaded, setRegistryLoaded] = useState(false)
   const [registryLoadError, setRegistryLoadError] = useState(false)
+  // The connected agents holding a grant the current passphrase's ladder VM
+  // signed, which the change strikes. Read once a new passphrase is first
+  // typed, so an untouched form reads no directory, and clearing the field
+  // does not read it again. A successful change resets the latch.
+  const passphraseEntry = unlockRegistry?.methods.find(
+    method => method.type === 'passphrase'
+  )
+  const [passphraseTyped, setPassphraseTyped] = useState(false)
+  const passphraseAgents = useAgentReconnect({
+    session,
+    withdrawn:
+      session && passphraseEntry && passphraseTyped
+        ? {
+            key: passphraseEntry.unlockSpaceId,
+            keys: () =>
+              retiredCredentialWithdrawnKeys({
+                session,
+                entry: passphraseEntry
+              })
+          }
+        : null
+  })
   // The stale-seal state is its own load error: the registry is there and
   // intact, only sealed to a superseded user key, and the next login's
   // re-seal repair mends it -- so it gets copy that says so rather than the
@@ -411,6 +445,19 @@ export function SettingsPage() {
   const removeNeedsCeremony = removeTarget
     ? !canRevokeWithoutCeremony(removeTarget)
     : false
+  // The connected agents holding a grant the removed passkey's ladder VM
+  // signed, listed in the removal dialog.
+  const passkeyAgents = useAgentReconnect({
+    session,
+    withdrawn:
+      session && removeTarget && removeDialogOpen
+        ? {
+            key: removeTarget.credentialId,
+            keys: () =>
+              retiredCredentialWithdrawnKeys({ session, entry: removeTarget })
+          }
+        : null
+  })
   // Positively knowing this account has no passphrase method (registry loaded,
   // present, no passphrase entry, and the session did not log in via a
   // passphrase) is what lets us hide the change-passphrase form and offer to
@@ -540,7 +587,9 @@ export function SettingsPage() {
     setRemoving(true)
     setRemoveError(false)
     try {
-      await removeAccountPasskey({ session, entry })
+      await passkeyAgents.runCeremony(() =>
+        removeAccountPasskey({ session, entry })
+      )
       setRemoveDialogOpen(false)
       setRemoveTarget(null)
       showToast({ message: t('settings.passkeyRemoved') })
@@ -1058,18 +1107,31 @@ export function SettingsPage() {
                       setNewPassphrase(event.target.value)
                       setPassphraseChangeSuccess(null)
                       setPassphraseChangeError(null)
+                      if (event.target.value.length > 0) {
+                        setPassphraseTyped(true)
+                      }
                     }}
                   />
                   <PassphraseStrengthField
                     password={newPassphrase}
                     onChangeScore={setNewPassphraseScore}
                   />
+                  {newPassphrase.length > 0 && (
+                    <AgentReconnectList
+                      agents={passphraseAgents.agents}
+                      mode="tick"
+                      isTicked={passphraseAgents.isTicked}
+                      onToggle={passphraseAgents.toggle}
+                      disabled={changingPassphrase}
+                    />
+                  )}
                   <Button
                     variant="contained"
                     sx={{ alignSelf: 'flex-start' }}
                     disabled={
                       changingPassphrase ||
                       registryRepairing ||
+                      passphraseAgents.loading ||
                       oldPassphrase.length === 0 ||
                       !newPassphraseValid
                     }
@@ -1107,6 +1169,7 @@ export function SettingsPage() {
                       {t(PASSPHRASE_CHANGE_ERROR_KEYS[passphraseChangeError])}
                     </Alert>
                   )}
+                  <AgentReconnectNotice state={passphraseAgents.state} />
                   <Typography variant="body2" color="text.secondary">
                     {t('settings.passphraseLeakHint')}
                   </Typography>
@@ -1325,6 +1388,7 @@ export function SettingsPage() {
                                 : t('settings.passkeyAddFailed')}
                         </Alert>
                       )}
+                      <AgentReconnectNotice state={passkeyAgents.state} />
                     </>
                   )}
                 </Stack>
@@ -1675,6 +1739,13 @@ export function SettingsPage() {
                 {t('settings.passkeyRemoveReconnectApps')}
               </DialogContentText>
             )}
+            <AgentReconnectList
+              agents={passkeyAgents.agents}
+              mode="tick"
+              isTicked={passkeyAgents.isTicked}
+              onToggle={passkeyAgents.toggle}
+              disabled={removing}
+            />
             {removeError && (
               <Alert severity="error" sx={{ mt: 2 }}>
                 {t(PASSKEY_REMOVE_ERROR_KEYS[removeError])}
@@ -1692,7 +1763,7 @@ export function SettingsPage() {
               variant="contained"
               color="error"
               onClick={handleRemovePasskey}
-              disabled={removing}
+              disabled={removing || passkeyAgents.loading}
             >
               {removing
                 ? t('settings.passkeyRemoving')

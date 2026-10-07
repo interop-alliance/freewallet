@@ -51,6 +51,7 @@ import {
   type CollectionGenerator,
   type IDelegatedZcap,
   type IndexSchema,
+  type Resource,
   type ServiceDescription,
   type SpaceMetadata
 } from '@interop/was-client'
@@ -93,6 +94,7 @@ import {
   WAS_SERVER_URL
 } from '@/app.config'
 import {
+  clearReceivedGrants,
   connectionGrants,
   connectionRecipientKid,
   grantRecipientKid,
@@ -200,11 +202,13 @@ import {
   addHistoryCollectionUnshared as buildHistoryCollectionUnshared,
   APP_KEYS_COLLECTION,
   CONNECTIONS_COLLECTION,
+  INBOX_COLLECTION,
   type WalletActivity
 } from '@interop/wallet-core/space'
 import { createLogger, stageTimer } from '@/lib/log'
 
 const log = createLogger('fw:storage:manager')
+const inboxLog = createLogger('fw:inbox')
 
 // The `wallet-activity` wire shape now lives in `@interop/wallet-core/space`
 // (shared with Freewallet mobile). Re-exported here so existing importers keep
@@ -243,6 +247,37 @@ export type ImportSpaceSummary = {
   resourcesCreated: number
   resourcesSkipped: number
 }
+
+/**
+ * Why the `inbox` collection is not trusted: it is public, its Collection
+ * Metadata object carries an `encryption` descriptor, or it carries a
+ * `generator` stamp. Each marks a collection some requester created under
+ * that name, which the wallet does not adopt.
+ */
+export type UntrustedInboxReason = 'public' | 'encrypted' | 'attributed'
+
+/**
+ * One `inbox` message's metadata, read before its body: the DID the server
+ * recorded as its creator, its content type, and its stored size in bytes.
+ * A member the server did not report is absent.
+ */
+export type InboxMessageMeta = {
+  resourceId: string
+  createdBy?: string
+  contentType?: string
+  size?: number
+}
+
+/**
+ * What {@link StorageManager.readInbox} found: no `inbox` (absent, or the
+ * session has no Space), an `inbox` the wallet does not trust, or a trusted
+ * one with its listing, one page of resource ids at a time. Iterating
+ * `pages` throws what the listing read throws.
+ */
+export type InboxRead =
+  | { trust: 'absent' }
+  | { trust: 'untrusted'; reason: UntrustedInboxReason }
+  | { trust: 'trusted'; pages: AsyncIterable<string[]> }
 
 /**
  * The recipient kids of a descriptor's CURRENT key epoch, minus the owner's
@@ -789,6 +824,85 @@ async function acquireCollectionMetas({
     })
   )
   return Object.fromEntries(entries.filter(entry => entry !== undefined))
+}
+
+/**
+ * Mints grants under the parent rule consent's mint follows: the session's
+ * generation delegation (`profile.invocationCapability`) when it holds one,
+ * the Space root otherwise. Given `parentStale`, a generation delegation that
+ * is stale is renewed first, as consent's mint does. When it cannot be
+ * renewed, or the renewal is still stale, nothing is minted and `undefined`
+ * comes back, since a grant minted under a lapsing parent would carry its
+ * `expires` and be due again at once. With no `parentStale`, the parent is
+ * used as held.
+ *
+ * Each grant keeps the `invocationTarget` it is given exactly, since a
+ * renewal's scope compares the stored form. Its expiry is its TTL from now,
+ * no later than its `notAfter`, and limited by the parent's own `expires`.
+ * Signing is local and inert: nothing is recorded or sent here.
+ *
+ * @param options {object}
+ * @param options.profile {object}   the session profile's
+ *   `invocationCapability` and `zcapClient`
+ * @param options.spaceUrl {string}   this Space's container URL, whose root
+ *   capability parents a grant when no delegation is held
+ * @param options.grants {Array<object>}   per grant, `{ invocationTarget,
+ *   controller, allowedActions, ttlMs, notAfter }`
+ * @param [options.parentStale] {Function}   `(parent) => boolean`, whether a
+ *   generation delegation can no longer parent a grant
+ * @param [options.renewParent] {Function}   `() => Promise<IZcap | null>`,
+ *   renews the generation delegation in place, `null` when it could not
+ * @returns {Promise<IDelegatedZcap[] | undefined>}   the minted grants in the
+ *   order given, or `undefined` when the parent could not be renewed
+ */
+export async function delegateUnderSessionParent({
+  profile,
+  spaceUrl,
+  grants,
+  parentStale,
+  renewParent
+}: {
+  profile: Pick<ControllerProfile, 'invocationCapability' | 'zcapClient'>
+  spaceUrl: string
+  grants: Array<{
+    invocationTarget: string
+    controller: string
+    allowedActions: string[]
+    ttlMs: number
+    notAfter: Date
+  }>
+  parentStale?: (parent: IZcap) => boolean
+  renewParent?: () => Promise<IZcap | null>
+}): Promise<IDelegatedZcap[] | undefined> {
+  let parent = profile.invocationCapability
+  if (parent && parentStale?.(parent)) {
+    const renewed = await renewParent?.()
+    if (!renewed || parentStale(renewed)) {
+      inboxLog.warn(
+        'The generation delegation is stale and could not be renewed; renewing no agent grant'
+      )
+      return undefined
+    }
+    parent = renewed
+  }
+  const minted: IDelegatedZcap[] = []
+  for (const grant of grants) {
+    const now = Date.now()
+    const ttlMs = Math.min(grant.ttlMs, grant.notAfter.getTime() - now)
+    const expires = parent
+      ? clampGrantExpires({ ttlMs, delegation: parent, now })
+      : new Date(now + ttlMs)
+    minted.push(
+      (await profile.zcapClient.delegate({
+        capability: parent ?? rootCapabilityId(spaceUrl),
+        invocationTarget: grant.invocationTarget,
+        controller: grant.controller,
+        allowedActions: grant.allowedActions,
+        expires
+      })) as unknown as IDelegatedZcap
+    )
+  }
+  return minted
 }
 
 /**
@@ -5022,26 +5136,42 @@ export class StorageManager {
 
   /**
    * The session's `connections` directory, read once: every entry at its
-   * own resource id, with what the read could not open or parse, and this
-   * Space's container URL the grant checks read (absent on a session with no
-   * remote Space). Throws when the directory is refused or absent, and when
-   * the listing comes back `null`: a caller deciding anything about a party
-   * must not read a missing directory as an empty one.
+   * own resource id, with what the read could not open or parse, beside the
+   * directory itself ({@link connectionsDirectory}: the store and key a
+   * later write takes, and this Space's container URL the grant checks read,
+   * absent on a session with no remote Space). Throws when the directory is
+   * refused or absent, and when the listing comes back `null`: a caller
+   * deciding anything about a party must not read a missing directory as an
+   * empty one.
    *
-   * @returns {Promise<{ listing: ConnectionsListing; spaceUrl?: string }>}
+   * @returns {Promise<ConnectionsDirectory & { listing: ConnectionsListing }>}
    */
-  async readConnectionsListing(): Promise<{
-    listing: ConnectionsListing
-    spaceUrl?: string
-  }> {
-    const { store, hmacKey, spaceUrl } = await this.connectionsDirectory()
-    const listing = await readConnections({ store, hmacKey })
+  async readConnectionsListing(): Promise<
+    ConnectionsDirectory & { listing: ConnectionsListing }
+  > {
+    const directory = await this.connectionsDirectory()
+    const listing = await readConnections(directory)
     if (!listing) {
       throw new Error(
         `The "${CONNECTIONS_COLLECTION}" collection could not be listed.`
       )
     }
-    return { listing, ...(spaceUrl !== undefined ? { spaceUrl } : {}) }
+    return { ...directory, listing }
+  }
+
+  /**
+   * Empties a party's `grantsReceived` and `outbox` (wallet-core's
+   * `clearReceivedGrants`): an agent revoke's first write, so no pass renews
+   * grants to the party or pushes to it once the revoke has started. Both
+   * already empty, or an absent entry, writes nothing.
+   *
+   * @param options {object}
+   * @param options.did {string}   the party's DID
+   * @returns {Promise<void>}
+   */
+  async clearConnectionChannel({ did }: { did: string }): Promise<void> {
+    const { store, hmacKey } = await this.connectionsDirectory()
+    await clearReceivedGrants({ store, hmacKey, did })
   }
 
   /**
@@ -5078,6 +5208,215 @@ export class StorageManager {
       did,
       handledZcapIds,
       ...(spaceUrl !== undefined && { spaceUrl })
+    })
+  }
+
+  /**
+   * Reads the account's own `inbox` remote-direct, under this session's own
+   * capability (the generation delegation of a transient session, the root
+   * otherwise). The collection is trusted only when it is not public and its
+   * Collection Metadata object carries neither an `encryption` descriptor
+   * nor a `generator` stamp. Each of the three marks a collection some
+   * requester created under that name before the wallet provisioned its
+   * own, so the wallet refuses it and counts it as absent. A trusted inbox
+   * comes back with its listing, walked lazily one page at a time, so a
+   * reader that stops early reads no further page. Each message's metadata
+   * and body are read through {@link readInboxMessageMeta} and
+   * {@link readInboxMessageBody}, the metadata first.
+   *
+   * A session with no Space reads `absent`. Throws what the metadata or the
+   * policy read throws.
+   *
+   * @returns {Promise<InboxRead>}
+   */
+  async readInbox(): Promise<InboxRead> {
+    const remote = this.#remoteStore
+    if (!remote) {
+      return { trust: 'absent' }
+    }
+    const handle = remote.collectionHandle({ collectionId: INBOX_COLLECTION })
+    // Both reads run at once. The policy read's failure counts only where
+    // the metadata leaves it deciding, as when it ran second.
+    const [metadata, publicRead] = await Promise.all([
+      handle.describe(),
+      handle.isPublic().then(
+        isPublic => ({ isPublic }),
+        (err: unknown) => ({ err })
+      )
+    ])
+    if (!metadata) {
+      return { trust: 'absent' }
+    }
+    let reason: UntrustedInboxReason | undefined
+    if (metadata.encryption !== undefined) {
+      reason = 'encrypted'
+    } else if (metadata.generator !== undefined) {
+      reason = 'attributed'
+    } else if ('err' in publicRead) {
+      throw publicRead.err
+    } else if (publicRead.isPublic) {
+      reason = 'public'
+    }
+    if (reason !== undefined) {
+      inboxLog.warn('The inbox collection is not trusted; it reads as absent', {
+        reason
+      })
+      return { trust: 'untrusted', reason }
+    }
+    async function* pages(): AsyncGenerator<string[]> {
+      for await (const page of handle.listPages()) {
+        yield page.items.map(item => item.id)
+      }
+    }
+    return { trust: 'trusted', pages: pages() }
+  }
+
+  /**
+   * One `inbox` message's metadata: the server-recorded `createdBy`, the
+   * content type, and the stored size. Resolves `null` when the message is
+   * gone (or not visible). Throws what the read throws.
+   *
+   * @param options {object}
+   * @param options.resourceId {string}
+   * @returns {Promise<InboxMessageMeta | null>}
+   */
+  async readInboxMessageMeta({
+    resourceId
+  }: {
+    resourceId: string
+  }): Promise<InboxMessageMeta | null> {
+    const meta = await this.#inboxResource({ resourceId }).meta()
+    if (!meta) {
+      return null
+    }
+    const { createdBy, contentType, size } = meta
+    return {
+      resourceId,
+      ...(typeof createdBy === 'string' ? { createdBy } : {}),
+      ...(typeof contentType === 'string' ? { contentType } : {}),
+      ...(typeof size === 'number' ? { size } : {})
+    }
+  }
+
+  /**
+   * One `inbox` message's body, parsed: a JSON value, or `undefined` for a
+   * body that is not JSON. Resolves `null` when the message is gone. Throws
+   * what the read throws.
+   *
+   * @param options {object}
+   * @param options.resourceId {string}
+   * @returns {Promise<unknown>}
+   */
+  async readInboxMessageBody({
+    resourceId
+  }: {
+    resourceId: string
+  }): Promise<unknown> {
+    const body = await this.#inboxResource({ resourceId }).get()
+    if (body === null) {
+      return null
+    }
+    return body instanceof Blob ? undefined : body
+  }
+
+  /**
+   * Deletes one `inbox` message. A message already gone counts as done, so
+   * two sessions draining at once both succeed.
+   *
+   * @param options {object}
+   * @param options.resourceId {string}
+   * @returns {Promise<void>}
+   */
+  async deleteInboxMessage({
+    resourceId
+  }: {
+    resourceId: string
+  }): Promise<void> {
+    try {
+      await this.#inboxResource({ resourceId }).delete()
+    } catch (err) {
+      if (errorNameOf(err) === 'NotFoundError') {
+        return
+      }
+      throw err
+    }
+  }
+
+  /**
+   * The `Resource` handle of one `inbox` message, read and deleted as stored:
+   * the collection is plaintext, so no codec runs.
+   *
+   * @param options {object}
+   * @param options.resourceId {string}
+   * @returns {Resource}
+   */
+  #inboxResource({ resourceId }: { resourceId: string }): Resource {
+    return this.#requireRemote('Reading the inbox')
+      .collectionHandle({ collectionId: INBOX_COLLECTION })
+      .resource(resourceId, { encryption: 'plaintext' })
+  }
+
+  /**
+   * The verified account document's reading, for the agent grant renewal:
+   * the current signing keys, the current document, and the current annex
+   * DID. `undefined` when the session has no account to check against, or
+   * when the read throws. The renewal reads `undefined` as "renew nothing",
+   * the opposite of a revocation, which POSTs every grant on the same value.
+   * A planted record must never be turned into a delegation the account
+   * signs.
+   *
+   * @returns {Promise<AccountSignerCheck | undefined>}
+   */
+  async renewalSignerCheck(): Promise<AccountSignerCheck | undefined> {
+    try {
+      return await this.#signerCheckFor()
+    } catch (err) {
+      inboxLog.warn(
+        'Could not read the account key set; renewing no agent grant',
+        { err }
+      )
+      return undefined
+    }
+  }
+
+  /**
+   * Mints the renewals of recorded agent grants under the parent rule
+   * consent's mint follows, a stale generation delegation renewed first
+   * ({@link delegateUnderSessionParent}). `undefined` when the parent could
+   * not be renewed: nothing is minted then.
+   *
+   * @param options {object}
+   * @param options.profile {ControllerProfile}   the session profile
+   * @param options.grants {Array<object>}   per grant, `{ invocationTarget,
+   *   controller, allowedActions, ttlMs, notAfter }`
+   * @param options.parentStale {Function}   `(parent) => boolean`
+   * @param options.renewParent {Function}   `() => Promise<IZcap | null>`
+   * @returns {Promise<IDelegatedZcap[] | undefined>}
+   */
+  async delegateRenewalGrants({
+    profile,
+    grants,
+    parentStale,
+    renewParent
+  }: {
+    profile: ControllerProfile
+    grants: Array<{
+      invocationTarget: string
+      controller: string
+      allowedActions: string[]
+      ttlMs: number
+      notAfter: Date
+    }>
+    parentStale: (parent: IZcap) => boolean
+    renewParent: () => Promise<IZcap | null>
+  }): Promise<IDelegatedZcap[] | undefined> {
+    const remote = this.#requireRemote('Renewing an agent grant')
+    return await delegateUnderSessionParent({
+      profile,
+      spaceUrl: remote.spaceUrl,
+      grants,
+      parentStale,
+      renewParent
     })
   }
 
@@ -5456,6 +5795,10 @@ export class StorageManager {
         const descriptor = descriptors.get(collectionId)
         if (descriptor instanceof Error) {
           failed += 1
+        } else if (descriptor === undefined) {
+          // A plaintext target (`inbox`, an audience collection) resolves no
+          // descriptor and carries no roster: skipped, not a failure.
+          continue
         } else if (
           recipientId &&
           currentEpochRecipientKids({ descriptor }).includes(recipientId)
@@ -5522,6 +5865,15 @@ export class StorageManager {
     recipientId: string
   }): Promise<boolean> {
     const descriptor = await this.#readGovernedDescriptor({ collectionId })
+    if (descriptor === undefined) {
+      // A plaintext target (`inbox`, an audience collection) has no
+      // governing log, so it resolves no descriptor and lists no recipient.
+      // It is skipped, not counted as a rotation failure.
+      log.debug('A granted collection carries no key epochs; skipped', {
+        collectionId
+      })
+      return false
+    }
     return currentEpochRecipientKids({ descriptor }).includes(recipientId)
   }
 
@@ -5680,26 +6032,24 @@ export class StorageManager {
     expires?: Date
   }): Promise<IDelegatedZcap> {
     const remote = this.#requireRemote('Sharing a collection')
-    const spaceRootCapability = rootCapabilityId(remote.spaceUrl)
-    // The store's own canonical form: the grant's target must match the URL
-    // the grantee's request addresses byte for byte.
-    const collectionUrl = remote.collectionTargetUrl(collectionId)
-    const now = Date.now()
-    const requestedExpires = expires ?? new Date(now + RP_ZCAP_TTL_MS)
-    const expiresAt = profile.invocationCapability
-      ? clampGrantExpires({
-          ttlMs: requestedExpires.getTime() - now,
-          delegation: profile.invocationCapability,
-          now
-        })
-      : requestedExpires
-    return (await profile.zcapClient.delegate({
-      capability: profile.invocationCapability ?? spaceRootCapability,
-      invocationTarget: collectionUrl,
-      controller,
-      allowedActions: ['GET', 'HEAD'],
-      expires: expiresAt
-    })) as unknown as IDelegatedZcap
+    // No `parentStale`: a share mints under the parent as held, renewing
+    // nothing, so the mint always resolves.
+    const [grant] = (await delegateUnderSessionParent({
+      profile,
+      spaceUrl: remote.spaceUrl,
+      grants: [
+        {
+          // The store's own canonical form: the grant's target must match
+          // the URL the grantee's request addresses byte for byte.
+          invocationTarget: remote.collectionTargetUrl(collectionId),
+          controller,
+          allowedActions: ['GET', 'HEAD'],
+          ttlMs: Number.POSITIVE_INFINITY,
+          notAfter: expires ?? new Date(Date.now() + RP_ZCAP_TTL_MS)
+        }
+      ]
+    }))!
+    return grant!
   }
 
   /**

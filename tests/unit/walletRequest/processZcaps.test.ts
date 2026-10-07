@@ -6,6 +6,11 @@ import { securityLoader } from '@interop/security-document-loader'
 import type { Session } from '@/types/auth'
 import type { ICapabilityQueryDetail, IZcap } from '@/lib/walletRequest'
 import { x25519RecipientFromDidKey } from '@interop/was-client/edv'
+import { base64urlnopad } from '@scure/base'
+import {
+  connectionDidKey,
+  connectionSeedTag
+} from '@interop/wallet-core/connections'
 import type { CollectionGenerator } from '@interop/was-client'
 import {
   APP_KEYS_COLLECTION,
@@ -15,6 +20,7 @@ import {
 import {
   existingCollectionsFrom,
   isSatisfiable,
+  processAppConnect,
   resolveInvocationTarget,
   resolveGrant,
   resolveGrants,
@@ -2411,5 +2417,287 @@ describe('processRequest with zcaps', () => {
     expect(ensureCalls).toHaveLength(0)
     expect(provisionCalls).toHaveLength(0)
     expect(shareCalls).toHaveLength(0)
+  })
+})
+
+describe('connection requests', () => {
+  const DAY_MS = 24 * 60 * 60 * 1000
+  const SHARE_TTL_MS = 365 * DAY_MS
+  const AUDIENCE_URL = `${SPACE_URL}friends/`
+  const INBOX_TYPE = 'https://w3id.org/byoe#inbox'
+
+  /**
+   * A connection request's capability queries: a read on one audience by
+   * its container URL, and POST on the inbox by its descriptor.
+   *
+   * @param controller {string}
+   * @returns {ICapabilityQueryDetail[]}
+   */
+  function connectionDetails(controller: string): ICapabilityQueryDetail[] {
+    return [
+      {
+        referenceId: 'friends',
+        allowedAction: ['GET', 'HEAD'],
+        controller,
+        invocationTarget: AUDIENCE_URL
+      },
+      {
+        referenceId: 'inbox',
+        allowedAction: ['POST'],
+        controller,
+        invocationTarget: { type: INBOX_TYPE }
+      }
+    ]
+  }
+
+  beforeEach(() => {
+    collectionListing = [{ id: 'friends' }, { id: 'inbox' }]
+    delegated.length = 0
+    ensureCalls.length = 0
+    provisionCalls.length = 0
+  })
+
+  it('resolves the inbox class ahead of the never-grantable check, with POST alone', () => {
+    const { target, allowedActions, write } = resolveGrant({
+      descriptor: {
+        controller: RP_DID,
+        allowedAction: ['GET', 'HEAD', 'POST', 'PUT', 'DELETE'],
+        invocationTarget: { type: INBOX_TYPE }
+      },
+      space: SPACE,
+      collections: existingCollectionsFrom([{ id: 'inbox' }]),
+      requestKind: 'connection-request'
+    })
+    expect(target.targetClass).toBe('inbox')
+    expect(target.invocationTarget).toBe(`${SPACE_URL}inbox/`)
+    expect(target.needsProvisioning).toBe(false)
+    expect(allowedActions).toEqual(['POST'])
+    expect(write).toBe(true)
+  })
+
+  it('leaves the inbox unsatisfiable for any other request kind', () => {
+    for (const requestKind of [
+      'app-connect',
+      'interaction-url',
+      undefined
+    ] as const) {
+      const target = resolveInvocationTarget({
+        descriptor: { type: INBOX_TYPE },
+        space: SPACE,
+        collections: NO_COLLECTIONS,
+        requester: { controller: RP_DID },
+        requestKind
+      })
+      expect(isSatisfiable(target)).toBe(false)
+    }
+  })
+
+  it('refuses a named inbox descriptor and a plain URL naming the inbox', () => {
+    const named = resolveInvocationTarget({
+      descriptor: { type: INBOX_TYPE, name: 'inbox' },
+      space: SPACE,
+      collections: existingCollectionsFrom([{ id: 'inbox' }]),
+      requester: { controller: RP_DID },
+      requestKind: 'connection-request'
+    })
+    expect(isSatisfiable(named)).toBe(false)
+    const byUrl = resolveInvocationTarget({
+      descriptor: `${SPACE_URL}inbox/`,
+      space: SPACE,
+      collections: existingCollectionsFrom([{ id: 'inbox' }]),
+      requester: { controller: RP_DID },
+      requestKind: 'connection-request'
+    })
+    expect(isSatisfiable(byUrl)).toBe(false)
+  })
+
+  it('delegates the read and inbox grants for the share TTL, at bare container targets', async () => {
+    const before = Date.now()
+    const zcaps = (await processZcaps({
+      zcapRequests: connectionDetails(RP_DID),
+      session,
+      shareTtlMs: SHARE_TTL_MS,
+      requestKind: 'connection-request'
+    })) as unknown as Array<{
+      invocationTarget: string
+      allowedAction: string[]
+      expires: string
+    }>
+    expect(zcaps.map(zcap => zcap.invocationTarget)).toEqual([
+      AUDIENCE_URL,
+      `${SPACE_URL}inbox/`
+    ])
+    expect(zcaps.map(zcap => zcap.allowedAction)).toEqual([
+      ['GET', 'HEAD'],
+      ['POST']
+    ])
+    for (const zcap of zcaps) {
+      expect(
+        Math.abs(Date.parse(zcap.expires) - (before + SHARE_TTL_MS))
+      ).toBeLessThan(60 * 1000)
+    }
+    expect(ensureCalls).toEqual([])
+    expect(provisionCalls).toEqual([])
+  })
+
+  it("limits the share TTL to the generation delegation's remaining life", async () => {
+    const parentExpires = new Date(Date.now() + 200 * DAY_MS).toISOString()
+    const transient = {
+      ...session,
+      profile: {
+        ...session.profile,
+        invocationCapability: {
+          id: 'urn:zcap:delegated:generation',
+          invocationTarget: SPACE_URL,
+          expires: parentExpires
+        }
+      }
+    } as unknown as Session
+    const zcaps = (await processZcaps({
+      zcapRequests: connectionDetails(RP_DID),
+      session: transient,
+      shareTtlMs: SHARE_TTL_MS,
+      requestKind: 'connection-request'
+    })) as unknown as Array<{ expires: string }>
+    expect(zcaps).toHaveLength(2)
+    for (const zcap of zcaps) {
+      expect(Date.parse(zcap.expires)).toBeLessThanOrEqual(
+        Date.parse(parentExpires)
+      )
+    }
+  })
+
+  it('delegates nothing on the inbox for an interaction-URL request', async () => {
+    const zcaps = (await processZcaps({
+      zcapRequests: connectionDetails(RP_DID),
+      session,
+      requestKind: 'interaction-url'
+    })) as unknown as Array<{ invocationTarget: string }>
+    expect(zcaps.map(zcap => zcap.invocationTarget)).toEqual([AUDIENCE_URL])
+  })
+
+  it('delegates nothing for an App Connect request naming the inbox', async () => {
+    const zcaps = await processZcaps({
+      zcapRequests: [connectionDetails(RP_DID)[1]!],
+      session,
+      requestKind: 'app-connect',
+      app: {
+        name: 'Example App',
+        origin: 'https://app.example',
+        appUrl: 'https://app.example/app'
+      }
+    })
+    expect(zcaps).toEqual([])
+    expect(delegated).toEqual([])
+  })
+
+  it('mints no inbox delegation through processAppConnect', async () => {
+    const appSession = {
+      ...session,
+      storage: {
+        ...session.storage,
+        async listAppKeys() {
+          return {
+            appKeys: [],
+            skipped: {
+              unknownEpoch: 0,
+              noEpochKey: 0,
+              undecryptable: 0,
+              integrity: 0,
+              plaintext: 0
+            }
+          }
+        },
+        async addMintedAppKey() {
+          return { resourceId: 'z1MintedAppKey' }
+        }
+      }
+    } as unknown as Session
+    const response = await processAppConnect({
+      appConnect: {
+        app: { name: 'Example App', appUrl: 'https://app.example/app' },
+        capabilityQueries: [
+          {
+            referenceId: 'inbox',
+            allowedAction: ['POST'],
+            invocationTarget: { type: INBOX_TYPE }
+          }
+        ]
+      } as never,
+      session: appSession,
+      origin: 'https://app.example',
+      challenge: CHALLENGE,
+      domain: 'app.example',
+      didAuthRequested: true
+    })
+    expect(response.zcaps).toEqual([])
+    expect(delegated).toEqual([])
+  })
+
+  it('signs the response with the pairwise key over the challenge, with no domain', async () => {
+    const hmacKey = Uint8Array.from({ length: 32 }, (_, index) => index + 1)
+    const seed = base64urlnopad.encode(new Uint8Array(32).fill(5))
+    const seedTag = await connectionSeedTag({ hmacKey, seed })
+    const pairwise = await connectionDidKey({ hmacKey, seed, seedTag })
+    const pairwiseSigner = {
+      signer: pairwise.keyAgent.getSigner(),
+      holder: pairwise.did
+    }
+    const { verifiablePresentation } = await processRequest({
+      request: {
+        query: [
+          {
+            type: 'AuthorizationCapabilityQuery',
+            capabilityQuery: connectionDetails(RP_DID)
+          }
+        ],
+        challenge: CHALLENGE
+      },
+      session,
+      credentialRequestOrigin: 'n/a (API request)',
+      delegateStandaloneZcaps: true,
+      pairwiseSigner
+    })
+    const vp = verifiablePresentation as unknown as {
+      holder?: string
+      zcap?: IZcap[]
+      proof?: Record<string, unknown>
+    }
+    expect(vp.holder).toBe(pairwise.did)
+    expect(vp.zcap).toHaveLength(2)
+    expect(vp.proof?.proofPurpose).toBe('authentication')
+    expect(vp.proof?.challenge).toBe(CHALLENGE)
+    expect(vp.proof?.domain).toBeUndefined()
+    expect(String(vp.proof?.verificationMethod)).toMatch(
+      new RegExp(`^${pairwise.did}#`)
+    )
+    const { suite } = presentationSuiteFor({ signer: pairwiseSigner.signer })
+    const result = await vc.verify({
+      presentation: verifiablePresentation as never,
+      challenge: CHALLENGE,
+      suite,
+      documentLoader
+    })
+    expect(result.verified).toBe(true)
+  })
+
+  it('refuses a connection request without its pairwise signer, delegating nothing', async () => {
+    await expect(
+      processRequest({
+        request: {
+          query: [
+            {
+              type: 'AuthorizationCapabilityQuery',
+              capabilityQuery: connectionDetails(RP_DID)
+            }
+          ],
+          challenge: CHALLENGE
+        },
+        session,
+        credentialRequestOrigin: 'n/a (API request)',
+        delegateStandaloneZcaps: true
+      })
+    ).rejects.toThrow(/pairwise signer/)
+    expect(delegated).toEqual([])
   })
 })

@@ -17,9 +17,16 @@
  * nothing can run them out of their own order. The encounter sites that keep
  * their own call are data too.
  *
- * Three encounter registrations run mid-visit, after the chain has settled,
+ * Behind each chain's block runs its inbox tail: the inbox pass (the drain,
+ * then the agent grant renewal), which settles `session.inboxPass` alone. It
+ * talks to other parties' servers, so neither `session.registryReady` nor
+ * `session.mends` waits on it.
+ *
+ * Five encounter registrations run mid-visit, after the chain has settled,
  * through the encounter runner (`encounter.ts`): the stranded-collection
- * mend, the registry stale-seal mend, and the `connections` writer sweep.
+ * mend, the registry stale-seal mend, the `connections` writer sweep, and the
+ * two uses of the inbox pass (the Notifications page open, and the Settings
+ * site after a ceremony that replaces the generation delegation).
  */
 import {
   errorNameOf,
@@ -89,6 +96,7 @@ import {
 import { sweepClientAnnexGenerations } from '@/session/clientAnnexGc'
 import { refreshTransientManageCapability } from '@/session/unlockMethods'
 import { sweepHeldConnectionWriters } from '@/session/connectionWriters'
+import { INBOX_PASS_REPORTS, runInboxPass } from '@/session/inboxPass'
 import { wasServiceDescription } from '@/lib/wasService'
 
 /**
@@ -1195,6 +1203,90 @@ export const CONNECTION_WRITERS_SWEEP_ENCOUNTER: Registration<
 }
 
 /**
+ * The inbox pass as one chain's tail registration: the drain, then the
+ * agent grant renewal and the outbox push (`src/session/inboxPass.ts`). It
+ * reports both invariants, the drain's first. The runner admits it off the
+ * CHAPI popup only (both declarations' `when`), and the block's runner
+ * starts it only on a session with a Space.
+ *
+ * @param trigger {'remembered-login-chain' | 'transient-login-chain'}
+ * @returns {Registration}
+ */
+function inboxAndRenewal(
+  trigger: 'remembered-login-chain' | 'transient-login-chain'
+): Registration<LoginMenderDeps, CeremonyId> {
+  return {
+    trigger,
+    reports: [...INBOX_PASS_REPORTS],
+    async converge(deps) {
+      const { entries } = await runInboxPass({ session: deps.session })
+      return entries
+    }
+  }
+}
+
+/**
+ * The remembered chain's inbox tail, run after the whole block (the annex GC
+ * and the keystore report included), so a generation the GC swapped is
+ * renewed under in the same login.
+ */
+export const REMEMBERED_INBOX_TAIL: ReadonlyArray<
+  Registration<LoginMenderDeps, CeremonyId>
+> = [inboxAndRenewal('remembered-login-chain')]
+
+/**
+ * The transient chain's inbox tail, run after the whole block.
+ */
+export const TRANSIENT_INBOX_TAIL: ReadonlyArray<
+  Registration<LoginMenderDeps, CeremonyId>
+> = [inboxAndRenewal('transient-login-chain')]
+
+/**
+ * The inbox pass as an encounter registration. It awaits the session's own
+ * login-time pass first, so it never runs beside it and renews nothing
+ * twice; passes on one session are serialized beside that as well.
+ *
+ * @returns {Registration}
+ */
+function inboxAndRenewalEncounter(): Registration<
+  { session: Session },
+  CeremonyId
+> {
+  return {
+    trigger: 'encounter',
+    reports: [...INBOX_PASS_REPORTS],
+    reachedBy: ['remembered', 'transient'],
+    async converge({ session }) {
+      await session.inboxPass
+      if (isSessionDisposed({ session })) {
+        return INBOX_PASS_REPORTS.map(invariant => ({
+          invariant,
+          outcome: 'noop' as const,
+          detail: { reason: 'session-disposed' }
+        }))
+      }
+      const { entries } = await runInboxPass({ session })
+      return entries
+    }
+  }
+}
+
+/**
+ * The Notifications page's encounter: opening the page drains the inbox and
+ * renews, so an invitation an agent posted after this visit's consent is
+ * read in the same visit.
+ */
+export const INBOX_NOTIFICATIONS_ENCOUNTER = inboxAndRenewalEncounter()
+
+/**
+ * The Settings site's encounter, raised once a ceremony that replaces the
+ * generation delegation resolves (a ladder-kind passphrase change or
+ * credential removal, a client revocation, the last-client transition). The
+ * drain runs first, so a channel stored in the same visit is pushed through.
+ */
+export const INBOX_CEREMONY_ENCOUNTER = inboxAndRenewalEncounter()
+
+/**
  * The remembered block's registry-writing registrations, in execution order.
  * `session.registryReady` settles when the last of these has reported, which
  * is the meaning its awaiters have always had.
@@ -1228,7 +1320,9 @@ export const REMEMBERED_REGISTRATIONS: ReadonlyArray<
 
 /**
  * The transient block, every entry of which settles `session.registryReady`:
- * the collection fan-out first, then the registry-writing passes.
+ * the collection fan-out first, then the registry-writing passes. The inbox
+ * tail is not part of it, so `registryReady` never waits on another party's
+ * server.
  */
 export const TRANSIENT_REGISTRATIONS: ReadonlyArray<
   Registration<LoginMenderDeps, CeremonyId>
@@ -1348,16 +1442,20 @@ const REPORTING_SITES: ReadonlyArray<RegistrationSite> = [
 
 /**
  * Every registration site the registry indexes: both blocks in execution
- * order (the seed first), the three encounter registrations the encounter
- * runner runs, then the sites that report from their own call sites. The
- * audit's derived sets read this list.
+ * order (the seed first), each followed by its inbox tail, the five
+ * encounter registrations the encounter runner runs, then the sites that
+ * report from their own call sites. The audit's derived sets read this list.
  */
 export const MENDER_SITES: ReadonlyArray<RegistrationSite> = [
   REMEMBERED_SEED,
   ...REMEMBERED_REGISTRATIONS,
+  ...REMEMBERED_INBOX_TAIL,
   ...TRANSIENT_REGISTRATIONS,
+  ...TRANSIENT_INBOX_TAIL,
   STRANDED_COLLECTION_ENCOUNTER,
   REGISTRY_SEAL_ENCOUNTER,
   CONNECTION_WRITERS_SWEEP_ENCOUNTER,
+  INBOX_NOTIFICATIONS_ENCOUNTER,
+  INBOX_CEREMONY_ENCOUNTER,
   ...REPORTING_SITES
 ]

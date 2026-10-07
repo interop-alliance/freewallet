@@ -35,8 +35,9 @@ function publishStorageSeam(session: Session | null): void {
  * `window.__E2E_LOGIN_CHAIN_SETTLED__` so a Playwright fixture can let the
  * block finish before it tears the context down. It waits on
  * `session.mends`, which settles when the whole block has run -- the annex
- * GC and the keystore report included -- and never rejects. Cleared on
- * logout. No-op in production.
+ * GC and the keystore report included -- and then on `session.inboxPass`,
+ * the inbox tail behind the block. Neither rejects. Cleared on logout. No-op
+ * in production.
  */
 function publishLoginChainSeam(session: Session | null): void {
   if (import.meta.env.MODE === 'production') {
@@ -49,6 +50,7 @@ function publishLoginChainSeam(session: Session | null): void {
   ).__E2E_LOGIN_CHAIN_SETTLED__ = session
     ? async () => {
         await session.mends
+        await session.inboxPass
       }
     : undefined
 }

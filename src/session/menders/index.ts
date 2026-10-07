@@ -22,8 +22,10 @@ export { MENDER_GAPS } from './gaps.js'
 export { MENDER_INVARIANTS } from './invariants.js'
 export {
   MENDER_SITES,
+  REMEMBERED_INBOX_TAIL,
   REMEMBERED_REGISTRATIONS,
   REMEMBERED_SEED,
+  TRANSIENT_INBOX_TAIL,
   TRANSIENT_REGISTRATIONS
 } from './registrations.js'
 

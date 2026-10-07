@@ -13,8 +13,9 @@ pasted into Add Credential or scanned from a QR reaches the page too:
 The page (`src/pages/external/ExternalRequestPage.tsx`) is the
 `WalletGetPage` shape minus CHAPI. It opens the exchange, classifies the
 VPR, renders the storage-access consent panel, delegates through the
-ordinary grant engine, and POSTs the unsigned zcap-only presentation back
-with the exchange URL. Its consent rows carry the same existing-collection
+ordinary grant engine, and POSTs the zcap-only presentation back with the
+exchange URL. The presentation is unsigned, except for a connection request
+(see "The connection request" below). Its consent rows carry the same existing-collection
 reading the popup's rows do, through the same hook (`useAttributedGrants`)
 and second resolution pass (`attributeExistingCollections`). A collection
 another requester (an app, service, or agent) created names that requester. An interaction-URL
@@ -75,7 +76,9 @@ module `src/lib/walletRequest/externalRequest.ts`, each with its own copy:
 - a string target naming an existing encrypted collection, or a Resource
   inside one, whose current key epoch does not list the agent;
 - a grantee `controller` that is the did:key of a wallet client the
-  verified account document lists or ever listed (`enrolledClient`).
+  verified account document lists or ever listed (`enrolledClient`);
+- a connection request that breaks its own rules, or whose account has no
+  `inbox` the wallet trusts (see "The connection request" below).
 
 The last is decided once the session can read the account document
 (`refuseEnrolledClientController`), and a log that cannot be read fails the
@@ -87,8 +90,99 @@ A consent that reaches the entry write and finds an entry of another kind
 at the controller's id, such as a disconnected app's, is refused there by
 wallet-core's `ConnectionKindMismatchError` and fails as a failed consent.
 
+**The connection request.** An agent that needs a channel back to the
+wallet sends a connection request. It is an interaction-URL request whose
+grants include the `{ type: 'https://w3id.org/byoe#inbox' }` descriptor
+(`namesInboxTarget` in `src/lib/walletRequest/connectionRequest.ts`).
+Beside it, the request asks for GET and HEAD on audience collections, each
+named by its plain container URL. The descriptor resolves to the `inbox`
+target class, POST only, and provisions nothing. The resolver in
+`processZcaps.ts` resolves it only when told the request is a connection
+request (`requestKind`). For App Connect and every other kind it is
+unsatisfiable. A plain URL string naming the inbox container stays under
+the string-target rules, where the never-grantable marking refuses it.
+Every other interaction-URL request runs as described above, with no seed
+and an unsigned response.
+
+Once the rules above pass, the precheck holds a connection request to four
+more (`precheckConnectionRequest`), in this order:
+
+- a grant naming any descriptor other than `#inbox`
+  (`connectionTargetForm`). An audience is named by its container URL,
+  which never provisions;
+- a write on any target but the inbox (`connectionWithWriteGrant`);
+- no `challenge` at the VPR root (`connectionWithoutChallenge`). One
+  inside the capability query alone does not count, since the response
+  proof signs over the root one;
+- a proof that does not verify against the controller the request names
+  (`connectionUnsigned`).
+
+The proof is a `DataIntegrityProof` at the VPR root, by the named
+controller's did:key, with cryptosuite `eddsa-jcs-2022`, purpose
+`authentication`, the root `challenge`, and no `domain`. wallet-request's
+`verifyCapabilityRequest` checks it, and any failure it reports refuses.
+JCS signs the whole request but its `proof`, so the presentation endpoint,
+the `controller`, the capability queries, and `agent.name` are all
+covered. The proof is what keeps the wallet from minting a key toward a
+party that never asked. The request carries no `domain`, and its response
+carries none either. Relay is stopped at the request. A phishing exchange
+cannot author a request the named agent signed. A verbatim copy of a
+genuine one still names the agent's own presentation endpoint, which
+`foreignDelivery` refuses when the copy is hosted elsewhere.
+
+Two refusals follow the enrolled-client check, once the session can read
+the Space (`refuseUntrustedInbox`). An account with no `inbox` is refused
+with `noInbox`. An `inbox` that is public, carries an `encryption`
+descriptor, or carries a `generator` stamp is refused with
+`untrustedInbox`. Each of the three marks a collection some requester
+created under that name, which the wallet does not adopt. The page reads
+the inbox through `StorageManager.readInbox`, the same read the inbox pass
+runs before it reads any mail, so the three tests live in one place. A
+failed read fails the preparation closed.
+
+A third refusal follows those two (`refuseUnattributedServer`). The inbox
+pass attributes each message by the server's `createdBy`. A server promises
+to record it by advertising the `created-by` feature token in its core
+version entry, read from the one service discovery (`wasServiceInfo` in
+`src/lib/wasService.ts`). A server without the token is refused with
+`noCreatorAttribution`.
+
+The consent panel shows the inbox row with its own copy and no write
+banner. Every grant of a connection request takes the share TTL
+(`SHARE_ZCAP_TTL_MS`), limited by the parent's remaining life, and every
+row states the share TTL's day count (`shareTtlDays`). The rows also state that the access renews
+while the connection stands, and that the agent passes its read access on
+to people it chooses. The silent renewal rests on that copy.
+
+On approval, before anything is delegated, the wallet resolves its
+pairwise seed toward the agent (`resolvePairwiseSeed` in
+`src/lib/walletRequest/respond.ts`). It reads the agent's entry at the
+controller's id, the one direct read the directory allows at consent. A
+stored `seed` is taken once its `seedTag` verifies under the directory's
+blinded-index key. An entry with no seed, or no entry, gets 32 fresh random
+bytes and their tag. A seed whose tag fails, an entry the codec refuses, or
+a failed read fails the consent with nothing delivered. A host that planted
+a seed is misbehaving, so the seed is not read as absent. The seed and its
+tag ride the entry write with the grants. A connection request provisions
+nothing, so it records after compose and before delivery. `recordGrants`
+refuses an entry that already carries a different seed. A concurrent
+consent won that race, and the composed response names a did:key the entry
+does not, so the request fails closed.
+
+The response is held and signed by the pairwise did:key
+(`connectionDidKey`), over the request's root `challenge`, with no
+`domain`. wallet-request's `processRequest` signs it through its
+`signWithoutDidAuth` option. The proof answers no DID Auth query, so
+freewallet's DID Auth `domain` rule does not reach it. The agent verifies
+the proof against the `holder`, delegates POST on its own inbox to that
+did:key, and posts the capability into the owner's `inbox`. The next inbox
+pass stores it (see "The agent connection" in app-connect.md). A consent
+rolled back leaves a freshly written seed on the entry. Nothing outside the
+wallet saw its did:key, so it is inert, and the next consent reuses it.
+
 Only `#public-collection` and `#private-collection` targets are granted from
-a link, string targets resolving to those classes included. A string target
+a link, string targets resolving to those classes included. The one other
+class is `inbox`, on a connection request alone. A string target
 names only a collection that already exists, since it never provisions.
 One the same request provisions does not count. A
 share would hand the grantee decryption of the user's own encrypted

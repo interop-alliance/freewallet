@@ -257,7 +257,15 @@
     "deleteFarewellTitle": "Your account is deleted",
     "deleteFarewellAction": "Sign out",
     "deleteForgetBrowserAction": "Forget all wallet data on this browser",
-    "deleteRefusalDeleted": "Already deleted before it stopped ({{count}}): {{list}}"
+    "deleteRefusalDeleted": "Already deleted before it stopped ({{count}}): {{list}}",
+    "agentReconnect": {
+      "intro": "These connected agents hold access that this change ends. The wallet grants it again to each ticked agent, and that agent's subscribers are reconnected. An unticked agent is marked as declined and stays listed on the Applications page.",
+      "introNextSignIn": "These connected agents hold access that this change ends. This browser cannot grant it again, since it is leaving. An unticked agent is marked as declined and stays listed on the Applications page.",
+      "introEnds": "Forgetting this browser ends the access these connected agents hold.",
+      "running": "Reconnecting the ticked agents' subscribers...",
+      "done": "The ticked agents' subscribers are being reconnected.",
+      "notRestored": "Could not reconnect {{names}}. They stay listed on the Applications page."
+    }
   },
   "landing": {
     "title": "Freewallet",
@@ -485,7 +493,14 @@
     "revokeAgentConfirm": "Revoking access revokes the storage access {{name}} was granted, so it can no longer read or write the collections it was given. It may still hold copies of data it already fetched. The agent will have to ask for access again. This cannot be undone.",
     "revokeAgentSuccess": "Agent access revoked.",
     "revokeAgentSuccessEnded": "Agent removed. Its storage access had already ended.",
-    "revokeAgentFailed": "Could not revoke agent access. Please try again."
+    "revokeAgentFailed": "Could not revoke agent access. Please try again.",
+    "agentDeclinedChip": "Declined",
+    "agentDeclinedNotice": "On {{date}} you chose not to keep this agent connected. Restore grants its access again.",
+    "restore": "Restore",
+    "restoreSuccess": "Access restored. The agent's subscribers are being reconnected.",
+    "restoreFailed": "Could not restore this agent's access. Try again later.",
+    "earlierGrants_one": "{{count}} earlier grant",
+    "earlierGrants_other": "{{count}} earlier grants"
   },
   "dashboard": {
     "title": "Freewallet Dashboard",
@@ -649,7 +664,8 @@
       "id": "Identity",
       "key-map": "Key Map",
       "unlock-methods": "Unlock Methods",
-      "connections": "Connections"
+      "connections": "Connections",
+      "inbox": "Inbox"
     },
     "groupWalletContents": "Wallet Contents",
     "groupAppCollections": "Application Collections",
@@ -999,7 +1015,8 @@
       "shareHandle": "Share your username {{username}}",
       "zcapHeading": "Storage access",
       "zcapTarget": {
-        "collection": "Collection:"
+        "collection": "Collection:",
+        "inbox": "Your wallet's inbox"
       },
       "zcapPublicWarning": "This collection will be public: anyone on the web will be able to read it, without logging in.",
       "zcapRecipient": "Access granted to:",
@@ -1007,6 +1024,7 @@
       "zcapRecipientWalletStored": "This identity is stored in your wallet for this app.",
       "zcapRecipientWalletMintedPending": "A new identity, unique to you, will be created in your wallet for this app.",
       "zcapWriteWarning": "This site will be able to add, change, or delete data in this collection.",
+      "zcapInboxNote": "Can send messages to your wallet. It cannot read, change, or delete anything there.",
       "zcapEncryptedNote": "This collection is encrypted -- this site will only see ciphertext.",
       "zcapExistingOther": "This collection already exists and was created by another application ({{creator}}). This site will be able to read everything already stored in it.",
       "zcapExistingUnattributed": "This collection already exists. This site will be able to read everything already stored in it.",
@@ -1021,6 +1039,8 @@
       "appKeysUnreadable": "This wallet could not read this app's stored connection. Its key is in a key epoch this session cannot open, so connecting again now would give the app a new identity and orphan its existing data. Try again later, or log in from a wallet client that is already connected to this account.",
       "zcapExpiry": "Expires in {{days}} days",
       "zcapRevokeNote": "(you will be able to revoke access any time on the Applications page)",
+      "zcapConnectionExpiry": "Expires in {{days}} days, and renews while this connection stands",
+      "zcapConnectionPassOn": "The agent passes this read access on to people it chooses.",
       "appConnect": {
         "title": "Connect {{appName}} to storage?",
         "nameLabel": "Name:",
@@ -1077,6 +1097,13 @@
       "unreadableTarget": "This request names an encrypted collection by its URL, which grants no key to read it. The requester would get only unreadable data. Ask its developer to request the collection with a https://w3id.org/byoe#private-collection descriptor instead, which grants that key.",
       "multipleGrantees": "This request asks for access on behalf of more than one program key. A link can grant access to one requester at a time, so it was refused.",
       "enrolledClient": "This request asks for access on behalf of a wallet that is or was connected to your account. A link cannot grant access to one of your own wallets, so it was refused.",
+      "connectionUnsigned": "This connection request is not signed by the key it names, so it was refused. The agent's software may need an update.",
+      "connectionWithoutChallenge": "This connection request carries no challenge for the wallet to answer, so it was refused.",
+      "connectionWithWriteGrant": "This connection request asks to change data in your wallet. A connection may only read the collections it names and send messages to your inbox, so it was refused.",
+      "connectionTargetForm": "This connection request names a collection in a form a connection cannot use. A connection names each collection by its URL, so it was refused.",
+      "noInbox": "This connection request needs your wallet's inbox, which this account does not have, so it was refused.",
+      "untrustedInbox": "This account has a collection named \"inbox\" that this wallet did not create, so the wallet will not use it as your inbox. The request was refused.",
+      "noCreatorAttribution": "This connection request needs a storage server that records who wrote each message to your inbox. Your server does not say that it does, so the request was refused.",
       "zcapUnavailable": "This request needs remote storage, which this wallet isn't configured with.",
       "processFailed": "Something went wrong preparing the answer. Please try again.",
       "exchangeFailed": "Could not deliver the answer to the server this request lives on."

@@ -31,7 +31,14 @@
  *   subject to the consent screen and the shorter write TTL. It is
  *   provisioned encrypted, with the user as recipient zero and the grantee's identity key-agreement
  *   key (derived from its `did:key` controller) escrowed beside it, so a
- *   controller that derivation cannot handle makes the grant unsatisfiable.
+ *   controller that derivation cannot handle makes the grant unsatisfiable;
+ * - the `inbox` -- POST alone, so the grantee can create a message and do
+ *   nothing else. Only the `https://w3id.org/byoe#inbox` descriptor names
+ *   it, and only on an interaction-URL connection request. For App Connect
+ *   and every other request kind the descriptor is unsatisfiable. It
+ *   resolves ahead of the never-grantable check, which would otherwise
+ *   refuse `inbox`, and provisions nothing. A plain URL naming the inbox
+ *   container stays under the string-target rules, which refuse it.
  *
  * Only two request paths reach this module: App Connect and the
  * interaction-URL agent path. Each lists its grantees and can revoke them, so
@@ -90,7 +97,10 @@
  * than read-only grants.
  */
 import type { Session } from '@/types/auth'
-import { WALLET_SPACE_PROVISION_ROSTER } from '@interop/wallet-core/space'
+import {
+  INBOX_COLLECTION,
+  WALLET_SPACE_PROVISION_ROSTER
+} from '@interop/wallet-core/space'
 import {
   clampGrantExpires,
   GENERATION_DELEGATION_TTL_MS
@@ -122,6 +132,7 @@ import type { IDID } from '@interop/data-integrity-core'
 import type { CollectionGenerator, IDelegatedZcap } from '@interop/was-client'
 import type { ICapabilityQueryDetail, IZcap } from './types'
 import { granteeRecipientId } from '@/lib/zcap'
+import { isInboxDescriptor } from './connectionRequest'
 
 /**
  * Default actions for a grant whose `allowedAction` is absent: read-only.
@@ -161,7 +172,23 @@ type WasAction = (typeof WAS_ACTIONS)[number]
  * exactly one, and it is what `ACTION_CEILINGS` keys on.
  */
 type TargetClass =
-  'protected-collection' | 'share' | 'public-collection' | 'collection'
+  | 'protected-collection'
+  | 'share'
+  | 'public-collection'
+  | 'collection'
+  | 'inbox'
+
+/**
+ * The request path a grant is resolved for. It decides one thing at
+ * resolution: the `#inbox` descriptor resolves only for
+ * `connection-request`, an interaction-URL request naming that descriptor.
+ * Every other kind, an absent one included, leaves it unsatisfiable. On a
+ * connection request it also decides the grants' lifetime
+ * ({@link processZcaps}) and the consent screen's day counts
+ * ({@link grantTtlDays}).
+ */
+export type GrantRequestKind =
+  'app-connect' | 'interaction-url' | 'connection-request'
 
 /**
  * The most any grant on a target of each class may be delegated. Requested
@@ -182,7 +209,9 @@ const ACTION_CEILINGS: Record<TargetClass, readonly WasAction[]> = {
   'public-collection': ['GET', 'HEAD', 'POST', 'PUT', 'DELETE'],
   // A requester-provisioned private collection is the requester's own data: the full
   // vocabulary, bounded by the consent screen and the shorter write TTL.
-  collection: ['GET', 'HEAD', 'POST', 'PUT', 'DELETE']
+  collection: ['GET', 'HEAD', 'POST', 'PUT', 'DELETE'],
+  // Create a message and nothing else: no listing, no read, no overwrite.
+  inbox: ['POST']
 }
 
 /**
@@ -652,6 +681,9 @@ const DAY_MS = 24 * 60 * 60 * 1000
  * caller mints with; `processZcaps`'s per-call TTL overrides exist for tests
  * and are not reflected here.
  *
+ * On a connection request every grant the mint delegates takes the share
+ * TTL, and the consent panel states `shareTtlDays` on every row.
+ *
  * @param options {object}
  * @param [options.session] {Session}   absent before the consent screen has a
  *   session, where the configured TTLs are all there is to state
@@ -882,7 +914,11 @@ function classifySpaceTarget({
  *
  * Whatever the form, a target resolving onto a never-grantable collection
  * (a roster entry declaring `grantable: false`, see
- * {@link isNeverGrantableCollection}) is unsatisfiable.
+ * {@link isNeverGrantableCollection}) is unsatisfiable. The one carve-out is
+ * `{ type: 'https://w3id.org/byoe#inbox' }`, with no `name`: on a connection
+ * request it resolves to this Space's `inbox` container, classed `inbox`,
+ * ahead of that check. It provisions nothing. On any other request kind it
+ * is unsatisfiable.
  *
  * @param options {object}
  * @param options.descriptor {string | { type: string; name?: string }}
@@ -898,6 +934,8 @@ function classifySpaceTarget({
  *   grantee did:key and the app's canonical URL, read to class an existing
  *   collection's creator (`existing` on the result) and to check the
  *   grantee against a current key epoch
+ * @param [options.requestKind] {GrantRequestKind}   the request path; only
+ *   `connection-request` resolves the `#inbox` descriptor
  * @returns {ResolvedTarget}
  */
 export function resolveInvocationTarget(options: {
@@ -906,7 +944,26 @@ export function resolveInvocationTarget(options: {
   collections: ExistingCollections
   provisioned?: ProvisionedByRequest
   requester: { controller?: string; appUrl?: string }
+  requestKind?: GrantRequestKind
 }): ResolvedTarget {
+  // The inbox resolves first, since the never-grantable check below would
+  // refuse it. The request kind is the gate: App Connect never reads the
+  // interaction-URL page's allowlist, so the resolver itself keeps the
+  // descriptor unsatisfiable there.
+  if (isInboxDescriptor(options.descriptor)) {
+    if (options.requestKind !== 'connection-request') {
+      return UNSATISFIABLE
+    }
+    return {
+      ...SATISFIABLE_DEFAULTS,
+      invocationTarget: collectionTargetIn({
+        space: options.space,
+        collectionId: INBOX_COLLECTION
+      }),
+      collectionId: INBOX_COLLECTION,
+      targetClass: 'inbox'
+    }
+  }
   const target = resolveTargetForm(options)
   // One check covers every form: a target that resolves onto a
   // never-grantable collection (or a Resource inside one) is refused, however
@@ -1178,6 +1235,19 @@ function normalizeActions(
 }
 
 /**
+ * Whether a capability query asks for any action beyond reading, once its
+ * actions are normalized against the WAS vocabulary (an absent
+ * `allowedAction` reads as GET and HEAD). The interaction-URL precheck asks
+ * it before any target is resolved, since resolution needs a session.
+ *
+ * @param detail {ICapabilityQueryDetail}
+ * @returns {boolean}
+ */
+export function asksForWrite(detail: ICapabilityQueryDetail): boolean {
+  return includesWrite(normalizeActions(detail.allowedAction))
+}
+
+/**
  * Intersects requested actions with the ceiling for the target's class. The
  * result is ordered by the ceiling, so an equivalent request always yields the
  * same `allowedAction` array regardless of the order it asked in.
@@ -1223,6 +1293,8 @@ function capActions({
  *   controller is not yet a failure there
  * @param [options.appUrl] {string}   the requesting app's canonical URL, on
  *   the App Connect path; read only to class an existing collection's creator
+ * @param [options.requestKind] {GrantRequestKind}   the request path (see
+ *   {@link resolveInvocationTarget})
  * @returns {ResolvedGrant}
  */
 export function resolveGrant({
@@ -1231,7 +1303,8 @@ export function resolveGrant({
   collections,
   provisioned,
   allowMissingController = false,
-  appUrl
+  appUrl,
+  requestKind
 }: {
   descriptor: ICapabilityQueryDetail
   space: SpaceLocation
@@ -1239,13 +1312,15 @@ export function resolveGrant({
   provisioned?: ProvisionedByRequest
   allowMissingController?: boolean
   appUrl?: string
+  requestKind?: GrantRequestKind
 }): ResolvedGrant {
   let target = resolveInvocationTarget({
     descriptor: descriptor.invocationTarget,
     space,
     collections,
     provisioned,
-    requester: { controller: descriptor.controller, appUrl }
+    requester: { controller: descriptor.controller, appUrl },
+    requestKind
   })
   // A grant with no recipient cannot be delegated: the wire type requires a
   // `controller` but an actual request body can omit it, which would render a
@@ -1321,6 +1396,8 @@ export function resolveGrant({
  *   consent-preview only (see {@link resolveGrant})
  * @param [options.appUrl] {string}   the app's canonical URL (see
  *   {@link resolveGrant})
+ * @param [options.requestKind] {GrantRequestKind}   the request path (see
+ *   {@link resolveInvocationTarget})
  * @returns {ResolvedGrant[]}
  */
 export function resolveGrants({
@@ -1328,13 +1405,15 @@ export function resolveGrants({
   space,
   collections,
   allowMissingController,
-  appUrl
+  appUrl,
+  requestKind
 }: {
   zcapRequests: ICapabilityQueryDetail[]
   space: SpaceLocation
   collections: ExistingCollections
   allowMissingController?: boolean
   appUrl?: string
+  requestKind?: GrantRequestKind
 }): ResolvedGrant[] {
   const provisioned = new Map<string, { isPublic: boolean }>()
   return zcapRequests.map(descriptor => {
@@ -1344,7 +1423,8 @@ export function resolveGrants({
       collections,
       provisioned,
       allowMissingController,
-      appUrl
+      appUrl,
+      requestKind
     })
     const { target } = grant
     if (
@@ -1390,6 +1470,10 @@ export function resolveGrants({
  *   validated VPR-root `agent` member, when the request carried one. Its
  *   `name` is stamped beside the grantee did:key on each collection this
  *   call creates without an `app`.
+ * @param [options.requestKind] {GrantRequestKind}   the request path. Only
+ *   `connection-request` resolves the `#inbox` descriptor, and on it the
+ *   read grants and the inbox grant take `shareTtlMs`, limited by the
+ *   parent's remaining life like every other grant.
  * @param [options.beforeProvision] {Function}   awaited with every signed
  *   grant (`zcaps`) and the ids of the share grants among them
  *   (`shareZcapIds`) once signing is done and before any share is escrowed
@@ -1412,6 +1496,7 @@ export async function processZcaps({
   shareTtlMs = SHARE_ZCAP_TTL_MS,
   app,
   agent,
+  requestKind,
   beforeProvision,
   onEscrowed
 }: {
@@ -1422,6 +1507,7 @@ export async function processZcaps({
   shareTtlMs?: number
   app?: { name: string; origin: string; appUrl: string }
   agent?: { name: string }
+  requestKind?: GrantRequestKind
   beforeProvision?: (options: {
     zcaps: IZcap[]
     shareZcapIds: string[]
@@ -1511,6 +1597,34 @@ export async function processZcaps({
       })
     }
     return new Date(now + ttlMs)
+  }
+
+  /**
+   * The requested lifetime of one ordinary grant. On a connection request a
+   * read grant and the inbox grant take the share TTL: the agent's grants
+   * renew while the connection stands, and the inbox grant can only create
+   * messages the wallet deletes. Otherwise a write grant takes the shorter
+   * write TTL and a read grant the read TTL.
+   *
+   * @param options {object}
+   * @param [options.targetClass] {TargetClass}
+   * @param options.write {boolean}
+   * @returns {number}
+   */
+  function ttlFor({
+    targetClass,
+    write
+  }: {
+    targetClass?: TargetClass
+    write: boolean
+  }): number {
+    if (
+      requestKind === 'connection-request' &&
+      (targetClass === 'inbox' || !write)
+    ) {
+      return shareTtlMs
+    }
+    return write ? writeTtlMs : ttlMs
   }
 
   /**
@@ -1665,7 +1779,8 @@ export async function processZcaps({
   for (const { descriptor, target, allowedActions, write } of resolveGrants({
     zcapRequests,
     space,
-    collections
+    collections,
+    requestKind
   })) {
     if (!isSatisfiable(target) || !target.invocationTarget) {
       continue
@@ -1710,9 +1825,15 @@ export async function processZcaps({
         zcapIds: []
       })
     }
-    // Write grants live for the shorter write TTL; read-only grants for the
-    // longer read TTL.
-    const expires = grantExpires(write ? writeTtlMs : ttlMs)
+    const expires = grantExpires(
+      ttlFor({ targetClass: target.targetClass, write })
+    )
+    // The authorization profile is adding an explicit subtree marker (`*`
+    // appended to the target); flip when it ships. A collection grant, an
+    // audience read included, then takes the marker, and the inbox grant
+    // stays the bare container URL, an exact target. Until then every
+    // target is the bare URL, which the current server reads as covering
+    // the subtree.
     const zcap = await zcapClient.delegate({
       capability: parentCapability,
       invocationTarget: target.invocationTarget,

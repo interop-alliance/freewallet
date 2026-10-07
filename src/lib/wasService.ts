@@ -15,7 +15,7 @@
  * place to call it: a chain that threads the result down re-probes nothing
  * after a failure.
  */
-import type { ServiceDescription } from '@interop/was-client'
+import type { ServiceDescription, ServiceInfo } from '@interop/was-client'
 import { discoverService, IncompatibleServerError } from '@interop/was-client'
 
 import { WAS_SPACES_URL, withOneTrailingSlash } from '@/app.config'
@@ -24,12 +24,25 @@ import { isStorageUnreachable } from '@/lib/storageErrors'
 
 const log = createLogger('fw:was:service')
 
-let pending: Promise<ServiceDescription> | undefined
+let pending: Promise<ServiceInfo> | undefined
 
 /**
  * The configured WAS server's service description.
  *
  * @returns {Promise<ServiceDescription>}
+ * @throws {Error}   as {@link wasServiceInfo}
+ */
+export async function wasServiceDescription(): Promise<ServiceDescription> {
+  const { description } = await wasServiceInfo()
+  return description
+}
+
+/**
+ * What discovery learned about the configured WAS server: the service
+ * description, the version entry chosen from it, and its `features` tokens
+ * with `hasFeature(token)`. A caller gating on a feature token reads it here.
+ *
+ * @returns {Promise<ServiceInfo>}
  * @throws {Error}   when no WAS server is configured
  * @throws {IncompatibleServerError}   when the server's responses carry no
  *   `service` link, the document is malformed, it lists no version the
@@ -38,16 +51,17 @@ let pending: Promise<ServiceDescription> | undefined
  *   its mount is refused by name rather than silently misrouting the KMS,
  *   CORS-proxy, and account-pointer URLs derived from the configured value)
  */
-export function wasServiceDescription(): Promise<ServiceDescription> {
+export function wasServiceInfo(): Promise<ServiceInfo> {
   if (!WAS_SPACES_URL) {
     return Promise.reject(new Error('No WAS server is configured.'))
   }
   const configuredSpacesUrl = WAS_SPACES_URL
   if (pending === undefined) {
-    const attempt: Promise<ServiceDescription> = discoverService({
+    const attempt: Promise<ServiceInfo> = discoverService({
       url: configuredSpacesUrl
     })
-      .then(({ description, version, features, spacesUrl }) => {
+      .then(info => {
+        const { description, version, features, spacesUrl } = info
         if (
           spacesUrl !== undefined &&
           withOneTrailingSlash(spacesUrl) !== configuredSpacesUrl
@@ -67,7 +81,7 @@ export function wasServiceDescription(): Promise<ServiceDescription> {
           version,
           features
         })
-        return description
+        return info
       })
       .catch(err => {
         pending = undefined

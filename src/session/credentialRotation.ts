@@ -30,6 +30,8 @@
  */
 import { equalBytes } from '@noble/ciphers/utils.js'
 import {
+  attributeUnlockLadderInventory,
+  ladderVmClaimOf,
   preflightUnlockCredentialRetirement,
   retireUnlockCredential
 } from '@interop/wallet-core/unlock'
@@ -58,9 +60,8 @@ import type { ZcapClient } from '@interop/ezcap'
 import type { Session } from '@/types/auth'
 import type { CeremonyId } from '@interop/wallet-core'
 import {
-  clientAnnexReachFor,
-  isClientAnnexRungUncommittedError,
-  standingClientAnnexReachFor
+  annexReachUnder,
+  isClientAnnexRungUncommittedError
 } from '@/session/annexReach'
 import {
   accountCeremonyContext,
@@ -429,6 +430,64 @@ async function rotateOffUnlockCredentialHeld({
 }
 
 /**
+ * The signing authority a credential retirement withdraws, read before it
+ * runs: the credential's ladder VM, which the strike entry takes out of the
+ * document. It is read the way the retirement's own strike reads it, with
+ * no seed in hand: the credential's ladder inventory attributed over the
+ * verified account log from the registry entry's recorded anchor
+ * (`attributeUnlockLadderInventory`), and the claim held against the current
+ * document (`ladderVmClaimOf`), whose `struck` set is what the strike takes.
+ * The entry's recorded proof key ids are not it: a remembered login's
+ * standing-delegation refresh re-mints the bridge pair under the enrolled
+ * client's key, after which those ids name a key the retirement leaves
+ * standing. A passphrase change, a passkey removal, and a backup-credential
+ * removal each pass the entry they retire, and their dialogs list the agents
+ * holding a grant that VM signed. An entry recording no key-agreement key or
+ * no update key withdraws nothing a dialog can name. Throws when the log
+ * cannot be read or the attribution refuses, and the dialog then lists
+ * nothing.
+ *
+ * @param options {object}
+ * @param options.session {Session}
+ * @param options.entry {object}   the retired credential's registry entry
+ * @param options.entry.type {StandingCredentialEntry['type']}
+ * @param [options.entry.keyAgreementKeyMultibase] {string}
+ * @param [options.entry.updateKeyMultibase] {string}
+ * @returns {Promise<string[]>}   the withdrawn ladder VM ids, each named once
+ */
+export async function retiredCredentialWithdrawnKeys({
+  session,
+  entry
+}: {
+  session: Session
+  entry: Pick<
+    StandingCredentialEntry,
+    'type' | 'keyAgreementKeyMultibase' | 'updateKeyMultibase'
+  >
+}): Promise<string[]> {
+  const { keyAgreementKeyMultibase, updateKeyMultibase } = entry
+  if (!keyAgreementKeyMultibase || !updateKeyMultibase) {
+    return []
+  }
+  const { log: didLog, doc } = await verifiedAccountLog({ session })
+  const did = doc.id ?? session.profile.accountPointer?.did
+  if (did === undefined) {
+    throw new Error('The verified account document names no DID.')
+  }
+  const keyAgreement = await standingKeyAgreementOf({
+    type: entry.type,
+    keyAgreementKeyMultibase
+  })
+  const inventory = await attributeUnlockLadderInventory({
+    log: didLog,
+    did,
+    unlockKeys: { keyAgreement, updateKeyMultibase }
+  })
+  const { struck } = await ladderVmClaimOf({ doc, did, inventory })
+  return struck
+}
+
+/**
  * Whether an error is wallet-core's retirement gate refusing: the retired
  * credential's ladder VM could not be claimed, so the retirement published
  * nothing. Matched by name rather than by `instanceof`, because the class may
@@ -601,27 +660,19 @@ async function retireClientAnnexInventoryStage({
   }
 }): Promise<ClientAnnexInventoryRetirement & { errorName?: string }> {
   try {
-    const doc = document as Parameters<typeof clientAnnexReachFor>[0]['doc']
     // The annex Space answers to the account did:webvh, which a transient
     // session's per-visit annex VM is not, so the ladder branch reaches the
     // generation's log through the surviving credential's sibling delegation
     // rather than by root-invoking as this session's own key.
-    const serviceDescription = await wasServiceDescription()
-    const reach =
-      context.kind === 'ladder' && standingReach
-        ? standingClientAnnexReachFor({
-            pointer,
-            doc,
-            standing: standingReach,
-            pinStore: session.persistence.logPins,
-            serviceDescription
-          })
-        : clientAnnexReachFor({
-            session,
-            pointer,
-            doc,
-            serviceDescription
-          })
+    const doc = document as Parameters<typeof annexReachUnder>[0]['doc']
+    const reach = await annexReachUnder({
+      session,
+      pointer,
+      doc,
+      ...(context.kind === 'ladder' && standingReach
+        ? { standing: standingReach }
+        : {})
+    })
     if (reach === null) {
       return { action: 'skipped', reason: 'no-pointer' }
     }

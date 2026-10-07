@@ -252,6 +252,16 @@ export interface Session {
   // `registryReady` rather than with it. In memory only, scalar detail
   // only, and it never rejects.
   mends?: Promise<MendReport<CeremonyId>>
+  // This login's inbox pass (`src/session/inboxPass.ts`): the drain of the
+  // account's `inbox`, then the renewal of the connected agents' grants and
+  // the push of their outboxes. It runs behind the whole mender block and
+  // carries its own report, the two entries the pass reports. It reaches
+  // other parties' servers, so neither `registryReady` nor `mends` waits on
+  // it, and content migration and the backup export do not either. An
+  // encounter of the same pass awaits it before running. Settles empty on a
+  // CHAPI popup, a guest, and a session with no Space. Never rejects. Absent
+  // on a session whose composition starts no block.
+  inboxPass?: Promise<MendReport<CeremonyId>>
   // Settles when this login's writer registration has run
   // (`registerOwnConnectionWriter`), which may un-retire this client's own
   // `connections` entry while the verified document still lists it. The

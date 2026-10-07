@@ -691,11 +691,14 @@ const DECLARATIONS: ReadonlyArray<
   // No converger: a party that connected before the directory existed, or
   // one whose entry a deleted and re-created directory lost, has no entry
   // and nothing writes one. A detector would walk the collection rosters
-  // against the directory listing (FW-569).
+  // against the directory listing (FW-569). A subscriber holds a child of an
+  // agent's grant and has no entry of its own: the owner reaches it through
+  // the agent's entry, so the statement covers only grants the wallet
+  // delegated.
   {
-    id: 'every-party-with-authority-has-a-connection-entry',
+    id: 'every-grantee-of-the-wallet-has-a-connection-entry',
     statement:
-      "Every party holding a live grant, or listed in an unprotected collection's current epoch, has an unretired `connections` entry.",
+      "Every party holding a live grant the wallet delegated, or listed in an unprotected collection's current epoch, has an unretired `connections` entry.",
     standsOn: ['ladder-anchored', 'enrolled'],
     authority: 'none',
     triggers: [],
@@ -727,6 +730,68 @@ const DECLARATIONS: ReadonlyArray<
     // The anchored version of the roster log's verified head, read under the
     // visit's pins.
     evidence: ['verified-log']
+  },
+  // 38
+  // converger: `drainInbox` (`src/session/inboxPass.ts`), run by the inbox
+  // pass after either login chain's block, and by the two encounter sites
+  // (the Notifications page open and the Settings site after a ceremony
+  // that replaces the generation delegation). Reading and deleting the
+  // account's own mail is a content write the visit's own capability
+  // covers. An absent or untrusted `inbox` is outside the predicate: those
+  // states are declared under invariant 33's gap row.
+  {
+    id: 'inbox-is-drained',
+    statement:
+      'No message older than the start of the last completed drain stays in a trusted `inbox`.',
+    standsOn: ['ladder-anchored', 'enrolled'],
+    authority: 'none',
+    triggers: ['remembered-login-chain', 'transient-login-chain', 'encounter'],
+    ceremonies: ['request-consent'],
+    // Attribution rests on the host-served `createdBy` of each message.
+    evidence: ['host-listing', 'served-body'],
+    // The CHAPI popup runs neither the drain nor the renewal: the mediator
+    // closes it right after delivery. A session with no Space admits no
+    // inbox pass either, which the pass's own gate checks.
+    when: (route: { popup: boolean }) => !route.popup
+  },
+  // 39
+  // converger: `renewAgentGrants` (`src/session/inboxPass.ts`), run behind
+  // the drain in the same pass. A renewal is a delegation under the visit's
+  // own capability. An entry with no live channel, and a grant past its
+  // `expires`, are outside the predicate.
+  {
+    id: 'agent-grants-are-current',
+    statement:
+      'Every unretired agent entry holding a live `inbox` record in `grantsReceived` has no latest record per scope that is due, inside the renewal scope, and passing the proof check.',
+    standsOn: ['ladder-anchored', 'enrolled'],
+    authority: 'none',
+    triggers: ['remembered-login-chain', 'transient-login-chain', 'encounter'],
+    ceremonies: [
+      'request-consent',
+      'unlock-credential-rotation',
+      'client-revocation',
+      'forget-client',
+      'last-client-transition',
+      'recovery-code-spend'
+    ],
+    // The proof check and the pointed delegation id rest on the verified
+    // document and generation log; the entry body is host-served.
+    evidence: ['verified-log', 'host-listing'],
+    when: (route: { popup: boolean }) => !route.popup
+  },
+  // 40
+  // No converger: the epoch cascade does not reach the pairwise seed, and
+  // nothing rotates it until FW-647's seed rotation ships.
+  {
+    id: 'no-withdrawn-party-holds-a-live-pairwise-channel',
+    statement:
+      'No party whose authority the account has withdrawn (a revoked client, a retired credential, a struck annex generation) holds a live pairwise channel capability.',
+    standsOn: ['ladder-anchored', 'enrolled'],
+    authority: 'none',
+    triggers: [],
+    ceremonies: [],
+    // Which party read a seed is not visible in any stored state.
+    evidence: ['host-listing']
   }
 ]
 

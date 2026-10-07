@@ -203,6 +203,29 @@ export type ForgetOutcome = ForgetCeremonyOutcome & {
 }
 
 /**
+ * The signing authority a forget withdraws, read before it runs: this
+ * client's own signing key, on the ordinary forget and on the last-client
+ * transition alike. The removal entry strikes it, so a grant it signed under
+ * the Space root dies, and so does every grant chained under a generation
+ * delegation it minted. The forget's dialog lists the agents holding such
+ * grants. A session holding no did:key agent withdraws nothing.
+ *
+ * @param options {object}
+ * @param options.session {Session}
+ * @returns {string[]}   the withdrawn keys, as bare multibases
+ */
+export function forgottenClientWithdrawnKeys({
+  session
+}: {
+  session: Session
+}): string[] {
+  const keyAgent = session.profile.keyAgent
+  return keyAgent?.id.startsWith('did:key:')
+    ? [clientSigningKeyMultibase({ keyAgent })]
+    : []
+}
+
+/**
  * Retires this client's own `connections` entry ahead of the forget
  * ceremony, best-effort: a failure is logged and the ceremony proceeds. A
  * wallet-client entry normally carries no grants. One that does has them
@@ -267,10 +290,19 @@ async function retireOwnClientEntry({
  * removal entry leaving the login credential's bridge rotted would strand
  * the account).
  *
+ * A caller with writes of its own that must land under this client's
+ * authority, and only once the ceremony is going to run (the transition's
+ * agent decline markers), passes `beforeFirstWrite`. It runs after every
+ * refusal above and before the ceremony's first write, so a refused run
+ * leaves none of them behind. What it throws fails the forget before any
+ * write.
+ *
  * @param options {object}
  * @param options.session {Session}
  * @param [options.lastClient] {boolean}   run the last-client transition
  *   (default false: the ordinary forget)
+ * @param [options.beforeFirstWrite] {Function}   `() => Promise<void>`, run
+ *   once the up-front refusals have passed
  * @param [options.idb] {IDBFactory}
  * @returns {Promise<ForgetOutcome>}
  */
@@ -282,10 +314,12 @@ export const forgetThisBrowser = heldAsOwnUserKeyRotation(forgetThisBrowserHeld)
 async function forgetThisBrowserHeld({
   session,
   lastClient = false,
+  beforeFirstWrite,
   idb
 }: {
   session: Session
   lastClient?: boolean
+  beforeFirstWrite?: () => Promise<void>
   idb?: IDBFactory
 }): Promise<ForgetOutcome> {
   assertBrowserLocalSession({
@@ -456,6 +490,10 @@ async function forgetThisBrowserHeld({
       })
     })
   }
+
+  // Every refusal has passed: the caller's own writes go first, under this
+  // client's authority, which the ceremony below takes away.
+  await beforeFirstWrite?.()
 
   // This client's `connections` entry is retired before the ceremony, which
   // holds the removal entry with no seam between its fan-out and the edit. A

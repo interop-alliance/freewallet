@@ -1,9 +1,10 @@
 /**
  * The two login chains' one runner call. Each composition builds its deps,
- * whose chain picks the registration list, and gets back the two
+ * whose chain picks the registration list, and gets back the three
  * promises a session carries: `registryReady`, settling when the
- * registry-writing registrations have reported, and `mends`, settling when
- * the whole block has.
+ * registry-writing registrations have reported, `mends`, settling when the
+ * whole block has, and `inboxPass`, settling when the inbox tail that runs
+ * behind the block has.
  *
  * The discipline is wallet-core's: registration order is execution order, a
  * seed failure aborts the block, and a registration that throws warns with
@@ -12,10 +13,12 @@
  */
 import {
   heldAuthorities,
+  mendReportAccumulator,
   runMenderBlock,
   type Authority,
   type InvariantId,
   type LoginRoute,
+  type MendReport,
   type MendReportAccumulator,
   type Registration
 } from '@interop/wallet-core/menders'
@@ -30,9 +33,11 @@ import { createLogger } from '@/lib/log'
 import { openEncounterGateBehindBlock } from '@/session/sessionLifecycle'
 import { freewalletMenderRegistry } from './index.js'
 import {
+  REMEMBERED_INBOX_TAIL,
   REMEMBERED_REGISTRATIONS,
   REMEMBERED_REGISTRY_REGISTRATIONS,
   REMEMBERED_SEED,
+  TRANSIENT_INBOX_TAIL,
   TRANSIENT_REGISTRATIONS,
   type LoginMenderDeps
 } from './registrations.js'
@@ -102,8 +107,13 @@ export function heldFor({
  * acting credential's management-zcap refresh, and has no seed, a transient
  * session provisioning nothing.
  *
- * Both of the session's promises are stamped before anything is awaited, so
- * a caller that returns the session at once finds them. The two settle
+ * The session's three promises are stamped before anything is awaited, so
+ * a caller that returns the session at once finds them. The inbox tail runs
+ * behind the whole block and settles `session.inboxPass` alone, with its own
+ * report. A guest and a session with no Space run none, and their
+ * `inboxPass` settles empty once the block has; it would otherwise report
+ * the pass's no-Space no-op at every login. In the CHAPI popup the tail's
+ * declarations admit nothing, so it settles empty too. The two settle
  * points are derived from the lists rather than named: the ids the
  * registry-writing registrations report are what `registryReady` waits for,
  * skipping any the registry does not admit on this session's authorities and
@@ -152,10 +162,14 @@ export function startLoginMenderBlock({
         }
       : {
           trigger: 'transient-login-chain' as const,
+          // The block alone: the inbox tail behind it is not in this list,
+          // so `registryReady` never waits on another party's server.
           registrations: TRANSIENT_REGISTRATIONS,
           registryWriting: TRANSIENT_REGISTRATIONS,
           seed: undefined
         }
+  const inboxTail =
+    deps.chain === 'remembered' ? REMEMBERED_INBOX_TAIL : TRANSIENT_INBOX_TAIL
   const held = heldFor({ session })
   const awaited = new Set<InvariantId>()
   for (const registration of [...(seed ? [seed] : []), ...registryWriting]) {
@@ -170,6 +184,12 @@ export function startLoginMenderBlock({
     settleRegistry = resolve
   })
   session.mends = accumulator.settled
+  let settleInbox: (report: MendReport<CeremonyId>) => void = () => undefined
+  session.inboxPass = new Promise<MendReport<CeremonyId>>(resolve => {
+    settleInbox = resolve
+  })
+  // A guest or a no-WAS session has no Space and no inbox.
+  const runsInbox = !session.isGuest && !!session.storage?.hasRemoteStorage
   // A mend raised at a read waits behind the registry writers, not beside
   // them.
   openEncounterGateBehindBlock({ session })
@@ -207,5 +227,30 @@ export function startLoginMenderBlock({
         await Promise.allSettled(pendingReports)
       }
       accumulator.settle()
+    })
+    .then(async () => {
+      // The inbox tail, behind the whole block, on its own promise and its
+      // own report: a slow agent host delays neither `mends` nor
+      // `registryReady`.
+      if (!runsInbox) {
+        settleInbox([])
+        return
+      }
+      const inboxMends = mendReportAccumulator<CeremonyId>({ logger: log })
+      await runMenderBlock({
+        registry: freewalletMenderRegistry,
+        trigger,
+        held,
+        route,
+        deps,
+        logger: log,
+        registrations: inboxTail,
+        mends: inboxMends
+      })
+      settleInbox(inboxMends.settle())
+    })
+    .catch(err => {
+      log.warn('The login inbox tail could not run', { trigger, err })
+      settleInbox([])
     })
 }

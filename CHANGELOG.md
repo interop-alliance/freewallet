@@ -45,8 +45,8 @@
   dependency lines are kept as separate lanes. It replaces the per-spec
   collectors in the two forget specs.
 - An invariant auditor for tests (`tests/shared/invariantAudit.ts`). A
-  census sorts the 36 declared mender-registry invariants into stored-state
-  (15), key-holder (15), browser-local (4), and unchecked (2) kinds, and
+  census sorts the 39 declared mender-registry invariants into stored-state
+  (16), key-holder (16), browser-local (4), and unchecked (3) kinds, and
   carries each declaration's `standsOn`, so a row is skipped on an account
   shape no violation of it stands on.
   `auditInvariants` reads an account off the server's data dir, runs the
@@ -62,6 +62,57 @@
   credential (the caller names the retired credentials' unlock Spaces, since
   an unlock Space names no account) and a registered writer past its
   inactivity window (wallet-core's writer sweep, run without writing).
+- An agent connects through a connection request: an interaction-URL
+  request naming the `https://w3id.org/byoe#inbox` descriptor, beside reads
+  on audience collections named by their container URL. The request must
+  carry a VPR-root `challenge` and a proof by the did:key it names as
+  `controller` (`eddsa-jcs-2022`). Before consent, the page refuses another
+  descriptor (`connectionTargetForm`), any other write
+  (`connectionWithWriteGrant`), a missing challenge
+  (`connectionWithoutChallenge`), and a proof that does not verify
+  (`connectionUnsigned`). It also refuses an account with no `inbox`
+  (`noInbox`), one the wallet does not trust (`untrustedInbox`), and a
+  server that does not advertise the `created-by` feature token
+  (`noCreatorAttribution`).
+- The `inbox` collection joins the provision roster: plaintext, not public,
+  and not grantable. The `#inbox` descriptor resolves to the `inbox` target
+  class, POST only, on a connection request alone. App Connect and every
+  other request kind leave it unsatisfiable. Every grant of a connection
+  request takes the share TTL, and its consent rows state it.
+- A connection request is answered by a pairwise did:key. The wallet mints
+  a 32-byte seed per agent and stores it with its HMAC tag on the agent's
+  connection entry (`seed`, `seedTag`). The response is signed by the seed's
+  key over the request's `challenge`, with no `domain`. A stored seed whose
+  tag fails refuses the consent.
+- The inbox pass (`src/session/inboxPass.ts`, logger `fw:inbox`) runs after
+  each login chain's block and settles `session.inboxPass`. It drains the
+  `inbox`, storing each connected agent's channel capability on its entry
+  (`grantsReceived`) and deleting every message. It then renews each
+  connected agent's in-scope grants that are due, records each renewal with
+  its envelope queued on the entry's `outbox`, and pushes the outbox through
+  the agent's channel. A grant is renewed only once its recorded proof
+  verifies against the account (wallet-core's `verifyRecordedGrantProof`),
+  so a grant signed by withdrawn authority is not renewed.
+- Three mender invariants: `inbox-is-drained`, `agent-grants-are-current`,
+  and `no-withdrawn-party-holds-a-live-pairwise-channel`. The last is an
+  open gap with no mender.
+- The dialogs of a client disconnect, the last-client transition, a
+  passphrase change, a passkey removal, and a backup-credential removal list
+  the connected agents whose grants the withdrawn key or ladder VM signed,
+  each ticked by default. Once the ceremony succeeds, the ticked agents'
+  grants are re-minted as a fresh consent and pushed, and each unticked
+  agent's entry gets the `declined` marker. A failed ceremony writes no
+  marker. The last-client transition ends the session, so it restores
+  none. The ordinary forget lists the agents with no tick, and says their
+  access ends.
+- The Applications detail page shows a declined agent with Restore beside
+  Revoke. Restore re-grants its in-scope access as a fresh consent, which
+  clears the marker. The restore, the renewal, and the lapsed-agent offer
+  read one grant selection (`renewableAgentGrants`), so a later connection
+  request's inbox grant leaves an earlier consent's reads in scope on every
+  path.
+- `VITE_AGENT_GRANT_RENEWAL_WINDOW_DAYS` (default 90): how close to its
+  expiry a connected agent's grant is renewed at login.
 
 ### Changed
 
@@ -135,6 +186,25 @@
 - Requires `@interop/was-sync` 0.8.0, whose default conflict-handler
   equality compares every member of the synced document. The contacts
   conflict handler no longer overrides it with RxDB's `deepEqual`.
+- The Applications listing and detail page read the latest grant record per
+  scope, so a renewal is neither counted twice nor dated by the record it
+  replaced. The detail page collapses superseded records under the current
+  one.
+- Revoking an agent first empties its entry's `grantsReceived` and `outbox`,
+  before any POST, so a torn revoke is not undone by the next login's
+  renewal. Retirement empties both too, and keeps `seed`, `seedTag`, and
+  `declined`.
+- Invariant `every-party-with-authority-has-a-connection-entry` is renamed
+  `every-grantee-of-the-wallet-has-a-connection-entry`, and covers only
+  grants the wallet delegated. A subscriber holding a child of an agent's
+  grant has no entry of its own.
+- The authorization profile's subtree marker is not shipped yet. Every grant
+  target, the inbox grant's included, is the bare container URL for now,
+  which the current server reads as covering the container's subtree.
+- `@interop/wallet-request` is consumed through `link:../wallet-request`
+  (0.5.1, for the request proof check and the response signed with no DID
+  Auth query), and `@interop/wallet-core` 0.103.0 through
+  `link:../wallet-core`.
 
 ### Fixed
 

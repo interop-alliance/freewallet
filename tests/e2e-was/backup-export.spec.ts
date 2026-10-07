@@ -634,8 +634,11 @@ test.describe.serial('The backup export from a transient session', () => {
     await expect(backupRows(page)).toHaveCount(3, { timeout: 60_000 })
     // The removal is the ordinary revoke: strike, roster rotation, Space
     // delete, entry drop. The row goes and the other two stand.
-    page.once('dialog', dialog => void dialog.accept())
     await backupRows(page).first().click()
+    await page
+      .getByRole('dialog')
+      .getByRole('button', { name: 'Remove this backup credential' })
+      .click()
     await expect(page.getByText('Backup credential removed.')).toBeVisible({
       timeout: 120_000
     })

@@ -18,7 +18,11 @@ src/pages/          Route-level React components (one file per page)
   dashboard/        Authenticated dashboard pages
 src/components/     Shared React components
   credentialDetails/, storage/, resume/   Feature sub-components
+  AgentReconnectList.tsx  The agent list a ceremony's dialog shows, and
+                    the notice its reconnect leaves
 src/hooks/          Shared React hooks
+  useAgentReconnect.ts  A ceremony dialog's agent ticks, and the decline
+                    and restore once the ceremony succeeds
 src/context/        Theme and info-box React context
 src/lib/            Pure business logic (no React)
   kms.ts            WebKMS keystore provisioning (ensureKeystore), the
@@ -63,6 +67,9 @@ src/lib/            Pure business logic (no React)
                     refusal matrix
     externalRequestPath.ts  The deep-link route and query-parameter
                     contract, dependency free so e2e specs can import it
+    connectionRequest.ts  The connection request's `#inbox` descriptor and
+                    the test that tells a connection request apart,
+                    dependency free
     storeRequest.ts The store popup's pre-login DID-Auth check
     appConnect.ts   App Connect processing: the app-key credential found or
                     minted, and the capabilities delegated to it
@@ -109,7 +116,9 @@ src/session/        Session bootstrap and the account ceremonies -- the
                     and the remembered path ride
   Settings          accountSettings.ts, credentialRotation.ts,
                     unlockMethods.ts, backupCredential.ts, clients.ts,
-                    shares.ts, applications.ts
+                    shares.ts, applications.ts, agentReconnect.ts (the
+                    agents a ceremony cuts off, the decline marker, and
+                    the restore)
   Ceremonies        recovery.ts, revocation.ts, forget.ts, wipe.ts,
                     backupExport.ts, contentMigration.ts
   Repairs / sweeps  registryPasses.ts (the passes both chains share),
@@ -118,7 +127,9 @@ src/session/        Session bootstrap and the account ceremonies -- the
                     userKeyCascade.ts, standingDelegationRefresh.ts,
                     pointerHeal.ts, clientAnnexGc.ts,
                     credentialCoverage.ts, connectionWriters.ts (the
-                    writer registration and the writer sweep)
+                    writer registration and the writer sweep),
+                    inboxPass.ts (the inbox drain, the agent grant
+                    renewal, and the outbox push)
   Menders           menders/ -- the mender registry: the invariant table,
                     the two chains' registration lists, the runner that
                     executes one, the gap allowlist, and the encounter
@@ -229,8 +240,10 @@ registrations whose authority the session holds. `session.registryReady`
 settles when the block's registry-writing registrations have reported, and
 a Settings ceremony that writes the unlock-methods registry awaits it.
 `session.mends` settles when the whole block has run, and carries the
-login's mend report. Neither rejects. The `Session` object lives in the
-Zustand `authStore`, in memory only, so a reload logs the user out.
+login's mend report. `session.inboxPass` settles when the inbox pass
+behind the block has run, outside both. None of the three rejects. The
+`Session` object lives in the Zustand `authStore`, in memory only, so a
+reload logs the user out.
 
 The chain lists, the block's seed, the signed unlock-methods registry
 record, record authenticity, the replay bound, the rotation ceremony, and
@@ -320,6 +333,21 @@ listed (`enrolledClient`,
 The popup still delegates a ciphertext-only grant, with a note on its
 consent row.
 
+An agent connects through a connection request: an interaction-URL request
+whose grants include the `https://w3id.org/byoe#inbox` descriptor. It asks
+for reads on audience collections, named by container URL, and for POST on
+the account's `inbox`. It must carry a VPR-root `challenge` and a proof by
+the did:key it names as `controller`. So the wallet mints no key toward a
+party that never asked. The wallet answers with a presentation held and
+signed by a pairwise did:key, derived from a seed kept on the agent's
+connection entry. The agent then posts a channel capability into the
+`inbox`, and the login-time inbox pass stores it. While the connection
+stands, the pass renews the agent's grants in the same scope with no
+prompt, and pushes the renewals through that channel. The consent rows
+state both facts. The request and its refusals are in "The interaction-URL
+request page" (external-request.md), and the channel, the renewal, and the
+revoke are in "The agent connection" (app-connect.md).
+
 Both paths record a consent the same way (`composeAndDeliverResponse` in
 `src/lib/walletRequest/respond.ts`). Once the delegations are signed, the
 party's `connections` entry is written with the grants. That entry is the
@@ -408,6 +436,18 @@ retired, keeping its names, when its party's relationship ends. The binding
 refusals, the read and write rules, and retirement are in "The `connections`
 directory" in docs/architecture/app-connect.md.
 
+The `inbox` collection is the channel a connected agent reaches the wallet
+by (`decisions/0042-one-wallet-wide-plaintext-inbox-is-the-channel.md`). It
+is plaintext, not public, and outside every ordinary target class. An agent
+holds POST on it and nothing more, so it can post a message and cannot
+list or read one. The wallet reads and deletes its mail remote-direct under
+the session's own capability, with no local replica. It refuses an `inbox`
+that is public, carries an `encryption` descriptor, or carries a
+`generator` stamp. Each marks a collection some requester created under
+that name, and a refused inbox counts as absent. A guest or no-WAS session
+has no inbox. The inbox pass that reads it is in "The agent connection" in
+docs/architecture/app-connect.md.
+
 When `VITE_WAS_SERVER_URL` (the server's Spaces Repository URL; the base URL is
 its parent) is set, and the session holds a local replica and is not a guest, a
 remote WAS Space is attached as a **sync target**. `SessionSyncController` in
@@ -472,9 +512,10 @@ bound is the weaker of that passphrase and the wallet passphrase. A restore
 login on the credential is not built yet. The stage order is in "The backup
 export's stage order" in docs/architecture/session-persistence.md.
 
-Signup provisions the six standard collections and the `connections`
-directory, and a remembered login re-walks that roster. Nothing backfills
-the directory on an older account
+Signup provisions the six standard collections, the `connections`
+directory, and the `inbox`, and a remembered login re-walks that roster.
+That re-walk is the only thing that adds an `inbox` to an older account.
+Nothing backfills the directory on an older account
 (`decisions/0036-no-backfill-for-the-directory.md`).
 
 ## Route map
@@ -541,38 +582,44 @@ gap instead, listed after the table.
 Every mender is declared as an invariant in the mender registry
 (`src/session/menders/invariants.ts`), and the registrations that run them
 live in `src/session/menders/registrations.ts`. The runner executes one
-login chain's list in order and reports into `session.mends`. A routing or
-ceremony-tail entry reports from its own call site. Three encounter
-registrations run mid-visit through the encounter runner, where a session
-meets the evidence: a collection recorded as stranded, a stale registry
-seal at the Settings mount, and the `connections` writer sweep at the
-page-level directory listing read (`readDirectoryListing`). Five more
-encounter sites report from their own call sites, since each caller needs a
-return value or a refusal back. Encounter entries go to the page that
+login chain's list in order and reports into `session.mends`. Behind the
+block, the inbox pass (the drain of the account's `inbox`, then the renewal
+of the connected agents' grants, `src/session/inboxPass.ts`) runs as each
+chain's tail and reports into `session.inboxPass` alone, since it reaches
+other parties' servers. A routing or ceremony-tail entry reports from its
+own call site. Five encounter registrations run mid-visit through the
+encounter runner, where a session meets the evidence: a collection
+recorded as stranded, a stale registry seal at the Settings mount, the
+`connections` writer sweep at the page-level directory listing read
+(`readDirectoryListing`), and the inbox pass twice. One is the Settings
+page after a ceremony that replaces the generation delegation. The other is
+the Notifications page open (`openInboxNotifications`), which no page calls
+yet. Five more encounter sites report from their own call sites, since each
+caller needs a return value or a refusal back. Encounter entries go to the page that
 asked, not to `session.mends`. Every ceremony but update-key rotation, and
 every mend entry, also emits on the ceremony event channel (wallet-core's
 `ceremonyEvents` and `menderEvent`), which the debug-logs skill documents.
 
-| Ceremony                                              | Entry point                                                                                                    | Module                                                                      | Shared half                 | Mender                                                                                                                                                                                                                                                                                                                            | Topic doc                |
-| ----------------------------------------------------- | -------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------- | --------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------ |
-| Credential-anchored genesis                           | every WAS signup, remembered or not (the default)                                                              | `src/session/credentialAnchoredGenesis.ts`                                  | `/clientAnnex`              | re-run; the transient login's heal branch                                                                                                                                                                                                                                                                                         | `account-genesis.md`     |
-| Recovery spend (remembered and transient)             | `/recover`                                                                                                     | `src/session/recovery.ts`                                                   | `/recovery`, `/clientAnnex` | remembered: pending record pre-pivot + spend resume; transient: re-run, the next login's collection fan-out, open gaps (below)                                                                                                                                                                                                    | `recovery-codes.md`      |
-| Self-enrollment at login                              | `rememberBrowser: true` on a browser holding no record (no login form offers it yet)                           | `src/session/initSession.ts` + `src/session/pendingEnrollment.ts`           | `/clientAnnex`              | pending record pre-pivot; the next remembered login's resume                                                                                                                                                                                                                                                                      | `session-and-auth.md`    |
-| Client enrollment (two-party)                         | Settings > Connected wallets, any session type                                                                 | `src/lib/enrollment.ts` (UI in `src/components/EnrolledClientsSection.tsx`) | `/enrollment`               | re-run with the same connect code; the escrow-direction convergence of any later ladder-branch ceremony                                                                                                                                                                                                                           | `client-enrollment.md`   |
-| Client revocation + epoch cascade                     | Settings > Connected wallets, any session type                                                                 | `src/session/revocation.ts`                                                 | `/clients`                  | re-run; the cascade-completion sweep; the transient login's collection fan-out; on the ladder branch, the retire-direction convergence of any later ladder-branch ceremony (open gap below)                                                                                                                                       | `client-revocation.md`   |
-| Recovery-code issuance                                | Settings > Recovery codes, any session type                                                                    | `src/session/recovery.ts`                                                   | `/recovery`                 | re-run with the same code (every stage detects its own completion); a tear after the document entry has no mender                                                                                                                                                                                                                 | `recovery-codes.md`      |
-| Recovery-code revocation                              | Settings > Recovery codes, any session type                                                                    | `src/session/recovery.ts`                                                   | `/recovery`                 | re-run; the cascade-completion sweep; the transient login's collection fan-out                                                                                                                                                                                                                                                    | `recovery-codes.md`      |
-| Unlock-credential rotation                            | Settings (passphrase change or add, passkey add or removal, backup-credential removal), any session type       | `src/session/credentialRotation.ts`                                         | `/unlock`                   | torn-retirement repair at the next passphrase login, transient or remembered, with its marker-gated establish-first arm; remembered-login sweep; the transient login's collection fan-out; re-seal repair                                                                                                                         | `session-and-auth.md`    |
-| Forget ceremony                                       | Settings > Connected wallets, own row, browser-local only                                                      | `src/session/forget.ts`                                                     | `/clientAnnex`              | re-run (wipe last); forgotten-browser detector at the next remembered login                                                                                                                                                                                                                                                       | `did-webvh-identity.md`  |
-| Last-client transition                                | same row, `lastClient` confirm, browser-local only                                                             | `src/session/forget.ts`                                                     | `/clientAnnex`              | re-run                                                                                                                                                                                                                                                                                                                            | `did-webvh-identity.md`  |
-| Update-key rotation                                   | Settings, browser-local only                                                                                   | `src/session/accountSettings.ts`                                            | `/webvh`                    | re-run (persist-before-publish)                                                                                                                                                                                                                                                                                                   | `did-webvh-identity.md`  |
-| Account genesis (plain)                               | every remembered login's storage provisioning on a WAS deployment, as a heal (a no-WAS signup mints keys only) | `src/stores/storageManager.ts` + `src/session/signup.ts`                    | `/genesis`                  | re-run (every stage an ensure)                                                                                                                                                                                                                                                                                                    | `account-genesis.md`     |
-| Account deletion                                      | Settings, any session type                                                                                     | `src/session/accountSettings.ts` + `wipe.ts`                                | app-side phase order        | re-run; an in-run retry for the acting credential's own unlock Space; otherwise the next login with that credential offering to remove it (not yet built)                                                                                                                                                                         | `did-webvh-identity.md`  |
-| Shared wipe (executor, not user-facing)               | consumed by the deletion-shaped ceremonies                                                                     | `src/session/wipe.ts`                                                       | app-side                    | re-probe verification; the `unverified` report                                                                                                                                                                                                                                                                                    | `did-webvh-identity.md`  |
-| Content migration                                     | Storage page, beside Export Space, every session kind including guest                                          | `src/session/contentMigration.ts`                                           | `@interop/wallet-backup`    | re-run (skip existing by content identity; the import activity replaced put-then-delete-others; an app collection's own torn create, empty and carrying the archived `generator`, finished)                                                                                                                                       | `session-persistence.md` |
-| Backup export                                         | Storage page, the export action, any session with remote storage                                               | `src/session/backupExport.ts`                                               | `@interop/wallet-backup`    | re-run; the pre-flight refuses before the pivot; a tear inside the establishment leaves the entry-first row, whose Remove under Settings > Backup credentials converges whatever it reached (strike, roster rotation, Space delete, entry drop); a tear after it leaves an ordinary labeled backup credential the user can remove | `session-persistence.md` |
-| Request consent (App Connect, interaction URL, share) | CHAPI get popup and `/external/request`, approval of a request; a grant needs a remote Space                   | `src/lib/walletRequest/respond.ts`                                          | app-side                    | a failure before the first escrow rolls the record back; past it, the recorded grants stay listed, and the user's own revoke from that row converges them                                                                                                                                                                         | `app-connect.md`         |
-| Grant revocation (app, agent, unshare)                | Applications page (disconnect, revoke), Storage page shares dialog (unshare); an unshare needs a remote Space  | `src/lib/connectedApps.ts` + `src/session/shares.ts`                        | app-side                    | the user's own re-run from the row a torn run leaves listed                                                                                                                                                                                                                                                                       | `app-connect.md`         |
+| Ceremony                                              | Entry point                                                                                                                                                               | Module                                                                      | Shared half                 | Mender                                                                                                                                                                                                                                                                                                                            | Topic doc                |
+| ----------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------- | --------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------ |
+| Credential-anchored genesis                           | every WAS signup, remembered or not (the default)                                                                                                                         | `src/session/credentialAnchoredGenesis.ts`                                  | `/clientAnnex`              | re-run; the transient login's heal branch                                                                                                                                                                                                                                                                                         | `account-genesis.md`     |
+| Recovery spend (remembered and transient)             | `/recover`                                                                                                                                                                | `src/session/recovery.ts`                                                   | `/recovery`, `/clientAnnex` | remembered: pending record pre-pivot + spend resume; transient: re-run, the next login's collection fan-out, open gaps (below)                                                                                                                                                                                                    | `recovery-codes.md`      |
+| Self-enrollment at login                              | `rememberBrowser: true` on a browser holding no record (no login form offers it yet)                                                                                      | `src/session/initSession.ts` + `src/session/pendingEnrollment.ts`           | `/clientAnnex`              | pending record pre-pivot; the next remembered login's resume                                                                                                                                                                                                                                                                      | `session-and-auth.md`    |
+| Client enrollment (two-party)                         | Settings > Connected wallets, any session type                                                                                                                            | `src/lib/enrollment.ts` (UI in `src/components/EnrolledClientsSection.tsx`) | `/enrollment`               | re-run with the same connect code; the escrow-direction convergence of any later ladder-branch ceremony                                                                                                                                                                                                                           | `client-enrollment.md`   |
+| Client revocation + epoch cascade                     | Settings > Connected wallets, any session type; the dialog ticks the agents to keep                                                                                       | `src/session/revocation.ts`                                                 | `/clients`                  | re-run; the cascade-completion sweep; the transient login's collection fan-out; on the ladder branch, the retire-direction convergence of any later ladder-branch ceremony (open gap below)                                                                                                                                       | `client-revocation.md`   |
+| Recovery-code issuance                                | Settings > Recovery codes, any session type                                                                                                                               | `src/session/recovery.ts`                                                   | `/recovery`                 | re-run with the same code (every stage detects its own completion); a tear after the document entry has no mender                                                                                                                                                                                                                 | `recovery-codes.md`      |
+| Recovery-code revocation                              | Settings > Recovery codes, any session type                                                                                                                               | `src/session/recovery.ts`                                                   | `/recovery`                 | re-run; the cascade-completion sweep; the transient login's collection fan-out                                                                                                                                                                                                                                                    | `recovery-codes.md`      |
+| Unlock-credential rotation                            | Settings (passphrase change or add, passkey add or removal, backup-credential removal), any session type; a change or removal dialog ticks the agents to keep             | `src/session/credentialRotation.ts`                                         | `/unlock`                   | torn-retirement repair at the next passphrase login, transient or remembered, with its marker-gated establish-first arm; remembered-login sweep; the transient login's collection fan-out; re-seal repair                                                                                                                         | `session-and-auth.md`    |
+| Forget ceremony                                       | Settings > Connected wallets, own row, browser-local only; ends the agent grants this client signed                                                                       | `src/session/forget.ts`                                                     | `/clientAnnex`              | re-run (wipe last); forgotten-browser detector at the next remembered login                                                                                                                                                                                                                                                       | `did-webvh-identity.md`  |
+| Last-client transition                                | same row, `lastClient` confirm, browser-local only; the dialog marks unticked agents declined                                                                             | `src/session/forget.ts`                                                     | `/clientAnnex`              | re-run                                                                                                                                                                                                                                                                                                                            | `did-webvh-identity.md`  |
+| Update-key rotation                                   | Settings, browser-local only                                                                                                                                              | `src/session/accountSettings.ts`                                            | `/webvh`                    | re-run (persist-before-publish)                                                                                                                                                                                                                                                                                                   | `did-webvh-identity.md`  |
+| Account genesis (plain)                               | every remembered login's storage provisioning on a WAS deployment, as a heal (a no-WAS signup mints keys only)                                                            | `src/stores/storageManager.ts` + `src/session/signup.ts`                    | `/genesis`                  | re-run (every stage an ensure)                                                                                                                                                                                                                                                                                                    | `account-genesis.md`     |
+| Account deletion                                      | Settings, any session type                                                                                                                                                | `src/session/accountSettings.ts` + `wipe.ts`                                | app-side phase order        | re-run; an in-run retry for the acting credential's own unlock Space; otherwise the next login with that credential offering to remove it (not yet built)                                                                                                                                                                         | `did-webvh-identity.md`  |
+| Shared wipe (executor, not user-facing)               | consumed by the deletion-shaped ceremonies                                                                                                                                | `src/session/wipe.ts`                                                       | app-side                    | re-probe verification; the `unverified` report                                                                                                                                                                                                                                                                                    | `did-webvh-identity.md`  |
+| Content migration                                     | Storage page, beside Export Space, every session kind including guest                                                                                                     | `src/session/contentMigration.ts`                                           | `@interop/wallet-backup`    | re-run (skip existing by content identity; the import activity replaced put-then-delete-others; an app collection's own torn create, empty and carrying the archived `generator`, finished)                                                                                                                                       | `session-persistence.md` |
+| Backup export                                         | Storage page, the export action, any session with remote storage                                                                                                          | `src/session/backupExport.ts`                                               | `@interop/wallet-backup`    | re-run; the pre-flight refuses before the pivot; a tear inside the establishment leaves the entry-first row, whose Remove under Settings > Backup credentials converges whatever it reached (strike, roster rotation, Space delete, entry drop); a tear after it leaves an ordinary labeled backup credential the user can remove | `session-persistence.md` |
+| Request consent (App Connect, interaction URL, share) | CHAPI get popup and `/external/request`, approval of a request; an agent restore (a dialog's tick, Restore on the Applications detail page); a grant needs a remote Space | `src/lib/walletRequest/respond.ts` + `src/session/agentReconnect.ts`        | app-side                    | a failure before the first escrow rolls the record back; past it, the recorded grants stay listed, and the user's own revoke from that row converges them                                                                                                                                                                         | `app-connect.md`         |
+| Grant revocation (app, agent, unshare)                | Applications page (disconnect, revoke), Storage page shares dialog (unshare); an unshare needs a remote Space                                                             | `src/lib/connectedApps.ts` + `src/session/shares.ts`                        | app-side                    | the user's own re-run from the row a torn run leaves listed; an agent revoke's first write empties the channel, so no renewal undoes a torn one                                                                                                                                                                                   | `app-connect.md`         |
 
 A WAS signup's remembered and passkey flavors continue into the
 self-enrollment row, and the credential-anchored genesis heal branch also
@@ -581,6 +628,20 @@ mends a remembered signup torn before its self-enrollment.
 A client revocation and a forget each retire the client's `connections`
 entry, best-effort. What a tear around that retirement leaves is in "Client
 revocation and the epoch cascade" (client-revocation.md).
+
+The inbox pass is not a ceremony. It runs behind each login chain's block
+(`REMEMBERED_INBOX_TAIL`, `TRANSIENT_INBOX_TAIL`) and reports into
+`session.inboxPass` alone. Its renewal's pivot is `recordRenewedGrants`,
+which records the renewed grants and queues their envelope on the entry's
+`outbox` in one compare-and-swap. A push that fails waits on the outbox for
+the next pass. A ceremony that withdraws signing authority cuts every
+subscriber child of the agent grants that authority signed, all at once.
+These are a client revocation, a forget, the last-client transition, a
+passphrase change, a passkey or backup-credential removal, and a recovery
+spend. The
+ceremony dialogs and the restore are in "The agent connection" in
+app-connect.md
+(`decisions/0043-a-grant-signed-by-withdrawn-authority-is-renewed-only-on-the-owners-tick.md`).
 
 The open gaps below mirror the gap allowlist (`src/session/menders/gaps.ts`).
 Each bullet names its invariant id, and a unit test holds the bullet ids
@@ -625,13 +686,27 @@ built:
 - A pending passphrase entry written by a refusal after establishment
   (invariant `registry-passphrase-entry-names-the-standing-credential`),
   which the seedless torn-retirement repair cannot clear.
-- A party holding authority with no `connections` entry, because a
-  re-created directory lost it or it predates the directory (invariant
-  `every-party-with-authority-has-a-connection-entry`). Nothing backfills
-  the directory, and its grants end only at their own expiry.
+- A party holding a live grant the wallet delegated with no `connections`
+  entry, because a re-created directory lost it or it predates the
+  directory (invariant
+  `every-grantee-of-the-wallet-has-a-connection-entry`). Nothing backfills
+  the directory, and its grants end only at their own expiry. A subscriber
+  holding a child of an agent's grant has no entry by design. The owner
+  reaches it through the agent's entry.
+- A party whose authority the account withdrew (a revoked client, a
+  retired credential, a struck annex generation) keeps every pairwise seed
+  and channel capability it read from the directory (invariant
+  `no-withdrawn-party-holds-a-live-pairwise-channel`). The epoch cascade
+  does not reach the seed. Such a party can post into an agent's inbox as
+  the wallet until that capability expires, and no seed rotation is built.
 - An auxiliary Space stranded between its mint and its pointer entry by a
   crashed first visit (invariant `no-auxiliary-space-stands-unnamed`).
   Nothing names it, and nothing deletes it.
+- An account that adopted an untrusted `inbox`, one that is public, carries
+  an `encryption` descriptor, or carries a `generator` stamp (invariant
+  `standard-collections-are-provisioned`). The drain refuses it, and the
+  provision re-walk's presence check reads it as present, so no trigger on
+  either account shape replaces it.
 
 Second, a residue whose only mender is a remembered login:
 
@@ -658,7 +733,9 @@ Second, a residue whose only mender is a remembered login:
   (invariant `keystore-controller-is-the-account-did`).
 - A signup torn before its standard collections are provisioned (invariant
   `standard-collections-are-provisioned`). The one converger needs a
-  browser-local session.
+  browser-local session. The same holds for the `inbox` collection: an
+  account created before `inbox` joined the provision roster, and an
+  account whose user deleted it.
 - A forgotten or disconnected browser whose local wipe tore, on an account
   with no remembered login left to run the detector (invariant
   `this-browser-is-still-an-enrolled-client`).
@@ -860,6 +937,20 @@ Containment hierarchy (remote mode): **Space > Collection > Resource**.
   interaction URL may not name a wallet client's did:key as that
   controller. Avoid: transient client (the annex inventory), agent client,
   bot.
+- **Audience** -- a plaintext collection in the owner's Space whose
+  Resources are posts, readable by a set of people. Membership is a GET and
+  HEAD grant on the collection, and removal is that grant's revocation. A
+  public audience is a collection under `PublicCanRead`. Nothing on the
+  wire marks a collection as an audience, and the wallet has no surface
+  that creates one yet. A connection request names each audience by its
+  container URL. Avoid: group, circle, feed.
+- **Subscription agent** -- an agent that holds read grants on the owner's
+  audiences and re-delegates a child of each grant to the subscribers it
+  serves. It connects through a connection request (see "CHAPI, App
+  Connect, and external requests"). Revoking the agent cuts every
+  subscriber at once. The owner never sees a subscriber's capability, and
+  the agent revokes its subscribers itself. A subscriber has no connection
+  entry. Avoid: relay, proxy, subscriber agent.
 - **`writerId`** -- an unkeyed, clearable, unrecoverable attribution label
   saying which writing agent produced a revision, used to attribute history
   and break last-write-wins ties. It is minted per browser profile by
@@ -886,12 +977,32 @@ Containment hierarchy (remote mode): **Space > Collection > Resource**.
   wallet alone and never replicated. Its entries' grants are the revocation
   index. See "Storage model (local-first)". Avoid: party registry,
   connections log, client labels.
+- **Inbox** -- the `inbox` collection: one plaintext, wallet-wide
+  collection of incoming messages in the owner's Space, through which a
+  connected agent delivers capabilities to the wallet. An agent holds POST on its container and
+  nothing more. The inbox pass drains it at login and deletes every
+  message. See "Storage model (local-first)". Avoid: mailbox, message
+  queue, notifications collection.
 - **Connection entry** -- one party's record in the connections directory,
   at a resource id keyed by an HMAC of its DID under the collection's
   blinded-index key. It carries `kind`, the party's DID as `id`, `name` and
   `label`, an app's `origin`, `url`, and `appKey`, `firstSeen` and
-  `lastSeen`, the party's `grants`, and a wallet client's `writers`. Avoid:
+  `lastSeen`, the party's `grants`, and a wallet client's `writers`. An
+  agent's entry also carries `seed` and `seedTag` (the pairwise seed and
+  its HMAC tag), `grantsReceived` (the channel capabilities the agent
+  delegated to the wallet), `outbox` (the messages queued for the agent),
+  and `declined` (the owner's decline of keeping it connected). Avoid:
   connection record, party row.
+- **Pairwise did:key** -- the did:key the wallet holds toward one agent,
+  derived from the `seed` on that agent's connection entry
+  (`connectionDidKey`). It is not a Client. It is not the keypair of an
+  (app, user) pair, it appears in no roster, and it signs nothing in the
+  owner's Space. It is not an Agent either: the agent is the other party,
+  and this is the wallet's own key toward it. It is durable, since its seed
+  is server-held on the entry. It is a grantee on the agent's server, and
+  it is not revocable until a seed rotation is built. It gives continuity,
+  one key per edge, and no unlinkability, since every grant the agent
+  receives names the owner's Space. Avoid: connection key, edge key.
 - **Name and label** -- the two display strings on a connection entry. `name` is
   the party's own or suggested name: an app's `app.name`, an agent's
   self-declared `agent.name`, or a wallet client's platform label or the name
@@ -903,8 +1014,10 @@ Containment hierarchy (remote mode): **Space > Collection > Resource**.
 - **Retirement** -- ending a party's relationship on its connection entry,
   which keeps the entry and its names. It follows the revocation that
   handled the entry's grants, and refuses when the entry has since gained a
-  grant that revocation did not handle. What it changes, and what retires
-  an entry, are in "Storage model (local-first)". Avoid: removal, tombstone.
+  grant that revocation did not handle. It also empties `grantsReceived`
+  and `outbox`, and keeps the pairwise `seed`, so the same agent's later
+  consent reuses it. What it changes, and what retires an entry, are in
+  "Storage model (local-first)". Avoid: removal, tombstone.
 - **WAS (Wallet Attached Storage)** -- an HTTP protocol for storing
   arbitrary resources in user-owned Spaces, authorized via ZCap. See [the
   spec](https://w3c-ccg.github.io/wallet-attached-storage-spec/).
@@ -915,8 +1028,8 @@ base64url(SHA-256(unlock did:key))` (a discovery convention).
 - **Collection** -- a named grouping of Resources within a Space. Standard
   collections: `private-credentials`, `public-credentials`,
   `wallet-activity`, `contacts`, `contacts-history`, `app-keys`. The
-  `connections` directory sits in the same provision roster, outside the
-  synced set.
+  `connections` directory and the `inbox` sit in the same provision roster,
+  outside the synced set.
 - **Resource** -- an individual stored item (JSON or binary) within a
   Collection.
 - **Collection Metadata object** -- a Collection's configuration together

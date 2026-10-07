@@ -2,9 +2,13 @@
  * The detail view for one connected party, an app or an agent
  * (`/applications/:resourceId`, keyed by its `connections` entry's resource
  * id): its display name, origin (an app's), DID, connected date (the
- * entry's `firstSeen`), and every storage grant on the entry, live and
- * expired, newest first (each with its target, allowed actions, expiry, and
- * whether it has already lapsed). A party whose grants were all signed by a
+ * entry's `firstSeen`), and its storage grants, one card per scope (grantee,
+ * target, and actions), newest first. Each card shows the scope's latest
+ * record (its target, allowed actions, expiry, and whether it has already
+ * lapsed), and the records a renewal or a later consent superseded collapse
+ * under it. An agent the owner declined to keep connected shows as declined,
+ * with Restore beside Revoke: Restore re-grants its in-scope access as a
+ * fresh consent, which clears the decline. A party whose grants were all signed by a
  * since-disconnected wallet client is flagged as orphaned -- those grants
  * stopped verifying with the account-log edit (the current-key-set rule),
  * and reconnecting is the recovery path. Repeats the Applications section's
@@ -20,6 +24,7 @@ import Alert from '@mui/material/Alert'
 import Box from '@mui/material/Box'
 import Button from '@mui/material/Button'
 import Card from '@mui/material/Card'
+import Collapse from '@mui/material/Collapse'
 import Stack from '@mui/material/Stack'
 import Typography from '@mui/material/Typography'
 import { formatDate } from '@/lib/viewMappers/formatDate'
@@ -43,6 +48,7 @@ import {
   type ConnectedAgent,
   type ConnectedApp
 } from '@/lib/connectedApps'
+import { reconnectAgents } from '@/session/agentReconnect'
 import { createLogger } from '@/lib/log'
 
 const log = createLogger('fw:ui:applications')
@@ -69,6 +75,64 @@ function grantTargetLabel(target: string): string {
   }
 }
 
+/**
+ * One grant record's lines: its target label and URL, its allowed actions,
+ * and its expiry.
+ *
+ * @param options {object}
+ * @param options.grant {AppGrant}
+ * @param options.expired {boolean}
+ * @param [options.emphasis] {boolean}   the scope's current record
+ */
+function GrantSummary({
+  grant,
+  expired,
+  emphasis = false
+}: {
+  grant: AppGrant
+  expired: boolean
+  emphasis?: boolean
+}) {
+  const { t, i18n } = useTranslation()
+  return (
+    <>
+      {emphasis && (
+        <Typography variant="body2" sx={{ fontWeight: 600 }}>
+          {grantTargetLabel(grant.target)}
+        </Typography>
+      )}
+      {grant.target && (
+        <Typography variant="caption" sx={dashboardStyles.sharedRecipientDid}>
+          {grant.target}
+        </Typography>
+      )}
+      <Typography variant="body2" color="text.secondary">
+        {t('applications.grantActions', {
+          actions:
+            grant.allowedActions.join(', ') ||
+            t('applications.grantActionsNone')
+        })}
+      </Typography>
+      {grant.expires && (
+        <Typography
+          variant="body2"
+          color={expired ? 'error' : 'text.secondary'}
+        >
+          {t(
+            expired ? 'applications.grantExpired' : 'applications.grantExpires',
+            {
+              date: formatDate({
+                isoDate: grant.expires,
+                locale: i18n.language
+              })
+            }
+          )}
+        </Typography>
+      )}
+    </>
+  )
+}
+
 export function ApplicationDetailPage() {
   const { t, i18n } = useTranslation()
   const navigate = useNavigate()
@@ -78,11 +142,17 @@ export function ApplicationDetailPage() {
   const [revokeDialogOpen, setRevokeDialogOpen] = useState(false)
   const [revoking, setRevoking] = useState(false)
   const [revokeError, setRevokeError] = useState(false)
+  const [restoring, setRestoring] = useState(false)
+  const [restoreError, setRestoreError] = useState(false)
+  // The scopes whose superseded records are shown, by the current record's
+  // capability id.
+  const [expanded, setExpanded] = useState<string[]>([])
 
   const {
     data: view,
     loading,
-    error: loadError
+    error: loadError,
+    reload
   } = useAsyncLoad(
     async () => {
       if (!session || !resourceId) {
@@ -151,6 +221,36 @@ export function ApplicationDetailPage() {
     }
   }
 
+  /**
+   * Restores a declined agent: re-grants its in-scope access as a fresh
+   * consent, which clears the decline, and runs the inbox pass that pushes
+   * the grants to it.
+   */
+  async function handleRestore() {
+    if (!session || !agent) {
+      return
+    }
+    setRestoring(true)
+    setRestoreError(false)
+    try {
+      const { agents } = await reconnectAgents({
+        session,
+        dids: [agent.controller]
+      })
+      if (agents[0]?.outcome === 'restored') {
+        showToast({ message: t('applications.restoreSuccess') })
+      } else {
+        setRestoreError(true)
+      }
+      await reload()
+    } catch (err) {
+      log.error('Could not restore the agent', { err })
+      setRestoreError(true)
+    } finally {
+      setRestoring(false)
+    }
+  }
+
   function grantExpired(grant: AppGrant): boolean {
     return !!grant.expires && new Date(grant.expires).getTime() <= loadedAt
   }
@@ -192,6 +292,19 @@ export function ApplicationDetailPage() {
             <Alert severity="warning">
               {t('applications.orphanedNotice', { name: partyName })}
             </Alert>
+          )}
+          {agent?.declined !== undefined && (
+            <Alert severity="info">
+              {t('applications.agentDeclinedNotice', {
+                date: formatDate({
+                  isoDate: agent.declined,
+                  locale: i18n.language
+                })
+              })}
+            </Alert>
+          )}
+          {restoreError && (
+            <Alert severity="error">{t('applications.restoreFailed')}</Alert>
           )}
           {app?.origin !== undefined && (
             <Stack
@@ -257,41 +370,42 @@ export function ApplicationDetailPage() {
                       p: 1.5
                     }}
                   >
-                    <Typography variant="body2" sx={{ fontWeight: 600 }}>
-                      {grantTargetLabel(grant.target)}
-                    </Typography>
-                    {grant.target && (
-                      <Typography
-                        variant="caption"
-                        sx={dashboardStyles.sharedRecipientDid}
-                      >
-                        {grant.target}
-                      </Typography>
-                    )}
-                    <Typography variant="body2" color="text.secondary">
-                      {t('applications.grantActions', {
-                        actions:
-                          grant.allowedActions.join(', ') ||
-                          t('applications.grantActionsNone')
-                      })}
-                    </Typography>
-                    {grant.expires && (
-                      <Typography
-                        variant="body2"
-                        color={grantExpired(grant) ? 'error' : 'text.secondary'}
-                      >
-                        {t(
-                          grantExpired(grant)
-                            ? 'applications.grantExpired'
-                            : 'applications.grantExpires',
-                          {
-                            date: formatDate({
-                              isoDate: grant.expires,
-                              locale: i18n.language
-                            })
+                    <GrantSummary
+                      grant={grant}
+                      expired={grantExpired(grant)}
+                      emphasis
+                    />
+                    {grant.earlier !== undefined && (
+                      <>
+                        <Button
+                          size="small"
+                          variant="text"
+                          sx={{ alignSelf: 'flex-start', px: 0 }}
+                          onClick={() =>
+                            setExpanded(
+                              expanded.includes(grant.id)
+                                ? expanded.filter(id => id !== grant.id)
+                                : [...expanded, grant.id]
+                            )
                           }
-                        )}
-                      </Typography>
+                        >
+                          {t('applications.earlierGrants', {
+                            count: grant.earlier.length
+                          })}
+                        </Button>
+                        <Collapse in={expanded.includes(grant.id)}>
+                          <Stack sx={{ gap: 1, pl: 2 }}>
+                            {grant.earlier.map((earlier, earlierIndex) => (
+                              <Box key={earlier.id || earlierIndex}>
+                                <GrantSummary
+                                  grant={earlier}
+                                  expired={grantExpired(earlier)}
+                                />
+                              </Box>
+                            ))}
+                          </Stack>
+                        </Collapse>
+                      </>
                     )}
                   </Card>
                 ))}
@@ -300,10 +414,24 @@ export function ApplicationDetailPage() {
           </Box>
 
           <Stack direction="row" sx={{ gap: 1, flexWrap: 'wrap' }}>
+            {agent?.declined !== undefined && (
+              <Button
+                variant="contained"
+                sx={{ borderRadius: 2 }}
+                loading={restoring}
+                disabled={revoking}
+                onClick={() => void handleRestore()}
+              >
+                {t('applications.restore')}
+              </Button>
+            )}
+            {/* A restore in flight re-records the agent's grants, and a
+                revoke beside it would be undone by that write. */}
             <Button
               variant="outlined"
               color="error"
               sx={{ borderRadius: 2 }}
+              disabled={restoring}
               onClick={() => {
                 setRevokeError(false)
                 setRevokeDialogOpen(true)

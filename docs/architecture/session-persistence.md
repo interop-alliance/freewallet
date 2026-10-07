@@ -290,7 +290,13 @@ old credential's ladder VM may be what signed the delegation the visit's
 every request rides, and the strike takes that VM out of the document. The
 replacement is minted by the new credential's ladder VM and installed
 through that credential's sibling delegation. Every App Connect grant the
-visit chained under the old delegation ends with it.
+visit chained under the old delegation ends with it, and so does every
+connected agent's grant chained there. That cuts every subscriber child of
+the agent's grants at once. An agent grant whose parent's signer still
+stands is renewed in place by the Settings inbox pass once the change
+resolves. One the struck ladder VM signed is withdrawn authority, which only
+the owner's tick restores. The change's dialog lists those agents, ticked by
+default (see "The agent connection" in app-connect.md).
 
 **The backup export's stage order** (`src/session/backupExport.ts`). The
 Storage page's export action
@@ -551,7 +557,10 @@ the user key off its roster wrap, deletes its unlock Space through the
 entry's management zcap, and drops the entry. On the ladder kind the
 generation delegation this visit rides is replaced first, in case the
 credential's ladder VM signed it, and a replacement that does not install
-refuses the removal (`GenerationDelegationRenewalError`). A transient session refuses to
+refuses the removal (`GenerationDelegationRenewalError`). An agent grant the
+struck ladder VM signed ends with the strike, and with it every subscriber
+child of that grant. The removal's dialog ticks the agents to keep, as the
+passphrase change's does. A transient session refuses to
 remove the backup credential it entered on (`ActingCredentialRemovalError`),
 since every stage would act through the VM being struck. An entry recording
 no management zcap refuses with `BackupCredentialNotRemovableError`. After

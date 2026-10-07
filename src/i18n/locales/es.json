@@ -257,7 +257,15 @@
     "deleteFarewellTitle": "Su cuenta ha sido eliminada",
     "deleteFarewellAction": "Cerrar sesión",
     "deleteForgetBrowserAction": "Olvidar todos los datos de la billetera en este navegador",
-    "deleteRefusalDeleted": "Ya eliminado antes de detenerse ({{count}}): {{list}}"
+    "deleteRefusalDeleted": "Ya eliminado antes de detenerse ({{count}}): {{list}}",
+    "agentReconnect": {
+      "intro": "Estos agentes conectados tienen un acceso que este cambio termina. La billetera vuelve a concederlo a cada agente marcado, y sus suscriptores se vuelven a conectar. Un agente sin marcar queda como rechazado y sigue en la página de Aplicaciones.",
+      "introNextSignIn": "Estos agentes conectados tienen un acceso que este cambio termina. Este navegador no puede volver a concederlo, porque se va. Un agente sin marcar queda como rechazado y sigue en la página de Aplicaciones.",
+      "introEnds": "Olvidar este navegador termina el acceso de estos agentes conectados.",
+      "running": "Volviendo a conectar a los suscriptores de los agentes marcados...",
+      "done": "Los suscriptores de los agentes marcados se están volviendo a conectar.",
+      "notRestored": "No se pudo volver a conectar a {{names}}. Siguen en la página de Aplicaciones."
+    }
   },
   "landing": {
     "title": "Freewallet",
@@ -485,7 +493,14 @@
     "revokeAgentConfirm": "Al revocar el acceso se anulan los permisos de almacenamiento concedidos a {{name}}, de modo que ya no podrá leer ni escribir en las colecciones que se le dieron, aunque es posible que aún conserve copias de los datos que ya obtuvo. El agente tendrá que volver a solicitar acceso. Esta acción no se puede deshacer.",
     "revokeAgentSuccess": "Acceso del agente revocado.",
     "revokeAgentSuccessEnded": "Agente eliminado. Su acceso al almacenamiento ya había terminado.",
-    "revokeAgentFailed": "No se pudo revocar el acceso del agente. Inténtelo de nuevo."
+    "revokeAgentFailed": "No se pudo revocar el acceso del agente. Inténtelo de nuevo.",
+    "agentDeclinedChip": "Rechazado",
+    "agentDeclinedNotice": "El {{date}} decidiste no mantener conectado a este agente. Restaurar vuelve a concederle su acceso.",
+    "restore": "Restaurar",
+    "restoreSuccess": "Acceso restaurado. Los suscriptores del agente se están volviendo a conectar.",
+    "restoreFailed": "No se pudo restaurar el acceso de este agente. Inténtalo más tarde.",
+    "earlierGrants_one": "{{count}} concesión anterior",
+    "earlierGrants_other": "{{count}} concesiones anteriores"
   },
   "dashboard": {
     "title": "Panel de Freewallet",
@@ -649,7 +664,8 @@
       "id": "Identidad",
       "key-map": "Mapa de claves",
       "unlock-methods": "Métodos de desbloqueo",
-      "connections": "Conexiones"
+      "connections": "Conexiones",
+      "inbox": "Bandeja de entrada"
     },
     "groupWalletContents": "Contenido de la billetera",
     "groupAppCollections": "Colecciones de aplicaciones",
@@ -999,7 +1015,8 @@
       "shareHandle": "Compartir su nombre de usuario {{username}}",
       "zcapHeading": "Acceso al almacenamiento",
       "zcapTarget": {
-        "collection": "Colección:"
+        "collection": "Colección:",
+        "inbox": "La bandeja de entrada de su billetera"
       },
       "zcapPublicWarning": "Esta colección será pública: cualquier persona en la web podrá leerla, sin iniciar sesión.",
       "zcapRecipient": "Acceso otorgado a:",
@@ -1007,6 +1024,7 @@
       "zcapRecipientWalletStored": "Esta identidad está guardada en su billetera para esta aplicación.",
       "zcapRecipientWalletMintedPending": "Se creará en su billetera una identidad nueva, única para usted, para esta aplicación.",
       "zcapWriteWarning": "Este sitio podrá agregar, cambiar o eliminar datos en esta colección.",
+      "zcapInboxNote": "Puede enviar mensajes a su billetera. No puede leer, cambiar ni eliminar nada allí.",
       "zcapEncryptedNote": "Esta colección está cifrada: este sitio solo verá texto cifrado.",
       "zcapExistingOther": "Esta colección ya existe y fue creada por otra aplicación ({{creator}}). Este sitio podrá leer todo lo que ya está almacenado en ella.",
       "zcapExistingUnattributed": "Esta colección ya existe. Este sitio podrá leer todo lo que ya está almacenado en ella.",
@@ -1021,6 +1039,8 @@
       "appKeysUnreadable": "Esta billetera no pudo leer la conexión guardada de esta aplicación. Su clave está en una época de claves que esta sesión no puede abrir, así que conectarla de nuevo ahora le daría una identidad nueva y dejaría huérfanos sus datos actuales. Inténtelo más tarde o inicie sesión desde una billetera ya conectada a esta cuenta.",
       "zcapExpiry": "Caduca en {{days}} días",
       "zcapRevokeNote": "(podrá revocar el acceso en cualquier momento en la página de Aplicaciones)",
+      "zcapConnectionExpiry": "Caduca en {{days}} días, y se renueva mientras esta conexión siga vigente",
+      "zcapConnectionPassOn": "El agente comparte este acceso de lectura con las personas que elija.",
       "appConnect": {
         "title": "¿Conectar {{appName}} al almacenamiento?",
         "nameLabel": "Nombre:",
@@ -1077,6 +1097,13 @@
       "unreadableTarget": "Esta solicitud nombra una colección cifrada por su URL, lo que no concede ninguna clave para leerla. El solicitante solo obtendría datos ilegibles. Pide a su desarrollador que solicite la colección con un descriptor https://w3id.org/byoe#private-collection, que sí concede esa clave.",
       "multipleGrantees": "Esta solicitud pide acceso en nombre de más de una clave de programa. Un enlace puede conceder acceso a un solo solicitante a la vez, por lo que fue rechazada.",
       "enrolledClient": "Esta solicitud pide acceso en nombre de una billetera que está o estuvo conectada a su cuenta. Un enlace no puede conceder acceso a una de sus propias billeteras, por lo que fue rechazada.",
+      "connectionUnsigned": "Esta solicitud de conexión no está firmada por la clave que nombra, por lo que fue rechazada. Es posible que el software del agente necesite una actualización.",
+      "connectionWithoutChallenge": "Esta solicitud de conexión no incluye un desafío al que la billetera pueda responder, por lo que fue rechazada.",
+      "connectionWithWriteGrant": "Esta solicitud de conexión pide cambiar datos de su billetera. Una conexión solo puede leer las colecciones que nombra y enviar mensajes a su bandeja de entrada, por lo que fue rechazada.",
+      "connectionTargetForm": "Esta solicitud de conexión nombra una colección de una forma que una conexión no puede usar. Una conexión nombra cada colección por su URL, por lo que fue rechazada.",
+      "noInbox": "Esta solicitud de conexión necesita la bandeja de entrada de su billetera, que esta cuenta no tiene, por lo que fue rechazada.",
+      "untrustedInbox": "Esta cuenta tiene una colección llamada \"inbox\" que esta billetera no creó, por lo que la billetera no la usará como su bandeja de entrada. La solicitud fue rechazada.",
+      "noCreatorAttribution": "Esta solicitud de conexión necesita un servidor de almacenamiento que registre quién escribió cada mensaje en su bandeja de entrada. Su servidor no indica que lo haga, por lo que la solicitud fue rechazada.",
       "zcapUnavailable": "Esta solicitud necesita almacenamiento remoto, con el que esta billetera no está configurada.",
       "processFailed": "Algo salió mal al preparar la respuesta. Inténtelo de nuevo.",
       "exchangeFailed": "No se pudo entregar la respuesta al servidor donde reside esta solicitud."

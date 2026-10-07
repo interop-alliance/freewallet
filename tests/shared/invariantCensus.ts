@@ -300,11 +300,11 @@ export const INVARIANT_CENSUS: Readonly<
     reason:
       'The writers and their activity times live in encrypted connections entries, which only a session with directory access opens.'
   },
-  'every-party-with-authority-has-a-connection-entry': {
+  'every-grantee-of-the-wallet-has-a-connection-entry': {
     kind: 'unchecked',
     standsOn: ['ladder-anchored', 'enrolled'],
     reason:
-      'A detector would walk the live grants and every collection roster against the encrypted connections directory; none is built (FW-569).'
+      'A detector would walk the live grants the wallet delegated and every collection roster against the encrypted connections directory; none is built (FW-569).'
   },
   // The roster log's half of
   // `governed-log-heads-anchor-past-the-membership-change`, with the same
@@ -314,6 +314,26 @@ export const INVARIANT_CENSUS: Readonly<
     standsOn: ['ladder-anchored', 'enrolled'],
     reason:
       "The roster log head's proof names the account log version it anchors at, and the account log's assertionMethod history is stored."
+  },
+  // `inbox` is plaintext, so its messages and its Collection Metadata
+  // object are stored as written.
+  'inbox-is-drained': {
+    kind: 'stored',
+    standsOn: ['ladder-anchored', 'enrolled'],
+    reason:
+      "The inbox collection's metadata object and each message are stored plaintext under the data root."
+  },
+  'agent-grants-are-current': {
+    kind: 'key-holder',
+    standsOn: ['ladder-anchored', 'enrolled'],
+    reason:
+      'The agent grants and the channel capabilities live in encrypted connections entries, which only a session with directory access opens.'
+  },
+  'no-withdrawn-party-holds-a-live-pairwise-channel': {
+    kind: 'unchecked',
+    standsOn: ['ladder-anchored', 'enrolled'],
+    reason:
+      'No stored or key-holder state shows which party read a pairwise seed from the directory.'
   }
 }
 

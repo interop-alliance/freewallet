@@ -137,6 +137,9 @@ describe('processAppConnect', () => {
     // The delegation used the minted key's DID as the controller.
     const delegated = vi.mocked(processZcaps).mock.calls[0][0]
     expect(delegated.zcapRequests[0].controller).toBe(subjectDid)
+    // The App Connect request kind, under which the `#inbox` descriptor is
+    // unsatisfiable (the resolver's own tests prove nothing is minted).
+    expect(delegated.requestKind).toBe('app-connect')
 
     const presentation = response.verifiablePresentation as {
       appConnect?: unknown

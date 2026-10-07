@@ -49,6 +49,8 @@ The four stages, in the enrolled kind's form:
    skips with a report when that seed or a promoted pointer is absent. It
    runs in the no-roster early return too. Grants chained under the old
    delegation die with it, a stated consequence of an ordinary disconnect.
+   A connected agent's grant among them takes every subscriber child the
+   agent re-delegated with it.
 
 The revoking session then adopts the fresh user key in place: vault keys
 swapped, storage ciphers rebuilt on the re-epoch'd descriptors, the
@@ -200,6 +202,27 @@ state, and the policy takes the signer that would sign the removal entry. It
 confirms the limitation first: re-keying stops future reads, and
 already-fetched ciphertext stays readable. A partial collection fan-out is
 reported as a resumable success pointing at the login-time sweep.
+
+**The subscriber cut.** A disconnect ends connected agents' grants, and
+with them every subscriber child the agents re-delegated. Two kinds end. A
+grant the revoked client signed under the Space root dies by the
+current-key-set rule. A grant chained under a generation delegation that
+client minted dies with the delegation. Before the ceremony runs, the
+dialog lists the agents holding such a grant, read from the directory
+against the revoked client's key (`revokedClientWithdrawnKeys` in
+`src/session/revocation.ts`). Each is ticked by default. Once the
+disconnect succeeds, each unticked agent's entry gets the `declined`
+marker, and the ticked agents' in-scope grants are re-minted under the
+current authority as a fresh consent (`reconnectAgents` in
+`src/session/agentReconnect.ts`). The Settings inbox pass then runs as an
+encounter (`renewAgentGrantsAfterCeremony`), after the login's own pass has
+settled. It pushes the restored grants to each agent, and silently renews
+any grant under the replaced generation delegation whose signer still
+stands. The notice names any agent it could not restore. A disconnect that
+fails writes no marker and restores nothing. The forget's dialog lists the
+agents whose grants this client signed (`forgottenClientWithdrawnKeys`)
+with no tick, and says their access ends, since the browser is leaving.
+The mechanism is in "The agent connection" in app-connect.md.
 
 On the enrolled branch the last enrolled client cannot be disconnected,
 since it is always the current one from its own session and self-revocation

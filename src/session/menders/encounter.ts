@@ -13,7 +13,9 @@
  *    gets `refused` entries, and the converger is not called.
  * 2. Joins a run of the same registration already in flight on this session,
  *    and returns that run's entries. A run counts as in flight from the call
- *    on, so one still waiting at the gate is joined too.
+ *    on, so one still waiting at the gate is joined too. A caller passing
+ *    `freshEvidence` waits that run out instead and then runs its own,
+ *    since the run in flight read its evidence before the caller's landed.
  * 3. Waits on the session's encounter gate, so it never runs beside the
  *    login block's registry writers.
  * 4. Spends a once-per-session budget: a run that ended `failed` or
@@ -126,8 +128,9 @@ function spendsBudget(entries: MendReport<CeremonyId>): boolean {
  * @param options.registration {Registration}   an `encounter` registration
  * @param [options.freshEvidence] {boolean}   the caller holds evidence no
  *   earlier run of this registration saw (a collection newly recorded as
- *   stranded), so a spent budget does not stand this run down. A run in
- *   flight is still joined
+ *   stranded, grants just recorded for a push), so a spent budget does not
+ *   stand this run down, and a run in flight is waited out rather than
+ *   joined
  * @returns {Promise<MendReport>}   this run's entries, one per reported
  *   invariant; never rejects
  */
@@ -156,9 +159,16 @@ export async function runEncounter({
     // gate wait, so a caller joining while the run still waits there joins
     // it too.
     const flights = mapFor({ store: inFlight, session })
-    const running = flights.get(registration)
-    if (running) {
+    let running = flights.get(registration)
+    if (running && !freshEvidence) {
       return await running
+    }
+    // The run in flight read its evidence before this caller's landed, so
+    // its outcome does not cover it: wait it out, then run again. Another
+    // caller may have started a run meanwhile, so wait until none is.
+    while (running) {
+      await running
+      running = flights.get(registration)
     }
     const run = (async (): Promise<MendReport<CeremonyId>> => {
       // (3) Behind the login block's registry writers.

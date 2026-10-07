@@ -485,7 +485,8 @@ seed aborts it, and the seed is storage provisioning: when that fails the
 login page abandons the session, and neither of the block's promises hangs.
 The transient chain has no seed, a transient session provisioning nothing.
 
-Two promises settle it, and both session types set both.
+Two promises settle it, and both session types set both. A third settles
+the inbox tail behind it (below).
 `session.registryReady` settles when the registry-writing registrations have
 reported. The keystore promotion is not among them: the pointer heal fires
 it and the block's tail reports it, so no `registryReady` awaiter waits on a
@@ -501,6 +502,27 @@ which today is the transient login's did:web projection mend. It carries the
 login's mend report: one entry per invariant a mender reported, the routing
 entries this login fired first and the block's registrations after them. The
 e2e login-chain seam waits on it.
+
+A third promise, `session.inboxPass`, settles the login's inbox tail. Each
+chain has one registration there (`REMEMBERED_INBOX_TAIL` and
+`TRANSIENT_INBOX_TAIL` in `src/session/menders/registrations.ts`), which
+runs the inbox pass (`src/session/inboxPass.ts`). The pass drains the
+account's `inbox`, renews the connected agents' grants, and pushes each
+agent entry's `outbox`. The tail starts once the whole
+block has run, the annex GC and the keystore report included, so a
+generation the GC swapped is renewed under in the same login. The pass
+reaches the agents' own servers, so it stands outside both other promises.
+`registryReady` lists the block's registry writers alone, and `mends`
+carries the block's report alone. A slow agent host therefore delays no
+Settings ceremony, no content migration, and no backup export.
+`session.inboxPass` carries its own report, the two entries the pass
+reports (`inbox-is-drained` and `agent-grants-are-current`), and never
+rejects. A CHAPI popup, a guest, and a session with no Space run no tail,
+and their `inboxPass` settles empty. An encounter of the same pass, on the
+Settings page after a ceremony that replaces the generation delegation,
+awaits `session.inboxPass` first, so the two never run side by side. The
+e2e login-chain seam waits on it as well. The pass itself is in "The agent
+connection" in app-connect.md.
 
 The CHAPI popup route is declared rather than guarded: each declaration
 carries a `when(route)` predicate, and the four shared passes, the

@@ -149,14 +149,28 @@ export const MENDER_GAPS: ReadonlyArray<InvariantGap> = [
   // 13. Retired 2026-10-01: invariant 20 (stranded app keys) left the
   // census with its sweep. The number stays, so the rows below keep theirs.
   // 14. The one converger needs a browser-local session, so invariant 33 is
-  // declared `enrolled` until FW-464 builds the replica-less one.
+  // declared `enrolled` until FW-464 builds the replica-less one. Two of the
+  // three `inbox` states sit here too: the drain's own predicate excludes an
+  // absent or refused inbox, and only the remembered login's re-walk of the
+  // provision roster adds one. The third is row 26.
   {
     invariant: 'standard-collections-are-provisioned',
     tornState:
-      'A signup torn before provisioning on an account that runs no remembered login.',
+      'A signup torn before provisioning on an account that runs no remembered login. The same residue covers the `inbox` collection: an account created before `inbox` joined the provision roster, and an account whose user deleted `inbox`.',
     standsOn: ['ladder-anchored'],
     item: 'FW-464',
     kind: 'unreachable'
+  },
+  // 26. The re-walk's presence check reads an adopted untrusted `inbox` as
+  // clean, so no trigger on either shape converges it. FW-669 builds the
+  // converger.
+  {
+    invariant: 'standard-collections-are-provisioned',
+    tornState:
+      'An account that adopted an untrusted `inbox` (public, encrypted, or attributed), which the drain refuses and the provision re-walk reads as present.',
+    standsOn: ['ladder-anchored', 'enrolled'],
+    item: 'FW-669',
+    kind: 'none'
   },
   // 15
   {
@@ -181,9 +195,9 @@ export const MENDER_GAPS: ReadonlyArray<InvariantGap> = [
   // so the rows below keep theirs.
   // 23
   {
-    invariant: 'every-party-with-authority-has-a-connection-entry',
+    invariant: 'every-grantee-of-the-wallet-has-a-connection-entry',
     tornState:
-      'A party with authority and no connections entry: one whose entry a deleted and re-created directory lost, or one that connected before the directory existed.',
+      'A party holding a live grant the wallet delegated and no connections entry: one whose entry a deleted and re-created directory lost, or one that connected before the directory existed.',
     standsOn: ['ladder-anchored', 'enrolled'],
     item: 'FW-569',
     kind: 'none'
@@ -224,6 +238,16 @@ export const MENDER_GAPS: ReadonlyArray<InvariantGap> = [
       "A detector with no converger of its own: the user's own reissue is the mender, and the detector nudges rather than refuses.",
     standsOn: ['ladder-anchored', 'enrolled'],
     item: 'FW-290',
+    kind: 'none'
+  },
+  // 25. The epoch cascade does not reach the pairwise seed on an agent's
+  // connections entry. FW-647's seed rotation is the converger.
+  {
+    invariant: 'no-withdrawn-party-holds-a-live-pairwise-channel',
+    tornState:
+      'A party whose authority the account withdrew keeps every pairwise seed and channel capability it read from the directory: a revoked client, a retired credential, or a struck annex generation (every past transient visit included). It can post into an agent inbox as the wallet until that capability expires.',
+    standsOn: ['ladder-anchored', 'enrolled'],
+    item: 'FW-647',
     kind: 'none'
   }
 ]

@@ -16,6 +16,15 @@
  * session on a standing unlock credential the ladder signs, so every row
  * offers Disconnect and the last row states the transition it makes: the
  * account lands ladder-anchored, reached by the sign-in credentials alone.
+ *
+ * The disconnect and the forget dialogs list the connected agents holding a
+ * grant the departing client's key signed. A disconnect, and the last-client
+ * transition, tick each by default: an unticked agent is marked declined on
+ * confirmation. Once a disconnect resolves, the ticked agents are restored
+ * under the current authority and the Settings inbox pass runs. The
+ * last-client transition ends this session, so its ticked agents are left
+ * for a later sign-in to offer. The ordinary forget states that their access
+ * ends.
  */
 import Alert from '@mui/material/Alert'
 import Button from '@mui/material/Button'
@@ -54,7 +63,16 @@ import {
 } from '@/session/clients'
 import { approveEnrollment } from '@/lib/enrollment'
 import { useAsyncLoad } from '@/hooks/useAsyncLoad'
-import { forgetThisBrowser } from '@/session/forget'
+import {
+  forgetThisBrowser,
+  forgottenClientWithdrawnKeys
+} from '@/session/forget'
+import { revokedClientWithdrawnKeys } from '@/session/revocation'
+import { useAgentReconnect } from '@/hooks/useAgentReconnect'
+import {
+  AgentReconnectList,
+  AgentReconnectNotice
+} from '@/components/AgentReconnectList'
 import { GenerationDelegationRenewalError } from '@/session/annexReach'
 import { OnboardInviteCard } from '@/components/OnboardInviteCard'
 import { formatDate } from '@/lib/viewMappers/formatDate'
@@ -172,6 +190,25 @@ export function EnrolledClientsSection({
   // Whether a listing has ever landed, which is what tells the polling first
   // load from a re-list.
   const listedOnceRef = useRef(false)
+  // The connected agents each dialog's withdrawn keys signed grants for.
+  const disconnectAgents = useAgentReconnect({
+    session,
+    withdrawn: disconnectTarget
+      ? {
+          key: disconnectTarget.signingKeyMultibase,
+          keys: () => revokedClientWithdrawnKeys({ client: disconnectTarget })
+        }
+      : null
+  })
+  const forgetAgents = useAgentReconnect({
+    session,
+    withdrawn: forgetOpen
+      ? {
+          key: 'this-browser',
+          keys: () => forgottenClientWithdrawnKeys({ session })
+        }
+      : null
+  })
 
   // The initial load polls: right after signup the did:webvh provisioning
   // (and the pointer promotion `canManageAccountClients` gates on) still runs
@@ -269,10 +306,13 @@ export function EnrolledClientsSection({
     setDisconnectError(false)
     setCascadeWarning(false)
     try {
-      const outcome = await disconnectAccountClient({
-        session,
-        client: target
-      })
+      // The replaced generation delegation and the revoked key left agent
+      // grants to restore: the ticked agents' by a fresh consent, and the
+      // rest the inbox pass renews in place. The unticked ones are marked
+      // declined first. The reconnect runs past the dialog.
+      const outcome = await disconnectAgents.runCeremony(() =>
+        disconnectAccountClient({ session, client: target })
+      )
       setDisconnectTarget(null)
       // A partial collection fan-out is a resumable success, never an error:
       // the wallet IS disconnected (the document edit landed first), and the
@@ -323,9 +363,19 @@ export function EnrolledClientsSection({
     setForgetting(true)
     setForgetErrorKey(null)
     try {
+      // The transition ends this session, so the ticked agents are not
+      // restored here. The unticked ones are marked declined once the
+      // ceremony's up-front refusals have passed and before its first write,
+      // since the session's keys leave the document with it and a refused
+      // run must leave no marker. The ordinary forget (the `ends` mode)
+      // declines nothing.
+      const choice = forgetLastClient ? forgetAgents.confirm() : null
       const outcome = await forgetThisBrowser({
         session,
-        lastClient: forgetLastClient
+        lastClient: forgetLastClient,
+        ...(choice
+          ? { beforeFirstWrite: () => forgetAgents.decline(choice) }
+          : {})
       })
       if (outcome.wipeFailed.length > 0) {
         // Residue is self-healing: a surviving replica, or an unlock
@@ -613,6 +663,8 @@ export function EnrolledClientsSection({
         </Typography>
       )}
 
+      <AgentReconnectNotice state={disconnectAgents.state} />
+
       {cascadeWarning && (
         <Alert severity="warning">
           {t(
@@ -772,6 +824,13 @@ export function EnrolledClientsSection({
               {t('settings.clients.lastClientTransitionHint')}
             </DialogContentText>
           )}
+          <AgentReconnectList
+            agents={disconnectAgents.agents}
+            mode="tick"
+            isTicked={disconnectAgents.isTicked}
+            onToggle={disconnectAgents.toggle}
+            disabled={disconnecting}
+          />
           {disconnecting && (
             <Alert severity="info" sx={{ mt: 2 }}>
               {t('settings.clients.disconnectProgress')}
@@ -800,7 +859,7 @@ export function EnrolledClientsSection({
             variant="contained"
             color="error"
             loading={disconnecting}
-            disabled={registryRepairing}
+            disabled={registryRepairing || disconnectAgents.loading}
             onClick={() => void handleDisconnect()}
           >
             {t('settings.clients.disconnectConfirmAction')}
@@ -847,6 +906,13 @@ export function EnrolledClientsSection({
             <DialogContentText>
               {t('settings.forget.confirmCeiling')}
             </DialogContentText>
+            <AgentReconnectList
+              agents={forgetAgents.agents}
+              mode={forgetLastClient ? 'next-sign-in' : 'ends'}
+              isTicked={forgetAgents.isTicked}
+              onToggle={forgetAgents.toggle}
+              disabled={forgetting}
+            />
           </Stack>
           {forgetting && (
             <Alert severity="info" sx={{ mt: 2 }}>
@@ -878,7 +944,7 @@ export function EnrolledClientsSection({
             variant="contained"
             color="error"
             loading={forgetting}
-            disabled={registryRepairing}
+            disabled={registryRepairing || forgetAgents.loading}
             onClick={() => void handleForget()}
             data-testid="forget-this-browser-confirm"
           >

@@ -5,6 +5,12 @@
  * `processAppConnect`) and enforces Freewallet's stricter DID Auth rule -- a
  * `domain` is required whenever DID Authentication is requested (the shared
  * layer requires only a `challenge`).
+ *
+ * A connection request (an interaction-URL request naming the `#inbox`
+ * descriptor) is answered by the wallet's pairwise key toward the agent: the
+ * caller hands that signer in, and the response is signed with it over the
+ * VPR-root `challenge` with no `domain`. That proof answers no DID Auth
+ * query, so the DID Auth rule above does not reach it.
  */
 import {
   isDIDAuthRequested,
@@ -13,6 +19,7 @@ import {
 } from '@interop/wallet-request'
 import type {
   IVPRDetails as ISpecVPRDetails,
+  PresentationSigner,
   WalletResponse
 } from '@interop/wallet-request'
 import type { Session } from '@/types/auth'
@@ -20,6 +27,7 @@ import { queriesOf } from './classify'
 import { presentationSignerFor } from './composeVP'
 import { processAppConnect } from './appConnect'
 import { processZcaps } from './processZcaps'
+import { namesInboxTarget } from './connectionRequest'
 import type { IVerifiableCredential, IVPRDetails, IZcap } from './types'
 
 export { domainMatchesOrigin } from '@interop/wallet-request'
@@ -52,6 +60,12 @@ export { domainMatchesOrigin } from '@interop/wallet-request'
  *   provisioning. A throw ends the request with nothing provisioned.
  * @param [options.onEscrowed] {Function}   called with the grant ids each
  *   landed escrow covers (see `processZcaps`)
+ * @param [options.pairwiseSigner] {PresentationSigner}   a connection
+ *   request's pairwise did:key and its signer, which marks the standalone
+ *   request as a connection request: the grants then resolve as one, and
+ *   the response is signed by this key over the VPR-root `challenge`, with
+ *   no `domain`. A request naming `#inbox` without it, or carrying it
+ *   without naming `#inbox`, is refused before anything is delegated.
  * @returns {Promise<WalletResponse>} The response VP, or `{}` when there is
  *   nothing to send.
  */
@@ -63,7 +77,8 @@ export async function processRequest({
   expectedAppKeyDid,
   delegateStandaloneZcaps = false,
   beforeProvision,
-  onEscrowed
+  onEscrowed,
+  pairwiseSigner
 }: {
   request: IVPRDetails
   session: Session
@@ -77,6 +92,7 @@ export async function processRequest({
     appConnect?: { firstRun: boolean; subjectDid: string; appKey: string }
   }) => Promise<void>
   onEscrowed?: (options: { zcapIds: string[] }) => void
+  pairwiseSigner?: PresentationSigner
 }): Promise<WalletResponse> {
   const queries = queriesOf(request)
   const didAuth = isDIDAuthRequested({ queries })
@@ -95,9 +111,17 @@ export async function processRequest({
   // `processAppConnect` (pinned to the client did:key, whatever the request
   // accepts). Resolve the dispatched signer only when it will actually be
   // used, so App Connect avoids a redundant KMS lookup.
-  const presentationSigner = appConnectRequested
-    ? { signer: session.profile.keyAgent!.getSigner(), holder: session.user.id }
-    : await presentationSignerFor({ session, queries })
+  let presentationSigner: PresentationSigner
+  if (pairwiseSigner) {
+    presentationSigner = pairwiseSigner
+  } else if (appConnectRequested) {
+    presentationSigner = {
+      signer: session.profile.keyAgent!.getSigner(),
+      holder: session.user.id
+    }
+  } else {
+    presentationSigner = await presentationSignerFor({ session, queries })
+  }
 
   // Freewallet widens `IVPRDetails.query` with the app-side `AppConnectQuery`;
   // the shared pipeline reads the query set structurally.
@@ -107,14 +131,28 @@ export async function processRequest({
     presentationSigner,
     selectedVCs,
     credentialRequestOrigin,
+    // The connection request's response proof: the pairwise key over the
+    // VPR-root `challenge`, with no `domain`.
+    signWithoutDidAuth: pairwiseSigner !== undefined,
     processors: {
       // The shared pipeline delegates no standalone capability query when
       // this processor is absent.
       ...(delegateStandaloneZcaps && {
-        processZcaps: ({ zcapRequests }) =>
-          processZcaps({
+        processZcaps: async ({ zcapRequests }) => {
+          // The pairwise signer marks a connection request. It and the
+          // `#inbox` descriptor travel together, so a request cannot take
+          // one without the other.
+          const connection = pairwiseSigner !== undefined
+          if (namesInboxTarget({ zcapRequests }) !== connection) {
+            throw new Error(
+              'A connection request is answered by its pairwise signer, ' +
+                'and only a connection request is.'
+            )
+          }
+          return processZcaps({
             zcapRequests,
             session,
+            requestKind: connection ? 'connection-request' : 'interaction-url',
             // The self-declared `agent` name, stamped on each collection
             // the grant provisions. Classification already validated it, so
             // this read does not throw.
@@ -122,6 +160,7 @@ export async function processRequest({
             ...(beforeProvision && { beforeProvision }),
             ...(onEscrowed && { onEscrowed })
           })
+        }
       }),
       // The shared layer validates the `AppConnectQuery` (its `app.appUrl`
       // against the attested origin) and hands the validated request in, so
