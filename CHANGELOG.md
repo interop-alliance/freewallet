@@ -194,6 +194,10 @@
   before any POST, so a torn revoke is not undone by the next login's
   renewal. Retirement empties both too, and keeps `seed`, `seedTag`, and
   `declined`.
+- The outbox push drops a channel record the agent's server refused (401,
+  403, or 404) and keeps the queued envelopes, and the agent's replacement
+  channel is stored whatever its `expires`. An entry with no channel no
+  longer grades the pass `partial`.
 - Invariant `every-party-with-authority-has-a-connection-entry` is renamed
   `every-grantee-of-the-wallet-has-a-connection-entry`, and covers only
   grants the wallet delegated. A subscriber holding a child of an agent's

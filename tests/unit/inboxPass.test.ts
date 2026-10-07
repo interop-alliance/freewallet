@@ -315,16 +315,22 @@ async function connect({
  * @param options.directory {object}
  * @param options.pairwiseDid {string}
  * @param [options.did] {string}
+ * @param [options.id] {string}   the channel capability's id
+ * @param [options.expires] {string}
  * @returns {Promise<void>}
  */
 async function storeChannel({
   directory,
   pairwiseDid,
-  did = AGENT_DID
+  did = AGENT_DID,
+  id = `${did}-channel`,
+  expires
 }: {
   directory: ReturnType<typeof memoryConnectionsStore>
   pairwiseDid: string
   did?: string
+  id?: string
+  expires?: string
 }): Promise<void> {
   await recordReceivedGrants({
     store: directory.store,
@@ -334,7 +340,11 @@ async function storeChannel({
     spaceUrl: SPACE_URL,
     grants: [
       {
-        zcap: channelZcap({ id: `${did}-channel`, controller: pairwiseDid }),
+        zcap: channelZcap({
+          id,
+          controller: pairwiseDid,
+          ...(expires !== undefined ? { expires } : {})
+        }),
         grantKind: 'inbox'
       }
     ],
@@ -1167,21 +1177,25 @@ describe('the outbox', () => {
     expect((await entryOf(AGENT_DID))?.outbox).toEqual([])
   })
 
-  it('stops pushing on a 401 or 403 and keeps the items', async () => {
-    const { directory, deps, entryOf, pass } = fixture()
-    const pairwise = await pairwiseSeed()
-    await connect({ directory, pairwise })
-    await storeChannel({ directory, pairwiseDid: pairwise.did })
-    deps.push.mockRejectedValue(
-      Object.assign(new Error('Forbidden'), { status: 403 })
-    )
+  it('stops pushing on a 401 or 403, drops the channel, and keeps the items', async () => {
+    for (const status of [401, 403]) {
+      const { directory, deps, entryOf, pass } = fixture()
+      const pairwise = await pairwiseSeed()
+      await connect({ directory, pairwise })
+      await storeChannel({ directory, pairwiseDid: pairwise.did })
+      deps.push.mockRejectedValue(
+        Object.assign(new Error('Refused'), { status })
+      )
 
-    const { outcome } = await pass()
+      const { outcome } = await pass()
 
-    expect(outcome.pushFailures).toEqual([
-      expect.objectContaining({ reason: 'channel-refused' })
-    ])
-    expect((await entryOf(AGENT_DID))?.outbox).toHaveLength(1)
+      expect(outcome.pushFailures).toEqual([
+        expect.objectContaining({ reason: 'channel-refused' })
+      ])
+      const entry = await entryOf(AGENT_DID)
+      expect(entry?.outbox).toHaveLength(1)
+      expect(entry?.grantsReceived).toEqual([])
+    }
   })
 
   it('stops pushing on a 404, which a WAS host answers a denied capability with', async () => {
@@ -1209,8 +1223,107 @@ describe('the outbox', () => {
     expect(deps.push).toHaveBeenCalledTimes(1)
     const entry = await entryOf(AGENT_DID)
     expect(entry?.outbox).toHaveLength(1)
-    // The refused channel record stays until a write that drops it exists.
+    // The refused channel record is dropped, and the queue waits.
+    expect(entry?.grantsReceived).toEqual([])
+  })
+
+  it('pushes nothing to an entry whose channel was dropped, and does not grade the pass partial', async () => {
+    const { directory, deps, entryOf, pass } = fixture()
+    const pairwise = await pairwiseSeed()
+    await connect({ directory, pairwise })
+    await storeChannel({ directory, pairwiseDid: pairwise.did })
+    deps.push.mockRejectedValueOnce(
+      Object.assign(new Error('Not Found'), { status: 404 })
+    )
+    await pass()
+
+    const { entries, outcome } = await pass()
+
+    expect(deps.push).toHaveBeenCalledTimes(1)
+    expect(outcome.pushFailures).toEqual([
+      { agentDid: AGENT_DID, agentName: 'News agent', reason: 'no-channel' }
+    ])
+    expect(entries[1]).toMatchObject({
+      outcome: 'noop',
+      detail: { reason: 'no-channel' }
+    })
+    expect((await entryOf(AGENT_DID))?.outbox).toHaveLength(1)
+  })
+
+  it('stores a replacement channel expiring before the dropped one, and pushes the queue through it', async () => {
+    const { directory, deps, entryOf, pass } = fixture()
+    const pairwise = await pairwiseSeed()
+    await connect({ directory, pairwise })
+    await storeChannel({
+      directory,
+      pairwiseDid: pairwise.did,
+      expires: inDays(200)
+    })
+    deps.push.mockRejectedValueOnce(
+      Object.assign(new Error('Forbidden'), { status: 403 })
+    )
+    await pass()
+    expect((await entryOf(AGENT_DID))?.grantsReceived).toEqual([])
+
+    // The agent's next invitation hands over a channel that expires sooner.
+    await storeChannel({
+      directory,
+      pairwiseDid: pairwise.did,
+      id: `${AGENT_DID}-channel-2`,
+      expires: inDays(30)
+    })
+    expect(
+      (await entryOf(AGENT_DID))?.grantsReceived.map(record => record.zcap.id)
+    ).toEqual([`${AGENT_DID}-channel-2`])
+
+    const { entries, outcome } = await pass()
+
+    expect(deps.push).toHaveBeenCalledTimes(2)
+    expect(deps.push.mock.calls[1]![0].channel).toMatchObject({
+      id: `${AGENT_DID}-channel-2`
+    })
+    expect(outcome.pushFailures).toEqual([])
+    expect(entries[1]).toMatchObject({
+      outcome: 'clean',
+      detail: { pushed: 1 }
+    })
+    expect((await entryOf(AGENT_DID))?.outbox).toEqual([])
+  })
+
+  it('records the refusal and keeps the channel when its drop write fails', async () => {
+    const capture = captureSink()
+    stopCapture = addSink(capture.sink)
+    const { directory, deps, entryOf, pass } = fixture()
+    const pairwise = await pairwiseSeed()
+    await connect({ directory, pairwise })
+    await storeChannel({ directory, pairwiseDid: pairwise.did })
+    deps.push.mockImplementationOnce(async () => {
+      // The next directory write is the drop.
+      vi.spyOn(directory.store, 'put').mockRejectedValueOnce(
+        Object.assign(new Error('offline'), { name: 'NetworkError' })
+      )
+      throw Object.assign(new Error('Forbidden'), { status: 403 })
+    })
+
+    const { entries, outcome } = await pass()
+
+    expect(outcome.pushFailures).toEqual([
+      expect.objectContaining({ reason: 'channel-refused' })
+    ])
+    expect(entries[1]).toMatchObject({
+      outcome: 'partial',
+      detail: { pushFailed: 1 }
+    })
+    const entry = await entryOf(AGENT_DID)
     expect(entry?.grantsReceived).toHaveLength(1)
+    expect(entry?.outbox).toHaveLength(1)
+    expect(capture.events).toContainEqual(
+      expect.objectContaining({
+        ns: 'fw:inbox',
+        level: 'warn',
+        msg: 'Could not drop a refused channel record'
+      })
+    )
   })
 
   it('discards unsent an item whose capabilities have all expired', async () => {

@@ -656,9 +656,23 @@ a session with no Space run none. Each pass has three steps, in order.
    pass. A delivered item is removed. A network failure or a 5xx keeps it
    for the next pass. A 401, 403, or 404 stops the pushes to that entry for
    the pass, since a WAS host answers every capability denial with one of
-   them. The refused channel record stays on the entry, so the next pass
-   tries it again until it lapses or the agent's next invitation replaces
-   it.
+   them. The refused channel record is then dropped from the entry
+   (`dropReceivedGrant`), and the queued envelopes stay on the `outbox`.
+   The next pass pushes nothing to an entry with no channel. It lists the
+   entry's waiting items as `no-channel` push failures, and they do not
+   grade the pass `partial`. The agent's next invitation stores the
+   replacement channel whatever its `expires`, since the dropped record is
+   gone, and the pass after that pushes the queue.
+
+   A refusal that was not the agent's doing drops the channel too: an agent
+   server whose clock skew answers 401, or a 404 during its redeploy. Only
+   the agent's next invitation brings the channel back. Until then the
+   renewals queue undelivered, and at worst the agent's grants lapse at
+   their own `expires` and the agent invites again. That cost is accepted.
+   A 401, 403, or 404 from the agent's own host is that host's answer about
+   the capability. Keeping the record would cost one wasted request per pass
+   for the channel's whole life, and a `partial` grade on every pass that
+   would hide a real one.
 
 The renewal's pivot is `recordRenewedGrants`. Inside one compare-and-swap
 it re-reads the entry, refuses a retired one, and checks that a live
@@ -672,7 +686,8 @@ and is pruned once past its `expires` plus the revocation clock skew
 (`pruneSupersededGrants`). One Grant activity is written per renewed entry
 per pass, so History shows every renewal. A listing, read, write, or push
 failure grades the pass `partial`, which does not spend an encounter's
-once-per-session budget. An absent or untrusted inbox grades it `refused`.
+once-per-session budget. An entry waiting on a channel is not such a
+failure. An absent or untrusted inbox grades it `refused`.
 Each push is a direct browser request to the agent's host. So every
 connected agent learns the owner's IP address, user agent, and login
 cadence, and its server must serve cross-origin requests on its inbox.

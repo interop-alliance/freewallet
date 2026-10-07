@@ -24,6 +24,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { addSink, captureSink } from '@interop/logger'
 import {
   connectionResourceId,
+  dropReceivedGrant,
   readConnections,
   recordGrants,
   recordReceivedGrants,
@@ -700,6 +701,50 @@ describe('lapsedAgentOffers', () => {
     expect(offers.map(offer => offer.did).sort()).toEqual(
       [AGENT_DID, THIRD_AGENT_DID].sort()
     )
+  })
+
+  it('stops offering a lapsed agent whose refused channel was dropped, until a new channel is stored', async () => {
+    const { pairwiseDid } = await connectAgent({
+      did: AGENT_DID,
+      signer: 'client',
+      expires: new Date(Date.now() - DAY_MS).toISOString()
+    })
+    const { session } = fakeSession()
+    expect(
+      (await lapsedAgentOffers({ session })).map(offer => offer.did)
+    ).toEqual([AGENT_DID])
+
+    // The push's channel refusal drops the record.
+    await dropReceivedGrant({
+      store: directory.store,
+      hmacKey: HMAC_KEY,
+      did: AGENT_DID,
+      zcapId: `${AGENT_DID}-channel`
+    })
+    expect(await lapsedAgentOffers({ session })).toEqual([])
+
+    // The agent's next invitation stores a replacement channel.
+    await recordReceivedGrants({
+      store: directory.store,
+      hmacKey: HMAC_KEY,
+      did: AGENT_DID,
+      pairwiseDid,
+      spaceUrl: SPACE_URL,
+      grants: [
+        {
+          zcap: channelZcap({
+            id: `${AGENT_DID}-channel-2`,
+            controller: pairwiseDid,
+            expires: inDays(30)
+          }),
+          grantKind: 'inbox'
+        }
+      ],
+      channelMaxLifetimeMs: 365 * DAY_MS
+    })
+    expect(
+      (await lapsedAgentOffers({ session })).map(offer => offer.did)
+    ).toEqual([AGENT_DID])
   })
 
   it('offers nothing when the account document cannot be read', async () => {

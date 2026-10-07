@@ -45,13 +45,23 @@
  * item is removed. A network failure or a 5xx keeps it for the next pass. An
  * authorization refusal (401 or 403) stops the pushes to that entry for the
  * pass, and so does a 404, since a WAS host answers every capability denial
- * (revoked, expired, unauthorized) with one. The refused channel record
- * stays on the entry: no directory write
- * that drops one received record exists yet, so the next pass tries the
- * channel again until it lapses or the agent's next invitation replaces it.
- * Pushes
- * run in parallel up to a limit, under one time budget per pass. Superseded
- * grant records and outbox items no push can deliver are pruned last.
+ * (revoked, expired, unauthorized) with one. The refused channel record is
+ * dropped from the entry (`dropReceivedGrant`), and the queued envelopes
+ * stay on the outbox. The next pass pushes nothing to an entry with no
+ * channel, and that entry's waiting items do not grade the pass `partial`.
+ * The agent's next invitation stores the replacement channel whatever its
+ * `expires`, since the dropped record is gone, and the pass after that
+ * pushes the queue. A refusal that was not the agent's doing (an agent
+ * server whose clock skew answers 401, a 404 during its redeploy) drops the
+ * channel too, and only the agent's next invitation brings it back. Until
+ * then the renewals queue undelivered, and at worst the agent's grants lapse
+ * at their own `expires` and the agent re-invites. That cost is accepted: a
+ * 401, 403, or 404 from the agent's own host is that host's answer about the
+ * capability, and keeping the record cost one wasted request per pass for
+ * the channel's whole life, plus a `partial` grade on every pass that hid a
+ * real one. Pushes run in parallel up to a limit, under one time budget per
+ * pass. Superseded grant records and outbox items no push can deliver are
+ * pruned last.
  *
  * Grading. A listing, read, write, or push failure is `partial`, which does
  * not spend an encounter's once-per-session budget. So is a renewal skipped
@@ -87,6 +97,7 @@ import {
   normalizedActions,
   parseConnectionEntry,
   pruneSupersededGrants,
+  dropReceivedGrant,
   receivedGrants,
   recordReceivedGrants,
   recordRenewedGrants,
@@ -173,11 +184,13 @@ type InboxRefusalReason =
  *
  * - `channel-refused` -- the agent's server answered 401, 403, or 404: the
  *   channel capability is expired or revoked. A WAS host answers every
- *   capability denial with a 404. Pushes to the entry stop.
+ *   capability denial with a 404. Pushes to the entry stop, and the channel
+ *   record is dropped from the entry. The items wait for the agent's next
+ *   invitation.
  * - `network` -- no response, or a 5xx. The item waits for the next pass.
  * - `rejected` -- any other refusal. The item waits for the next pass.
  * - `no-channel` -- the entry holds no live channel. The item waits for the
- *   agent's next invitation.
+ *   agent's next invitation. It is listed, and is not a failure of the pass.
  * - `seed-tag` -- the entry's seed fails its tag, so no pairwise key signs.
  * - `timed-out` -- the pass's push time budget ran out first.
  */
@@ -1411,7 +1424,10 @@ export async function drainOutboxes({
   const deadline = Date.now() + INBOX_PUSH_TIME_BUDGET_MS
 
   /**
-   * Records one push failure in the outcome.
+   * Records one push failure in the outcome. Every reason but `no-channel`
+   * also counts toward the pass's failures: a channel-less entry waits on
+   * the agent's next invitation, which no later pass of this wallet can
+   * bring about.
    *
    * @param options {object}
    * @param options.entry {ConnectionEntry}
@@ -1425,7 +1441,9 @@ export async function drainOutboxes({
     entry: ConnectionEntry
     reason: InboxPushFailureReason
   }): void {
-    failed += 1
+    if (reason !== 'no-channel') {
+      failed += 1
+    }
     outcome.pushFailures.push({
       agentDid: entry.id!,
       ...(entry.name !== undefined ? { agentName: entry.name } : {}),
@@ -1515,6 +1533,23 @@ export async function drainOutboxes({
             "An agent's server refused its channel capability; pushes to it stop",
             { did: entry.id, status }
           )
+          try {
+            // The queued envelopes stay on the outbox for the agent's next
+            // invitation.
+            const written = await dropReceivedGrant({
+              store: directory.store,
+              hmacKey: directory.hmacKey,
+              did: entry.id!,
+              zcapId: channel.zcap.id
+            })
+            directory.dirty.add(written.resourceId)
+          } catch (err) {
+            // The next pass pushes through it again, and drops it again.
+            log.warn('Could not drop a refused channel record', {
+              did: entry.id,
+              err
+            })
+          }
           failure({ entry, reason: 'channel-refused' })
           return
         }
