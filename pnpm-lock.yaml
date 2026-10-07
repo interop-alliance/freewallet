@@ -63,8 +63,8 @@ importers:
         specifier: ^0.35.1
         version: 0.35.1
       '@interop/vc':
-        specifier: ^11.0.12
-        version: 11.0.12
+        specifier: ^11.1.0
+        version: 11.1.0
       '@interop/vc-display':
         specifier: ^0.1.0
         version: 0.1.0
@@ -81,8 +81,8 @@ importers:
         specifier: link:../wallet-core
         version: link:../wallet-core
       '@interop/wallet-request':
-        specifier: link:../wallet-request
-        version: link:../wallet-request
+        specifier: ^0.5.1
+        version: 0.5.1
       '@interop/was-client':
         specifier: ^0.93.1
         version: 0.93.1(@interop/jsonld-signatures@11.8.6)
@@ -769,8 +769,8 @@ packages:
     resolution: {integrity: sha512-+naZ6vsKlB/G7kjD6bDKnxNDEJ2stRPi7Hq/OiPq12y+0FhiwPbNu8+Spx56isx6SfgBcXntum2fx4Q4vj86ag==}
     engines: {node: '>=24.0'}
 
-  '@interop/vc@11.0.12':
-    resolution: {integrity: sha512-jAjzJa0kMFGW2vbweT+d9Pdn0oPAhIIUgv20RY2dOHYkwdXC72bzEbBxU2Sik0HClgBwrS8nxPlwt5AZXM1k6Q==}
+  '@interop/vc@11.1.0':
+    resolution: {integrity: sha512-2inkscRr4bh/3mFchnDkLs2zJXKQDCTqBvzK601/jvT4WuVVhyL6fYiPqbnEN7gY6id8Us52Edpdl/QWZGkYcw==}
     engines: {node: '>=24.0'}
 
   '@interop/verifier-core@3.7.0':
@@ -791,6 +791,10 @@ packages:
     peerDependencies:
       '@interop/wallet-core': '>=0.80.0 <1.0.0'
       '@interop/was-client': '>=0.80.0 <1.0.0'
+
+  '@interop/wallet-request@0.5.1':
+    resolution: {integrity: sha512-lun3qfXTr1xGf9uMYKL/dsBmOYf/JczNUIhULR+q8NtplGLxO6A+q1lMF2FeANM5qRyyNCBD6/FXqnisGL4VXA==}
+    engines: {node: '>=24.0'}
 
   '@interop/was-client@0.93.1':
     resolution: {integrity: sha512-k7xAy3VXf7Oln615PeT7RKN+uJ3JahNuUmK6/aal95lTnM0z63epY1yispOTX+E9IxR2oVaOX1HG0JzY5DDwqw==}
@@ -4535,6 +4539,20 @@ snapshots:
     transitivePeerDependencies:
       - react-native-get-random-values
 
+  '@interop/ed25519-signature@7.2.3(@interop/jsonld-signatures@11.8.7)':
+    dependencies:
+      '@interop/data-integrity-core': 8.8.0
+      '@interop/data-integrity-proof': 3.4.7
+      '@interop/ed25519-verification-key': 8.2.1
+      '@interop/jsonld': 9.0.3
+      canonicalize: 3.0.0
+      ed25519-signature-2020-context: 1.1.0
+      rdf-canonize: 5.0.0
+    optionalDependencies:
+      '@interop/jsonld-signatures': 11.8.7
+    transitivePeerDependencies:
+      - react-native-get-random-values
+
   '@interop/ed25519-verification-key@8.2.1':
     dependencies:
       '@interop/data-integrity-core': 8.8.0
@@ -4723,13 +4741,13 @@ snapshots:
       '@digitalbazaar/bitstring': 3.1.0
       '@digitalbazaar/credentials-context': 3.2.0
       '@digitalbazaar/vc-bitstring-status-list-context': 1.1.0
-      '@interop/vc': 11.0.12
+      '@interop/vc': 11.1.0
 
   '@interop/vc-display@0.1.0':
     dependencies:
       '@interop/data-integrity-core': 8.8.0
 
-  '@interop/vc@11.0.12':
+  '@interop/vc@11.1.0':
     dependencies:
       '@digitalcredentials/credentials-v2-context': 1.0.0
       '@interop/data-integrity-core': 8.8.0
@@ -4750,7 +4768,7 @@ snapshots:
       '@interop/ed25519-verification-key': 8.2.1
       '@interop/jsonld-signatures': 11.8.6
       '@interop/security-document-loader': 10.1.4
-      '@interop/vc': 11.0.12
+      '@interop/vc': 11.1.0
       '@interop/vc-bitstring-status-list': 3.2.0
       ajv: 8.20.0
       ajv-formats: 3.0.1(ajv@8.20.0)
@@ -4785,6 +4803,20 @@ snapshots:
       - bare-abort-controller
       - bare-buffer
       - react-native-b4a
+
+  '@interop/wallet-request@0.5.1':
+    dependencies:
+      '@interop/capability-agent': 0.2.1
+      '@interop/data-integrity-core': 8.8.0
+      '@interop/data-integrity-proof': 3.4.7
+      '@interop/ed25519-signature': 7.2.3(@interop/jsonld-signatures@11.8.7)
+      '@interop/jsonld-signatures': 11.8.7
+      '@interop/security-document-loader': 10.1.4
+      '@interop/vc': 11.1.0
+      '@scure/base': 2.4.0
+      byoe-context: 0.5.0
+    transitivePeerDependencies:
+      - react-native-get-random-values
 
   '@interop/was-client@0.93.1(@interop/jsonld-signatures@11.8.6)':
     dependencies:

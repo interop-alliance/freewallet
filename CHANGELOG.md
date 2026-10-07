@@ -205,10 +205,10 @@
 - The authorization profile's subtree marker is not shipped yet. Every grant
   target, the inbox grant's included, is the bare container URL for now,
   which the current server reads as covering the container's subtree.
-- `@interop/wallet-request` is consumed through `link:../wallet-request`
-  (0.5.1, for the request proof check and the response signed with no DID
-  Auth query), and `@interop/wallet-core` 0.103.0 through
-  `link:../wallet-core`.
+- `@interop/wallet-request` moves to `^0.5.1` from the registry (the
+  request proof check, the response signed with no DID Auth query, and
+  `composeVp`'s `sign` option, which the `composeVP` wrapper passes).
+  `@interop/wallet-core` 0.103.0 is consumed through `link:../wallet-core`.
 
 ### Fixed
 

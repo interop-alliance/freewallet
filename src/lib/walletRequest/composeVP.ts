@@ -364,7 +364,10 @@ export async function presentationSignerFor({
  *   to share (empty for a DID-Auth-only response).
  * @param [options.challenge] {string} - Required when DID Auth is requested.
  * @param [options.domain] {string} - Required when DID Auth is requested.
- * @param options.didAuthRequested {boolean} - Whether to sign the VP.
+ * @param options.didAuthRequested {boolean} - Whether to sign the VP. The
+ *   shared `composeVp` names this option `sign`; the wrapper keeps the
+ *   name `didAuthRequested` since the challenge-and-domain guard it
+ *   enforces is a DID Auth rule about what the request asked for.
  * @param [options.cryptosuite] {string} - Negotiated cryptosuite; falls back to
  *   the wallet default (Ed25519Signature2020) when absent.
  * @param [options.zcaps] {IZcap[]} - Delegated capabilities to embed as the
