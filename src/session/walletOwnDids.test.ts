@@ -96,6 +96,12 @@ function logEntry({
   return {
     state: {
       id: ACCOUNT_DID,
+      verificationMethod: [...clients, ...ladders].map(multibase => ({
+        id: `${ACCOUNT_DID}#${multibase}`,
+        type: 'Multikey',
+        controller: ACCOUNT_DID,
+        publicKeyMultibase: multibase
+      })),
       capabilityInvocation: clientVms,
       capabilityDelegation: [...clientVms, ...ladderVms],
       ...(annexDid !== undefined && {

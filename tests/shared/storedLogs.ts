@@ -625,8 +625,9 @@ export async function accountLogRemovalIndex({
  * Where a stored resource log's head entry anchors: the account log version
  * its first proof names, and the key that signed it. A resource log entry's
  * proof names its signer as a versioned verification-method DID URL,
- * `<account did>?versionId=<account versionId>#<key multibase>`.
- * `anchorIndex` is that versionId's position in the account log, or `-1`
+ * `<account did>?versionId=<account versionId>#<fragment>`, and this stack
+ * mints the fragment as the signing key's multibase, so `signerKey` is that
+ * fragment. `anchorIndex` is that versionId's position in the account log, or `-1`
  * when the account log carries no such version.
  *
  * @param options {object}
@@ -666,7 +667,7 @@ function headAnchorOf({
       anchorVersionId === undefined
         ? -1
         : accountVersionIds.indexOf(anchorVersionId),
-    signerKey: parsed?.keyMultibase
+    signerKey: parsed?.fragment
   }
 }
 

@@ -62,6 +62,12 @@ function logEntry({ clients }: { clients: string[] }): {
   return {
     state: {
       id: ACCOUNT_DID,
+      verificationMethod: clients.map(multibase => ({
+        id: `${ACCOUNT_DID}#${multibase}`,
+        type: 'Multikey',
+        controller: ACCOUNT_DID,
+        publicKeyMultibase: multibase
+      })),
       capabilityInvocation: clients.map(
         multibase => `${ACCOUNT_DID}#${multibase}`
       )
