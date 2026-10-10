@@ -37,6 +37,7 @@ import { isStorageUnreachable } from '@/lib/storageErrors'
 import { requestUnpartitionedIdb } from '@/lib/storageAccess'
 import { TransientLoginUnavailableError } from '@/session/transientLogin'
 import { transientRefusalKey } from '@/session/loginErrorKey'
+import { DeadAccountPointerError } from '@/session/deadAccountPointer'
 import { createLogger } from '@/lib/log'
 
 const log = createLogger('fw:session:popup')
@@ -47,7 +48,9 @@ const log = createLogger('fw:session:popup')
  * or from a post-login storage read. A storage-unreachable error gets its own
  * guidance key; a transient-login refusal gets the shared per-reason copy
  * (the popup reaches those now that a record-less visit routes transient);
- * anything else is logged and reported as a generic login failure.
+ * a dead account pointer gets the popup's own copy, which sends the user to
+ * the wallet app for the removal offer the popup does not render; anything
+ * else is logged and reported as a generic login failure.
  *
  * @param err {unknown}
  * @returns {string}   an i18n key the page passes to `t()`
@@ -62,6 +65,12 @@ export function mapPopupLoginError(err: unknown): string {
       err
     })
     return transientRefusalKey(err.reason)
+  }
+  if (err instanceof DeadAccountPointerError) {
+    log.warn('CHAPI login refused: the account the record names is gone', {
+      unlockSpaceId: err.unlockSpaceId
+    })
+    return 'chapi.accountGone'
   }
   log.error('CHAPI login failed', { err })
   return 'chapi.loginFailed'

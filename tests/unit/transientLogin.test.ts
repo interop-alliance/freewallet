@@ -103,11 +103,13 @@ vi.mock('@/session/unlockMethods', async importOriginal => ({
 }))
 
 import {
+  AccountLogMissingError,
   delegatedWebvhLogStore,
   ensureDidWebProjection,
   verifyAccountLog,
   webvhZcapClient
 } from '@interop/wallet-core/webvh'
+import { DeadAccountPointerError } from '@/session/deadAccountPointer'
 import { ID_COLLECTION } from '@interop/wallet-core/space'
 import {
   delegatedClientsDelegationSpaceId,
@@ -440,6 +442,29 @@ describe('transientSessionFromKeyringHit -- typed refusals', () => {
     }
     throw new Error('expected a refusal')
   }
+
+  it('refuses a dead account pointer with the credential in hand', async () => {
+    // The first-contact log read answers 404: the record decrypted, but the
+    // account it names is gone. With the credential threaded in, the
+    // refusal carries this credential's own sign-in data removal, and the
+    // composition wrote nothing first.
+    primeHappyPath()
+    vi.mocked(verifyAccountLog).mockRejectedValue(new AccountLogMissingError())
+    const err = (await refusalFor(makeFound(), {
+      credential: CREDENTIAL
+    })) as DeadAccountPointerError
+    expect(err).toBeInstanceOf(DeadAccountPointerError)
+    expect(err.unlockSpaceId).toBe('unlock-space-1')
+    expect(err.accountDid).toBe(POINTER.did)
+    expect(enrollTransientClient).not.toHaveBeenCalled()
+  })
+
+  it('rethrows a missing account log unchanged with no credential in hand', async () => {
+    primeHappyPath()
+    const missing = new AccountLogMissingError()
+    vi.mocked(verifyAccountLog).mockRejectedValue(missing)
+    expect(await refusalFor(makeFound())).toBe(missing)
+  })
 
   it('treats a record without standing authority as an invariant bug', async () => {
     // A standing record is the only record a WAS signup produces, so a

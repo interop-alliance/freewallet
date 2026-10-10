@@ -1,4 +1,4 @@
-import Alert from '@mui/material/Alert'
+import Alert, { type AlertColor } from '@mui/material/Alert'
 import Box from '@mui/material/Box'
 import Button from '@mui/material/Button'
 import Card from '@mui/material/Card'
@@ -23,6 +23,8 @@ import type { SubmitEvent } from 'react'
 import { useEffect, useState } from 'react'
 import { loginWithPassphrase, loginWithPasskey } from '@/session/initSession'
 import { loginErrorKey } from '@/session/loginErrorKey'
+import { useDeadPointerRemoval } from '@/hooks/useDeadPointerRemoval'
+import { RemoveSignInDataButton } from '@/components/RemoveSignInDataButton'
 import { completeAppLogin } from '@/session/completeAppLogin'
 import { showToast } from '@/stores/toastStore'
 import type { ClientWebvhUpdateKeys } from '@interop/wallet-core/webvh'
@@ -61,6 +63,17 @@ const FORGETTABLE_ERROR_KEYS = new Set([
   'auth.errors.accountLogContinuity',
   'auth.errors.userKeyRosterContinuity'
 ])
+
+/**
+ * The login errors rendered in a severity other than `error`, and without
+ * the recover link: a forgotten browser is information, and a dead account
+ * pointer is a state the page offers a way out of. Every other key renders
+ * as an error beside the recover link.
+ */
+const ERROR_ALERT_SEVERITY: Record<string, AlertColor> = {
+  'auth.errors.browserForgotten': 'info',
+  'auth.errors.accountGone': 'warning'
+}
 
 export function LoginPage() {
   const { t } = useTranslation()
@@ -103,6 +116,9 @@ export function LoginPage() {
   // browser-scoped, so there is no per-account binding to get wrong).
   const [forgetState, setForgetState] = useState<boolean | null>(null)
   const [forgetBusy, setForgetBusy] = useState(false)
+  // The dead-pointer refusal's removal offer. Reset by every fresh login
+  // attempt, so the offer never sits beside an error it did not belong to.
+  const removal = useDeadPointerRemoval()
   const { copied: codeCopied, copy: copyCode } = useCopyToClipboard({
     onError: (err: unknown) => {
       log.error('Could not copy the connect code', { err })
@@ -131,6 +147,7 @@ export function LoginPage() {
     setIsSubmitting(true)
     setErrorKey(null)
     setForgetState(null)
+    removal.clear()
     setNotEnrolledPassphrase(null)
     // Hoisted out of the try: the torn-enrollment catch arm below offers the
     // connect-this-browser flow, which needs the passphrase that located the
@@ -192,6 +209,7 @@ export function LoginPage() {
     } catch (err) {
       const { key } = loginErrorKey({ err, label: 'Login' })
       setErrorKey(key)
+      removal.offerFrom(err)
       // A torn enrollment (the remembered path's own two-client state):
       // connecting this browser mints a fresh key set and redoes the wrap,
       // so offer that flow. A transient-login refusal never opens the card
@@ -342,6 +360,28 @@ export function LoginPage() {
   }
 
   /**
+   * The dead-pointer removal's outcome, as a toast: `null` is a failed
+   * removal, whose offer stays.
+   */
+  const handleSignInDataRemoved = (
+    outcome: { unlockSpaceDeleted: boolean } | null
+  ) => {
+    if (!outcome) {
+      showToast({ message: t('auth.accountGone.failed'), severity: 'error' })
+      return
+    }
+    setErrorKey(null)
+    showToast({
+      message: t(
+        outcome.unlockSpaceDeleted
+          ? 'auth.accountGone.removed'
+          : 'auth.accountGone.incomplete'
+      ),
+      severity: outcome.unlockSpaceDeleted ? 'success' : 'warning'
+    })
+  }
+
+  /**
    * Handles the "Log in with a Passkey" button. Runs the WebAuthn PRF
    * assertion via `loginWithPasskey`, then upgrades to a full session on a hit.
    */
@@ -352,6 +392,7 @@ export function LoginPage() {
     setIsPasskeySubmitting(true)
     setErrorKey(null)
     setForgetState(null)
+    removal.clear()
     setNotEnrolledPassphrase(null)
     try {
       const { session, userExists } = await loginWithPasskey(
@@ -384,6 +425,7 @@ export function LoginPage() {
         // enrollment only surfaces its message here; the passphrase handler
         // offers the flow itself.
         setErrorKey(loginErrorKey({ err, label: 'Passkey login' }).key)
+        removal.offerFrom(err)
       }
     } finally {
       setIsPasskeySubmitting(false)
@@ -519,20 +561,24 @@ export function LoginPage() {
                       }}
                     />
                   </Alert>
-                ) : errorKey === 'auth.errors.browserForgotten' ? (
-                  <Alert severity="info" sx={authStyles.userMessage}>
-                    {t(errorKey)}
-                  </Alert>
                 ) : errorKey ? (
-                  <Alert severity="error" sx={authStyles.userMessage}>
-                    {t(errorKey)}{' '}
-                    <Link
-                      component={RouterLink}
-                      to="/recover"
-                      underline="always"
-                    >
-                      {t('auth.login.recoverLink')}
-                    </Link>
+                  <Alert
+                    severity={ERROR_ALERT_SEVERITY[errorKey] ?? 'error'}
+                    sx={authStyles.userMessage}
+                  >
+                    {t(errorKey)}
+                    {ERROR_ALERT_SEVERITY[errorKey] === undefined && (
+                      <>
+                        {' '}
+                        <Link
+                          component={RouterLink}
+                          to="/recover"
+                          underline="always"
+                        >
+                          {t('auth.login.recoverLink')}
+                        </Link>
+                      </>
+                    )}
                   </Alert>
                 ) : (
                   bannerText && (
@@ -541,6 +587,12 @@ export function LoginPage() {
                     </Alert>
                   )
                 )}
+
+                <RemoveSignInDataButton
+                  removal={removal}
+                  onRemoved={handleSignInDataRemoved}
+                  sx={authStyles.actionButton}
+                />
 
                 {errorKey && FORGETTABLE_ERROR_KEYS.has(errorKey) && (
                   <Button

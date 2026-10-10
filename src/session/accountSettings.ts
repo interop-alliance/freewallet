@@ -128,6 +128,7 @@ import {
 import { joinEncounter } from '@/session/menders/encounter'
 import {
   invalidateVerifiedLog,
+  isAccountLogMissing,
   refreshVerifiedAccountLog,
   verifiedAccountLog
 } from '@/session/verifiedLog'
@@ -2304,7 +2305,7 @@ async function runAccountDeletion({
         doc = verified.doc
         logEntries = verified.log
       } catch (err) {
-        if ((err as Error).name === 'AccountLogMissingError') {
+        if (isAccountLogMissing(err)) {
           // The account log answers 404: this account is already gone (a
           // second tab, or a re-click after a (b5) whose 2xx was lost). The
           // remote half is finished, and the credential is already derived,

@@ -18,6 +18,7 @@ import {
   PendingResumeLogUnavailableError
 } from '@/session/pendingEnrollment'
 import { SelfEnrollmentSkewError } from '@/session/standingUnlock'
+import { DeadAccountPointerError } from '@/session/deadAccountPointer'
 import enLocale from '@/i18n/locales/en.json'
 import esLocale from '@/i18n/locales/es.json'
 
@@ -159,19 +160,40 @@ describe('loginErrorKey -- the pending-enrollment outcomes (FW-280)', () => {
     expect(outcome.key).toBe('auth.errors.selfEnrollmentSkew')
   })
 
+  it('maps the dead account pointer onto the account-gone copy', () => {
+    const outcome = loginErrorKey({
+      err: new DeadAccountPointerError({
+        unlockSpaceId: 'unlock-space-1',
+        accountDid: 'did:webvh:QmScid:was.example.test:space:space-1:id',
+        removeSignInData: async () => ({ unlockSpaceDeleted: true })
+      }),
+      label: 'Login'
+    })
+    expect(outcome).toEqual({ key: 'auth.errors.accountGone' })
+  })
+
   it('carries every new key in both locales', () => {
     const locales = [enLocale, esLocale] as Array<{
-      auth: { errors: Record<string, string> }
+      auth: {
+        errors: Record<string, string>
+        accountGone: Record<string, string>
+        recover: { errors: Record<string, string> }
+      }
     }>
     for (const locale of locales) {
       for (const key of [
         'pendingEnrollment',
         'pendingEnrollmentDiscarded',
         'pendingRecoveryResume',
-        'selfEnrollmentSkew'
+        'selfEnrollmentSkew',
+        'accountGone'
       ]) {
         expect(typeof locale.auth.errors[key]).toBe('string')
         expect(locale.auth.errors[key]!.length).toBeGreaterThan(0)
+      }
+      expect(locale.auth.recover.errors.accountGone).toBeTruthy()
+      for (const key of ['button', 'removed', 'incomplete', 'failed']) {
+        expect(locale.auth.accountGone[key]).toBeTruthy()
       }
     }
   })

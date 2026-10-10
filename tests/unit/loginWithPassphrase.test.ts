@@ -45,6 +45,13 @@ vi.mock('@/session/transientLogin', () => ({
   transientSessionFromKeyringHit: vi.fn()
 }))
 vi.mock('@/lib/kms', () => ({ ensureKeystore: vi.fn() }))
+// The remembered login's first-contact account-log read, with the WAS
+// server configured: resolved by default, and rejected with the 404 class
+// by the dead-pointer test.
+vi.mock('@interop/wallet-core/webvh', async importOriginal => ({
+  ...(await importOriginal<typeof import('@interop/wallet-core/webvh')>()),
+  verifyAccountLog: vi.fn(async () => ({}) as never)
+}))
 // A full factory: the remembered resume heal is the only consumer here,
 // and the real module drags in the whole establishment stack.
 vi.mock('@/session/credentialAnchoredGenesis', () => ({
@@ -106,6 +113,11 @@ import {
 import { transientSessionStores } from '@/session/persistence'
 import type { AccountPointer } from '@interop/wallet-core/keyring'
 import { loginWithPassphrase } from '@/session/initSession'
+import {
+  AccountLogMissingError,
+  verifyAccountLog
+} from '@interop/wallet-core/webvh'
+import { DeadAccountPointerError } from '@/session/deadAccountPointer'
 import { ensureKeystore } from '@/lib/kms'
 import { mintUserKey } from '@interop/wallet-core/keys'
 import { epochKeyIdFor } from '@interop/was-client/edv'
@@ -1065,6 +1077,35 @@ describe('loginWithPassphrase -- the popup session (FW-203)', () => {
     expect(await cache.readDescriptor({ collectionId: 'contacts' })).toEqual(
       descriptor
     )
+  })
+
+  it('refuses a remembered login whose account log is gone as a dead pointer', async () => {
+    // The unlock record decrypted and this browser holds the client key
+    // set, but the account log answers 404: the dead account pointer. The
+    // refusal lands at the first-contact read, before the forgotten-browser
+    // detector (which would stand down on the unreadable log) and before
+    // any session is built, and carries the credential's own removal.
+    state.wasUrl = 'https://was.example.test'
+    const clientSeed = randomSeed()
+    const controller = await didFromSeed(clientSeed)
+    vi.mocked(fetchKeyring).mockResolvedValue({
+      controller,
+      pointer: POINTER,
+      clientKeys: { clientSeed },
+      unlockSpaceId: 'unlock-space-test',
+      createdAt: new Date().toISOString()
+    })
+    vi.mocked(verifyAccountLog).mockRejectedValue(new AccountLogMissingError())
+
+    const err = await loginWithPassphrase({ passphrase: PASSPHRASE }).then(
+      () => undefined,
+      (refusal: unknown) => refusal
+    )
+
+    expect(err).toBeInstanceOf(DeadAccountPointerError)
+    expect((err as DeadAccountPointerError).accountDid).toBe(POINTER.did)
+    expect(assertClientStillEnrolled).not.toHaveBeenCalled()
+    expect(StorageManager.initStorageClients).not.toHaveBeenCalled()
   })
 
   it('keeps the popup caches persistent with no WAS server (local mode)', async () => {

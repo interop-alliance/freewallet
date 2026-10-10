@@ -93,7 +93,6 @@ import {
   type UserKey
 } from '@interop/wallet-core/keys'
 import {
-  deleteUnlockSpace,
   deriveUnlockIdentity,
   deriveUnlockSeed,
   ensureUnlockSpace,
@@ -122,7 +121,12 @@ import { currentAccountRecordSigners } from '@interop/wallet-core/clients'
 import { delegatedClientsDelegationSpaceId } from '@interop/wallet-core/clientAnnex'
 import type { ResourceLogPinStore } from '@interop/vh-resource-log'
 import { isPreconditionFailed, isStorageUnreachable } from '@/lib/storageErrors'
-import { isResourceLogContinuityError } from '@/session/verifiedLog'
+import {
+  isAccountLogMissing,
+  isResourceLogContinuityError
+} from '@/session/verifiedLog'
+import { retireUnlockIdentity } from '@/session/retireUnlockIdentity'
+import { deadAccountPointerError } from '@/session/deadAccountPointer'
 import {
   unwrapRecordEnvelope,
   wrapRecordEnvelope
@@ -130,7 +134,6 @@ import {
 import {
   deleteClientKeyRecord,
   deleteKeyringCache,
-  deleteUnlockLocalState,
   loadClientKeyRecord,
   loadKeyringCache,
   saveClientKeyRecord,
@@ -872,8 +875,11 @@ async function unwrapStoredKeyringRecord({
  * Failure classification mirrors the recovery flow's: an unreachable storage
  * server rethrows unchanged (could-not-check must not read as forged), and so
  * does an account-log continuity refusal (its own surface; a `rollback` may
- * be replication lag). Everything else refuses as
- * `KeyringRecordForgedError`.
+ * be replication lag). An account log answering 404 is the dead account
+ * pointer, not a forged record: with the credential's unlock identity in
+ * hand it refuses as `DeadAccountPointerError`, carrying the credential's
+ * own sign-in data removal, and without one it rethrows unchanged.
+ * Everything else refuses as `KeyringRecordForgedError`.
  *
  * @param options {object}
  * @param options.record {unknown}   the stored record, proof included
@@ -883,18 +889,26 @@ async function unwrapStoredKeyringRecord({
  * @param options.accountLogPinStore {ResourceLogPinStore}   the chain-head
  *   pin store the account-log read rides: the login's own, so the reads
  *   that follow this settlement are checked against the head it saw
+ * @param [options.unlock] {UnlockIdentity}   the credential's unlock
+ *   identity, for the dead-pointer refusal's removal closure
+ * @param [options.idb] {IDBFactory}   first-party IndexedDB for that
+ *   removal's unlock-local state
  * @returns {Promise<void>}
  */
 async function settlePendingRecordProof({
   record,
   proofState,
   found,
-  accountLogPinStore
+  accountLogPinStore,
+  unlock,
+  idb
 }: {
   record: unknown
   proofState: UnlockRecordProofState
   found: KeyringRecordContents
   accountLogPinStore: ResourceLogPinStore
+  unlock?: UnlockIdentity
+  idb?: IDBFactory
 }): Promise<void> {
   if (proofState === 'verified') {
     return
@@ -929,6 +943,13 @@ async function settlePendingRecordProof({
       throw err
     }
     if (isResourceLogContinuityError(err)) {
+      throw err
+    }
+    if (isAccountLogMissing(err)) {
+      const accountDid = found.pointer?.did
+      if (unlock !== undefined && accountDid !== undefined) {
+        throw deadAccountPointerError({ cause: err, unlock, accountDid, idb })
+      }
       throw err
     }
     throw new KeyringRecordForgedError({ cause: err })
@@ -1009,7 +1030,9 @@ async function readCachedRecord({
       record: cached.record,
       proofState: unwrapped.proofState,
       found: unwrapped.found,
-      accountLogPinStore
+      accountLogPinStore,
+      unlock,
+      idb
     })
     return await buildFetchResult({
       unwrapped,
@@ -1194,7 +1217,9 @@ export async function fetchKeyring({
     record,
     proofState: unwrapped.proofState,
     found: unwrapped.found,
-    accountLogPinStore
+    accountLogPinStore,
+    unlock,
+    idb
   })
   await saveKeyringCache({ spaceId: unlock.spaceId, record, idb })
   return await buildFetchResult({
@@ -1330,7 +1355,8 @@ export async function fetchTransientKeyring({
     record,
     proofState: unwrapped.proofState,
     found: unwrapped.found,
-    accountLogPinStore
+    accountLogPinStore,
+    unlock
   })
   // The management zcap this visit may refresh the registry entry with: the
   // same mint the remembered login makes (`buildFetchResult`), with the full
@@ -1427,7 +1453,8 @@ async function readServedUnlockRecord({
     record: stored.record,
     proofState: served.proofState,
     found: served.found,
-    accountLogPinStore
+    accountLogPinStore,
+    unlock: credential.unlock
   })
   return { served, record: stored.record, etag: stored.etag }
 }
@@ -2776,45 +2803,6 @@ export async function verifyPassphrase({
     idb,
     credential
   })
-}
-
-/**
- * Retires one unlock identity: its unlock Space on the server (best effort)
- * and every local record filed under it (the keyring cache and the
- * client-key record). Shared by `deleteUnlockMethod` and the old-identity
- * half of `changePassphrase`.
- *
- * @param options {object}
- * @param options.unlock {UnlockIdentity}   the identity to retire
- * @param options.warning {string}   how a failed Space deletion is logged
- * @param [options.idb] {IDBFactory}
- * @returns {Promise<boolean>}   whether the unlock Space was deleted
- */
-async function retireUnlockIdentity({
-  unlock,
-  warning,
-  idb
-}: {
-  unlock: UnlockIdentity
-  warning: string
-  idb?: IDBFactory
-}): Promise<boolean> {
-  let unlockSpaceDeleted = true
-  if (WAS_SERVER_URL) {
-    try {
-      await deleteUnlockSpace({
-        serviceDescription: await wasServiceDescription(),
-        storageServerUrl: WAS_SERVER_URL,
-        zcapClient: unlock.zcapClient,
-        spaceId: unlock.spaceId
-      })
-    } catch (err) {
-      log.warn(warning, { err })
-      unlockSpaceDeleted = false
-    }
-  }
-  await deleteUnlockLocalState({ spaceId: unlock.spaceId, idb })
-  return unlockSpaceDeleted
 }
 
 /**

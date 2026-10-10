@@ -53,11 +53,12 @@ export const MENDER_GAPS: ReadonlyArray<InvariantGap> = [
     item: 'FW-303',
     kind: 'none'
   },
-  // 5
+  // 5. The dead-pointer prompt at the credential's next login or spend is
+  // the mender, so what stands is the credential never used again.
   {
     invariant: 'no-unlock-space-outlives-its-credential',
     tornState:
-      "A sibling unlock Space an account deletion could not remove. The self-delete backstop does not close it: the sibling Space's own credential may never be used again, and an unspent recovery code is the sharp case.",
+      "A sibling unlock Space an account deletion could not remove, whose credential is never used again. The dead-pointer prompt mends it only at that credential's next use, and an unspent recovery code is the sharp case.",
     standsOn: ['ladder-anchored', 'enrolled'],
     item: 'FW-401',
     kind: 'none'

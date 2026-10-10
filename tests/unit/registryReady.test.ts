@@ -49,6 +49,14 @@ vi.mock('@/session/transientLogin', () => ({
   routeUnlockLogin: vi.fn(),
   transientSessionFromKeyringHit: vi.fn()
 }))
+// The remembered login's first-contact account-log read (the dead-pointer
+// check) is stubbed as resolving to no head, so the detector below reads the
+// log itself as it did before the check: the dead pointer is not under test
+// here.
+vi.mock('@/session/deadAccountPointer', async importOriginal => ({
+  ...(await importOriginal<typeof import('@/session/deadAccountPointer')>()),
+  verifyPointedAccountLog: vi.fn(async () => undefined as never)
+}))
 vi.mock('@/lib/kms', () => ({ ensureKeystore: vi.fn() }))
 // The detector runs for real unless a test arranges a forgotten browser.
 vi.mock('@/session/forget', async importOriginal => {

@@ -20,9 +20,13 @@ src/components/     Shared React components
   credentialDetails/, storage/, resume/   Feature sub-components
   AgentReconnectList.tsx  The agent list a ceremony's dialog shows, and
                     the notice its reconnect leaves
+  RemoveSignInDataButton.tsx  The dead-pointer prompt's accept, shared by
+                    the login, recover, and interaction-URL pages
 src/hooks/          Shared React hooks
   useAgentReconnect.ts  A ceremony dialog's agent ticks, and the decline
                     and restore once the ceremony succeeds
+  useDeadPointerRemoval.ts  The dead-pointer removal offer a login
+                    surface holds, and the removal run on its accept
 src/context/        Theme and info-box React context
 src/lib/            Pure business logic (no React)
   kms.ts            WebKMS keystore provisioning (ensureKeystore), the
@@ -106,7 +110,10 @@ src/session/        Session bootstrap and the account ceremonies -- the
                     only). Grouped by role:
   Login             transientLogin.ts (the default login's routing and
                     composition), initSession.ts, keyring.ts,
-                    verifiedLog.ts, loginErrorKey.ts
+                    verifiedLog.ts, loginErrorKey.ts, deadAccountPointer.ts
+                    (the dead-pointer refusal and the sign-in data removal
+                    it offers), retireUnlockIdentity.ts (the one unlock
+                    identity retirement)
   Signup            credentialAnchoredGenesis.ts and standingUnlock.ts
                     (the default signup, every WAS deployment),
                     signup.ts, provisionNewWallet.ts, standingEstablishment.ts
@@ -614,7 +621,7 @@ every mend entry, also emits on the ceremony event channel (wallet-core's
 | Last-client transition                                | same row, `lastClient` confirm, browser-local only; the dialog marks unticked agents declined                                                                             | `src/session/forget.ts`                                                     | `/clientAnnex`              | re-run                                                                                                                                                                                                                                                                                                                            | `did-webvh-identity.md`  |
 | Update-key rotation                                   | Settings, browser-local only                                                                                                                                              | `src/session/accountSettings.ts`                                            | `/webvh`                    | re-run (persist-before-publish)                                                                                                                                                                                                                                                                                                   | `did-webvh-identity.md`  |
 | Account genesis (plain)                               | every remembered login's storage provisioning on a WAS deployment, as a heal (a no-WAS signup mints keys only)                                                            | `src/stores/storageManager.ts` + `src/session/signup.ts`                    | `/genesis`                  | re-run (every stage an ensure)                                                                                                                                                                                                                                                                                                    | `account-genesis.md`     |
-| Account deletion                                      | Settings, any session type                                                                                                                                                | `src/session/accountSettings.ts` + `wipe.ts`                                | app-side phase order        | re-run; an in-run retry for the acting credential's own unlock Space; otherwise the next login with that credential offering to remove it (not yet built)                                                                                                                                                                         | `did-webvh-identity.md`  |
+| Account deletion                                      | Settings, any session type                                                                                                                                                | `src/session/accountSettings.ts` + `wipe.ts`                                | app-side phase order        | re-run; an in-run retry for the acting credential's own unlock Space; otherwise the dead-pointer prompt at the next login or recovery spend with that credential, which offers to remove its sign-in data                                                                                                                         | `did-webvh-identity.md`  |
 | Shared wipe (executor, not user-facing)               | consumed by the deletion-shaped ceremonies                                                                                                                                | `src/session/wipe.ts`                                                       | app-side                    | re-probe verification; the `unverified` report                                                                                                                                                                                                                                                                                    | `did-webvh-identity.md`  |
 | Content migration                                     | Storage page, beside Export Space, every session kind including guest                                                                                                     | `src/session/contentMigration.ts`                                           | `@interop/wallet-backup`    | re-run (skip existing by content identity; the import activity replaced put-then-delete-others; an app collection's own torn create, empty and carrying the archived `generator`, finished)                                                                                                                                       | `session-persistence.md` |
 | Backup export                                         | Storage page, the export action, any session with remote storage                                                                                                          | `src/session/backupExport.ts`                                               | `@interop/wallet-backup`    | re-run; the pre-flight refuses before the pivot; a tear inside the establishment leaves the entry-first row, whose Remove under Settings > Backup credentials converges whatever it reached (strike, roster rotation, Space delete, entry drop); a tear after it leaves an ordinary labeled backup credential the user can remove | `session-persistence.md` |
@@ -662,9 +669,11 @@ built:
   `every-document-key-agreement-entry-has-a-locatable-credential`). The
   remembered login's sweep rotates the orphan wrap away, but no
   retire-and-reissue mender exists.
-- A sibling unlock Space an account deletion could not remove (invariant
-  `no-unlock-space-outlives-its-credential`). Its credential's next use
-  would be the mender, and that is not built.
+- A sibling unlock Space an account deletion could not remove, whose
+  credential is never used again (invariant
+  `no-unlock-space-outlives-its-credential`). The dead-pointer prompt at a
+  login or a recovery spend on that credential is the mender, so only the
+  credential never used again leaves the Space standing.
 - A keystore orphaned by an account deletion on a KMS deployment (invariant
   `no-keystore-outlives-its-account`). A server-side reaper is not a wallet
   mender.

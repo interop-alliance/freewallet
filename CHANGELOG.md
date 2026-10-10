@@ -1,5 +1,22 @@
 # History
 
+## 0.45.0 - TBD
+
+### Added
+
+- A login whose unlock record decrypts but whose account log answers 404
+  (an account deleted or moved from under the credential) is refused as a
+  dead account pointer, apart from a transport failure and a continuity
+  refusal, on the transient and the remembered login alike, and in the
+  settlement of a pending record proof. The login page and the
+  interaction-URL page say the account no longer exists and offer to remove
+  the method's sign-in data: its unlock Space, deleted under its own unlock
+  identity, and its local records. Declining leaves the record in place. The
+  CHAPI popup sends the user to the wallet app instead. The `/recover` page
+  takes the same branch for a recovery code at its locate step, and the
+  removal is the `login-routing` mender for invariant
+  `no-unlock-space-outlives-its-credential`.
+
 ## 0.44.0 - 2026-10-09
 
 ### Added

@@ -286,6 +286,7 @@
       "transientCredentialNotStanding": "Se encontró su cuenta, pero este método de inicio de sesión nunca terminó de configurarse, por lo que no puede iniciar sesión desde un navegador nuevo. Inicie sesión con su frase de contraseña anterior u otro de los métodos de acceso de su cuenta y vuelva a configurar este.",
       "transientUnavailable": "Se encontró su cuenta, pero por ahora no es accesible desde un navegador nuevo.",
       "keyringUnusable": "Se encontró su cuenta, pero su registro de acceso guardado no se pudo leer. Si el problema persiste, cambie su frase de contraseña desde un dispositivo donde aún tenga la sesión iniciada para escribir un registro nuevo.",
+      "accountGone": "Se encontró este método de inicio de sesión, pero la cuenta a la que pertenece ya no existe en el servidor de almacenamiento: fue eliminada o se trasladó a otro servidor. No se cambió nada. Puede eliminar abajo los datos de inicio de sesión que quedaron de este método, o dejarlos como están. Si tiene una copia de seguridad de la cuenta, volver a ejecutar la restauración de la copia de seguridad la recupera en su lugar.",
       "clientNotEnrolled": "Se encontró su cuenta, pero este navegador aún no tiene sus claves. Use \"Conectar este navegador\" abajo para inscribirlo desde un navegador donde su billetera ya esté configurada.",
       "keyringForged": "El servidor de almacenamiento devolvió un registro de acceso que no es auténtico: no fue escrito por su frase de contraseña, así que ha sido falsificado o alterado. El inicio de sesión se detuvo y no se cambió nada. Contacte a su proveedor de almacenamiento y use un código de recuperación para llegar a su cuenta desde un servidor de confianza.",
       "accountLogContinuity": "El servidor de almacenamiento devolvió una versión del historial de su cuenta que entra en conflicto con otra versión que sirvió durante este inicio de sesión, por lo que el inicio de sesión se detuvo por precaución. No se cambió nada. Si no esperaba esto, contacte a su proveedor de almacenamiento.",
@@ -315,6 +316,12 @@
       "incomplete": "Los datos de billetera en este navegador se olvidaron, pero parte de ellos no se pudo eliminar (otra pestaña abierta puede estar reteniéndolos). Cierre las demás pestañas e inténtelo de nuevo.",
       "unverified": "Los datos de billetera en este navegador se eliminaron, pero este navegador no pudo confirmar la eliminación.",
       "failed": "No se pudieron olvidar los datos de billetera en este navegador. Inténtelo de nuevo."
+    },
+    "accountGone": {
+      "button": "Eliminar los datos de inicio de sesión de este método",
+      "removed": "Se han eliminado los datos de inicio de sesión de este método.",
+      "incomplete": "Los datos de inicio de sesión en este navegador se eliminaron, pero el registro en el servidor de almacenamiento no se pudo borrar. Al intentarlo de nuevo más tarde con el mismo método se ofrecerá esto otra vez.",
+      "failed": "No se pudieron eliminar los datos de inicio de sesión. Inténtelo de nuevo."
     },
     "login": {
       "heading": "Iniciar sesión",
@@ -426,6 +433,7 @@
         "unavailable": "Los códigos de recuperación requieren un servidor de almacenamiento y esta instalación no tiene ninguno configurado.",
         "couldNotCheck": "No se pudo contactar con el servidor de almacenamiento, así que el código no pudo comprobarse. Esto no significa que el código sea incorrecto: inténtalo de nuevo cuando vuelvas a estar en línea.",
         "accountLogContinuity": "El servidor de almacenamiento devolvió una versión del historial de la cuenta que entra en conflicto con otra versión que sirvió durante esta comprobación, por lo que la comprobación se detuvo por precaución. No se cambió nada y esto no significa que el código sea incorrecto. Si no esperabas esto, contacta con tu proveedor de almacenamiento.",
+        "accountGone": "Se encontró este código de recuperación, pero la cuenta a la que pertenece ya no existe en el servidor de almacenamiento: fue eliminada o se trasladó a otro servidor. No se cambió nada. Puedes eliminar abajo los datos de inicio de sesión que quedaron del código, o dejarlos como están. Si tienes una copia de seguridad de la cuenta, volver a ejecutar la restauración de la copia de seguridad la recupera en su lugar.",
         "failed": "La recuperación falló. Inténtalo de nuevo.",
         "passphraseCollision": "Esta frase de contraseña ya desbloquea una credencial existente de la cartera, y usarla aquí rompería esa credencial. Elige una frase de contraseña nueva diferente.",
         "completionFailed": "La recuperación funcionó, pero este navegador no pudo terminar de guardarla. El código de arriba sigue disponible: intenta confirmar de nuevo, o inicia sesión con tu nueva frase de contraseña y se mostrará una vez más.",
@@ -992,6 +1000,7 @@
     "clientNotEnrolled": "Se encontró su cuenta, pero sus claves no son accesibles desde esta ventana emergente. Abra la aplicación de la billetera en su propia pestaña, inicie sesión allí y vuelva a intentarlo aquí.",
     "storageUnreachable": "No se pudo conectar con el servidor de almacenamiento. Inténtelo de nuevo en un momento.",
     "loginFailed": "No se pudo iniciar sesión. Inténtelo de nuevo.",
+    "accountGone": "Se encontró este método de inicio de sesión, pero la cuenta a la que pertenece ya no existe en el servidor de almacenamiento: fue eliminada o se trasladó a otro servidor. No se cambió nada. Abra la aplicación de la cartera en su propia pestaña e inicie sesión allí con este método para eliminar los datos de inicio de sesión que quedaron.",
     "loginPrompt": "Introduzca la frase de contraseña de su billetera para continuar:",
     "passphrasePlaceholder": "Frase de contraseña",
     "viewRequestSource": "Ver el código fuente de la solicitud",

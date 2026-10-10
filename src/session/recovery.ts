@@ -167,6 +167,7 @@ import {
 import { KEYRING_KDF } from '@interop/wallet-core/keyring'
 import { registryEntriesForCredentialVmIds } from '@/session/credentialCoverage'
 import { transientSessionStores } from '@/session/persistence'
+import { verifyPointedAccountLog } from '@/session/deadAccountPointer'
 import {
   deleteUnlockSpaceForEntry,
   emptyUnlockMethodsRegistry,
@@ -893,14 +894,35 @@ export async function locateRecoveryAccount({
 }: {
   code: string
 }): Promise<void> {
-  const { record, contents, proofState } = await readRecoveryRecord({ code })
+  const { unlock, record, contents, proofState } = await readRecoveryRecord({
+    code
+  })
+  const pointer = contents.pointer
+  // One read and nothing after it: the locate step holds no session, and
+  // the spend that may follow runs under its own store from first contact.
+  const pinStore = memoryResourceLogPinStore()
+  // The account log is read here for every record shape, one unauthenticated
+  // GET, so a dead account pointer (the log answering 404) refuses at the
+  // locate step, before the page asks for a new passphrase, as
+  // `DeadAccountPointerError` carrying the code's own retirement. A record
+  // naming no did:webvh has no log to read; its proof settles as before.
+  const did = pointer.did
+  const verifiedLog =
+    did !== undefined && isWebvhDid(did)
+      ? await verifyPointedAccountLog({
+          did,
+          spaceId: pointer.spaceId,
+          host: pointer.host,
+          pinStore,
+          unlock
+        })
+      : undefined
   await completeRecoveryRecordProof({
     record,
     proofState,
-    pointer: contents.pointer,
-    // One read and nothing after it: the locate step holds no session, and
-    // the spend that may follow runs under its own store from first contact.
-    pinStore: memoryResourceLogPinStore()
+    pointer,
+    ...(verifiedLog !== undefined ? { verifiedLog } : {}),
+    pinStore
   })
 }
 
@@ -1376,12 +1398,16 @@ export async function recoverAccountWithCode({
   // re-resolution -- is checked against it. It dies with the tab; the
   // remembered login that follows starts its own.
   const logPins = memoryResourceLogPinStore()
-  // Verify the world-readable log locally before invoking anything.
-  const verifiedLog = await verifyAccountLog({
+  // Verify the world-readable log locally before invoking anything. A 404 is
+  // the dead account pointer, refused as `DeadAccountPointerError` with the
+  // code's own retirement for the page to offer.
+  const verifiedLog = await verifyPointedAccountLog({
     did: pointer.did,
     spaceId: pointer.spaceId,
     host: pointer.host,
-    pinStore: logPins
+    pinStore: logPins,
+    unlock,
+    ...(idb !== undefined ? { idb } : {})
   })
 
   // Settle the record's proof before acting on anything it carries. An
@@ -2768,11 +2794,14 @@ async function recoverAccountTransient({
   const persistence = transientSessionStores()
   const logPins = persistence.logPins
 
-  const verifiedLog = await verifyAccountLog({
+  // A 404 is the dead account pointer, refused as `DeadAccountPointerError`
+  // with the code's own retirement for the page to offer.
+  const verifiedLog = await verifyPointedAccountLog({
     did,
     spaceId,
     host,
-    pinStore: logPins
+    pinStore: logPins,
+    unlock
   })
   await completeRecoveryRecordProof({
     record,

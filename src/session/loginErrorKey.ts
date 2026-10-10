@@ -17,6 +17,7 @@ import {
   PendingResumeLogUnavailableError
 } from '@/session/pendingEnrollment'
 import { SelfEnrollmentSkewError } from '@/session/standingUnlock'
+import { DeadAccountPointerError } from '@/session/deadAccountPointer'
 import { isResourceLogContinuityError } from '@/session/verifiedLog'
 import { isStorageUnreachable } from '@/lib/storageErrors'
 import { createLogger } from '@/lib/log'
@@ -93,6 +94,17 @@ export function loginErrorKey({
   if (err instanceof SelfEnrollmentSkewError) {
     log.error('Login refused: self-enrollment build skew', { label, err })
     return { key: 'auth.errors.selfEnrollmentSkew' }
+  }
+  // The dead account pointer: the record decrypted, but the account log it
+  // names answered 404. Not a transport failure (that rethrew above) and not
+  // a continuity refusal (below). The page offers removing this credential's
+  // sign-in data through the error's own closure.
+  if (err instanceof DeadAccountPointerError) {
+    log.warn('Login refused: the account the record names is gone', {
+      label,
+      unlockSpaceId: err.unlockSpaceId
+    })
+    return { key: 'auth.errors.accountGone' }
   }
   // The authenticity refusal: the record's proof was not made by the key the
   // typed secret derives, so the storage host forged or tampered with it.

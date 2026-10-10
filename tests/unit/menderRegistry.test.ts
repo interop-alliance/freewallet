@@ -93,7 +93,7 @@ describe('census completeness', () => {
 })
 
 describe('the transient-reachable set', () => {
-  it('is the twenty-three entries the design pins', () => {
+  it('is the twenty-four entries the design pins', () => {
     const reachable = transientReachableInvariants({
       registry: freewalletMenderRegistry
     })
@@ -103,10 +103,13 @@ describe('the transient-reachable set', () => {
     // counted through its ceremony-tail trigger, as row 2 was before the
     // split, and row 2 stays since its transient collection fan-out still
     // reports it. Rows 38 and 39 joined with the inbox pass, which runs
-    // behind the transient chain's block and at two encounter sites.
+    // behind the transient chain's block and at two encounter sites. Row 30
+    // joined when the dead-pointer prompt gave its account-is-gone half a
+    // routing site, which a login or a recovery spend on any credential
+    // reaches.
     expect(reachable.map(rowOf)).toEqual([
-      1, 2, 3, 4, 5, 6, 7, 8, 10, 12, 13, 14, 15, 16, 17, 18, 25, 26, 32, 35,
-      37, 38, 39
+      1, 2, 3, 4, 5, 6, 7, 8, 10, 12, 13, 14, 15, 16, 17, 18, 25, 26, 30, 32,
+      35, 37, 38, 39
     ])
   })
 })
@@ -118,7 +121,7 @@ describe('the gap allowlist', () => {
       derived
         .filter(gap => gap.kind === 'none')
         .map(gap => rowOf(gap.invariant))
-    ).toEqual([26, 28, 29, 30, 31, 32, 34, 36, 40])
+    ).toEqual([26, 28, 29, 31, 32, 34, 36, 40])
     // Row 2 moved out of `none` when the transient chain's collection
     // fan-out began reporting its collection half.
     // Rows 11 and 27 moved out of `none` when stage B gave each an
@@ -131,7 +134,10 @@ describe('the gap allowlist', () => {
     // login-time stranded app-key sweep. Row 37 entered no derived set when
     // it split off row 2: the remembered sweep reports it and its
     // ceremony-tail trigger counts it reached. Row 40 entered `none` with
-    // its declaration: nothing rotates the pairwise seed until FW-647.
+    // its declaration: nothing rotates the pairwise seed until FW-647. Row
+    // 30 left `none` when the dead-pointer prompt's accept began reporting
+    // it from the login-routing site; its declared rows stay, each scoped
+    // to a torn state the prompt does not reach.
     expect(
       derived
         .filter(gap => gap.kind === 'unreachable')
@@ -258,6 +264,11 @@ describe('the code counterpart', () => {
         row: 27,
         file: 'src/stores/storageManager.ts',
         symbol: 'promoteAccountKeystore'
+      },
+      {
+        row: 30,
+        file: 'src/session/deadAccountPointer.ts',
+        symbol: 'removeDeadPointerSignInData'
       },
       {
         row: 35,

@@ -31,6 +31,9 @@ import { RecoveryCodeDisplay } from '@/components/RecoveryCodeDisplay'
 import { createLogger } from '@/lib/log'
 import { errorNameOf } from '@interop/wallet-core/menders'
 import { isResourceLogContinuityError } from '@/session/verifiedLog'
+import { DeadAccountPointerError } from '@/session/deadAccountPointer'
+import { useDeadPointerRemoval } from '@/hooks/useDeadPointerRemoval'
+import { RemoveSignInDataButton } from '@/components/RemoveSignInDataButton'
 
 const log = createLogger('fw:ui:recover')
 
@@ -63,6 +66,9 @@ export function RecoverPage() {
   const [passphraseScore, setPassphraseScore] = useState(0)
   const [outcome, setOutcome] = useState<RecoveryOutcome | null>(null)
   const [replacementSaved, setReplacementSaved] = useState(false)
+  // The dead-pointer refusal's removal offer. Reset by every attempt.
+  const removal = useDeadPointerRemoval()
+  const [noticeKey, setNoticeKey] = useState<string | null>(null)
   /**
    * Maps a recovery failure onto the page's honest error states: a mistyped
    * code, a code that resolves to nothing (never issued, revoked, or spent),
@@ -86,6 +92,12 @@ export function RecoverPage() {
     }
     if (err instanceof RecoveryUnavailableError) {
       return 'auth.recover.errors.unavailable'
+    }
+    // The dead account pointer: the code located its record, but the account
+    // log it names answered 404. The page offers removing the code's sign-in
+    // data through the refusal's own closure.
+    if (err instanceof DeadAccountPointerError) {
+      return 'auth.recover.errors.accountGone'
     }
     if (isStorageUnreachable(err)) {
       return 'auth.recover.errors.couldNotCheck'
@@ -120,6 +132,8 @@ export function RecoverPage() {
     }
     setBusy(true)
     setErrorKey(null)
+    setNoticeKey(null)
+    removal.clear()
     try {
       const data = new FormData(event.currentTarget)
       const typed = (data.get('recovery-code') as string) ?? ''
@@ -129,6 +143,7 @@ export function RecoverPage() {
     } catch (err) {
       log.warn('Recovery code check failed', { err })
       setErrorKey(errorKeyFor(err))
+      removal.offerFrom(err)
     } finally {
       setBusy(false)
     }
@@ -146,6 +161,7 @@ export function RecoverPage() {
     }
     setBusy(true)
     setErrorKey(null)
+    removal.clear()
     try {
       const recovered = await recoverAccountWithCode({
         code,
@@ -157,10 +173,45 @@ export function RecoverPage() {
     } catch (err) {
       log.error('Recovery failed', { err })
       setErrorKey(errorKeyFor(err))
+      removal.offerFrom(err)
     } finally {
       setBusy(false)
     }
   }
+
+  /**
+   * The dead-pointer removal's outcome: back to the code step with a notice,
+   * or on a failed removal (`null`) an error beside the offer that stays.
+   */
+  const handleSignInDataRemoved = (
+    outcome: { unlockSpaceDeleted: boolean } | null
+  ) => {
+    if (!outcome) {
+      setErrorKey('auth.accountGone.failed')
+      return
+    }
+    setErrorKey(null)
+    setCode('')
+    setStep('code')
+    setNoticeKey(
+      outcome.unlockSpaceDeleted
+        ? 'auth.accountGone.removed'
+        : 'auth.accountGone.incomplete'
+    )
+  }
+
+  // The dead-pointer offer, rendered under the error on both steps. The
+  // severity follows the error shown, not the offer: a failed removal is an
+  // error beside an offer that stays.
+  const errorSeverity =
+    errorKey === 'auth.recover.errors.accountGone' ? 'warning' : 'error'
+  const removeSignInDataButton = (
+    <RemoveSignInDataButton
+      removal={removal}
+      onRemoved={handleSignInDataRemoved}
+      sx={authStyles.actionButton}
+    />
+  )
 
   /**
    * The "I saved this code" confirm: runs the confirm-gated record
@@ -261,11 +312,19 @@ export function RecoverPage() {
                   {t('auth.recover.noCodeHint')}
                 </Typography>
 
+                {noticeKey && (
+                  <Alert severity="info" sx={authStyles.userMessage}>
+                    {t(noticeKey)}
+                  </Alert>
+                )}
+
                 {errorKey && (
-                  <Alert severity="error" sx={authStyles.userMessage}>
+                  <Alert severity={errorSeverity} sx={authStyles.userMessage}>
                     {t(errorKey)}
                   </Alert>
                 )}
+
+                {removeSignInDataButton}
 
                 <Typography
                   variant="h5"
@@ -307,10 +366,12 @@ export function RecoverPage() {
                 </Typography>
 
                 {errorKey && (
-                  <Alert severity="error" sx={authStyles.userMessage}>
+                  <Alert severity={errorSeverity} sx={authStyles.userMessage}>
                     {t(errorKey)}
                   </Alert>
                 )}
+
+                {removeSignInDataButton}
 
                 <Typography
                   variant="h5"

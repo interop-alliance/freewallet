@@ -441,3 +441,15 @@ export async function reprimeVerifiedAccountLog({
 export function isResourceLogContinuityError(err: unknown): boolean {
   return errorNameOf(err) === 'ResourceLogContinuityError'
 }
+
+/**
+ * Whether a failure is the account log answering 404 (wallet-core's
+ * `AccountLogMissingError`), the one dead-pointer signal. Matched on `name`,
+ * since wallet-core's class may be a linked or duplicated copy.
+ *
+ * @param err {unknown}
+ * @returns {boolean}
+ */
+export function isAccountLogMissing(err: unknown): boolean {
+  return errorNameOf(err) === 'AccountLogMissingError'
+}

@@ -101,6 +101,7 @@ import {
 import { blockRegistryRead } from '@/session/registryPasses'
 import { primeVerifiedAccountLog } from '@/session/verifiedLog'
 import { documentListsCredential } from '@/session/pendingRetirement'
+import { verifyPointedAccountLog } from '@/session/deadAccountPointer'
 import { refreshDidWebProjection } from '@/session/annexReach'
 import type { Session } from '@/types/auth'
 import type { IZcap } from '@interop/data-integrity-core'
@@ -514,6 +515,9 @@ export async function ensureClientAnnexGenerationReady({
  *   the account it just established), reused for the first-contact
  *   verification below in place of the fetch. Only ever a head from within
  *   this visit: the pin check runs on it exactly as on a served one
+ * @param [options.idb] {IDBFactory}   first-party IndexedDB (the CHAPI
+ *   popup's Storage Access handle), for the dead-pointer refusal's removal
+ *   of this credential's unlock-local state
  * @returns {Promise<{ session: Session, userExists: boolean }>}
  */
 export async function transientSessionFromKeyringHit({
@@ -526,7 +530,8 @@ export async function transientSessionFromKeyringHit({
   healAttempted = false,
   repairShaped = false,
   accountLog,
-  mends: suppliedMends
+  mends: suppliedMends,
+  idb
 }: {
   found: TransientKeyringFetchResult
   type: 'passphrase' | 'passkey'
@@ -538,6 +543,7 @@ export async function transientSessionFromKeyringHit({
   repairShaped?: boolean
   accountLog?: PublishedWebvhLog
   mends?: MendReportAccumulator<CeremonyId>
+  idb?: IDBFactory
 }): Promise<{ session: Session; userExists: boolean }> {
   const mends =
     suppliedMends ?? mendReportAccumulator<CeremonyId>({ logger: log })
@@ -604,7 +610,8 @@ export async function transientSessionFromKeyringHit({
             popup,
             healAttempted: true,
             repairShaped: report.reenterRepairShaped === true,
-            mends
+            mends,
+            ...(idb !== undefined ? { idb } : {})
           })
         }
       }
@@ -650,12 +657,20 @@ export async function transientSessionFromKeyringHit({
     accountLog !== undefined && accountLog.did === accountDid
       ? accountLog
       : undefined
-  let verified = await verifyAccountLog({
+  //
+  // A 404 here is the dead account pointer: the record decrypted, but the
+  // account it names is gone. With the credential in hand it refuses as
+  // `DeadAccountPointerError`, carrying the removal of this credential's
+  // sign-in data for the login page to offer. A transport failure and a
+  // continuity refusal rethrow unchanged.
+  let verified = await verifyPointedAccountLog({
     did: accountDid,
     spaceId: pointer.spaceId,
     host: pointer.host,
     pinStore: persistence.logPins,
-    ...(seededLog !== undefined ? { published: seededLog } : {})
+    ...(seededLog !== undefined ? { published: seededLog } : {}),
+    ...(credential !== undefined ? { unlock: credential.unlock } : {}),
+    ...(idb !== undefined ? { idb } : {})
   })
 
   // The credential's own inventory, before anything signed by its ladder is

@@ -122,6 +122,11 @@ vi.mock('@/session/unlockMethods', async importOriginal => ({
 }))
 
 import { deriveNextKeyHash } from '@interop/did-method-webvh'
+import {
+  AccountLogMissingError,
+  verifyAccountLog
+} from '@interop/wallet-core/webvh'
+import { DeadAccountPointerError } from '@/session/deadAccountPointer'
 import { WasError } from '@interop/was-client'
 import {
   deriveUnlockIdentity,
@@ -288,6 +293,23 @@ describe('locateRecoveryAccount error discipline', () => {
     await expect(
       locateRecoveryAccount({ code: formatted })
     ).resolves.toBeUndefined()
+  })
+
+  it('refuses a code whose account log is gone as a dead pointer, at the locate step', async () => {
+    // An issuance-signed record (its proof verified in the unwrap, so no
+    // signer settlement reads the log) still reads the account log once at
+    // the locate step, so a deleted account refuses before the page asks
+    // for a new passphrase. The refusal carries the code's own retirement.
+    const { code } = await storeRecordForCode()
+    vi.mocked(verifyAccountLog).mockRejectedValueOnce(
+      new AccountLogMissingError()
+    )
+    const err = await locateRecoveryAccount({ code }).then(
+      () => undefined,
+      (refusal: unknown) => refusal
+    )
+    expect(err).toBeInstanceOf(DeadAccountPointerError)
+    expect((err as DeadAccountPointerError).accountDid).toBe(POINTER.did)
   })
 })
 

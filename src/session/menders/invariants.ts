@@ -575,14 +575,18 @@ const DECLARATIONS: ReadonlyArray<
     evidence: ['verified-log', 'verified-registry']
   },
   // 30
-  // No converger.
+  // converger: `removeDeadPointerSignInData`
+  // (`src/session/deadAccountPointer.ts`), the dead-pointer prompt's accept
+  // at a login or a recovery spend whose pointed account log answers 404.
+  // Only the account-is-gone half: no converger reaches a retired
+  // credential's Space.
   {
     id: 'no-unlock-space-outlives-its-credential',
     statement:
       'No unlock Space stands whose credential the account has retired or whose account is gone.',
     standsOn: ['ladder-anchored', 'enrolled'],
     authority: 'ladder',
-    triggers: [],
+    triggers: ['login-routing'],
     ceremonies: [
       'account-deletion',
       'recovery-code-spend',

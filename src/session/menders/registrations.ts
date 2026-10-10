@@ -1370,6 +1370,18 @@ const REPORTING_SITES: ReadonlyArray<RegistrationSite> = [
       'generation-delegation-is-current'
     ]
   },
+  // The dead-pointer prompt's accept, `removeDeadPointerSignInData`
+  // (`src/session/deadAccountPointer.ts`): the first-contact account-log
+  // read of the transient login (`transientSessionFromKeyringHit`), of the
+  // remembered login (`loginWithUnlockCredential`), of a pending record proof's
+  // settlement (`settlePendingRecordProof`), and of a recovery code's
+  // locate step and spend refuses on a 404 with the removal closure, and
+  // the login, recover, or interaction-URL page runs it on the user's
+  // accept.
+  {
+    trigger: 'login-routing',
+    reports: ['no-unlock-space-outlives-its-credential']
+  },
   // The four routing sites behind the client-key-record probe
   // (`src/session/initSession.ts`), in the order routing reaches them:
   // `wipeStaleClientResidue` and `assertClientStillEnrolled`

@@ -30,7 +30,8 @@ import {
   webvhCapabilityAgent,
   webvhZcapClient,
   type ClientWebvhUpdateKeys,
-  type ICapabilityAgent
+  type ICapabilityAgent,
+  type VerifiedAccountLog
 } from '@interop/wallet-core/webvh'
 import {
   mintUserKey,
@@ -65,6 +66,7 @@ import {
   reportCredentialAnchoredMend
 } from '@/session/credentialAnchoredGenesis'
 import { KEYRING_KDF, type UnlockKdf } from '@interop/wallet-core/keyring'
+import { verifyPointedAccountLog } from '@/session/deadAccountPointer'
 import {
   routeUnlockLogin,
   transientSessionFromKeyringHit
@@ -954,10 +956,20 @@ async function loginWithUnlockCredential({
         persistence: routed.persistence,
         credential: routed.credential,
         popup,
-        mends
+        mends,
+        idb
       })
     }
-    derived = routed.credential ?? derived
+    // The credential in hand for the whole remembered path: the keyring
+    // fetch would derive it anyway, and the dead-pointer refusal below needs
+    // its unlock identity.
+    derived =
+      routed.credential ??
+      derived ??
+      (await deriveUnlockCredential({
+        secret: secret as string | Uint8Array,
+        kdf
+      }))
 
     // The remembered session's persistence strategy, built BEFORE the
     // keyring fetch: its chain-head pin store rides every account-log read
@@ -973,16 +985,38 @@ async function loginWithUnlockCredential({
         persistCaches: !(popup && !!WAS_SERVER_URL)
       })
     let found = await fetchKeyring({
-      ...(secret !== undefined ? { secret } : {}),
       kdf,
       idb,
       mintManageCapability: true,
-      ...(derived ? { credential: derived } : {}),
+      credential: derived,
       accountLogPinStore: persistence.logPins
     })
     if (!found) {
       return { session: null, userExists: false }
     }
+    // The remembered login's first-contact read of the account log, under
+    // the pins every later read on this path rides. A 404 is the dead
+    // account pointer: the record decrypted, but the account it names is
+    // gone. It refuses here as `DeadAccountPointerError`, carrying the
+    // removal of this credential's sign-in data, before the
+    // forgotten-browser detector (which stands down on a log it cannot
+    // verify) could let the login run on to the dead key's authorization
+    // errors. A transport failure and a continuity refusal rethrow
+    // unchanged. A pointer naming no did:webvh has no log to read, and the
+    // no-WAS deployment none to reach.
+    // The verified head is handed on to the detector, which reads it in
+    // place of fetching the same log again.
+    const accountLog =
+      WAS_SERVER_URL && found.pointer && isWebvhDid(found.pointer.did)
+        ? await verifyPointedAccountLog({
+            did: found.pointer.did,
+            spaceId: found.pointer.spaceId,
+            host: found.pointer.host,
+            pinStore: persistence.logPins,
+            unlock: derived.unlock,
+            ...(idb !== undefined ? { idb } : {})
+          })
+        : undefined
 
     // The remembered resume entry: only under the explicit remember input,
     // and only for a standing record whose pointer names no did:webvh (a
@@ -994,12 +1028,6 @@ async function loginWithUnlockCredential({
       found.pointer &&
       !isWebvhDid(found.pointer.did)
     ) {
-      derived =
-        derived ??
-        (await deriveUnlockCredential({
-          secret: secret as string | Uint8Array,
-          kdf
-        }))
       found = await healUnpromotedRememberedAccount({
         found,
         credential: derived,
@@ -1021,11 +1049,12 @@ async function loginWithUnlockCredential({
         persistence,
         idb,
         mends,
+        ...(accountLog !== undefined ? { accountLog } : {}),
         ...(loginCredential
           ? {
               loginCredential: {
                 ...loginCredential,
-                ...(derived ? { derived } : {})
+                derived
               }
             }
           : {})
@@ -1063,13 +1092,14 @@ async function loginWithUnlockCredential({
 async function detectForgottenBrowser({
   found,
   pinStore,
+  verified,
   idb,
   mends
 }: Parameters<typeof assertClientStillEnrolled>[0] & {
   mends: MendReportAccumulator<CeremonyId>
 }): Promise<Awaited<ReturnType<typeof assertClientStillEnrolled>>> {
   try {
-    return await assertClientStillEnrolled({ found, pinStore, idb })
+    return await assertClientStillEnrolled({ found, pinStore, verified, idb })
   } catch (err) {
     if (errorNameOf(err) === 'BrowserForgottenError') {
       const { wipeFailed = [], wipeUnverified = [] } =
@@ -1129,6 +1159,10 @@ async function detectForgottenBrowser({
  *   typed (and the derived credential, when the routing already ran the
  *   KDF), threaded to the torn-retirement repair so its establish-first arm
  *   can make the credential standing; passphrase logins only
+ * @param options.mends {MendReportAccumulator}   the login's accumulator
+ * @param [options.accountLog] {VerifiedAccountLog}   the login's
+ *   first-contact read of the account log, which the forgotten-browser
+ *   detector reads in place of fetching the same log again
  * @returns {Promise<{ session: Session | null, userExists: boolean }>}
  */
 async function sessionFromKeyringHit({
@@ -1140,7 +1174,8 @@ async function sessionFromKeyringHit({
   persistence,
   idb,
   loginCredential,
-  mends
+  mends,
+  accountLog
 }: {
   found: KeyringFetchResult
   type: 'passphrase' | 'passkey'
@@ -1151,6 +1186,7 @@ async function sessionFromKeyringHit({
   idb?: IDBFactory
   loginCredential?: { secret: string | Uint8Array; derived?: UnlockCredential }
   mends: MendReportAccumulator<CeremonyId>
+  accountLog?: VerifiedAccountLog
 }): Promise<{ session: Session | null; userExists: boolean }> {
   // The three-way record routing, keyed on `userKey` presence: a record
   // holding a user key proceeds through the detector and the ordinary login;
@@ -1241,7 +1277,13 @@ async function sessionFromKeyringHit({
   const pinStore = persistence.logPins
   const detected =
     found.clientKeys && !pendingResume
-      ? await detectForgottenBrowser({ found, pinStore, idb, mends })
+      ? await detectForgottenBrowser({
+          found,
+          pinStore,
+          verified: accountLog,
+          idb,
+          mends
+        })
       : undefined
   const detectorLog = detected === 'unverified' ? undefined : detected
   if (detectorLog) {

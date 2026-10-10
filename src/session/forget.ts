@@ -699,16 +699,21 @@ async function rebindLoginCredentialRecord({
  * @param options.pinStore {ResourceLogPinStore}   the login's chain-head
  *   pins; this read establishes or checks the account log's slot, and the
  *   session built afterwards reads under the same store
+ * @param [options.verified] {VerifiedAccountLog}   the login's first-contact
+ *   read of the same log, moments ago under the same pins, read in place of
+ *   fetching and verifying it again
  * @param [options.idb] {IDBFactory}
  * @returns {Promise<VerifiedAccountLog | 'unverified' | undefined>}
  */
 export async function assertClientStillEnrolled({
   found,
   pinStore,
+  verified: firstContact,
   idb
 }: {
   found: KeyringFetchResult
   pinStore: ResourceLogPinStore
+  verified?: VerifiedAccountLog
   idb?: IDBFactory
 }): Promise<VerifiedAccountLog | 'unverified' | undefined> {
   const { clientKeys, pointer } = found
@@ -733,12 +738,14 @@ export async function assertClientStillEnrolled({
     signingKeyMultibase = clientSigningKeyMultibase({
       keyAgent: agents.keyAgent
     })
-    verified = await verifyAccountLog({
-      did: pointer.did,
-      spaceId: pointer.spaceId,
-      host: pointer.host,
-      pinStore
-    })
+    verified =
+      firstContact ??
+      (await verifyAccountLog({
+        did: pointer.did,
+        spaceId: pointer.spaceId,
+        host: pointer.host,
+        pinStore
+      }))
   } catch {
     // Unverifiable is not "forgotten": a flap, a missing log, and a
     // continuity refusal all fall through to the ordinary login, whose own

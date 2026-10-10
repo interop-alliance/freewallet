@@ -286,6 +286,7 @@
       "transientCredentialNotStanding": "Your account was found, but this sign-in method was never fully set up on it, so it cannot sign in from a new browser. Sign in with your previous passphrase or another of your account's unlock methods, then set this one up again.",
       "transientUnavailable": "Your account was found, but it is not reachable from a new browser right now.",
       "keyringUnusable": "Your account was found, but its stored login record could not be read. If this keeps happening, change your passphrase from a device where you are still logged in to write a fresh record.",
+      "accountGone": "This login method was found, but the account it belongs to no longer exists on the storage server -- it was deleted, or it moved to another server. Nothing was changed. You can remove this method's leftover sign-in data below, or leave it in place. If you have a backup of the account, re-running the backup restore puts the account back instead.",
       "clientNotEnrolled": "Your account was found, but this browser does not hold its keys yet. Use \"Connect this browser\" below to enroll it from a browser where your wallet is already set up.",
       "keyringForged": "The storage server returned a login record that is not authentic -- it was not written by your passphrase, so it has been forged or tampered with. Sign-in was stopped and nothing was changed. Contact your storage provider, and use a recovery code to reach your account from a trusted server.",
       "accountLogContinuity": "The storage server returned a version of your account's history that conflicts with another version it served during this sign-in, so sign-in was stopped as a precaution. Nothing was changed. If you did not expect this, contact your storage provider.",
@@ -315,6 +316,12 @@
       "incomplete": "Wallet data on this browser was forgotten, but some of it could not be deleted (another open tab may be holding it). Close other tabs and try again.",
       "unverified": "Wallet data on this browser was deleted, but this browser could not confirm the deletion.",
       "failed": "Could not forget the wallet data on this browser. Please try again."
+    },
+    "accountGone": {
+      "button": "Remove this method's sign-in data",
+      "removed": "The sign-in data for this login method has been removed.",
+      "incomplete": "The sign-in data on this browser was removed, but the record on the storage server could not be deleted. Trying again later with the same method will offer this once more.",
+      "failed": "Could not remove the sign-in data. Please try again."
     },
     "login": {
       "heading": "Log in",
@@ -426,6 +433,7 @@
         "unavailable": "Recovery codes require a storage server, and this deployment has none configured.",
         "couldNotCheck": "The storage server could not be reached, so the code could not be checked. This does not mean the code is wrong -- please try again once you are back online.",
         "accountLogContinuity": "The storage server returned a version of the account's history that conflicts with another version it served during this check, so the check was stopped as a precaution. Nothing was changed, and this does not mean the code is wrong. If you did not expect this, contact your storage provider.",
+        "accountGone": "This recovery code was found, but the account it belongs to no longer exists on the storage server -- it was deleted, or it moved to another server. Nothing was changed. You can remove the code's leftover sign-in data below, or leave it in place. If you have a backup of the account, re-running the backup restore puts the account back instead.",
         "failed": "Recovery failed. Please try again.",
         "passphraseCollision": "This passphrase already unlocks an existing wallet credential, and using it here would break that one. Choose a different new passphrase.",
         "completionFailed": "Your recovery worked, but this browser could not finish saving it. The code above stays available -- try the save confirmation again, or log in with your new passphrase and it will be shown once more.",
@@ -992,6 +1000,7 @@
     "clientNotEnrolled": "Your account was found, but its keys are not reachable from this popup. Open the wallet app in its own tab, sign in there, then try again here.",
     "storageUnreachable": "Could not reach the storage server. Please try again in a moment.",
     "loginFailed": "Could not log in. Please try again.",
+    "accountGone": "This login method was found, but the account it belongs to no longer exists on the storage server -- it was deleted, or it moved to another server. Nothing was changed. Open the wallet app in its own tab and sign in with this method there to remove its leftover sign-in data.",
     "loginPrompt": "Enter your wallet passphrase to continue:",
     "passphrasePlaceholder": "Passphrase",
     "viewRequestSource": "View request source code",

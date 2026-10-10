@@ -168,6 +168,8 @@ import {
   wrapUnlockRecord
 } from '@interop/wallet-core/unlock'
 import { currentAccountRecordSigners } from '@interop/wallet-core/clients'
+import { AccountLogMissingError } from '@interop/wallet-core/webvh'
+import { DeadAccountPointerError } from '@/session/deadAccountPointer'
 import { memoryResourceLogPinStore } from '@interop/vh-resource-log'
 
 // The login's chain-head pins every keyring fetch below settles under.
@@ -2909,6 +2911,43 @@ describe('fetchTransientKeyring (FW-215)', () => {
         accountLogPinStore: memoryResourceLogPinStore()
       })
     ).rejects.toThrow(KeyringRecordForgedError)
+  })
+
+  it('refuses a re-minted record whose account log is gone as a dead pointer, not as forged', async () => {
+    // The pending proof's settlement is the first account-log read on this
+    // path. A 404 there is the dead account pointer: the record decrypted,
+    // but the account it names is gone. It refuses with the credential's
+    // own removal, and never reads as a host forging the record.
+    const passphrase = 'transient pending proof, account gone'
+    const { keyAgreementKey, spaceId, seed } = await unlockFor(passphrase)
+    const standing = await standingClientFromUnlockSeed({ unlockSeed: seed })
+    const record = await wrapUnlockRecord({
+      controller: DATA_CONTROLLER,
+      pointer: POINTER,
+      delegation: DELEGATION,
+      keyAgreementKey: keyAgreementKey as unknown as IKeyAgreementKey,
+      signer: recordSignerFromAgent({
+        keyAgent: (await unlockFor(STRANGER_PASSPHRASE)).agent
+      }),
+      bindingMacKey: standing.bindingMacKey
+    })
+    wasState.spaces.set(spaceId, record)
+    vi.mocked(currentAccountRecordSigners).mockRejectedValueOnce(
+      new AccountLogMissingError()
+    )
+
+    const err = await fetchTransientKeyring({
+      secret: passphrase,
+      kdf: KDF,
+      accountLogPinStore: memoryResourceLogPinStore()
+    }).then(
+      () => undefined,
+      (refusal: unknown) => refusal
+    )
+
+    expect(err).toBeInstanceOf(DeadAccountPointerError)
+    expect((err as DeadAccountPointerError).unlockSpaceId).toBe(spaceId)
+    expect((err as DeadAccountPointerError).accountDid).toBe(POINTER.did)
   })
 })
 

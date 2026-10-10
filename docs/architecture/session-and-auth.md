@@ -385,6 +385,42 @@ since no entry names anything to mark. A retry of the same change with the
 same secret converges, the sealed ladder seed being read back from the
 record.
 
+**A dead account pointer.** An unlock record can decrypt cleanly while
+the account it points at no longer exists: the account was deleted
+server-side, moved to another host, or torn out from under this credential
+by an account deletion that could not reach this credential's unlock Space
+(a sibling whose management zcap had lapsed, or the acting credential's own
+Space on a run torn between the account Space delete and that one). The one
+signal is the account log answering 404 at the login's first-contact read
+(`verifyPointedAccountLog` in `src/session/deadAccountPointer.ts`, over
+wallet-core's `AccountLogMissingError`). A network failure, a server fault,
+and a continuity refusal (a `rollback` included) rethrow unchanged, so none
+of them is deletion evidence and none reaches the deleter. Both login
+compositions refuse with `DeadAccountPointerError`, which carries the unlock
+Space id, the account DID, and a removal closure: the transient login at its
+first-contact read, and the remembered login at a read of its own right
+after the keyring fetch, before the forgotten-browser detector, which stands
+down on a log it cannot verify. A record whose proof is pending reads the
+log earlier still, in the settlement of that proof (`settlePendingRecordProof`
+in `src/session/keyring.ts`), and that read refuses the same way rather
+than as a forged record. The login page and the interaction-URL page render
+`auth.errors.accountGone` and offer "remove this method's sign-in data";
+accepting runs the closure, which retires the credential's unlock identity
+(the unlock Space deleted root-invoked under its own unlock identity, best
+effort, then the credential's unlock-local state, through the Storage Access
+handle on a popup), so the browser holds no record for the credential
+afterwards. Declining leaves the record in place, and a later login offers
+this again. The CHAPI popup renders no offer: its copy
+(`chapi.accountGone`) sends the user to the wallet app. The copy names
+re-running a backup restore as the other way out, since a restore torn after
+its unlock-Space stage leaves the same shape. A recovery code's next use is
+a spend, so the `/recover` page takes the same branch when the pointed log
+answers 404, at the locate step for every record shape, before the new
+passphrase is asked for, and retires the code's own unlock Space. The
+removal is the `login-routing` mender for invariant
+`no-unlock-space-outlives-its-credential`, reported on accept. A credential
+never used again is the residue it does not reach.
+
 **Bare passkey entry.** A passkey login runs the sibling repair,
 `rebuildBarePasskeyEntry`, on its own present-but-bare entry, matched by
 unlock Space and rebuilt from the keyring hit once the account document

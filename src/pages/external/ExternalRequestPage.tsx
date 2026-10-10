@@ -37,6 +37,8 @@ import { useTranslation } from 'react-i18next'
 import { useAuthStore } from '@/stores/authStore'
 import { loginWithPassphrase } from '@/session/initSession'
 import { loginErrorKey } from '@/session/loginErrorKey'
+import { useDeadPointerRemoval } from '@/hooks/useDeadPointerRemoval'
+import { RemoveSignInDataButton } from '@/components/RemoveSignInDataButton'
 import { completeAppLogin } from '@/session/completeAppLogin'
 import { useCopyToClipboard } from '@/hooks/useCopyToClipboard'
 import { chapiStyles } from '@/styles/appStyles'
@@ -142,6 +144,9 @@ export function ExternalRequestPage() {
   // existing collection waits for that pass instead, before consent.
   const { grants: resolvedGrants, attributeGrants } = useAttributedGrants()
   const [loginError, setLoginError] = useState<string | null>(null)
+  // The dead-pointer refusal's removal offer. Reset by every attempt.
+  const removal = useDeadPointerRemoval()
+  const [loginNotice, setLoginNotice] = useState<string | null>(null)
   // The requester DIDs this account has granted before and not revoked,
   // read off the `connections` directory after consent renders.
   const [knownAgents, setKnownAgents] = useState<
@@ -370,6 +375,8 @@ export function ExternalRequestPage() {
    */
   async function handleLogin(passphrase: string) {
     setLoginError(null)
+    setLoginNotice(null)
+    removal.clear()
     if (!profile) {
       return
     }
@@ -394,6 +401,7 @@ export function ExternalRequestPage() {
       setLoginError(
         t(loginErrorKey({ err, label: 'External request login' }).key)
       )
+      removal.offerFrom(err)
       return
     }
     setSession(loggedIn)
@@ -414,6 +422,27 @@ export function ExternalRequestPage() {
       log.error('External request preparation failed', { err })
       block('processFailed')
     }
+  }
+
+  /**
+   * The dead-pointer removal's outcome, as the login form's notice, or on a
+   * failed removal (`null`) as its error, beside the offer that stays.
+   */
+  function handleSignInDataRemoved(
+    outcome: { unlockSpaceDeleted: boolean } | null
+  ) {
+    if (!outcome) {
+      setLoginError(t('auth.accountGone.failed'))
+      return
+    }
+    setLoginError(null)
+    setLoginNotice(
+      t(
+        outcome.unlockSpaceDeleted
+          ? 'auth.accountGone.removed'
+          : 'auth.accountGone.incomplete'
+      )
+    )
   }
 
   /**
@@ -605,7 +634,14 @@ export function ExternalRequestPage() {
         )}
 
         {pageState === 'awaiting-login' && (
-          <CHAPILoginForm onSubmit={handleLogin} error={loginError} />
+          <Stack spacing={2}>
+            {loginNotice && <Alert severity="info">{loginNotice}</Alert>}
+            <CHAPILoginForm onSubmit={handleLogin} error={loginError} />
+            <RemoveSignInDataButton
+              removal={removal}
+              onRemoved={handleSignInDataRemoved}
+            />
+          </Stack>
         )}
 
         {pageState === 'preparing' && (

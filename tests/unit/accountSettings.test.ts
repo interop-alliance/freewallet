@@ -797,7 +797,10 @@ vi.mock('@interop/wallet-core/webvh', async importOriginal => ({
   relationIds: vi.fn(() => ['did:webvh:account#z6MkClientOne'])
 }))
 
-vi.mock('@/session/verifiedLog', () => ({
+vi.mock('@/session/verifiedLog', async importOriginal => ({
+  isAccountLogMissing: (
+    await importOriginal<typeof import('@/session/verifiedLog')>()
+  ).isAccountLogMissing,
   invalidateVerifiedLog: vi.fn(),
   // The deletion repair's memo refresh before its roster read.
   refreshVerifiedAccountLog: vi.fn(async () => {
