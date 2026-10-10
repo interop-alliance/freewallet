@@ -3185,6 +3185,49 @@ describe('StorageManager.revokeCollectionRecipients (an agent)', () => {
     expect(revokedIdsOf(revoked)).toEqual(['z-agent-notes'])
   })
 
+  it('rotates an agent-provisioned collection its entry holds no grant on, through the generator stamp alone', async () => {
+    const agent = await generateAppIdentity()
+    const { owner, storage, remoteStore, revoked, setCollections, localStore } =
+      await directorySession()
+    await storage.provisionEncryptedCollection({
+      collectionId: 'agent-notes',
+      recipient: agent.recipient
+    })
+    // The entry records the agent and no grant on the collection: the
+    // consent's grant was lost, and no Login or Grant activity row exists
+    // either. The collection carries the agent's stamp, as the
+    // interaction-URL path stamps it: `id` and the self-attested `name`,
+    // with no `origin` or `url`.
+    await recordPartyGrants({
+      storage,
+      did: agent.did,
+      kind: 'agent',
+      zcaps: []
+    })
+    setCollections([
+      {
+        id: 'agent-notes',
+        url: `${SPACE_URL}agent-notes/`,
+        generator: { id: agent.did, name: 'Notes agent' }
+      }
+    ])
+    expect((await localStore.listHistoryItems()).entries).toEqual([])
+
+    const { rotation } = await rotateParty({ storage, did: agent.did })
+
+    expect(rotation).toEqual({
+      collections: 1,
+      rotated: 1,
+      failed: 0,
+      revokedIds: []
+    })
+    const descriptor = await remoteStore.collectionEncryption({
+      collectionId: 'agent-notes'
+    })
+    expect(currentEpochKids(descriptor!)).toEqual([owner.keyAgreementKey.id])
+    expect(revoked).toEqual([])
+  })
+
   it('skips a plaintext inbox or audience target, which resolves no descriptor', async () => {
     const agent = await generateAppIdentity()
     const { storage } = await agentGrantStorage(agent)

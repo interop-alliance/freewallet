@@ -4,6 +4,12 @@
 
 ### Added
 
+- Unit test: an agent-provisioned collection whose `connections` entry
+  holds no grant on it, and whose consent left no activity row, is rotated
+  off the agent through its `generator` stamp alone. The re-admit case is
+  settled: a collection an agent was admitted to but did not create is
+  reached through the grant recorded on its entry, and no roster scan is
+  built.
 - A login whose unlock record decrypts but whose account log answers 404
   (an account deleted or moved from under the credential) is refused as a
   dead account pointer, apart from a transport failure and a continuity
