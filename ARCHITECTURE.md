@@ -595,7 +595,11 @@ block, the inbox pass (the drain of the account's `inbox`, then the renewal
 of the connected agents' grants, `src/session/inboxPass.ts`) runs as each
 chain's tail and reports into `session.inboxPass` alone, since it reaches
 other parties' servers. A routing or ceremony-tail entry reports from its
-own call site. Five encounter registrations run mid-visit through the
+own call site, through a report-only site that names the invariants it
+grades. Two tail sites exist, the client revocation's and the
+unlock-credential rotation's; a ceremony's own roster rotation and
+collection cascade report no entry and back no trigger. Five encounter
+registrations run mid-visit through the
 encounter runner, where a session meets the evidence: a collection
 recorded as stranded, a stale registry seal at the Settings mount, the
 `connections` writer sweep at the page-level directory listing read
@@ -1163,8 +1167,13 @@ base64url(SHA-256(unlock did:key))` (a discovery convention).
   dependency graph. An encounter registration is run by the encounter
   runner (`src/session/menders/encounter.ts`): an authority check, a wait on
   the session's encounter gate, one run per session and registration at a
-  time, and a once-per-session budget on a failed or refused run. Its gap
-  allowlist declares the residues nothing converges today (see "Ceremony
+  time, and a once-per-session budget on a failed or refused run. A
+  `ceremony-tail` trigger is site-backed, as `encounter` is: the registry
+  refuses a declaration listing either with no site behind it, and the
+  derived sets count a tail site only under the authority its invariants
+  declare. A `login-routing` declaration stands with no site, since its
+  detector refuses from inside the login itself. Its gap allowlist
+  declares the residues nothing converges today (see "Ceremony
   inventory"). Avoid: saga, state machine, mender table.
 - **Tear mending** -- the umbrella for how a torn ceremony (one interrupted
   mid-run) gets finished, by a converging re-run, a standing sweep, or a

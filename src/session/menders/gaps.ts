@@ -81,10 +81,9 @@ export const MENDER_GAPS: ReadonlyArray<InvariantGap> = [
     item: 'FW-417',
     kind: 'none'
   },
-  // 8. Lapsed on the 2026-09-09 trigger correction; stands until a review
-  // confirms the residue mended. The derivation counts the invariant reached
-  // through its ceremony-tail trigger, though the ladder-kind tail is a
-  // one-shot license and the standing converger needs `enrolled`.
+  // 8. Derived: the standing converger is the remembered sweep, under
+  // `enrolled`, and a ladder-kind ceremony's own roster append registers no
+  // tail site.
   {
     invariant: 'roster-wraps-exactly-the-document-key-set',
     tornState:
@@ -116,11 +115,9 @@ export const MENDER_GAPS: ReadonlyArray<InvariantGap> = [
   // collection descriptor logs behind a forget ceremony's removal entry, on
   // both grades. The number stays, so the rows below keep theirs.
   // 21. The roster half row 10 never named, listed in row 10's place. Its
-  // only seal is the remembered sweep's
-  // roster convergence, which no credential-only visit fires. It keys
-  // invariant 37, the roster log's half of invariant 2. The derivation
-  // counts 37 reached through its ceremony-tail trigger, so this row stands
-  // by declaration.
+  // only seal is the remembered sweep's roster convergence, which no
+  // credential-only visit fires. It keys invariant 37, the roster log's half
+  // of invariant 2, and derives `unreachable` from that.
   {
     invariant: 'roster-log-head-anchors-past-the-membership-change',
     tornState:

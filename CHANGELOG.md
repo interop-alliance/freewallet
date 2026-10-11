@@ -25,6 +25,15 @@
 
 ### Changed
 
+- The mender registry's `ceremony-tail` trigger is site-backed, on
+  `@interop/wallet-core` 0.105.0. The client revocation's and the
+  unlock-credential rotation's tails are registered as report-only sites,
+  keyed by ceremony (`CEREMONY_TAIL_SITES`), and `reportCeremonyTail` warns on
+  an entry naming an invariant its ceremony's site does not report. The
+  four declarations that carried the trigger as a note on a ceremony's own
+  roster rotation drop it. The roster's wraps and the roster log's head leave
+  the transient-reachable set, and gap rows 8 and 21 derive `unreachable`
+  rather than standing by declaration.
 - The resource replica carries the `writerId` label the latest revision was
   declared under, pulled off the changes feed and absent when the feed
   carries none, on `@interop/was-sync` 0.9.0. The label is advisory, and a

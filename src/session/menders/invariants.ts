@@ -38,15 +38,17 @@ const DECLARATIONS: ReadonlyArray<
   // over wallet-core `/clients`' `convergeUserKeyRosterToAccount`. The
   // authority is that standing converger's reach, the remembered sweep,
   // which needs this client's key agent. On a transient session only a
-  // ladder-kind ceremony's own tail converges it, as the one roster append
-  // the ceremony-tail license admits per inventory-changing version.
+  // ladder-kind ceremony's own sequenced roster rotation converges it, as
+  // the one roster append the ceremony-tail license admits per
+  // inventory-changing version. That rotation reports no tail entry, so no
+  // tail site backs this invariant.
   {
     id: 'roster-wraps-exactly-the-document-key-set',
     statement:
       "The user key roster's current epoch wraps the user key to exactly the key-agreement keys the account document lists: no recipient the document has stopped keying, and no keyed client left without a wrap.",
     standsOn: ['ladder-anchored', 'enrolled'],
     authority: 'enrolled',
-    triggers: ['remembered-login-chain', 'ceremony-tail'],
+    triggers: ['remembered-login-chain'],
     ceremonies: [
       'client-revocation',
       'recovery-code-spend',
@@ -74,11 +76,7 @@ const DECLARATIONS: ReadonlyArray<
       "Each encrypted collection's governing log (its `meta/log`) has a verified head anchored at a controller version no earlier than the controller's latest assertion-key removal.",
     standsOn: ['ladder-anchored', 'enrolled'],
     authority: 'account',
-    triggers: [
-      'remembered-login-chain',
-      'transient-login-chain',
-      'ceremony-tail'
-    ],
+    triggers: ['remembered-login-chain', 'transient-login-chain'],
     ceremonies: [
       'client-revocation',
       'forget-client',
@@ -102,12 +100,7 @@ const DECLARATIONS: ReadonlyArray<
       "Every encrypted collection's current key epoch names the current user key generation.",
     standsOn: ['ladder-anchored', 'enrolled'],
     authority: 'account',
-    triggers: [
-      'remembered-login-chain',
-      'transient-login-chain',
-      'ceremony-tail',
-      'encounter'
-    ],
+    triggers: ['remembered-login-chain', 'transient-login-chain', 'encounter'],
     ceremonies: [
       'client-revocation',
       'recovery-code-spend',
@@ -713,17 +706,15 @@ const DECLARATIONS: ReadonlyArray<
   // converger: the `seal()` backstop inside invariant 1's converger
   // (`convergeRosterToDocument`, `src/session/userKeySweep.ts`), reported
   // by the remembered sweep. The roster log's half of invariant 2, on
-  // invariant 1's authority and for invariant 1's reason: a roster append
-  // needs this client's key agent, or a ladder-kind ceremony's one licensed
-  // tail append, so no transient chain converges it. Gap row 21 keeps the
-  // residue visible.
+  // invariant 1's authority and for invariant 1's reason. Gap row 21 derives
+  // from that.
   {
     id: 'roster-log-head-anchors-past-the-membership-change',
     statement:
       "The user key roster log's verified head is anchored at a controller version no earlier than the controller's latest assertion-key removal.",
     standsOn: ['ladder-anchored', 'enrolled'],
     authority: 'enrolled',
-    triggers: ['remembered-login-chain', 'ceremony-tail'],
+    triggers: ['remembered-login-chain'],
     ceremonies: [
       'client-revocation',
       'forget-client',

@@ -98,6 +98,7 @@ import { refreshTransientManageCapability } from '@/session/unlockMethods'
 import { sweepHeldConnectionWriters } from '@/session/connectionWriters'
 import { INBOX_PASS_REPORTS, runInboxPass } from '@/session/inboxPass'
 import { wasServiceDescription } from '@/lib/wasService'
+import { CEREMONY_TAIL_SITES } from '@/session/menders/ceremonyTail'
 
 /**
  * What the remembered login's registrations read. One object per block, its
@@ -1334,10 +1335,11 @@ export const TRANSIENT_REGISTRATIONS: ReadonlyArray<
 
 /**
  * The sites that report from their own call sites rather than from a block:
- * the routing entries, which decide whether a session is built at all, and
- * the did:web projection mend, fired before the transient chain and in the
- * CHAPI popup. They carry no `converge`, so nothing can run them out of
- * their own order.
+ * the routing entries, which decide whether a session is built at all, the
+ * did:web projection mend, fired before the transient chain and in the
+ * CHAPI popup, and the two ceremony tails that grade an entry through
+ * `reportCeremonyTail` (`CEREMONY_TAIL_SITES`). They carry no `converge`,
+ * so nothing can run them out of their own order.
  */
 const REPORTING_SITES: ReadonlyArray<RegistrationSite> = [
   // The did:web projection mend, `refreshDidWebProjection`
@@ -1449,14 +1451,18 @@ const REPORTING_SITES: ReadonlyArray<RegistrationSite> = [
     trigger: 'encounter',
     reports: ['unlock-registry-opens-under-the-current-user-key'],
     reachedBy: ['remembered', 'transient']
-  }
+  },
+  // The two ceremony tails that report an entry, keyed by ceremony in
+  // `ceremonyTail.ts` so a reporter's entries are checked against its site.
+  ...Object.values(CEREMONY_TAIL_SITES)
 ]
 
 /**
  * Every registration site the registry indexes: both blocks in execution
  * order (the seed first), each followed by its inbox tail, the five
  * encounter registrations the encounter runner runs, then the sites that
- * report from their own call sites. The audit's derived sets read this list.
+ * report from their own call sites, the two ceremony tails last. The
+ * audit's derived sets read this list.
  */
 export const MENDER_SITES: ReadonlyArray<RegistrationSite> = [
   REMEMBERED_SEED,

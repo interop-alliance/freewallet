@@ -95,7 +95,8 @@ vi.mock('@/session/credentialRotation', () => ({
     mended: []
   }))
 }))
-vi.mock('@/session/menders/ceremonyTail', () => ({
+vi.mock('@/session/menders/ceremonyTail', async importOriginal => ({
+  ...(await importOriginal<typeof import('@/session/menders/ceremonyTail')>()),
   reportCeremonyTail: vi.fn()
 }))
 vi.mock('@/session/userKeyAdoption', () => {

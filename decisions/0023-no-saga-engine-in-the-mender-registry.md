@@ -36,8 +36,9 @@ the run reported.
 Two limits follow directly. The credential-anchored heal arms register
 as invariants whose convergers delegate to wallet-core's mend entry
 point, rather than rebuilding an arm here. A ceremony-tail entry carries
-no registration at all, so no caller can fire the revocation's re-mint
-or the rotation's annex retirement outside the cascade order.
+a report-only site and no converging registration, so no caller can fire
+the revocation's re-mint or the rotation's annex retirement outside the
+cascade order.
 
 Do not reopen.
 

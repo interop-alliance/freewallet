@@ -1,9 +1,10 @@
 /**
  * The ceremony-tail report's consumer (`src/session/menders/ceremonyTail.ts`).
- * A ceremony-tail entry carries no registration, so no login chain's runner
- * ever sees it; this helper is what applies the runner's warn discipline to
- * the entries a ceremony reports from its own call site, and what emits each
- * entry's `'ceremony mender'` event.
+ * A ceremony-tail entry carries a report-only site and no converging
+ * registration, so no login chain's runner ever sees it. This helper is what
+ * applies the runner's warn discipline to the entries a ceremony reports from
+ * its own call site, checks each entry against the ceremony's tail site, and
+ * emits each entry's `'ceremony mender'` event.
  */
 import { afterEach, describe, expect, it } from 'vitest'
 import { addSink, captureSink, configure } from '@interop/logger'
@@ -133,6 +134,32 @@ describe('reportCeremonyTail', () => {
       outcome: 'refused',
       reason: 'no-pointer',
       ceremony: 'client-revocation'
+    })
+  })
+
+  it("warns on an entry naming an invariant outside the ceremony's site", () => {
+    const events = reported({
+      ceremony: 'client-revocation',
+      mended: [
+        {
+          invariant: ANNEX_INVENTORY,
+          ceremonies: ['client-revocation'],
+          outcome: 'clean'
+        }
+      ]
+    })
+
+    const shape = events.filter(
+      event =>
+        event.msg !== CEREMONY_MENDER_MSG &&
+        event.msg !== freewalletMenderRegistry.byId(ANNEX_INVENTORY)?.warn
+    )
+    expect(shape).toHaveLength(1)
+    expect(shape[0]?.level).toBe('warn')
+    expect(shape[0]?.data).toMatchObject({
+      invariant: ANNEX_INVENTORY,
+      ceremony: 'client-revocation',
+      reports: [GENERATION_DELEGATION]
     })
   })
 

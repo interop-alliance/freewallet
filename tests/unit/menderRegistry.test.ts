@@ -85,31 +85,41 @@ describe('census completeness', () => {
     expect(new Set(keys).size).toBe(keys.length)
   })
 
-  it('registers no ceremony-tail site', () => {
-    expect(MENDER_SITES.some(site => site.trigger === 'ceremony-tail')).toBe(
-      false
-    )
+  it('registers the two ceremony-tail sites, one per tail reporter', () => {
+    // The client revocation's and the unlock-credential rotation's tails are
+    // the two that grade an entry through `reportCeremonyTail`. A ceremony's
+    // own roster rotation and collection cascade report none.
+    expect(
+      MENDER_SITES.filter(site => site.trigger === 'ceremony-tail').map(
+        site => site.reports
+      )
+    ).toEqual([
+      ['generation-delegation-is-current'],
+      ['retired-credential-leaves-no-annex-inventory']
+    ])
   })
 })
 
 describe('the transient-reachable set', () => {
-  it('is the twenty-four entries the design pins', () => {
+  it('is the twenty-two entries the design pins', () => {
     const reachable = transientReachableInvariants({
       registry: freewalletMenderRegistry
     })
     // Row 35 joined when the connections writer sweep became an encounter
     // site at the directory listing read, which a transient session reaches.
-    // Row 37 joined when it split off row 2 as the roster log's half. It is
-    // counted through its ceremony-tail trigger, as row 2 was before the
-    // split, and row 2 stays since its transient collection fan-out still
-    // reports it. Rows 38 and 39 joined with the inbox pass, which runs
-    // behind the transient chain's block and at two encounter sites. Row 30
-    // joined when the dead-pointer prompt gave its account-is-gone half a
-    // routing site, which a login or a recovery spend on any credential
-    // reaches.
+    // Rows 1 and 37 left when the ceremony-tail trigger became site-backed:
+    // each was counted through a reporterless tail trigger, and the
+    // remembered sweep, under `enrolled`, is the one site reporting either.
+    // Row 2 stays since its transient collection fan-out still reports it.
+    // Rows 16 and 25 stay on their tail sites, whose `account` authority the
+    // ladder held set admits. Rows 38 and 39 joined with the inbox pass,
+    // which runs behind the transient chain's block and at two encounter
+    // sites. Row 30 joined when the dead-pointer prompt gave its
+    // account-is-gone half a routing site, which a login or a recovery spend
+    // on any credential reaches.
     expect(reachable.map(rowOf)).toEqual([
-      1, 2, 3, 4, 5, 6, 7, 8, 10, 12, 13, 14, 15, 16, 17, 18, 25, 26, 30, 32,
-      35, 37, 38, 39
+      2, 3, 4, 5, 6, 7, 8, 10, 12, 13, 14, 15, 16, 17, 18, 25, 26, 30, 32, 35,
+      38, 39
     ])
   })
 })
@@ -131,18 +141,18 @@ describe('the gap allowlist', () => {
     // connections writer sweep became an encounter site at the directory
     // listing read. Row 36 entered `none` with its declaration: nothing
     // backfills the connections directory. Row 20 left the census with the
-    // login-time stranded app-key sweep. Row 37 entered no derived set when
-    // it split off row 2: the remembered sweep reports it and its
-    // ceremony-tail trigger counts it reached. Row 40 entered `none` with
-    // its declaration: nothing rotates the pairwise seed until FW-647. Row
-    // 30 left `none` when the dead-pointer prompt's accept began reporting
-    // it from the login-routing site; its declared rows stay, each scoped
-    // to a torn state the prompt does not reach.
+    // login-time stranded app-key sweep. Rows 1 and 37 entered
+    // `unreachable` when the ceremony-tail trigger became site-backed: the
+    // remembered sweep is the one site reporting either. Row 40 entered `none`
+    // with its declaration: nothing rotates the pairwise seed until FW-647.
+    // Row 30 left `none` when the dead-pointer prompt's accept began
+    // reporting it from the login-routing site; its declared rows stay,
+    // each scoped to a torn state the prompt does not reach.
     expect(
       derived
         .filter(gap => gap.kind === 'unreachable')
         .map(gap => rowOf(gap.invariant))
-    ).toEqual([11, 19, 22, 24, 27, 33])
+    ).toEqual([1, 11, 19, 22, 24, 27, 33, 37])
     expect(undeclaredGaps({ derived, declared: MENDER_GAPS })).toEqual([])
   })
 

@@ -104,7 +104,8 @@ vi.mock('@/session/revocation', () => ({
   })
 }))
 
-vi.mock('@/session/menders/ceremonyTail', () => ({
+vi.mock('@/session/menders/ceremonyTail', async importOriginal => ({
+  ...(await importOriginal<typeof import('@/session/menders/ceremonyTail')>()),
   reportCeremonyTail: vi.fn(() => {
     state.calls.push('reportCeremonyTail')
   })
