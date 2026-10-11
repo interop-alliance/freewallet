@@ -33,14 +33,20 @@ const log = createLogger('fw:session:registry')
 
 /**
  * The ceremony tails that report an entry, one site per reporting ceremony.
- * The registry indexes these beside the other report-only sites.
+ * The registry indexes these beside the other report-only sites. Each names
+ * the session kinds that reach its ceremony in `reachedBy`, as an encounter
+ * site does, since the derived sets count a tail toward a credential-only
+ * visit only when `transient` reaches it. The registry refuses a tail site
+ * with no reach at construction, and the typecheck refuses it first.
  */
 export const CEREMONY_TAIL_SITES = {
   // The client revocation's generation-delegation renewal, reported from
   // the cascade orchestrator's caller (`src/session/clients.ts`).
   'client-revocation': {
     trigger: 'ceremony-tail',
-    reports: ['generation-delegation-is-current']
+    reports: ['generation-delegation-is-current'],
+    // Settings > Connected wallets runs the revocation on any session type.
+    reachedBy: ['remembered', 'transient']
   },
   // The unlock-credential rotation's annex inventory strike, reported from
   // each rotation caller: `src/session/unlockMethods.ts`,
@@ -48,7 +54,9 @@ export const CEREMONY_TAIL_SITES = {
   // and `src/session/standingEstablishment.ts`.
   'unlock-credential-rotation': {
     trigger: 'ceremony-tail',
-    reports: ['retired-credential-leaves-no-annex-inventory']
+    reports: ['retired-credential-leaves-no-annex-inventory'],
+    // Every rotation caller runs on any session type.
+    reachedBy: ['remembered', 'transient']
   }
 } as const satisfies Partial<Record<CeremonyId, RegistrationSite>>
 

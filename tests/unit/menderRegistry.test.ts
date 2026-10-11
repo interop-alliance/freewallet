@@ -89,13 +89,22 @@ describe('census completeness', () => {
     // The client revocation's and the unlock-credential rotation's tails are
     // the two that grade an entry through `reportCeremonyTail`. A ceremony's
     // own roster rotation and collection cascade report none.
+    // Both ceremonies run on any session type, so each tail names both
+    // session kinds; the transient-reachable set counts rows 16 and 25
+    // through them.
     expect(
       MENDER_SITES.filter(site => site.trigger === 'ceremony-tail').map(
-        site => site.reports
+        site => ({ reports: site.reports, reachedBy: site.reachedBy })
       )
     ).toEqual([
-      ['generation-delegation-is-current'],
-      ['retired-credential-leaves-no-annex-inventory']
+      {
+        reports: ['generation-delegation-is-current'],
+        reachedBy: ['remembered', 'transient']
+      },
+      {
+        reports: ['retired-credential-leaves-no-annex-inventory'],
+        reachedBy: ['remembered', 'transient']
+      }
     ])
   })
 })

@@ -14,6 +14,7 @@ import type {
 import type { ZcapClient } from '@interop/ezcap'
 import type { IZcap } from '@interop/data-integrity-core'
 import type { KeystoreAgent } from '@interop/webkms-client'
+import type { ProfileKeyAgreementKey } from '@interop/was-client/identity'
 import type { ClientWebvhUpdateKeys } from '@interop/wallet-core/webvh'
 import type { UserKey } from '@interop/wallet-core/keys'
 import type { StandingUnlockClient } from '@interop/wallet-core/unlock'
@@ -72,7 +73,7 @@ export interface ControllerProfile {
   // user-key-backed `keyAgreementKey` above. It is the client's entry in the user key
   // wrap-set roster (`key-map/user-key.jsonl`): rotation wraps the fresh user key to it,
   // and a roster read unwraps with it.
-  clientKeyAgreementKey?: IKeyAgreementKey
+  clientKeyAgreementKey?: ProfileKeyAgreementKey
   // WebKMS keystore agent, bound to the user's keystore on the configured
   // KMS server (KMS_SERVER_URL). Absent for guests, when no KMS server is
   // configured, or when keystore provisioning failed at login.

@@ -33,7 +33,15 @@
   four declarations that carried the trigger as a note on a ceremony's own
   roster rotation drop it. The roster's wraps and the roster log's head leave
   the transient-reachable set, and gap rows 8 and 21 derive `unreachable`
-  rather than standing by declaration.
+  rather than standing by declaration. Each tail site names the session
+  kinds that reach its ceremony in `reachedBy`, both kinds for both, since
+  the client revocation and the unlock-credential rotation run on any
+  session type. The registry refuses a tail site with no reach, and the
+  typecheck refuses it first. Before this, the registry threw at module
+  load on wallet-core 0.105.0 and the wallet did not boot.
+- The session profile's `clientKeyAgreementKey` is typed as was-client's
+  `ProfileKeyAgreementKey`, the key `agentsFromSeed` returns, which
+  wallet-core 0.105.0's `ensureAccountGenesis` takes.
 - The resource replica carries the `writerId` label the latest revision was
   declared under, pulled off the changes feed and absent when the feed
   carries none, on `@interop/was-sync` 0.9.0. The label is advisory, and a

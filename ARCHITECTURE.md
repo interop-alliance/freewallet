@@ -1171,7 +1171,8 @@ base64url(SHA-256(unlock did:key))` (a discovery convention).
   `ceremony-tail` trigger is site-backed, as `encounter` is: the registry
   refuses a declaration listing either with no site behind it, and the
   derived sets count a tail site only under the authority its invariants
-  declare. A `login-routing` declaration stands with no site, since its
+  declare and, toward a credential-only visit, only when its `reachedBy`
+  names `transient`. A `login-routing` declaration stands with no site, since its
   detector refuses from inside the login itself. Its gap allowlist
   declares the residues nothing converges today (see "Ceremony
   inventory"). Avoid: saga, state machine, mender table.
