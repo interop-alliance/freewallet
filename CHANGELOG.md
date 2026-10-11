@@ -23,6 +23,18 @@
   removal is the `login-routing` mender for invariant
   `no-unlock-space-outlives-its-credential`.
 
+### Changed
+
+- The resource replica carries the `writerId` label the latest revision was
+  declared under, pulled off the changes feed and absent when the feed
+  carries none, on `@interop/was-sync` 0.9.0. The label is advisory, and a
+  local edit leaves the previous revision's label on the row until the
+  push's ack write-back or echo replaces it. The schema change makes RxDB
+  refuse every existing replica, so each is forgotten at the next login and
+  re-pulled from the Space, its replication checkpoint included. Local writes
+  not yet pushed at the update are lost, and a guest or no-WAS session's
+  replica is lost whole.
+
 ## 0.44.0 - 2026-10-09
 
 ### Added

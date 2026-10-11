@@ -389,8 +389,9 @@ collection (`private-credentials`, `public-credentials`, `wallet-activity`,
 schema (`syncedDocSchema` from `@interop/was-sync`). Its shape is
 `{ id, updatedAt, data }` plus optional members the server assigns or
 reports: the rest of the write stamp (`updatedAtCounter`, `originId`), the
-nested `meta` stamp and the `custom` body, `createdBy`, `epoch`, and the
-`etag` and `metaEtag` validators. A local write carries only `id`,
+nested `meta` stamp and the `custom` body, `createdBy`, `epoch`, the
+`etag` and `metaEtag` validators, and the `writerId` label the latest
+revision was declared under. A local write carries only `id`,
 `updatedAt`, `data`, and an optional `epoch`, and the write's ack or the
 feed's echo fills in the rest. RxDB hashes that schema and refuses a replica
 whose stored hash differs, so its shape is browser-local stored state rather
