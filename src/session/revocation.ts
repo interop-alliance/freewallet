@@ -511,7 +511,7 @@ async function revokeEnrolledClientHeld({
  * the post-edit document as its signer-death axis: a rotted (or expiring)
  * delegation is replaced by one annex entry, the fresh delegation signed
  * by this session's promoted account key and the entry by the login
- * credential's static annex rung 0. A healthy delegation is one no-op
+ * credential's static annex rung. A healthy delegation is one no-op
  * read.
  *
  * Best-effort by the cascade's contract: failures are reported, never

@@ -25,6 +25,37 @@
 
 ### Changed
 
+- Follows @interop/wallet-core 0.107.0 (FW-220). A credential's client-annex
+  rung is static, the same key on every generation, and a generation swap
+  restates the superseded generation's standing set. A swap therefore no
+  longer locks the other standing credentials out of transient login, and a
+  credential bound with no annex commit entry mints a restating generation
+  at its own next transient visit. Every generation minted before this
+  change commits its rungs under the old derivation, so on such an account
+  each credential's next transient visit mints one fresh generation. Each
+  mint re-points the generation, which ends the App Connect grants chained
+  under the old generation delegation, as any swap does. Connected agents'
+  grants are renewed by the inbox pass. The old-derivation hashes are
+  carried forward as dead entries, and a strike of a credential retired on
+  such a generation cannot name its old-derivation rung, so it reads
+  `clean`.
+- The unlock-credential retirement's annex swap names the retired
+  credential's ladder seed (`retiredLadderSeeds`). The restating swap then
+  leaves the retired rung out. A retirement holding no seed passes
+  `'unnamed'`, and that swap restates nothing, so the retired rung dies with
+  the old generation.
+- The annex GC sweep handles wallet-core 0.107.0's `readmitted` swap: an
+  off-cadence swap when the pointed generation's log commits no annex rung
+  of the login credential, the remembered-login twin of the transient
+  readiness stage's restating mint. The sweep invalidates the verified-log
+  memo after it, as after a swap or a repair. The five annex entry builders
+  are called without the dropped `generationId`.
+- The annex retirement stage's warnings and skip reasons state what holds
+  when it removed nothing: a restating swap carries the retired rung
+  forward, so only a strike, a named retirement swap, or an unnamed one
+  ends it. A rung none of them removed is a declared open gap of invariant
+  `retired-credential-leaves-no-annex-inventory` (FW-682, wallet-core
+  WC-295).
 - The storage-access consent panel (the App Connect popup and the
   interaction-URL page) is more compact. The recipient block, the expiry,
   and the revoke note are stated once above the grant list when the grants

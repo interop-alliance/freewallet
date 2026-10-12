@@ -243,7 +243,8 @@ test.describe.serial('the passphrase change from a transient session', () => {
       ).toBeVisible({ timeout: 30_000 })
 
       // The account log grew by the ceremony's two entries (the bind entry
-      // signed by the old rung, the strike entry signed by the new rung 0),
+      // signed by the old rung, the strike entry signed by the new
+      // credential's ladder rung 0),
       // and the old credential's ladder VM is gone.
       const after = await readAccountState(page, logUrl)
       expect(after.entries).toBe(before.entries + 2)

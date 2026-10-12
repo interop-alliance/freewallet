@@ -1550,8 +1550,8 @@ export async function recoverAccountWithCode({
       // sibling is best-effort, exactly as the standing establishment's: an
       // account with no pointed generation binds without one. No annex rung
       // commit runs here -- the spend holds no acting ladder seed to sign
-      // one with, so the fresh credential waits for the next generation
-      // swap (the documented mid-generation lockout).
+      // one with, so the fresh credential's first transient visit mints a
+      // fresh generation itself, restating the pointed log's standing set.
       bridge = await delegateLogWrite({
         zcapClient: newZcapClient,
         pointer,
@@ -1755,8 +1755,8 @@ export async function recoverAccountWithCode({
   // the wrap; torn before either half, the rotation drops the wrap and the
   // state converges to not-established, which the spend resume's backfill
   // detects from durable state and finishes. No annex rung commit runs (the
-  // spend holds no acting ladder seed; the fresh credential waits for the
-  // next generation swap -- the documented mid-generation lockout).
+  // spend holds no acting ladder seed; the fresh credential's first
+  // transient visit mints a restating generation itself).
   // Best-effort, like the establishment always was: a failure leaves a
   // record that logs in without self-enrolling -- and a BARE registry entry
   // below (the success flag gates the standing block), so nothing downstream
@@ -2903,7 +2903,8 @@ async function recoverAccountTransient({
     onCommitted: async () => {
       // The fresh annex generation, minted once per run (a retry reuses
       // it): genesis under the bootstrap did:key self-commits the fresh
-      // credential's per-generation rung 0, the delegation embeds while the
+      // credential's static annex rung and restates no other credential (the
+      // spend retires every pre-recovery one), the delegation embeds while the
       // auxiliary Space still answers to the bootstrap key, the controller
       // flips after -- the credential-anchored genesis order.
       if (!clientAnnexDid) {
@@ -2924,7 +2925,6 @@ async function recoverAccountTransient({
             pinStore: logPins
           }),
           ladderSeed,
-          generationId: minted.generationId,
           mintGenerationDelegation: async ({ clientAnnexDid: generationDid }) =>
             mintGenerationDelegation({
               zcapClient: ladderZcap,
@@ -2936,7 +2936,7 @@ async function recoverAccountTransient({
         })
         // The visit's key enrolled into the fresh generation BEFORE the
         // add-and-retire entry (the loud annex entry, signed by the
-        // credential's static rung 0), written controller-tier while the
+        // credential's static annex rung), written controller-tier while the
         // auxiliary Space still answers to the bootstrap key. Nothing is
         // exercised here: the delegation it will invoke under is signed by a
         // ladder VM the document does not list yet. What the placement buys
@@ -2950,7 +2950,6 @@ async function recoverAccountTransient({
             pinStore: logPins
           }),
           ladderSeed,
-          generationId: minted.generationId,
           transientKeyMultibase: clientSigningKeyMultibase({
             keyAgent: visitAgents.keyAgent
           }),

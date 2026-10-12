@@ -126,10 +126,14 @@ delegation, and renews the record's own bridge delegation when it has
 expired, entered its 30-day renewal window, or lost its signer (the key left
 `capabilityDelegation`). It re-seals the fresh bridge and sibling into the
 remote unlock record, and the visit stamps the renewed bridge rather than
-the served one. A mend that moves the account-log pointer re-verifies the
-log before enrollment. On an account whose document anchors no ladder VM of
-this credential's, the stage refuses with
-`ClientAnnexGenerationUnavailableError`, resolved as a value: the
+the served one. The stage checks up front that the pointed generation's log
+admits this credential's annex rung. A log that does not, such as one a
+credential was bound into with no commit entry, gets a fresh generation even
+when its delegation is current. That genesis restates the old log's standing
+set, so the mint locks no other credential out. A mend that moves the
+account-log pointer re-verifies the log before enrollment. On an account
+whose document anchors no ladder VM of this credential's, the stage refuses
+with `ClientAnnexGenerationUnavailableError`, resolved as a value: the
 composition falls back to the record's own `delegatedClients` sibling
 delegation and the pointed generation's embedded delegation.
 

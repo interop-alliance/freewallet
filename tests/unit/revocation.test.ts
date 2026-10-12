@@ -841,7 +841,6 @@ describe('the generation-delegation re-mint stage', () => {
       expect.objectContaining({
         store: { isClientAnnexLogStore: true },
         ladderSeed: LADDER_SEED,
-        generationId: GENERATION_ID,
         expectedDid: CLIENT_ANNEX_DID,
         // The signer-death axis: the document the revocation edit just
         // produced, never a cached view.

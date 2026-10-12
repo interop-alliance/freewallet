@@ -312,6 +312,31 @@ describe('sweepClientAnnexGenerations -- the pass', () => {
     })
   })
 
+  it('invalidates the verified-log memo after a readmission of the login credential', async () => {
+    // A passkey whose rung an unnamed retirement swap left out, used only
+    // through this enrolled client since: the pass swaps off the cadence,
+    // restating the pointed log's standing set beside the passkey's hash,
+    // and the account points at the fresh generation.
+    vi.mocked(runClientAnnexGc).mockResolvedValue({
+      ...REPORT,
+      swap: 'readmitted',
+      pointedDid: SIBLING_ANNEX_DID
+    } as never)
+    const session = makeSession()
+    const ladderSeed = new Uint8Array(32).fill(9)
+    const swept = await sweepClientAnnexGenerations({ session, ladderSeed })
+    expect(swept).toEqual({
+      report: expect.objectContaining({
+        swap: 'readmitted',
+        pointedDid: SIBLING_ANNEX_DID
+      })
+    })
+    expect(gcOptions().ladderSeed).toBe(ladderSeed)
+    expect(invalidateVerifiedLog).toHaveBeenCalledWith({
+      profile: session.profile
+    })
+  })
+
   it('invalidates the memo when the re-read pointer moved under a swap that did not land', async () => {
     // A `failed` swap whose re-point landed, or a sibling client's swap:
     // either way the log the memo holds is behind the host's.

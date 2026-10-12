@@ -139,7 +139,8 @@ export interface ControllerProfile {
   }
   // The login credential's ladder seed, from its unlock record's standing
   // members. Client annex log entries are signed by the credential's static
-  // rung 0 (derived from this seed and the generation id), so the ceremonies
+  // annex rung (derived from this seed alone, the same key on every
+  // generation), so the ceremonies
   // that write the annex mid-session -- the revocation cascade's
   // generation-delegation re-mint and the rotation's strike-or-swap -- read
   // it from here. A transient session stamps it too: it is what lets the

@@ -320,8 +320,14 @@ const DECLARATIONS: ReadonlyArray<
   // (`src/session/transientLogin.ts`) over wallet-core's
   // `ensureCredentialClientAnnexGeneration`, whose fresh-generation arm
   // mends a pointer naming a generation whose log is gone; not exported.
+  // The same arm mints a generation restating the pointed log's standing
+  // set when that log does not admit the acting credential's annex rung.
   // On a remembered login the annex GC (row 19) mends the same pointer
-  // with its `repaired` swap, inside a live auxiliary Space only. That
+  // with its `repaired` swap, inside a live auxiliary Space only, and its
+  // `readmitted` swap is the remembered-login twin of that restating arm:
+  // an off-cadence swap when the pointed log commits no annex rung of the
+  // login credential, restating the log's standing set beside the
+  // credential's own hash. That
   // pass reports row 19 alone: listing this row there would hold the GC to
   // the `ladder` authority, which a remembered session does not carry.
   {
@@ -397,8 +403,9 @@ const DECLARATIONS: ReadonlyArray<
   // host's listing against the pointer re-read from the account log under
   // the visit's pin, and keeps an unpointed generation the log never pointed
   // at until it is GC-quiet. Its `repaired` swap re-points an account left
-  // naming a deleted generation, the remembered-login twin of row 15's
-  // fresh-generation arm.
+  // naming a deleted generation, and its `readmitted` swap re-points one
+  // whose pointed log commits no rung of the login credential: the
+  // remembered-login twins of row 15's fresh-generation and restating arms.
   {
     id: 'no-annex-generation-outlives-its-pointer',
     statement:

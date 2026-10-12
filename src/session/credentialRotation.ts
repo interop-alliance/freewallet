@@ -89,6 +89,17 @@ import { wasServiceDescription } from '@/lib/wasService'
 const log = createLogger('fw:session:rotation')
 
 /**
+ * The tail of every warning and skip reason the annex retirement stage
+ * leaves when it removed nothing. A restating swap carries the retired rung
+ * forward, so only a strike entry, a named retirement swap, or an unnamed
+ * one ends it. A rung none of them removed is the declared residue of
+ * invariant `retired-credential-leaves-no-annex-inventory` (FW-682,
+ * wallet-core WC-295).
+ */
+const RETIRED_RUNG_STANDS =
+  'the retired rung rides every restating swap until a strike, a named retirement swap, or an unnamed one removes it'
+
+/**
  * What a completed retirement reports: whether the roster actually rotated on
  * this run (a re-run of an already-complete retirement reports `false`), the
  * per-collection fan-out outcomes, the rotated key when there was one, and
@@ -593,20 +604,27 @@ async function standingKeyAgreementOf({
 
 /**
  * The client annex reach of the retirement (the ceremony's stage 1b):
- * strike-or-swap. A standing credential's annex rung-0 key and hash live
- * in the pointed generation's log, out of the account document edit's reach,
- * so without this stage a retired credential keeps annex-write authority
- * for the life of the generation.
+ * strike-or-swap. A standing credential's annex rung key and hash live in
+ * the pointed generation's log, out of the account document edit's reach.
+ * The rung is static per credential, and a generation swap restates the
+ * standing set it supersedes. So without this stage a retired credential
+ * keeps annex-write authority across generations.
  *
  * - STRIKE, when the ceremony holds the retired credential's ladder seed
  *   (to name what to drop) and a distinct surviving seed whose committed
  *   rung can sign: one atomic annex entry drops the retired rung's key
- *   and hash (`retireClientAnnexRung`); a generation the retired credential
- *   never wrote reports `clean` with no entry.
- * - SWAP, otherwise: a fresh generation minted from a surviving credential's
- *   seed is installed and re-pointed under this client's account-log update
- *   authority (`swapClientAnnexGeneration`), and the retired rung dies with
- *   the old generation, which falls to the login-time collect fan-out.
+ *   and hash (`retireClientAnnexRung`); a generation whose log does not
+ *   commit the retired rung reports `clean` with no entry.
+ * - SWAP, otherwise: a fresh generation is installed and re-pointed under
+ *   this client's account-log update authority (`swapClientAnnexGeneration`).
+ *   The surviving credential's seed signs the mint, and the old generation
+ *   falls to the login-time collect fan-out. With the retired seed in hand
+ *   the genesis restates the old generation's standing set minus the retired
+ *   rung, so every other standing credential stays admitted. With none
+ *   (`'unnamed'`) the genesis restates nothing, so the retired rung dies with
+ *   the old generation. Every other standing credential then re-admits itself
+ *   at its next transient visit, through the readiness ensure's restating
+ *   mint.
  *
  * Best-effort by the ceremony's contract: every failure is caught and
  * reported as `skipped`, so the roster rotation -- the retirement's
@@ -681,11 +699,11 @@ async function retireClientAnnexInventoryStage({
       // strike would be refused as a masked 404 and read as a clean run.
       log.warn(
         'The annex strike has no sibling delegation to reach the generation ' +
-          'log through; the retired rung stands until the next generation swap'
+          `log through; ${RETIRED_RUNG_STANDS}`
       )
       return { action: 'skipped', reason: 'no-ladder-seed' }
     }
-    const { generationId, was } = reach
+    const { was } = reach
 
     if (retiredLadderSeed !== undefined && survivingLadderSeed !== undefined) {
       try {
@@ -693,7 +711,6 @@ async function retireClientAnnexInventoryStage({
           store: reach.logStore(),
           retiredLadderSeed,
           actingLadderSeed: survivingLadderSeed,
-          generationId,
           expectedDid: reach.clientAnnexDid
         })
         return { action: struck ? 'struck' : 'clean' }
@@ -717,7 +734,7 @@ async function retireClientAnnexInventoryStage({
       // this branch does not hold.
       log.warn(
         'The annex strike found no committed surviving rung on the ladder ' +
-          'branch; the retired rung stands until the next generation swap'
+          `branch; ${RETIRED_RUNG_STANDS}`
       )
       return { action: 'skipped', reason: 'no-ladder-seed' }
     }
@@ -732,7 +749,18 @@ async function retireClientAnnexInventoryStage({
       idStore: remoteStore.webvhIdStore(),
       signer: context.signer,
       zcapClient: session.profile.zcapClient,
-      ladderSeed: survivingLadderSeed
+      ladderSeed: survivingLadderSeed,
+      // The retired seed names the rung to leave out of the restated set.
+      // Two callers reach here with none: the passkey removal that does not
+      // tap the passkey (`unlockMethods.ts`) and the pending-retirement
+      // repair (`pendingRetirement.ts`). A restating swap would carry the
+      // retired rung forward, so they take the unnamed arm, which restates
+      // nothing. The other standing credentials re-admit themselves at
+      // their next transient visit, one extra mint each. Each such mint
+      // re-points the generation, ending the App Connect grants chained
+      // under the delegation it replaces, as any swap does.
+      retiredLadderSeeds:
+        retiredLadderSeed !== undefined ? [retiredLadderSeed] : 'unnamed'
     })
     if (revoke !== 'revoked') {
       // The re-point retires the old delegation on a conforming server;
@@ -746,7 +774,7 @@ async function retireClientAnnexInventoryStage({
     return { action: 'swapped' }
   } catch (err) {
     log.warn(
-      "Could not retire the credential's annex inventory; the retired rung stands until the next generation swap",
+      `Could not retire the credential's annex inventory; ${RETIRED_RUNG_STANDS}`,
       { err }
     )
     return {

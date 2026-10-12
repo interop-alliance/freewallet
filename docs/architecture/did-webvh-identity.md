@@ -47,23 +47,23 @@ did:web document of its own, so did:web and did:webvh resolution of one
 account cannot disagree. It is the whole document with its ids rewritten.
 
 **The log's growth.** Every entry is a full snapshot: the whole document,
-the full `updateKeys` and `nextKeyHashes`, and one proof. Nothing is a
-diff, and the log is append-only, so its size is the sum of the document
-size at each entry. At the deployed DID length an entry costs about 2 KB
-plus 1.8 KB per enrolled client (two verification methods, five relation
-references, one update key, two hashes) plus 1.55 KB per standing
-credential (the ladder VM, the `keyAgreement` member, one revealed rung,
-two hashes). A passphrase, a passkey, a recovery code, and a backup
-credential each count as one standing credential. The standing inventory is
-bounded by live membership: a retirement strikes the whole inventory in one
-entry, a revealed rung is reused rather than consumed, and no retired member
-lingers in `updateKeys` or `nextKeyHashes`. Entries are added only by
-ceremonies. A transient login writes the annex log and not this one. Most
-ceremonies add one or two entries; the last-client transition adds three,
-the annex GC's generation swap adds one pointer entry per period (and one
-per repair of a pointer naming a deleted generation), and a
-backup export adds one entry plus one standing credential that stays until
-the user removes it. An account with two clients and five standing
+the full `updateKeys` and `nextKeyHashes`, and one proof. Nothing is a diff,
+and the log is append-only, so its size is the sum of the document size at
+each entry. At the deployed DID length an entry costs about 2 KB plus 1.8 KB
+per enrolled client (two verification methods, five relation references, one
+update key, two hashes) plus 1.55 KB per standing credential (the ladder VM,
+the `keyAgreement` member, one revealed rung, two hashes). A passphrase, a
+passkey, a recovery code, and a backup credential each count as one standing
+credential. The standing inventory is bounded by live membership: a
+retirement strikes the whole inventory in one entry, a revealed rung is
+reused rather than consumed, and no retired member lingers in `updateKeys`
+or `nextKeyHashes`. Entries are added only by ceremonies. A transient login
+writes the annex log, and this one only when its readiness stage moves the
+generation pointer. Most ceremonies add one or two entries; the last-client
+transition adds three, the annex GC's generation swap adds one pointer entry
+per period (and one per repair of a pointer naming a deleted generation),
+and a backup export adds one entry plus one standing credential that stays
+until the user removes it. An account with two clients and five standing
 credentials pays about 13 KB per entry, so the server's 64 MiB upload limit
 is about 5,000 entries away, beyond any realistic account life.
 

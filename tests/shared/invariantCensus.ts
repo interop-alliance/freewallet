@@ -231,7 +231,7 @@ export const INVARIANT_CENSUS: Readonly<
     kind: 'unchecked',
     standsOn: ['ladder-anchored', 'enrolled'],
     reason:
-      "A credential's inventory on an annex generation is its rung-0 key and hash, derived from its ladder seed and the generation id (`clientAnnexRung`). The ladder seed rides only in that credential's own encrypted unlock record, and the registry records no annex rung: its `updateKeyMultibase` is the account log's rung. A key holder can attribute only the acting credential's own rung. The pointed generation's other keys and hashes belong to the other live credentials, to enrolled clients, or to a retired credential, and nothing a reader can open tells them apart."
+      "A credential's inventory on an annex generation is its annex rung key and hash, derived from its ladder seed alone and the same on every generation (`clientAnnexRung`). The ladder seed rides only in that credential's own encrypted unlock record, and the registry records no annex rung: its `updateKeyMultibase` is the account log's rung. A key holder can attribute only the acting credential's own rung. The pointed generation's other keys and hashes belong to the other live credentials, to enrolled clients, or to a retired credential, and nothing a reader can open tells them apart."
   },
   // The detector is the declaration's `holdsWhen`
   // (`documentListsCredential`), run by the key holder.

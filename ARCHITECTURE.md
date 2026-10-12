@@ -721,6 +721,13 @@ built:
   `standard-collections-are-provisioned`). The drain refuses it, and the
   provision re-walk's presence check reads it as present, so no trigger on
   either account shape replaces it.
+- A retired credential's annex rung hash that neither a strike entry nor a
+  named retirement swap removed (invariant
+  `retired-credential-leaves-no-annex-inventory`). A restating swap carries
+  every hash the superseded log holds, and the account document records no
+  annex commitment to attribute one by, so the hash rides every later swap.
+  The retired credential's unlock record and ladder VM are gone, so the
+  rung reaches no Space. The residue is wallet-core's WC-295.
 
 Second, a residue whose only mender is a remembered login:
 
@@ -738,7 +745,11 @@ Second, a residue whose only mender is a remembered login:
   enrolled client the pointed generation's log grows by one entry per
   transient visit, and every visit resolves it from genesis. A `gen-`
   collection a crashed first visit orphaned waits for the same sweep. A
-  ladder VM can sign neither the swap nor the collect fan-out.
+  ladder VM can sign neither the swap nor the collect fan-out. The same
+  sweep's readmission swap, an off-cadence swap when the pointed log
+  commits no annex rung of the login credential, is the remembered-login
+  twin of the transient readiness stage's restating mint, so a credential
+  used only through an enrolled client is not held to the quarter.
 - A credential-anchored signup whose pointer backfill failed, leaving the
   unlock record on the signup-time did:key (invariant
   `account-pointer-names-the-account-did`).

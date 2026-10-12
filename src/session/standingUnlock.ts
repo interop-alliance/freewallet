@@ -41,7 +41,7 @@
  * ladder, and the order changes for one reason: a ladder-signed roster
  * append is licensed only at the inventory-changing version its own entry
  * mints. So the record is written remotely first and stays inert (its ladder
- * VM is in no document yet), the bound credential's annex rung-0 hash is
+ * VM is in no document yet), the bound credential's annex rung hash is
  * committed under the acting credential's rung as a blocking stage, the bind
  * entry publishes, and only then does the escrow append. Nothing lands on
  * this browser.
@@ -214,11 +214,12 @@ export function unlockLogStore({
  * @param [options.requiredAnnexCommit] {object}   makes the bound
  *   credential's annex rung commit required on the enrolled kind. By default
  *   the commit is best-effort: it runs after the document entry and logs a
- *   skip or a failure, leaving the credential to wait for the next generation
- *   swap. Required, it runs BEFORE the document entry, so a commit that
- *   cannot land leaves only inert writes behind, and throws the skip or the
- *   failure: the backup export passes it, since a restore login on an
- *   uncommitted rung mints a fresh generation and loses every restored grant.
+ *   skip or a failure, leaving the credential's first transient visit to
+ *   mint a fresh generation. Required, it runs BEFORE the document entry, so
+ *   a commit that cannot land leaves only inert writes behind, and throws the
+ *   skip or the failure: the backup export passes it, since a restore login
+ *   on an uncommitted rung mints a fresh generation and loses every restored
+ *   grant.
  *   The ladder kind commits before its entry, blocking, either way
  * @param options.requiredAnnexCommit.clientAnnexDid {string | null}   the
  *   client-annex generation the caller's pre-flight resolved from the account
@@ -349,10 +350,13 @@ export async function establishStandingUnlock({
   }
 
   /**
-   * The bound credential's rung-0 hash into the pointed generation's
+   * The bound credential's annex rung hash into the pointed generation's
    * `nextKeyHashes`, in one atomic hash-restating entry signed by the ACTING
-   * credential's committed rung. Without it a freshly bound credential is
-   * locked out of transient login until the next generation swap.
+   * credential's committed rung. Without it, the bound credential's first
+   * transient visit finds its rung uncommitted and mints a fresh generation
+   * itself, restating the pointed log's standing set. The commit spares that
+   * extra mint. The mint's re-point would also end the grants chained under
+   * the old generation delegation.
    *
    * Best-effort on the enrolled branch (an acting rung the generation does
    * not commit is the honest skip). Blocking on the ladder branch, where the
@@ -390,7 +394,6 @@ export async function establishStandingUnlock({
       store: reach.logStore(),
       boundLadderSeed: ladderSeed,
       actingLadderSeed,
-      generationId: reach.generationId,
       expectedDid: clientAnnexDid
     })
   }
@@ -536,16 +539,17 @@ export async function establishStandingUnlock({
     invalidateVerifiedLog({ profile: session.profile })
 
     // 4b. The annex rung commit, best-effort: nothing licenses a bind to
-    // mint a generation, and the lockout consequence stands as documented.
+    // mint a generation. A commit that does not land leaves the credential's
+    // first transient visit to mint a restating generation itself.
     if (minted.clientAnnexDid && !requiredAnnexCommit) {
       try {
         await commitAnnexRung({ clientAnnexDid: minted.clientAnnexDid })
       } catch (err) {
         log.warn(
           err instanceof ClientAnnexRungCommitSkipped
-            ? 'The login credential carries no ladder seed; the bound credential waits for the next generation swap'
+            ? 'The login credential carries no ladder seed; the bound credential mints a fresh generation at its first transient visit'
             : isClientAnnexRungUncommittedError(err)
-              ? "The login credential's rung is not committed in the pointed generation; the bound credential waits for the next generation swap"
+              ? "The login credential's rung is not committed in the pointed generation; the bound credential mints a fresh generation at its first transient visit"
               : "Could not commit the bound credential's annex rung",
           { err }
         )
@@ -638,7 +642,7 @@ async function sealedLadderSeed({
  * credential's unlock record beside the existing bridge. The re-bind
  * preserves the record's ladder seed verbatim (`rebindStandingRecord`) --
  * load-bearing, since the genesis just committed that seed's
- * generation-bound rung 0 -- and the registry entry records the sibling's
+ * static annex rung -- and the registry entry records the sibling's
  * signer and expiry.
  *
  * This is what makes the credential's DEFAULT transient login possible on a

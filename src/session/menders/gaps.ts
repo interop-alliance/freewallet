@@ -247,5 +247,17 @@ export const MENDER_GAPS: ReadonlyArray<InvariantGap> = [
     standsOn: ['ladder-anchored', 'enrolled'],
     item: 'FW-647',
     kind: 'none'
+  },
+  // 26. The rotation's ceremony-tail site reports the invariant for the
+  // strike and the named swap; this row is the torn state neither reached.
+  // A restating swap carries every hash the superseded log holds, and the
+  // account document records no annex commitment to attribute one by.
+  {
+    invariant: 'retired-credential-leaves-no-annex-inventory',
+    tornState:
+      "A retired credential's annex rung hash that neither a strike entry nor a named retirement swap removed rides every later restating swap. Nothing attributes the hash to the retired credential, so no swap can leave it out.",
+    standsOn: ['ladder-anchored', 'enrolled'],
+    item: 'FW-682',
+    kind: 'none'
   }
 ]

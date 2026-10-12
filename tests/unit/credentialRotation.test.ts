@@ -731,7 +731,6 @@ describe('the annex strike-or-swap stage', () => {
         store: { isClientAnnexLogStore: true },
         retiredLadderSeed: RETIRED_SEED,
         actingLadderSeed: SURVIVING_SEED,
-        generationId: GENERATION_ID,
         expectedDid: CLIENT_ANNEX_DID
       })
     )
@@ -777,7 +776,9 @@ describe('the annex strike-or-swap stage', () => {
         accountSpaceId: POINTER.spaceId,
         wasServerUrl: POINTER.host,
         ladderSeed: SURVIVING_SEED,
-        idStore: { isWebvhIdStore: true }
+        idStore: { isWebvhIdStore: true },
+        // The restating swap leaves the retired rung out.
+        retiredLadderSeeds: [RETIRED_SEED]
       })
     )
   })
@@ -839,6 +840,14 @@ describe('the annex strike-or-swap stage', () => {
     expect(vi.mocked(retireClientAnnexRung)).not.toHaveBeenCalled()
     expect(outcome?.mended).toEqual(
       annexMend({ outcome: 'clean', detail: { action: 'swapped' } })
+    )
+    // No retired seed in hand: the unnamed arm, which restates nothing, so
+    // the retired rung dies with the old generation.
+    expect(vi.mocked(swapClientAnnexGeneration)).toHaveBeenCalledWith(
+      expect.objectContaining({
+        ladderSeed: SURVIVING_SEED,
+        retiredLadderSeeds: 'unnamed'
+      })
     )
   })
 

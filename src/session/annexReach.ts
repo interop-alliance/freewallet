@@ -482,7 +482,6 @@ async function runEnsureGenerationDelegation({
   return await ensureGenerationDelegationCurrent({
     store: reach.logStore(),
     ladderSeed,
-    generationId: reach.generationId,
     mintGenerationDelegation: mint,
     expectedDid: reach.clientAnnexDid,
     ...(accountDoc !== undefined ? { accountDoc } : {}),

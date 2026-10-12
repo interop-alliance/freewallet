@@ -72,15 +72,23 @@ authority: a pre-minted PUT-on-`did.jsonl` bridge delegation and a random
 update-key ladder seed (`@interop/wallet-core/unlock`, bound by
 `src/session/standingUnlock.ts`). On an account pointing at a client annex
 generation, that establishment also appends one atomic hash-restating annex
-commit entry with the new credential's rung-0 hash, signed by the login
-credential's committed rung. Without it the credential could not enter a
-transient session until the next generation swap. A ladder-anchored
-session runs the append before the document entry, and a failure there
-fails the establishment. An enrolled session runs it after the entry, as a
-best-effort step. A backup credential's establishment is the exception
-there. It requires the append and runs it before the document entry (the
-`requiredAnnexCommit` option), since a restore login on an uncommitted rung
-mints a fresh generation and loses every restored grant.
+commit entry with the new credential's annex rung hash, signed by the login
+credential's committed rung. A credential's annex rung is static, the same
+key on every generation. Without the commit entry, the credential's first
+transient visit finds its rung uncommitted and mints a fresh generation
+itself, restating the pointed log's standing set. The commit spares that
+mint, whose re-point ends the grants chained under the old generation
+delegation, as any swap does. A connected agent's grant there is renewed by
+the inbox pass, since its signer still stands. An App Connect grant there
+ends (see "Withdrawn authority and the owner's tick" in app-connect.md). A
+ladder-anchored session runs the append before the document entry, and a
+failure there fails the establishment. An enrolled session runs it after
+the entry, as a best-effort step, so a skipped commit there costs the bound
+credential's first transient visit that mint. A backup credential's
+establishment is the exception there. It requires the append and runs it
+before the document entry (the `requiredAnnexCommit` option), since a
+restore login on an uncommitted rung mints a fresh generation and loses
+every restored grant.
 
 The document carries a passphrase-derived `keyAgreement` key only as a hash
 commitment (`MultikeyCommitment`), which the roster's recipient resolver
@@ -502,8 +510,15 @@ pass mints a fresh generation and re-points at it off the cadence (swap
 `repaired`). This is the remembered-login mender of an account left pointing
 at a deleted generation. On a transient visit the readiness stage mints a
 fresh generation for the same state. The repair refuses when the auxiliary
-Space itself is gone, since only the readiness stage replaces a Space. The
-sweep invalidates the verified-log memo after a swap or a repair, and
+Space itself is gone, since only the readiness stage replaces a Space. When
+the pointed log stands but commits no annex rung of the login credential
+(a generation an unnamed retirement swap or a repair minted without it),
+the pass swaps off the cadence too, restating that log's standing set
+beside the credential's own hash (swap `readmitted`). That is the
+remembered-login twin of the readiness stage's restating mint, so a
+credential used only through an enrolled client is not held to the
+quarter. The quiet gate applies to both. The
+sweep invalidates the verified-log memo after a swap, a repair, or a readmission, and
 whenever the re-read pointer differs from the one it passed in. A `failed`
 swap whose re-point landed, or a sibling's swap, extended the log too.
 

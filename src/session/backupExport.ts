@@ -518,11 +518,16 @@ function refuseUnexportableEntry({
  *
  * One more condition rides the annex: the establishment must commit the new
  * credential's rung into the pointed generation, signed by this session's
- * own ladder rung. Two sessions cannot: an enrolled one whose record sealed
- * no ladder seed (the commit's honest skip), and one whose rung the pointed
- * generation neither reveals nor commits (the mid-generation lockout). Both
- * are read-only questions, so both are refused here rather than after the
- * roster wrap and the record are written and the cleanup has to retire them.
+ * own ladder rung. Without the commit, a restore login on the backup
+ * credential would mint a fresh generation and end every restored grant.
+ * Two sessions cannot sign it: an enrolled one whose record sealed no ladder
+ * seed (the commit's honest skip), and one whose rung the pointed generation
+ * neither reveals nor commits. The second is a remembered session on a
+ * credential bound with no commit entry, or one the generation predates. A
+ * transient session whose readiness stage ran clean meets neither, since
+ * that stage leaves a generation admitting its rung. Both are read-only
+ * questions, so both are refused here rather than after the roster wrap and
+ * the record are written and the cleanup has to retire them.
  *
  * The pointed generation and the registry are handed back -- the
  * generation's Space id for the listing and its DID for the establishment,
@@ -601,7 +606,6 @@ async function committableAnnexFor({
     !(await clientAnnexRungAdmitted({
       store: annex.logStore(),
       ladderSeed,
-      generationId: annex.generationId,
       expectedDid: annex.clientAnnexDid
     }))
   ) {

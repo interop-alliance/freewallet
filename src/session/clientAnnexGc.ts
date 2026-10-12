@@ -1,9 +1,12 @@
 /**
  * The client annex GC sweep: the login-time driver of wallet-core's
  * `runClientAnnexGc` -- the quarterly generation swap, its off-cadence repair
- * of a pointer naming a generation whose log is gone, and the predicate-driven
- * collect fan-out over every non-pointed `gen-` collection (see the module
- * header there for the ceremony's stage order and constraints). This module
+ * of a pointer naming a generation whose log is gone, its off-cadence
+ * readmission of a login credential the pointed log does not commit (a
+ * credential left out by an unnamed retirement swap or a repair, used only
+ * through this enrolled client since), and the predicate-driven collect
+ * fan-out over every non-pointed `gen-` collection (see the module header
+ * there for the ceremony's stage order and constraints). This module
  * supplies what only a freewallet session knows: the enrolled-client
  * preconditions, the verified-log memo, the pin store, the
  * GenerationCollect digest write (through the storage facade, id = the
@@ -35,8 +38,8 @@ import type { Session } from '@/types/auth'
  * wallet-core's per-pass report. The verified-log memo is refreshed first, so
  * the pass is handed the pointer the host serves now and not the one this
  * login read. The pass reports the pointer it re-read from the account log
- * before its collect fan-out. The memo is invalidated when the pass swapped
- * or repaired the generation, or when the two pointers differ: a `failed`
+ * before its collect fan-out. The memo is invalidated when the pass swapped,
+ * repaired, or readmitted the generation, or when the two pointers differ: a `failed`
  * swap whose re-point landed, or a sibling client's swap, also extended the
  * log the memo holds. A pass that rejects invalidates it too, since it
  * rejects only after its swap stage.
@@ -118,6 +121,7 @@ export async function sweepClientAnnexGenerations({
   if (
     report.swap === 'replaced' ||
     report.swap === 'repaired' ||
+    report.swap === 'readmitted' ||
     report.pointedDid !== reach.clientAnnexDid
   ) {
     invalidateVerifiedLog({ profile: session.profile })

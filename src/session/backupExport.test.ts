@@ -884,7 +884,6 @@ describe('exportBackup', () => {
     expect(vi.mocked(clientAnnexRungAdmitted)).toHaveBeenCalledWith({
       store: { store: 'annex-log' },
       ladderSeed: new Uint8Array(32).fill(3),
-      generationId: 'gen-1',
       expectedDid: ANNEX_REACH.clientAnnexDid
     })
     expect(vi.mocked(establishBackupCredential)).not.toHaveBeenCalled()

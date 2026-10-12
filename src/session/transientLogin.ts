@@ -464,8 +464,9 @@ export async function ensureClientAnnexGenerationReady({
  *    the pointed-generation-and-record-sibling fallback behind it and the
  *    typed refusals behind that.
  * 3. Mint a per-visit key set in memory and enroll it into the generation
- *    through the sibling delegation, signed by the credential's static rung
- *    0 (`enrollTransientClient`; the GC-race re-read is built in). The
+ *    through the sibling delegation, signed by the credential's static
+ *    annex rung (`enrollTransientClient`; the GC-race re-read is built in).
+ *    The
  *    generation delegation is taken as embedded -- the readiness stage above
  *    is what installs and renews it.
  * 4. Read the user key from the credential's STANDING roster wrap: the
@@ -794,6 +795,16 @@ export async function transientSessionFromKeyringHit({
         ? landedSibling
         : readiness.outcome.delegatedClients
     if (readiness.outcome.generationMinted || readiness.outcome.spaceMinted) {
+      // The re-point ends every App Connect grant chained under the old
+      // generation delegation, as any swap does. A connected agent's grant
+      // there is renewed by the inbox pass. Said here, since the mint runs
+      // with no dialog to say it on.
+      log.info(
+        'The readiness ensure minted a fresh annex generation; the App ' +
+          'Connect grants chained under the old generation delegation end ' +
+          'with it',
+        { clientAnnexDid: readiness.outcome.clientAnnexDid }
+      )
       // The pointer moved: the pre-mend document names a generation that is
       // no longer the live one, so the enrollment must read the fresh log.
       verified = await verifyAccountLog({
