@@ -72,7 +72,7 @@ const actualUnlockMethods = vi.hoisted(() => ({
 
 vi.mock('@/app.config', async importOriginal => ({
   ...(await importOriginal<typeof import('@/app.config')>()),
-  get WAS_SERVER_URL() {
+  get WAS_BASE_URL() {
     return state.wasUrl
   }
 }))

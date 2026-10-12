@@ -78,7 +78,7 @@ import type { IKeyAgreementKey, IZcap } from '@interop/data-integrity-core'
 import {
   KEYRING_CACHE_TTL_MS,
   UNLOCK_MANAGE_ZCAP_TTL_MS,
-  WAS_SERVER_URL
+  WAS_BASE_URL
 } from '@/app.config'
 import {
   isWebvhDid,
@@ -385,7 +385,7 @@ export async function delegateUnlockManagement({
   // deployment (a server URL like `https://host/was`) keeps its base path,
   // so the target matches byte for byte what the DELETE and the GET address.
   const invocationTarget = toUrl({
-    baseUrl: WAS_SERVER_URL as string,
+    baseUrl: WAS_BASE_URL as string,
     path: spacePath(spaceId)
   })
   return await zcapClient.delegate({
@@ -1127,7 +1127,7 @@ export async function fetchKeyring({
     }))
   const { unlock } = credential
 
-  if (!WAS_SERVER_URL) {
+  if (!WAS_BASE_URL) {
     // No remote: the cache is the keyring's only copy -- authoritative, no TTL.
     const cached = await loadKeyringCache({ spaceId: unlock.spaceId, idb })
     if (!cached) {
@@ -1148,7 +1148,7 @@ export async function fetchKeyring({
   try {
     record = await getUnlockKeyring({
       serviceDescription: await wasServiceDescription(),
-      storageServerUrl: WAS_SERVER_URL,
+      storageServerUrl: WAS_BASE_URL,
       zcapClient: unlock.zcapClient,
       spaceId: unlock.spaceId
     })
@@ -1313,7 +1313,7 @@ export async function fetchTransientKeyring({
   accountLogPinStore: ResourceLogPinStore
   credential?: UnlockCredential
 }): Promise<TransientKeyringFetchResult | null> {
-  if (!WAS_SERVER_URL) {
+  if (!WAS_BASE_URL) {
     throw new TypeError(
       'The transient unlock fetch requires a configured WAS server.'
     )
@@ -1337,7 +1337,7 @@ export async function fetchTransientKeyring({
   // clear.
   const record = await getUnlockKeyring({
     serviceDescription: await wasServiceDescription(),
-    storageServerUrl: WAS_SERVER_URL,
+    storageServerUrl: WAS_BASE_URL,
     zcapClient: unlock.zcapClient,
     spaceId: unlock.spaceId
   })
@@ -1422,7 +1422,7 @@ async function readServedUnlockRecord({
   const { unlock } = credential
   const stored = await getUnlockKeyringWithEtag({
     serviceDescription: await wasServiceDescription(),
-    storageServerUrl: WAS_SERVER_URL as string,
+    storageServerUrl: WAS_BASE_URL as string,
     zcapClient: unlock.zcapClient,
     spaceId: unlock.spaceId
   })
@@ -1576,7 +1576,7 @@ async function casRewriteUnlockRecord({
   onWritten?: (record: object) => Promise<void>
 }): Promise<object> {
   const { unlock } = credential
-  if (!WAS_SERVER_URL) {
+  if (!WAS_BASE_URL) {
     const record = await build({
       served: base,
       createdAt: nextRecordCreatedAt({ advancePast: [base.found.createdAt] })
@@ -1609,7 +1609,7 @@ async function casRewriteUnlockRecord({
     try {
       await putUnlockKeyring({
         serviceDescription: await wasServiceDescription(),
-        storageServerUrl: WAS_SERVER_URL,
+        storageServerUrl: WAS_BASE_URL,
         zcapClient: unlock.zcapClient,
         spaceId: unlock.spaceId,
         record,
@@ -1834,7 +1834,7 @@ async function buildFetchResult({
           }
         })
   }
-  if (mintManageCapability && WAS_SERVER_URL) {
+  if (mintManageCapability && WAS_BASE_URL) {
     // A standing record's capability carries PUT, exactly as its bind
     // delegated it: the login mints a fresh delegation every time and the
     // registry backfill stores it, so a narrower mint here would strip the
@@ -2037,12 +2037,12 @@ export async function probeUnlockSpaceCollision({
       clientKeys.pointerDid === pointer.did)
       ? localPending
       : undefined
-  if (!WAS_SERVER_URL) {
+  if (!WAS_BASE_URL) {
     return { ...(ownPending ? { ownPending } : {}) }
   }
   const record = await getUnlockKeyring({
     serviceDescription: await wasServiceDescription(),
-    storageServerUrl: WAS_SERVER_URL,
+    storageServerUrl: WAS_BASE_URL,
     zcapClient: unlock.zcapClient,
     spaceId: unlock.spaceId
   })
@@ -2275,18 +2275,18 @@ export async function bindUnlockSecret({
         })
 
   let manageCapability: IZcap | undefined
-  if (WAS_SERVER_URL) {
+  if (WAS_BASE_URL) {
     const serviceDescription = await wasServiceDescription()
     await ensureUnlockSpace({
       serviceDescription,
-      storageServerUrl: WAS_SERVER_URL,
+      storageServerUrl: WAS_BASE_URL,
       zcapClient: unlock.zcapClient,
       spaceId: unlock.spaceId,
       controller: unlock.agent.id
     })
     await putUnlockKeyring({
       serviceDescription,
-      storageServerUrl: WAS_SERVER_URL,
+      storageServerUrl: WAS_BASE_URL,
       zcapClient: unlock.zcapClient,
       spaceId: unlock.spaceId,
       record
@@ -2510,7 +2510,7 @@ export async function bindCredentialAnchoredUnlockSecret({
   unlockKeyAgreementKeyId?: string
   unlockKeyAgreementKeyMultibase?: string
 }> {
-  if (!WAS_SERVER_URL) {
+  if (!WAS_BASE_URL) {
     throw new TypeError(
       'The credential-anchored bind requires a configured WAS server.'
     )
@@ -2571,7 +2571,7 @@ export async function bindCredentialAnchoredUnlockSecret({
   if (priorCreatedAt === undefined) {
     await ensureUnlockSpace({
       serviceDescription,
-      storageServerUrl: WAS_SERVER_URL,
+      storageServerUrl: WAS_BASE_URL,
       zcapClient: unlock.zcapClient,
       spaceId: unlock.spaceId,
       controller: unlock.agent.id
@@ -2579,7 +2579,7 @@ export async function bindCredentialAnchoredUnlockSecret({
   }
   await putUnlockKeyring({
     serviceDescription,
-    storageServerUrl: WAS_SERVER_URL,
+    storageServerUrl: WAS_BASE_URL,
     zcapClient: unlock.zcapClient,
     spaceId: unlock.spaceId,
     record
@@ -2652,10 +2652,10 @@ async function verifyUnlockKeyring({
 }): Promise<{ found: KeyringRecordContents; ladderSeed?: Uint8Array }> {
   const { unlock } = credential
   let record: unknown
-  if (WAS_SERVER_URL) {
+  if (WAS_BASE_URL) {
     record = await getUnlockKeyring({
       serviceDescription: await wasServiceDescription(),
-      storageServerUrl: WAS_SERVER_URL,
+      storageServerUrl: WAS_BASE_URL,
       zcapClient: unlock.zcapClient,
       spaceId: unlock.spaceId
     })

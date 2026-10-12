@@ -102,7 +102,7 @@ import {
   type PersistableClientKeys,
   type UnlockCredential
 } from '@/session/keyring'
-import { WAS_SERVER_URL } from '@/app.config'
+import { WAS_BASE_URL } from '@/app.config'
 import {
   accountCeremonyContext,
   requireEnrolledCeremonyContext,
@@ -614,7 +614,7 @@ async function sealedLadderSeed({
   pointer: AccountPointer
   accountLogPinStore: ResourceLogPinStore
 }): Promise<Uint8Array | undefined> {
-  if (!WAS_SERVER_URL) {
+  if (!WAS_BASE_URL) {
     return undefined
   }
   const found = await fetchTransientKeyring({ credential, accountLogPinStore })
@@ -787,7 +787,7 @@ export function canSelfEnroll({
   found: KeyringFetchResult
 }): boolean {
   return !!(
-    WAS_SERVER_URL &&
+    WAS_BASE_URL &&
     found.standing?.ladderSeed &&
     found.standingClient &&
     found.enrollClientKeys &&

@@ -31,7 +31,7 @@ vi.mock('@/stores/sessionTeardown', () => ({
 // `SETUP_STAGE_LISTS.local` directly.
 vi.mock('@/app.config', async importOriginal => ({
   ...(await importOriginal<typeof import('@/app.config')>()),
-  WAS_SERVER_URL: 'https://was.example'
+  WAS_BASE_URL: 'https://was.example'
 }))
 
 /**

@@ -18,7 +18,7 @@ import { mintAccountKeySet as mintSharedAccountKeySet } from '@interop/wallet-co
 import { assertHostClaimsClientAnnexProfile } from '@interop/wallet-core/clientAnnex'
 import { generateLadderSeed } from '@interop/wallet-core/unlock'
 import type { PublishedWebvhLog } from '@interop/wallet-core/webvh'
-import { DATE_FMT, PASSKEY_KDF, WAS_SERVER_URL } from '@/app.config'
+import { DATE_FMT, PASSKEY_KDF, WAS_BASE_URL } from '@/app.config'
 import { recordOwnWalletClientEntry } from '@/session/clients'
 import {
   initSessionFromSeed,
@@ -90,8 +90,8 @@ const log = createLogger('fw:session:signup')
 async function mintAccountKeySet() {
   const { spaceId, clientSeed, userKey, updateKeys } =
     await mintSharedAccountKeySet()
-  const pointer: AccountPointer | undefined = WAS_SERVER_URL
-    ? { spaceId, host: WAS_SERVER_URL }
+  const pointer: AccountPointer | undefined = WAS_BASE_URL
+    ? { spaceId, host: WAS_BASE_URL }
     : undefined
   return {
     seed: clientSeed,
@@ -180,7 +180,7 @@ async function establishPassphraseAnchoredAccount({
   }
 
   const spaceId = mintSpaceId()
-  const pointer: AccountPointer = { spaceId, host: WAS_SERVER_URL as string }
+  const pointer: AccountPointer = { spaceId, host: WAS_BASE_URL as string }
   const ladderSeed = generateLadderSeed()
   const establishment = await establishCredentialAnchoredAccount({
     credential,
@@ -341,7 +341,7 @@ export async function signUpWithPassphrase({
   rememberBrowser?: boolean
   onStage?: StageNotifier
 }): Promise<{ session?: Session; userExists: boolean }> {
-  if (WAS_SERVER_URL && rememberBrowser === true) {
+  if (WAS_BASE_URL && rememberBrowser === true) {
     // The remembered signup: the establishment half only (never the
     // transient composition -- that would mint and abandon a per-visit
     // annex client). The remembered session's persistence is built here so
@@ -383,7 +383,7 @@ export async function signUpWithPassphrase({
     await finishRememberedSignup({ session })
     return { session, userExists: false }
   }
-  if (WAS_SERVER_URL) {
+  if (WAS_BASE_URL) {
     // The credential-anchored default: establishment, then the transient
     // entry, both over the visit's in-memory store family.
     const persistence = transientSessionStores()
@@ -547,7 +547,7 @@ async function signUpCredentialAnchoredWithPasskey({
   mark('kdf')
 
   const spaceId = mintSpaceId()
-  const pointer: AccountPointer = { spaceId, host: WAS_SERVER_URL as string }
+  const pointer: AccountPointer = { spaceId, host: WAS_BASE_URL as string }
   const ladderSeed = generateLadderSeed()
   // The remembered session's persistence, built here so the establishment's
   // reads and the login's run under one chain-head pin store.
@@ -668,7 +668,7 @@ export async function signUpWithPasskey({
   // The account's WebAuthn user id, minted once per account: every later
   // passkey registers under it, so authenticator pickers show one account.
   const userHandle = crypto.getRandomValues(new Uint8Array(16))
-  if (WAS_SERVER_URL) {
+  if (WAS_BASE_URL) {
     return signUpCredentialAnchoredWithPasskey({
       userHandle,
       email,

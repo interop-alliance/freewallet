@@ -10,7 +10,7 @@ import type { ServiceDescription } from '@interop/was-client'
 
 vi.mock('@/app.config', async importOriginal => ({
   ...(await importOriginal<Record<string, unknown>>()),
-  WAS_SERVER_URL: 'https://was.example',
+  WAS_BASE_URL: 'https://was.example',
   WAS_SPACES_URL: 'https://was.example/spaces/'
 }))
 

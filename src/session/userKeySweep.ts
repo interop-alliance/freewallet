@@ -21,7 +21,7 @@ import type {
   UserKeyRosterReadResult
 } from '@interop/wallet-core/keys'
 import type { AccountPointer } from '@interop/wallet-core/keyring'
-import { WAS_SERVER_URL } from '@/app.config'
+import { WAS_BASE_URL } from '@/app.config'
 import type { Session } from '@/types/auth'
 import type { SessionPersistence } from '@/session/persistence'
 import { sessionCollectionStores } from '@/session/collectionLogStore'
@@ -93,7 +93,7 @@ async function convergeRosterToDocument({
 }> {
   const { keyAgent } = session.profile
   const descriptor = read.descriptor
-  if (!pointer || !WAS_SERVER_URL || !keyAgent) {
+  if (!pointer || !WAS_BASE_URL || !keyAgent) {
     return {
       userKey,
       rosterDescriptor: descriptor,

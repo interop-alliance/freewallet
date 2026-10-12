@@ -14,7 +14,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 vi.mock('@/app.config', () => ({
-  WAS_SERVER_URL: 'https://was.example',
+  WAS_BASE_URL: 'https://was.example',
   WAS_SYNC_BATCH_SIZE: undefined,
   WAS_SYNC_RETRY_MS: undefined,
   WAS_SYNC_POLL_MS: 0,

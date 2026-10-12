@@ -67,10 +67,10 @@ import {
 } from '@interop/was-sync'
 import { BrowserStore } from '../../src/stores/browserStore'
 import { WALLET_STANDARD_COLLECTIONS } from '../../src/app.config'
+import { wasClientAt } from '../../src/lib/wasService'
 
 import type { IVerifiableCredential } from '@interop/data-integrity-core'
-import { WasClient, type CollectionEncryption } from '@interop/was-client'
-import { spacesUrl } from '@interop/was-client/paths'
+import type { WasClient, CollectionEncryption } from '@interop/was-client'
 import {
   createEdvDocCipher,
   createEdvEncryption,
@@ -145,8 +145,8 @@ function wasClientFor({
   baseUrl: string
   zcapClient: ConstructorParameters<typeof WasClient>[0]['zcapClient']
 }): WasClient {
-  return new WasClient({
-    serverUrl: spacesUrl({ baseUrl }),
+  return wasClientAt({
+    baseUrl,
     zcapClient,
     encryption: createEdvEncryption({ resolveKeys: async () => null })
   })

@@ -61,7 +61,7 @@ import {
   type PublishedWebvhLog
 } from '@interop/wallet-core/webvh'
 import { webvhResourceLogController } from '@interop/wallet-core/resourceLog'
-import { WAS_SERVER_URL } from '@/app.config'
+import { WAS_BASE_URL } from '@/app.config'
 import { hasClientKeyRecord } from '@/lib/sessionKey'
 import { isStorageUnreachable } from '@/lib/storageErrors'
 import { createLogger } from '@/lib/log'
@@ -265,7 +265,7 @@ export async function routeUnlockLogin({
       persistence: TransientSessionStores
     }
 > {
-  if (!WAS_SERVER_URL) {
+  if (!WAS_BASE_URL) {
     if (rememberBrowser === false) {
       throw new TransientLoginUnavailableError({ reason: 'no-was-server' })
     }

@@ -3,6 +3,7 @@
  * constants.
  */
 import type { EntityIdentityRegistry } from '@interop/verifier-core'
+import { baseUrlOfSpacesUrl } from '@interop/was-client/paths'
 import {
   CONTACTS_COLLECTION,
   CONTACTS_HISTORY_COLLECTION
@@ -35,13 +36,11 @@ export const WAS_SPACES_URL: string | undefined = env.VITE_WAS_SERVER_URL
 // The WAS server base URL, the parent of the Spaces Repository URL: the base
 // every Space path, the KMS facet, and the CORS proxy facet hang off, and
 // the `host` an account pointer records. Written without a trailing slash.
-// An interior doubled slash is a path segment the resolution keeps, so
-// `https://host//spaces/` derives `https://host` too. A value that does not
-// parse as an absolute URL (a scheme-less `localhost:3002/spaces/`, say) is
-// refused by name here, rather than throwing a bare TypeError at module
-// evaluation that leaves the app a white screen.
-export const WAS_SERVER_URL: string | undefined = WAS_SPACES_URL
-  ? deriveWasServerUrl(WAS_SPACES_URL)
+// A value that is not an absolute Spaces Repository URL (a scheme-less
+// `localhost:3002/spaces/`, say) is refused by name here, rather than
+// leaving the app a white screen at module evaluation.
+export const WAS_BASE_URL: string | undefined = WAS_SPACES_URL
+  ? deriveWasBaseUrl(WAS_SPACES_URL)
   : undefined
 
 /**
@@ -57,24 +56,26 @@ export function withOneTrailingSlash(url: string): string {
 }
 
 /**
- * The WAS server base URL derived from a configured Spaces Repository URL.
+ * The WAS server base URL derived from a configured Spaces Repository URL,
+ * by was-client's one rule for a well-formed base URL, so the base survives
+ * `spacesUrl` and the `WasClient` constructor byte for byte.
  *
  * @param spacesUrl {string}   the configured `VITE_WAS_SERVER_URL`, in its
  *   canonical trailing-slash form
  * @returns {string}   the parent URL, without a trailing slash
- * @throws {Error}   when the configured value is not an absolute URL
+ * @throws {Error}   when the configured value is not an absolute URL ending
+ *   in a `spaces` segment
  */
-function deriveWasServerUrl(spacesUrl: string): string {
-  try {
-    return new URL('..', spacesUrl).toString().replace(/\/+$/, '')
-  } catch (err) {
+function deriveWasBaseUrl(spacesUrl: string): string {
+  const baseUrl = baseUrlOfSpacesUrl(spacesUrl)
+  if (baseUrl === null) {
     throw new Error(
-      `VITE_WAS_SERVER_URL is not an absolute URL: "${spacesUrl}". Configure ` +
-        "it as the WAS server's Spaces Repository URL, for example " +
-        '"https://host/spaces/".',
-      { cause: err }
+      `VITE_WAS_SERVER_URL is not an absolute Spaces Repository URL: ` +
+        `"${spacesUrl}". Configure it as the WAS server's Spaces Repository ` +
+        'URL, for example "https://host/spaces/".'
     )
   }
+  return baseUrl
 }
 // WebKMS server URL. Defaults to the WAS server's in-process `/kms` facet;
 // set VITE_KMS_SERVER_URL only when the KMS is hosted separately. When
@@ -82,8 +83,7 @@ function deriveWasServerUrl(spacesUrl: string): string {
 // key is minted, the account document publishes none, and DIDAuth is
 // answered with the client did:key.
 export const KMS_SERVER_URL =
-  env.VITE_KMS_SERVER_URL ||
-  (WAS_SERVER_URL ? `${WAS_SERVER_URL}/kms` : undefined)
+  env.VITE_KMS_SERVER_URL || (WAS_BASE_URL ? `${WAS_BASE_URL}/kms` : undefined)
 // Lifetime of the capabilities delegated to a relying party when a user
 // approves a "Login with Wallet" zcap request (`src/lib/walletRequest/
 // processZcaps.ts`). Default 30 days: expiry bounds every RP grant. The WAS
@@ -409,7 +409,7 @@ export const MAX_CREDENTIAL_JSON_FILE_BYTES = 10 * 1024 * 1024
 // configured, its built-in proxy facet at `/api/cors` is the default.
 export const CORS_PROXY_URL =
   env.VITE_CORS_PROXY_URL ||
-  (WAS_SERVER_URL ? `${WAS_SERVER_URL}/api/cors` : 'https://corsproxy.io')
+  (WAS_BASE_URL ? `${WAS_BASE_URL}/api/cors` : 'https://corsproxy.io')
 
 export const PASSWORD_RULES = {
   minlength: 16,

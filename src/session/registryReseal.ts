@@ -26,7 +26,7 @@ import {
   type UserKeyRosterReadResult
 } from '@interop/wallet-core/keys'
 import { isWebvhDid } from '@interop/wallet-core/webvh'
-import { WAS_SERVER_URL } from '@/app.config'
+import { WAS_BASE_URL } from '@/app.config'
 import type { Session } from '@/types/auth'
 import { RecordEnvelopeDecryptError } from '@/session/recordEnvelope'
 import {
@@ -105,7 +105,7 @@ export async function repairStaleUnlockRegistrySeal({
   // ladder branch (escrowed into every epoch, so it opens every generation).
   const unwrapKey = rosterUnwrapKey({ session })
   if (
-    !WAS_SERVER_URL ||
+    !WAS_BASE_URL ||
     !context ||
     !pointer ||
     !isWebvhDid(pointer.did) ||
@@ -197,7 +197,7 @@ export async function resealRegistryFromEscrow({
   unwrapKey: IKeyAgreementKey
   capability?: IZcap
 }): Promise<'repaired' | 'unrepaired' | 'reseal-failed'> {
-  if (!WAS_SERVER_URL) {
+  if (!WAS_BASE_URL) {
     return 'unrepaired'
   }
   const generations = await unwrapUserKeyGenerations({
@@ -220,7 +220,7 @@ export async function resealRegistryFromEscrow({
   for (const generation of superseded) {
     try {
       await rewrapUnlockMethodsRecord({
-        storageServerUrl: WAS_SERVER_URL,
+        storageServerUrl: WAS_BASE_URL,
         zcapClient,
         spaceId,
         from: generation,

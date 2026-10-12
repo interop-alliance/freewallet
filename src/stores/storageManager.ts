@@ -91,7 +91,7 @@ import {
   RP_ZCAP_TTL_MS,
   isProtectedCollection,
   WALLET_STANDARD_COLLECTIONS,
-  WAS_SERVER_URL
+  WAS_BASE_URL
 } from '@/app.config'
 import {
   clearReceivedGrants,
@@ -2371,7 +2371,7 @@ export class StorageManager {
     // Guest sessions never touch the remote WAS server -- they get no remote
     // replica. This keeps guest mode usable as a fallback even when the
     // configured WAS server is unreachable.
-    const storageServerUrl = isGuest ? undefined : WAS_SERVER_URL
+    const storageServerUrl = isGuest ? undefined : WAS_BASE_URL
     log.info('Initializing storage clients', { storageServerUrl })
 
     const { profile, persistence } = session

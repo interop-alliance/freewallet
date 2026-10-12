@@ -12,7 +12,7 @@ import type { Session } from '@/types/auth'
 
 vi.mock('@/app.config', async importOriginal => ({
   ...(await importOriginal<typeof import('@/app.config')>()),
-  WAS_SERVER_URL: 'https://was.example.test'
+  WAS_BASE_URL: 'https://was.example.test'
 }))
 
 const logState = vi.hoisted(() => ({

@@ -9,7 +9,7 @@ import { Link as RouterLink } from 'react-router'
 import { AuthPageHeader } from '@/components/AuthPageHeader'
 import { useAppTheme } from '@/context/appThemeContext'
 import { landingStyles } from '@/styles/landingStyles'
-import { WAS_SERVER_URL } from '@/app.config'
+import { WAS_BASE_URL } from '@/app.config'
 
 export function LandingPage() {
   const { t } = useTranslation()
@@ -118,7 +118,7 @@ export function LandingPage() {
             </Box>
           </Box>
 
-          {!WAS_SERVER_URL && (
+          {!WAS_BASE_URL && (
             <Typography sx={landingStyles.configWarning}>
               {t('landing.wasServerWarning')}
             </Typography>

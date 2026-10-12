@@ -78,7 +78,7 @@ import {
   ENCRYPTED_WALLET_COLLECTION_IDS,
   KEY_MAP_COLLECTION,
   KMS_SERVER_URL,
-  WAS_SERVER_URL
+  WAS_BASE_URL
 } from '@/app.config'
 import { didWebFromSpace } from '@/lib/didWeb'
 import {
@@ -228,9 +228,9 @@ async function establishmentHooks({
   // Discovered once for every client this establishment builds, the ones
   // wallet-core builds from the parts below included.
   const serviceDescription = await wasServiceDescription()
-  // The one client shape of this establishment: the app-side `bootstrapWas`
-  // below (the KMS thunk and the id store), and the ones wallet-core builds
-  // from the agent it hands over, which owns the bootstrap identity.
+  // The client shape wallet-core builds from the agent it hands over, which
+  // owns the bootstrap identity; the app-side `bootstrapWas` below (the KMS
+  // thunk and the id store) is the same shape over `bootstrapZcap`.
   const bootstrapWasFor = ({
     keyAgent
   }: {
@@ -241,7 +241,11 @@ async function establishmentHooks({
       zcapClient: didKeyZcapClient({ keyAgent }),
       serviceDescription
     })
-  const bootstrapWas = bootstrapWasFor({ keyAgent: bootstrapAgent })
+  const bootstrapWas = wasClientAt({
+    baseUrl: host,
+    zcapClient: bootstrapZcap,
+    serviceDescription
+  })
   const idStore = wasWebvhIdStore({
     was: bootstrapWas,
     spaceId,
@@ -488,7 +492,7 @@ export async function establishCredentialAnchoredAccount({
     establishment: CredentialAnchoredEstablishment
   }) => Promise<void>
 }): Promise<CredentialAnchoredEstablishment> {
-  if (!WAS_SERVER_URL) {
+  if (!WAS_BASE_URL) {
     throw new TypeError(
       'The credential-anchored establishment requires a configured WAS server.'
     )
@@ -809,7 +813,7 @@ export async function mendCredentialAnchoredAccount({
   repairShaped?: boolean
   collectionIds?: string[]
 }): Promise<CredentialAnchoredMendReport> {
-  if (!WAS_SERVER_URL) {
+  if (!WAS_BASE_URL) {
     throw new TypeError(
       'The credential-anchored mend requires a configured WAS server.'
     )

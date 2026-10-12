@@ -22,7 +22,7 @@ import type { ZcapClient } from '@interop/ezcap'
 import type { DIDLog } from '@interop/did-method-webvh'
 import { agentsFromSeed } from '@interop/was-client/identity'
 import type { ControllerProfile, Session, User } from '@/types/auth'
-import { KMS_SERVER_URL, PASSKEY_KDF, WAS_SERVER_URL } from '@/app.config'
+import { KMS_SERVER_URL, PASSKEY_KDF, WAS_BASE_URL } from '@/app.config'
 import { ensureKeystore } from '@/lib/kms'
 import { assertPasskeyPrf } from '@/lib/passkey'
 import {
@@ -283,7 +283,7 @@ export async function initSessionFromSeed({
   // localStorage). With no WAS server the same store is the only record of
   // the locally minted key epochs, so dropping it would mint fresh ones and
   // orphan everything already encrypted.
-  const suppressPopupCaches = popup && !!WAS_SERVER_URL
+  const suppressPopupCaches = popup && !!WAS_BASE_URL
   const persistence =
     suppliedPersistence ??
     browserLocalSessionPersistence({
@@ -300,7 +300,7 @@ export async function initSessionFromSeed({
   // running off its local replica offline. A server that answers and refuses
   // still rejects the login.
   const discovery =
-    WAS_SERVER_URL && !isGuest
+    WAS_BASE_URL && !isGuest
       ? wasServiceDescriptionIfReachable()
       : Promise.resolve(undefined)
   const { keyAgent, zcapClient, keyAgreementKey, keyResolver } =
@@ -380,7 +380,7 @@ export async function initSessionFromSeed({
   if (
     userKey &&
     isRememberedSession({ persistence, isGuest }) &&
-    WAS_SERVER_URL &&
+    WAS_BASE_URL &&
     serviceDescription &&
     accountPointer &&
     isWebvhDid(accountPointer.did)
@@ -982,7 +982,7 @@ async function loginWithUnlockCredential({
       suppliedPersistence ??
       browserLocalSessionPersistence({
         idb,
-        persistCaches: !(popup && !!WAS_SERVER_URL)
+        persistCaches: !(popup && !!WAS_BASE_URL)
       })
     let found = await fetchKeyring({
       kdf,
@@ -1007,7 +1007,7 @@ async function loginWithUnlockCredential({
     // The verified head is handed on to the detector, which reads it in
     // place of fetching the same log again.
     const accountLog =
-      WAS_SERVER_URL && found.pointer && isWebvhDid(found.pointer.did)
+      WAS_BASE_URL && found.pointer && isWebvhDid(found.pointer.did)
         ? await verifyPointedAccountLog({
             did: found.pointer.did,
             spaceId: found.pointer.spaceId,

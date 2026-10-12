@@ -228,7 +228,7 @@ function gateRefusal(): Error {
 
 vi.mock('@/app.config', async importOriginal => ({
   ...(await importOriginal<typeof import('@/app.config')>()),
-  get WAS_SERVER_URL() {
+  get WAS_BASE_URL() {
     return state.wasUrl
   },
   get WAS_SPACES_URL() {

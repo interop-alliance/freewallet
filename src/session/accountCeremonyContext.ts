@@ -49,7 +49,7 @@ import type {
   CollectionStoreFor,
   SealableEncryptionDescriptorStore
 } from '@interop/wallet-core/keys'
-import { WAS_SERVER_URL } from '@/app.config'
+import { WAS_BASE_URL } from '@/app.config'
 import type { ControllerProfile, ICapabilityAgent, Session } from '@/types/auth'
 import type { WASRemoteStore } from '@/stores/wasRemoteStore'
 import { sessionRosterStore } from '@/session/rosterStore'
@@ -212,7 +212,7 @@ function resolveAccountReach({ session }: { session: Session }):
     }
   | { missing: MissingPrecondition } {
   const remoteStore = session.storage.remoteStore
-  if (!WAS_SERVER_URL || !remoteStore || session.isGuest) {
+  if (!WAS_BASE_URL || !remoteStore || session.isGuest) {
     return { missing: 'storage' }
   }
   const pointer = session.profile.accountPointer

@@ -50,7 +50,7 @@ import {
   DATE_FMT,
   PASSKEY_KDF,
   UNLOCK_METHODS_COLLECTION,
-  WAS_SERVER_URL
+  WAS_BASE_URL
 } from '@/app.config'
 import type { Session } from '@/types/auth'
 import type { AccountCeremonyContext } from '@/session/accountCeremonyContext'
@@ -566,7 +566,7 @@ export async function getUnlockMethods({
   const { unlockMethodsCache } = session.persistence
   const userKey = requireUserKey(session)
 
-  if (!WAS_SERVER_URL) {
+  if (!WAS_BASE_URL) {
     const cached = await unlockMethodsCache.load({ controller })
     if (!cached) {
       return null
@@ -581,7 +581,7 @@ export async function getUnlockMethods({
   }
 
   const stored = await getUnlockMethodsRecord({
-    storageServerUrl: WAS_SERVER_URL,
+    storageServerUrl: WAS_BASE_URL,
     zcapClient: session.profile.zcapClient,
     spaceId: requireSpaceId(session),
     ...registryRides({ session, capability })
@@ -770,7 +770,7 @@ export async function updateUnlockMethods({
   const { unlockMethodsCache } = session.persistence
   const userKey = requireUserKey(session)
 
-  if (!WAS_SERVER_URL) {
+  if (!WAS_BASE_URL) {
     const cached = await unlockMethodsCache.load({ controller })
     let current: UnlockMethodsRecord | null = null
     if (cached) {
@@ -792,7 +792,7 @@ export async function updateUnlockMethods({
     return next
   }
 
-  const storageServerUrl = WAS_SERVER_URL
+  const storageServerUrl = WAS_BASE_URL
   const zcapClient = session.profile.zcapClient
   const spaceId = requireSpaceId(session)
   return await casUpdateRegistryRecord({
@@ -883,12 +883,12 @@ export async function updateUnlockMethodsWithClient({
   ) => UnlockMethodsRecord | null | Promise<UnlockMethodsRecord | null>
   capability?: IZcap
 }): Promise<UnlockMethodsRecord | null> {
-  if (!WAS_SERVER_URL) {
+  if (!WAS_BASE_URL) {
     throw new TypeError(
       'The direct registry write requires a configured WAS server.'
     )
   }
-  const storageServerUrl = WAS_SERVER_URL
+  const storageServerUrl = WAS_BASE_URL
   const writeKey = writeUserKey ?? userKey
   return await casUpdateRegistryRecord({
     read: () =>
@@ -965,13 +965,13 @@ export async function getUnlockMethodsWithClient({
   userKey: UserKey
   capability?: IZcap
 }): Promise<UnlockMethodsRecord | null> {
-  if (!WAS_SERVER_URL) {
+  if (!WAS_BASE_URL) {
     throw new TypeError(
       'The direct registry read requires a configured WAS server.'
     )
   }
   const stored = await getUnlockMethodsRecord({
-    storageServerUrl: WAS_SERVER_URL,
+    storageServerUrl: WAS_BASE_URL,
     zcapClient,
     spaceId,
     ...(capability ? { capability } : {})
@@ -1218,7 +1218,7 @@ export async function dropRegistryEntry({
  * @returns {boolean}
  */
 export function canRevokeWithoutCeremony(entry: UnlockMethod): boolean {
-  return !WAS_SERVER_URL || !!entry.manageCapability
+  return !WAS_BASE_URL || !!entry.manageCapability
 }
 
 /**
@@ -1383,7 +1383,7 @@ export function unlockSpaceCapabilityRefusal({
     return 'foreign-controller'
   }
   const target = toUrl({
-    baseUrl: WAS_SERVER_URL as string,
+    baseUrl: WAS_BASE_URL as string,
     path: spacePath(entry.unlockSpaceId)
   })
   if (parent.invocationTarget !== target) {
@@ -1626,7 +1626,7 @@ export async function deleteUnlockSpaceForEntry({
   entry: UnlockMethod
   signer?: { zcapClient: ZcapClient; invoker?: ZcapClient; controller: string }
 }): Promise<UnlockSpaceDeletionOutcome> {
-  if (!WAS_SERVER_URL) {
+  if (!WAS_BASE_URL) {
     return 'no-server'
   }
   const invocation = await unlockSpaceVerbInvocation({
@@ -1640,7 +1640,7 @@ export async function deleteUnlockSpaceForEntry({
   }
   const { outcome } = await deleteUnlockSpace({
     serviceDescription: await wasServiceDescription(),
-    storageServerUrl: WAS_SERVER_URL,
+    storageServerUrl: WAS_BASE_URL,
     spaceId: entry.unlockSpaceId,
     ...invocation
   })
@@ -1707,7 +1707,7 @@ export async function revokeUnlockMethod({
   // removed" fallback the copy names is still available and a retry still
   // finds a removable entry. Refusing after the retirement would leave an
   // entry nothing can remove.
-  if (WAS_SERVER_URL) {
+  if (WAS_BASE_URL) {
     const refusal = unlockSpaceCapabilityRefusal({ session, entry, ...deleter })
     if (refusal) {
       throw new Error(
@@ -1741,7 +1741,7 @@ export async function revokeUnlockMethod({
       mended: rotation.mended
     })
   }
-  if (WAS_SERVER_URL) {
+  if (WAS_BASE_URL) {
     const outcome = await deleteUnlockSpaceForEntry({
       session,
       entry,

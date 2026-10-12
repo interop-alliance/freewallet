@@ -28,7 +28,7 @@ import {
 } from '@interop/wallet-core/clientAnnex'
 import type { CredentialAnchoredEstablishmentStage } from '@interop/wallet-core/clientAnnex'
 import type { Session } from '@/types/auth'
-import { WAS_SERVER_URL } from '@/app.config'
+import { WAS_BASE_URL } from '@/app.config'
 import { createLogger } from '@/lib/log'
 import { closeUnenteredSession } from '@/stores/sessionTeardown'
 import { resetPrfRetryPrompt } from '@/stores/prfRetryStore'
@@ -146,8 +146,9 @@ export const SETUP_STAGE_LISTS: Record<
 /**
  * The lists this deployment's signups actually run.
  */
-export const SETUP_STAGES: Record<SetupMethod, readonly string[]> =
-  WAS_SERVER_URL ? SETUP_STAGE_LISTS.was : SETUP_STAGE_LISTS.local
+export const SETUP_STAGES: Record<SetupMethod, readonly string[]> = WAS_BASE_URL
+  ? SETUP_STAGE_LISTS.was
+  : SETUP_STAGE_LISTS.local
 
 /**
  * Stage names that share a line with an earlier one: wallet-core's own

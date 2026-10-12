@@ -33,7 +33,7 @@ import type { IZcap } from '@interop/data-integrity-core'
 import type { ZcapClient } from '@interop/ezcap'
 import { userKeyVaultKeys, type UserKey } from '@interop/wallet-core/keys'
 import type { CollectionEncryption } from '@interop/was-client'
-import { WAS_SERVER_URL } from '@/app.config'
+import { WAS_BASE_URL } from '@/app.config'
 import type { Session } from '@/types/auth'
 import { rewrapUnlockMethodsRecord } from '@/session/unlockMethods'
 import { isSessionDisposed } from '@/session/sessionLifecycle'
@@ -129,7 +129,7 @@ export async function resealUnlockRegistryForRotation({
   userKey: UserKey
 }): Promise<boolean> {
   const from = session.profile.userKey
-  if (!from || !WAS_SERVER_URL) {
+  if (!from || !WAS_BASE_URL) {
     return true
   }
   // The visit's own authority, read here rather than threaded by every
@@ -138,7 +138,7 @@ export async function resealUnlockRegistryForRotation({
   // root-invokes.
   const capability = session.profile.invocationCapability
   return await rewrapUnlockRegistryToUserKey({
-    storageServerUrl: WAS_SERVER_URL,
+    storageServerUrl: WAS_BASE_URL,
     zcapClient: session.profile.zcapClient,
     spaceId,
     from,

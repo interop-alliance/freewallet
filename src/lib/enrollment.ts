@@ -30,7 +30,7 @@ import {
   type ClientWebvhUpdateKeys
 } from '@interop/wallet-core/webvh'
 import { browserLocalSessionPersistence } from '@/session/persistence'
-import { WAS_SERVER_URL } from '@/app.config'
+import { WAS_BASE_URL } from '@/app.config'
 import { KEYRING_KDF } from '@interop/wallet-core/keyring'
 import {
   bindPassphrase,
@@ -211,7 +211,7 @@ export async function completeEnrollment({
   passphrase: string
   idb?: IDBFactory
 }): Promise<Session> {
-  if (!WAS_SERVER_URL) {
+  if (!WAS_BASE_URL) {
     throw new Error('Enrollment requires a configured WAS server.')
   }
   const credential = await deriveUnlockCredential({

@@ -132,7 +132,7 @@ describe('the WAS server base URL derived in app.config', () => {
     vi.resetModules()
     const config =
       await vi.importActual<typeof import('@/app.config')>('@/app.config')
-    return { spaces: config.WAS_SPACES_URL, base: config.WAS_SERVER_URL }
+    return { spaces: config.WAS_SPACES_URL, base: config.WAS_BASE_URL }
   }
 
   it('takes the parent of a root-mounted Spaces URL', async () => {

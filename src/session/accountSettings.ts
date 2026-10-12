@@ -9,7 +9,7 @@
 import { base64urlnopad } from '@scure/base'
 import type { IKeyAgreementKey, IZcap } from '@interop/data-integrity-core'
 import type { ZcapClient } from '@interop/ezcap'
-import { httpStatus, WasClient } from '@interop/was-client'
+import { httpStatus } from '@interop/was-client'
 import type { DIDLog } from '@interop/did-method-webvh'
 import {
   clientKeyAgreementController,
@@ -46,8 +46,7 @@ import {
   DID_LOG_RESOURCE,
   ID_COLLECTION,
   PASSKEY_KDF,
-  WAS_SERVER_URL,
-  WAS_SPACES_URL
+  WAS_BASE_URL
 } from '@/app.config'
 import { assertPasskeyPrf, registerPasskey } from '@/lib/passkey'
 import { establishStandingUnlock } from '@/session/standingUnlock'
@@ -136,7 +135,7 @@ import {
 import { findLoginCredential, loginHandleOf } from '@/lib/loginCredential'
 import type { Session } from '@/types/auth'
 import { createLogger } from '@/lib/log'
-import { wasServiceDescription } from '@/lib/wasService'
+import { wasClientAt, wasServiceDescription } from '@/lib/wasService'
 
 const log = createLogger('fw:session:settings')
 
@@ -1818,7 +1817,7 @@ async function probeSpace({
   try {
     await zcapClient.read({
       url: spaceVerbTarget({
-        storageServerUrl: WAS_SERVER_URL as string,
+        storageServerUrl: WAS_BASE_URL as string,
         spaceId,
         verb: 'GET'
       }),
@@ -2088,7 +2087,7 @@ async function runAccountDeletion({
   // The WAS-scoped arms. A guest and a no-WAS deployment skip them BY SCOPE
   // rather than reaching them and catching: neither owns a Space, so neither
   // may be made undeletable by a refusal about one.
-  const remote = !isGuest && !!WAS_SERVER_URL && !!accountSpaceId
+  const remote = !isGuest && !!WAS_BASE_URL && !!accountSpaceId
   // Whether the account pointer names a did:webvh. The ladder-signed arms --
   // the (a2) ladder-VM gate, (b3), and the transient shapes of (b1) and (b5)
   // -- all verify against that document, so they need a promoted account; an
@@ -2405,7 +2404,7 @@ async function runAccountDeletion({
     // its next login and is offered the removal there. A record the detector
     // could NOT settle is a different matter and refuses the run, since a
     // walk that cannot tell a pending entry from a healthy one names neither.
-    const deploymentHost = new URL(WAS_SERVER_URL as string).host
+    const deploymentHost = new URL(WAS_BASE_URL as string).host
     const annexIds = new Set<string>()
     if (doc && accountDid && pointer) {
       try {
@@ -2494,7 +2493,7 @@ async function runAccountDeletion({
               spaceId,
               capability: await mintSpaceRootVerbCapability({
                 zcapClient: deleter.zcapClient,
-                storageServerUrl: WAS_SERVER_URL as string,
+                storageServerUrl: WAS_BASE_URL as string,
                 spaceId,
                 verb: 'GET',
                 controller: deleter.controller,
@@ -2580,7 +2579,7 @@ async function runAccountDeletion({
       if (deleter) {
         const capability = await mintSpaceRootVerbCapability({
           zcapClient: deleter.zcapClient,
-          storageServerUrl: WAS_SERVER_URL as string,
+          storageServerUrl: WAS_BASE_URL as string,
           spaceId,
           verb: 'DELETE',
           controller: deleter.controller,
@@ -2588,16 +2587,16 @@ async function runAccountDeletion({
         })
         ;({ outcome } = await deleteSpaceWithCapability({
           serviceDescription: await wasServiceDescription(),
-          storageServerUrl: WAS_SERVER_URL as string,
+          storageServerUrl: WAS_BASE_URL as string,
           zcapClient: deleter.invoker,
           spaceId,
           capability
         }))
       } else {
-        ;({ outcome } = await new WasClient({
-          serviceDescription: await wasServiceDescription(),
-          serverUrl: WAS_SPACES_URL as string,
-          zcapClient: profile.zcapClient
+        ;({ outcome } = await wasClientAt({
+          baseUrl: WAS_BASE_URL as string,
+          zcapClient: profile.zcapClient,
+          serviceDescription: await wasServiceDescription()
         })
           .space(spaceId)
           .deleteWithOutcome())
@@ -2755,7 +2754,7 @@ async function runAccountDeletion({
       if (deleter) {
         const capability = await mintSpaceRootVerbCapability({
           zcapClient: deleter.zcapClient,
-          storageServerUrl: WAS_SERVER_URL as string,
+          storageServerUrl: WAS_BASE_URL as string,
           spaceId: accountSpaceId,
           verb: 'DELETE',
           controller: deleter.controller,
@@ -2785,7 +2784,7 @@ async function runAccountDeletion({
               spaceId: accountSpaceId,
               capability: await mintSpaceRootVerbCapability({
                 zcapClient: deleter.zcapClient,
-                storageServerUrl: WAS_SERVER_URL as string,
+                storageServerUrl: WAS_BASE_URL as string,
                 spaceId: accountSpaceId,
                 verb: 'GET',
                 controller: deleter.controller,
@@ -2865,7 +2864,7 @@ async function runAccountDeletion({
   if (credential && (accountGone || !remote)) {
     const { spaceId, zcapClient } = credential.unlock
     onPhase?.({ phase: 'acting-unlock-space', spaceId })
-    if (WAS_SPACES_URL && remote) {
+    if (remote) {
       let outcome: 'deleted' | 'not-found' | undefined
       // The in-run recourse comes first: the credential is derived and in
       // memory, so one bounded retry costs nothing and mends the common tear
@@ -2873,10 +2872,10 @@ async function runAccountDeletion({
       // is retried -- a 404 is an answer, and the 404 rule grades it.
       for (let attempt = 0; attempt < 2 && outcome === undefined; attempt++) {
         try {
-          ;({ outcome } = await new WasClient({
-            serviceDescription: await wasServiceDescription(),
-            serverUrl: WAS_SPACES_URL,
-            zcapClient
+          ;({ outcome } = await wasClientAt({
+            baseUrl: WAS_BASE_URL as string,
+            zcapClient,
+            serviceDescription: await wasServiceDescription()
           })
             .space(spaceId)
             .deleteWithOutcome())

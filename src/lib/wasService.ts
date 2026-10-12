@@ -64,8 +64,8 @@ export function wasClientAt({
   return new WasClient({
     serverUrl: spacesUrl({ baseUrl }),
     zcapClient,
-    ...(serviceDescription ? { serviceDescription } : {}),
-    ...(encryption ? { encryption } : {})
+    serviceDescription,
+    encryption
   })
 }
 

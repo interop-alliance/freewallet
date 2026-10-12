@@ -14,8 +14,10 @@
 import { httpClient } from '@interop/http-client'
 import { BuiltinHttpGetService } from '@interop/verifier-core'
 import type { HttpGetService } from '@interop/verifier-core'
+import { errorNameOf } from '@interop/wallet-core/menders'
 import { CORS_PROXY_URL } from '@/app.config'
 import { createLogger } from '@/lib/log'
+import { causeChain } from '@/lib/storageErrors'
 
 const log = createLogger('fw:cors-proxy')
 
@@ -228,15 +230,9 @@ function originOf(url: string): string | undefined {
  * @returns {boolean}
  */
 function isAbortError(err: unknown): boolean {
-  // Matched by shape: a `DOMException` is no `Error` instance on every
-  // runtime, and a wrapper's `cause` is typed `unknown`.
-  let current: unknown = err
-  while (typeof current === 'object' && current !== null) {
-    const { name, cause } = current as { name?: unknown; cause?: unknown }
-    if (name === 'AbortError') {
-      return true
-    }
-    current = cause
-  }
-  return false
+  // Matched by name: a `DOMException` is no `Error` instance on every
+  // runtime.
+  return [...causeChain(err)].some(
+    current => errorNameOf(current) === 'AbortError'
+  )
 }

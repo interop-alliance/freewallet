@@ -65,7 +65,7 @@ function etagFor(spaceId: string): string {
 
 vi.mock('@/app.config', async importOriginal => ({
   ...(await importOriginal<typeof import('@/app.config')>()),
-  get WAS_SERVER_URL() {
+  get WAS_BASE_URL() {
     return wasState.url
   }
 }))

@@ -25,6 +25,13 @@
 
 ### Changed
 
+- The derived base-URL constant in `src/app.config.ts` is `WAS_BASE_URL`,
+  in place of `WAS_SERVER_URL`: the parent of `WAS_SPACES_URL`, which the
+  KMS and CORS-proxy facets hang off and an account pointer records as
+  `host`. It is derived by was-client's `baseUrlOfSpacesUrl`, so a
+  `VITE_WAS_SERVER_URL` whose last path segment is not `spaces` is refused
+  at startup. `VITE_WAS_SERVER_URL` is otherwise unchanged, and nothing on
+  the wire changes.
 - Every `WasClient` takes the Spaces Repository URL (`<base>/spaces/`) as
   `serverUrl`: the configured `WAS_SPACES_URL`, or `spacesUrl({ baseUrl })` of
   an account pointer's `host`, which stays a base URL. `toUrl` and

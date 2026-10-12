@@ -18,7 +18,7 @@ vi.mock('@/app.config', () => ({
     { key: 'privateCredentials', id: 'private-credentials' },
     { key: 'walletActivity', id: 'wallet-activity' }
   ],
-  WAS_SERVER_URL: 'https://was.example',
+  WAS_BASE_URL: 'https://was.example',
   WAS_SYNC_BATCH_SIZE: 10,
   WAS_SYNC_RETRY_MS: 5000,
   WAS_SYNC_POLL_MS: 30_000

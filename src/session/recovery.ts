@@ -56,7 +56,7 @@ import {
   memoryResourceLogPinStore,
   type ResourceLogPinStore
 } from '@interop/vh-resource-log'
-import { WAS_SERVER_URL } from '@/app.config'
+import { WAS_BASE_URL } from '@/app.config'
 import { DID_DOCUMENT_RESOURCE } from '@interop/wallet-core/space'
 import {
   standingFieldsOfKeyringHit,
@@ -284,7 +284,7 @@ async function bindRecoveryRecord({
   const serviceDescription = await wasServiceDescription()
   await ensureUnlockSpace({
     serviceDescription,
-    storageServerUrl: WAS_SERVER_URL as string,
+    storageServerUrl: WAS_BASE_URL as string,
     zcapClient: unlock.zcapClient,
     spaceId: unlock.spaceId,
     controller: unlock.agent.id
@@ -302,7 +302,7 @@ async function bindRecoveryRecord({
   })
   await putUnlockKeyring({
     serviceDescription,
-    storageServerUrl: WAS_SERVER_URL as string,
+    storageServerUrl: WAS_BASE_URL as string,
     zcapClient: unlock.zcapClient,
     spaceId: unlock.spaceId,
     record
@@ -758,7 +758,7 @@ export class RecoveryRecordForgedError extends Error {
  *   stored record, its contents, and its proof state
  */
 async function readRecoveryRecord({ code }: { code: string }) {
-  if (!WAS_SERVER_URL) {
+  if (!WAS_BASE_URL) {
     throw new RecoveryUnavailableError()
   }
   const client = await recoveryClientFromCode({ code })
@@ -768,7 +768,7 @@ async function readRecoveryRecord({ code }: { code: string }) {
   })
   const record = await getUnlockKeyring({
     serviceDescription: await wasServiceDescription(),
-    storageServerUrl: WAS_SERVER_URL,
+    storageServerUrl: WAS_BASE_URL,
     zcapClient: unlock.zcapClient,
     spaceId: unlock.spaceId
   })
@@ -1161,7 +1161,7 @@ async function deleteRetiredCredentialSpaces({
 }): Promise<void> {
   for (const entry of entries) {
     try {
-      if (WAS_SERVER_URL) {
+      if (WAS_BASE_URL) {
         const delegatee =
           controller ??
           (entry.manageCapability as { controller?: string } | undefined)
@@ -1964,7 +1964,7 @@ export async function recoverAccountWithCode({
   try {
     await deleteUnlockSpace({
       serviceDescription,
-      storageServerUrl: WAS_SERVER_URL as string,
+      storageServerUrl: WAS_BASE_URL as string,
       zcapClient: unlock.zcapClient,
       spaceId: unlock.spaceId
     })
@@ -3228,7 +3228,7 @@ async function recoverAccountTransient({
   try {
     await deleteUnlockSpace({
       serviceDescription,
-      storageServerUrl: WAS_SERVER_URL as string,
+      storageServerUrl: WAS_BASE_URL as string,
       zcapClient: unlock.zcapClient,
       spaceId: unlock.spaceId
     })
@@ -3522,7 +3522,7 @@ async function deleteRevokedCodeSpace({
   context: AccountCeremonyContext
   entry: RecoveryCodeUnlockMethod
 }): Promise<void> {
-  if (!WAS_SERVER_URL) {
+  if (!WAS_BASE_URL) {
     return
   }
   const outcome = await deleteUnlockSpaceForEntry({

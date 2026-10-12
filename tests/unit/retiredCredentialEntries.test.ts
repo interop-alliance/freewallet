@@ -17,7 +17,7 @@ import { describe, expect, it, vi } from 'vitest'
 
 vi.mock('@/app.config', async importOriginal => ({
   ...(await importOriginal<typeof import('@/app.config')>()),
-  WAS_SERVER_URL: 'https://was.example.test'
+  WAS_BASE_URL: 'https://was.example.test'
 }))
 
 import type { IZcap } from '@interop/data-integrity-core'

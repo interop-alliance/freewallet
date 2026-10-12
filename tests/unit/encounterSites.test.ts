@@ -38,7 +38,7 @@ const state = vi.hoisted(() => ({
 
 vi.mock('@/app.config', async importOriginal => ({
   ...(await importOriginal<Record<string, unknown>>()),
-  WAS_SERVER_URL: 'https://was.example'
+  WAS_BASE_URL: 'https://was.example'
 }))
 
 const STANDING_KAK = { id: 'did:key:z6LSStanding#z6LSStanding' }
