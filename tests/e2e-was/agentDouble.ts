@@ -39,9 +39,11 @@ import {
   type IVPRDetails,
   type IZcap
 } from '@interop/wallet-request'
+import { spacesUrl } from '@interop/was-client/paths'
 import { INBOX_DESCRIPTOR_TYPE } from '@/lib/walletRequest/connectionRequest'
 
 export const WAS_URL = 'http://localhost:3002'
+export const WAS_SPACES_URL = spacesUrl({ baseUrl: WAS_URL })
 
 /**
  * The presentation service type a VPR names its delivery endpoint with.
@@ -149,7 +151,7 @@ export class AgentDouble {
       handle: 'agent-double-connection'
     })
     const was = WasClient.fromSigner({
-      serverUrl: WAS_URL,
+      serverUrl: WAS_SPACES_URL,
       signer: controllerKey.getSigner()
     })
     const space = await was.createSpace({ name: `${name} space` })
@@ -180,7 +182,7 @@ export class AgentDouble {
    */
   agentClient(): WasClient {
     return WasClient.fromSigner({
-      serverUrl: WAS_URL,
+      serverUrl: WAS_SPACES_URL,
       signer: this.connectionKey.getSigner()
     })
   }

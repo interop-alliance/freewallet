@@ -25,7 +25,7 @@ export const TEST_SERVICE_DESCRIPTION: ServiceDescription = {
  * discovery resolved to the fixture. Registered once, in
  * `tests/shared/setup.wasService.ts`.
  *
- * @returns {object}   the mocked module's exports
+ * @returns {object}   the discovery exports the mock replaces
  */
 export function wasServiceModuleMock() {
   return {

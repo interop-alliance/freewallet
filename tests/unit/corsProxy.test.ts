@@ -204,9 +204,10 @@ describe('proxyFallbackHttpGetService', () => {
     })
     const { proxyFallbackHttpGetService } = await loadCorsProxy(PROXY_BASE)
 
+    // The abort arrives wrapped in the built-in service's error, as its cause.
     await expect(
       proxyFallbackHttpGetService().get(DID_DOC_URL)
-    ).rejects.toMatchObject({ name: 'AbortError' })
+    ).rejects.toMatchObject({ cause: { name: 'AbortError' } })
     expect(fetchMock).toHaveBeenCalledTimes(1)
   })
 
@@ -303,9 +304,14 @@ describe('proxyFallbackHttpGetService', () => {
     const fetchMock = stubFetch()
     const { proxyFallbackHttpGetService } = await loadCorsProxy(undefined)
 
+    // The built-in service wraps the rejection in its fixed-text error and
+    // keeps the browser's TypeError as the cause.
     await expect(
       proxyFallbackHttpGetService().get(DID_DOC_URL)
-    ).rejects.toThrow(TypeError)
+    ).rejects.toMatchObject({
+      message: `Request to ${DID_DOC_URL} failed`,
+      cause: expect.any(TypeError)
+    })
     expect(fetchMock).toHaveBeenCalledTimes(1)
   })
 })

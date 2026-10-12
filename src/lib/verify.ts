@@ -18,7 +18,8 @@ import {
 } from '@interop/verifier-core'
 import type {
   CredentialVerificationResult,
-  CheckResult
+  CheckResult,
+  ProblemDetail
 } from '@interop/verifier-core'
 import type { IVerifiableCredential } from '@interop/data-integrity-core'
 import { registryManager } from '@/lib/registryManager'
@@ -94,8 +95,15 @@ function mapCoreResultToLegacyPayload(
 
   const log: LegacyLogEntry[] = []
 
+  // verifier-core judges the validity dates only once the signature has
+  // verified, so a `proof.signature` failure typed as expired or not yet
+  // valid proves an authentic, out-of-date credential: the signature row
+  // passes and the expiry row carries the failure instead.
   const signature = byCheck(CHECK_ID.signature)
-  if (signature) {
+  const outOfDate = signature && outOfDateProblem(signature)
+  if (outOfDate) {
+    log.push({ id: 'valid_signature', valid: true })
+  } else if (signature) {
     log.push(legacyEntryFromCheck('valid_signature', signature))
   }
 
@@ -110,8 +118,16 @@ function mapCoreResultToLegacyPayload(
     log.push(legacyEntryFromCheck('revocation_status', status))
   }
 
+  // A fatal signature failure halts the opt-in expiration suite, but the
+  // signature row having already claimed the expiry keeps one row either way.
   const expiration = byCheck(CHECK_ID.expiration)
-  if (expiration && expiration.outcome.status !== 'skipped') {
+  if (outOfDate) {
+    log.push({
+      id: 'expiration',
+      valid: false,
+      error: { message: problemMessage(outOfDate) }
+    })
+  } else if (expiration && expiration.outcome.status !== 'skipped') {
     log.push(legacyEntryFromCheck('expiration', expiration))
   }
 
@@ -161,6 +177,25 @@ function legacyEntryFromCheck(id: string, check: CheckResult): LegacyLogEntry {
   }
 }
 
+const OUT_OF_DATE_PROBLEM_TYPES: readonly string[] = [
+  ProblemTypes.CREDENTIAL_EXPIRED,
+  ProblemTypes.CREDENTIAL_NOT_YET_VALID
+]
+
+/**
+ * The expired or not-yet-valid problem a failed signature check reports,
+ * or undefined for a success, a skip, or any other failure (a tampered
+ * credential included).
+ */
+function outOfDateProblem(check: CheckResult): ProblemDetail | undefined {
+  if (check.outcome.status !== 'failure') {
+    return undefined
+  }
+  return check.outcome.problems.find(problem =>
+    OUT_OF_DATE_PROBLEM_TYPES.includes(problem.type)
+  )
+}
+
 function problemDetail(check: CheckResult): string | undefined {
   if (check.outcome.status !== 'failure') {
     return undefined
@@ -169,6 +204,10 @@ function problemDetail(check: CheckResult): string | undefined {
   if (!problem) {
     return undefined
   }
+  return problemMessage(problem)
+}
+
+function problemMessage(problem: ProblemDetail): string {
   return problem.detail || problem.title
 }
 

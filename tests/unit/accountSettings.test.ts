@@ -6,6 +6,7 @@
  * passphrase change adopting the rebind into the live session. Every durable
  * seam is mocked; only the ordering is under test.
  */
+import { spacesUrl } from '@interop/was-client/paths'
 import { readFileSync } from 'node:fs'
 import path from 'node:path'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
@@ -229,6 +230,9 @@ vi.mock('@/app.config', async importOriginal => ({
   ...(await importOriginal<typeof import('@/app.config')>()),
   get WAS_SERVER_URL() {
     return state.wasUrl
+  },
+  get WAS_SPACES_URL() {
+    return state.wasUrl && spacesUrl({ baseUrl: state.wasUrl })
   }
 }))
 

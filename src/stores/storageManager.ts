@@ -5842,7 +5842,7 @@ export class StorageManager {
     }
     return collectionIdFromTarget({
       invocationTarget,
-      serverUrl: remote.storageServerUrl,
+      baseUrl: remote.storageServerUrl,
       spaceId: remote.spaceId
     })
   }

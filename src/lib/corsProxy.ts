@@ -219,14 +219,24 @@ function originOf(url: string): string | undefined {
 }
 
 /**
- * Whether a rejection is an abort.
+ * Whether a rejection is an abort, directly or through its `cause` chain.
+ * verifier-core's built-in HTTP service rethrows every fetch rejection as a
+ * fixed-text `Error` carrying the original as `cause`, so the abort it
+ * wraps is still an abort.
  *
  * @param err {unknown}
  * @returns {boolean}
  */
 function isAbortError(err: unknown): boolean {
-  return (
-    (err instanceof Error || err instanceof DOMException) &&
-    err.name === 'AbortError'
-  )
+  // Matched by shape: a `DOMException` is no `Error` instance on every
+  // runtime, and a wrapper's `cause` is typed `unknown`.
+  let current: unknown = err
+  while (typeof current === 'object' && current !== null) {
+    const { name, cause } = current as { name?: unknown; cause?: unknown }
+    if (name === 'AbortError') {
+      return true
+    }
+    current = cause
+  }
+  return false
 }

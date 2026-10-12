@@ -70,6 +70,7 @@ import { WALLET_STANDARD_COLLECTIONS } from '../../src/app.config'
 
 import type { IVerifiableCredential } from '@interop/data-integrity-core'
 import { WasClient, type CollectionEncryption } from '@interop/was-client'
+import { spacesUrl } from '@interop/was-client/paths'
 import {
   createEdvDocCipher,
   createEdvEncryption,
@@ -133,19 +134,19 @@ async function startTeachingServer(): Promise<{
  * codec-bypassing client: a no-op keystore, envelopes move verbatim.
  *
  * @param options {object}
- * @param options.serverUrl {string}
+ * @param options.baseUrl {string}   the storage server's base URL
  * @param options.zcapClient {object}
  * @returns {WasClient}
  */
 function wasClientFor({
-  serverUrl,
+  baseUrl,
   zcapClient
 }: {
-  serverUrl: string
+  baseUrl: string
   zcapClient: ConstructorParameters<typeof WasClient>[0]['zcapClient']
 }): WasClient {
   return new WasClient({
-    serverUrl,
+    serverUrl: spacesUrl({ baseUrl }),
     zcapClient,
     encryption: createEdvEncryption({ resolveKeys: async () => null })
   })
@@ -866,10 +867,13 @@ describe('cross-replica round-trip conformance', () => {
     spaceId = deriveSpaceId(dcwAgents.controllerDid)
 
     const dcwWas = wasClientFor({
-      serverUrl,
+      baseUrl: serverUrl,
       zcapClient: dcwAgents.zcapClient
     })
-    const fwWas = wasClientFor({ serverUrl, zcapClient: fwAgents.zcapClient })
+    const fwWas = wasClientFor({
+      baseUrl: serverUrl,
+      zcapClient: fwAgents.zcapClient
+    })
 
     // Freewallet created the account; DCW attaches without re-provisioning.
     // The provisioning two-step: declare each collection encrypted, then
@@ -1453,10 +1457,13 @@ describe('cross-replica writer attribution', () => {
     const fwAgents = await agentsFromSeed({ seed })
     spaceId = deriveSpaceId(dcwAgents.controllerDid)
     const dcwWas = wasClientFor({
-      serverUrl,
+      baseUrl: serverUrl,
       zcapClient: dcwAgents.zcapClient
     })
-    const fwWas = wasClientFor({ serverUrl, zcapClient: fwAgents.zcapClient })
+    const fwWas = wasClientFor({
+      baseUrl: serverUrl,
+      zcapClient: fwAgents.zcapClient
+    })
 
     await ensureSpaceAndCollection({
       was: fwWas,

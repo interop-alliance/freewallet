@@ -25,6 +25,7 @@ import {
   sessionSpaceId,
   signupViaWizard
 } from './helpers'
+import { WAS_SPACES_URL, WAS_URL } from './agentDouble'
 import { listStoredResourceIds } from '../shared/storedLogs'
 import { WAS_E2E_DATA_DIR } from './wasDataDir'
 import { test, expect } from '../shared/consoleCapture'
@@ -53,8 +54,6 @@ import { test, expect } from '../shared/consoleCapture'
  * `connections` entry is retired by the revoke and un-retired by the new
  * consent, and the Applications page lists the agent again.
  */
-
-const WAS_URL = 'http://localhost:3002'
 
 /**
  * The page the agent publishes through its grant, and the content type it
@@ -161,7 +160,7 @@ async function publishAndFetch({
   resourceId: string
 }): Promise<Response> {
   const was = WasClient.fromSigner({
-    serverUrl: WAS_URL,
+    serverUrl: WAS_SPACES_URL,
     signer: agent.getSigner()
   })
   const collection = was.fromCapability(zcap) as Collection
@@ -416,7 +415,7 @@ test.describe('agent grant over an interaction URL', () => {
 
     // The agent writes through its grant with its own key-agreement key.
     const encrypted = WasClient.fromSigner({
-      serverUrl: WAS_URL,
+      serverUrl: WAS_SPACES_URL,
       signer: agent.getSigner(),
       encryption: createEdvEncryption({
         resolveKeys: async () => ({

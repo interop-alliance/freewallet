@@ -25,6 +25,11 @@
 
 ### Changed
 
+- Every `WasClient` takes the Spaces Repository URL (`<base>/spaces/`) as
+  `serverUrl`: the configured `WAS_SPACES_URL`, or `spacesUrl({ baseUrl })` of
+  an account pointer's `host`, which stays a base URL. `toUrl` and
+  `parseSpaceTarget` calls pass `baseUrl`. `@interop/was-client` moves to
+  `^0.97.0` and `@interop/wallet-core` to `^0.106.0`.
 - The mender registry's `ceremony-tail` trigger is site-backed, on
   `@interop/wallet-core` 0.105.0. The client revocation's and the
   unlock-credential rotation's tails are registered as report-only sites,
@@ -51,6 +56,20 @@
   re-pulled from the Space, its replication checkpoint included. Local writes
   not yet pushed at the update are lost, and a guest or no-WAS session's
   replica is lost whole.
+
+### Fixed
+
+- The CORS-proxy fallback no longer retries an aborted verification fetch
+  through the proxy. verifier-core 3.8.0's built-in HTTP service wraps every
+  fetch rejection in a fixed-text error, and the abort check now reads
+  through that wrapper's `cause`.
+- An expired or not-yet-valid credential whose signature verifies now shows
+  a passing signature row and a failing expiry row carrying the date
+  detail, instead of a failed signature and no expiry row. The adapter maps
+  verifier-core 3.8.0's `CREDENTIAL_EXPIRED` and `CREDENTIAL_NOT_YET_VALID`
+  signature verdicts onto the `expiration` row, so the "expired but
+  authentic" summary is reachable. A tampered credential still fails the
+  signature row. Needs `@interop/verifier-core` 3.8.0.
 
 ## 0.44.0 - 2026-10-09
 

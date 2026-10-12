@@ -28,20 +28,20 @@ export function zcapExpires(zcap?: IZcap): string | undefined {
  *
  * @param options {object}
  * @param options.invocationTarget {string}
- * @param options.serverUrl {string}   the storage server's base URL
+ * @param options.baseUrl {string}   the storage server's base URL
  * @param options.spaceId {string}
  * @returns {string | undefined}
  */
 export function collectionIdFromTarget({
   invocationTarget,
-  serverUrl,
+  baseUrl,
   spaceId
 }: {
   invocationTarget: string
-  serverUrl: string
+  baseUrl: string
   spaceId: string
 }): string | undefined {
-  const parsed = parseSpaceTarget({ serverUrl, target: invocationTarget })
+  const parsed = parseSpaceTarget({ baseUrl, target: invocationTarget })
   if (parsed?.kind !== 'collection' || parsed.spaceId !== spaceId) {
     return undefined
   }

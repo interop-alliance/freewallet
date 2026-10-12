@@ -112,10 +112,9 @@ import {
   recoverWebvhLadderAnchored
 } from '@interop/wallet-core/clientAnnex'
 import { webvhResourceLogController } from '@interop/wallet-core/resourceLog'
-import {
-  WasClient,
-  type CollectionEncryption,
-  type ServiceDescription
+import type {
+  CollectionEncryption,
+  ServiceDescription
 } from '@interop/was-client'
 import { unwrapEpochSecret } from '@interop/was-client/edv'
 import {
@@ -202,7 +201,7 @@ import { deleteUnlockLocalState } from '@/lib/sessionKey'
 import { isStorageUnreachable } from '@/lib/storageErrors'
 import { mintSpaceId, WASRemoteStore } from '@/stores/wasRemoteStore'
 import { createLogger } from '@/lib/log'
-import { wasServiceDescription } from '@/lib/wasService'
+import { wasClientAt, wasServiceDescription } from '@/lib/wasService'
 import { zcapExpires } from '@/lib/zcap'
 
 const log = createLogger('fw:session:recovery')
@@ -2838,9 +2837,9 @@ async function recoverAccountTransient({
   const rung0 = await ladderRung({ ladderSeed, index: 0 })
   const bootstrapAgent = await ladderVmAgent({ ladderSeed })
   const serviceDescription = await wasServiceDescription()
-  const bootstrapWas = new WasClient({
+  const bootstrapWas = wasClientAt({
     serviceDescription,
-    serverUrl: host,
+    baseUrl: host,
     zcapClient: didKeyZcapClient({ keyAgent: bootstrapAgent })
   })
   const ladderZcap = await ladderVmZcapClient({ accountDid: did, ladderSeed })

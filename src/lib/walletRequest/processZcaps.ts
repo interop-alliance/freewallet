@@ -808,7 +808,7 @@ function collectionTargetIn({
   collectionId: string
 }): string {
   return toUrl({
-    serverUrl: space.serverUrl,
+    baseUrl: space.serverUrl,
     path: collectionPath(space.spaceId, collectionId)
   })
 }
@@ -851,7 +851,7 @@ function classifySpaceTarget({
     return undefined
   }
   const parsed = parseSpaceTarget({
-    serverUrl: space.serverUrl,
+    baseUrl: space.serverUrl,
     target: url.href
   })
   if (!parsed || parsed.spaceId !== space.spaceId) {
@@ -1079,7 +1079,7 @@ function resolveTargetForm({
         resourceId === undefined
           ? collectionTargetIn({ space, collectionId })
           : toUrl({
-              serverUrl: space.serverUrl,
+              baseUrl: space.serverUrl,
               path: resourcePath(space.spaceId, collectionId, resourceId)
             }),
       collectionId,

@@ -1383,7 +1383,7 @@ export function unlockSpaceCapabilityRefusal({
     return 'foreign-controller'
   }
   const target = toUrl({
-    serverUrl: WAS_SERVER_URL as string,
+    baseUrl: WAS_SERVER_URL as string,
     path: spacePath(entry.unlockSpaceId)
   })
   if (parent.invocationTarget !== target) {

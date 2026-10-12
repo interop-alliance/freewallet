@@ -385,7 +385,7 @@ export async function delegateUnlockManagement({
   // deployment (a server URL like `https://host/was`) keeps its base path,
   // so the target matches byte for byte what the DELETE and the GET address.
   const invocationTarget = toUrl({
-    serverUrl: WAS_SERVER_URL as string,
+    baseUrl: WAS_SERVER_URL as string,
     path: spacePath(spaceId)
   })
   return await zcapClient.delegate({

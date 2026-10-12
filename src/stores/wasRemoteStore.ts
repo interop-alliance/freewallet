@@ -31,7 +31,7 @@ import type {
 } from '@interop/data-integrity-core'
 import {
   readEtag,
-  WasClient,
+  type WasClient,
   type Collection,
   type CollectionEncryption,
   type CollectionGenerator,
@@ -91,7 +91,7 @@ import {
   type UserKey
 } from '@interop/wallet-core/keys'
 import { createLogger } from '@/lib/log'
-import { wasServiceDescription } from '@/lib/wasService'
+import { wasClientAt, wasServiceDescription } from '@/lib/wasService'
 
 const log = createLogger('fw:storage:remote')
 
@@ -216,7 +216,7 @@ export class WASRemoteStore {
     // canonical container form (a trailing slash) and the sub-path join are
     // was-client's rules to own.
     this.spaceUrl = toUrl({
-      serverUrl: storageServerUrl,
+      baseUrl: storageServerUrl,
       path: spacePath(spaceId)
     })
   }
@@ -842,8 +842,8 @@ export class WASRemoteStore {
    * @returns {WasClient}
    */
   #clientFor({ zcapClient }: { zcapClient: ZcapClient }): WasClient {
-    return new WasClient({
-      serverUrl: this.storageServerUrl,
+    return wasClientAt({
+      baseUrl: this.storageServerUrl,
       zcapClient,
       serviceDescription: this.#discovered,
       encryption: createEdvEncryption({ resolveKeys: async () => null })
@@ -905,7 +905,7 @@ export class WASRemoteStore {
    */
   didDocumentUrl(): string {
     return toUrl({
-      serverUrl: this.storageServerUrl,
+      baseUrl: this.storageServerUrl,
       path: resourcePath(this.spaceId, ID_COLLECTION.id, DID_DOCUMENT_RESOURCE)
     })
   }
@@ -1089,7 +1089,7 @@ export class WASRemoteStore {
    */
   collectionTargetUrl(collectionId: string): string {
     return toUrl({
-      serverUrl: this.storageServerUrl,
+      baseUrl: this.storageServerUrl,
       path: collectionPath(this.spaceId, collectionId)
     })
   }
@@ -1804,8 +1804,8 @@ async function unlockSpaceClient({
   storageServerUrl: string
   zcapClient: ZcapClient
 }): Promise<WasClient> {
-  return new WasClient({
-    serverUrl: storageServerUrl,
+  return wasClientAt({
+    baseUrl: storageServerUrl,
     zcapClient,
     serviceDescription: await wasServiceDescription()
   })

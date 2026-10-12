@@ -9,6 +9,7 @@
  * roster store, the keystore promotion), and the warn-only handling of the
  * ceremony's collected best-effort failures.
  */
+import { spacesUrl } from '@interop/was-client/paths'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { TEST_SERVICE_DESCRIPTION } from '../shared/wasServiceFixture'
 
@@ -205,7 +206,9 @@ describe('establishCredentialAnchoredAccount -- the orchestrator binding', () =>
         options: { serverUrl: string; zcapClient: unknown }
       }
     )({})
-    expect(bootstrapWas.options.serverUrl).toBe(POINTER.host)
+    expect(bootstrapWas.options.serverUrl).toBe(
+      spacesUrl({ baseUrl: POINTER.host })
+    )
     expect(bootstrapWas.options.zcapClient).toEqual({
       isBootstrapZcapClient: true
     })

@@ -19,7 +19,7 @@
  * minting closure, differing only in the ladder seed's provenance and whether
  * they hand it a post-edit account document -- both passed in by the caller.
  */
-import { WasClient, type ServiceDescription } from '@interop/was-client'
+import type { ServiceDescription, WasClient } from '@interop/was-client'
 import {
   clientAnnexDidParts,
   clientAnnexLogStore,
@@ -46,7 +46,7 @@ import type {
 } from '@interop/wallet-core/webvh'
 import { ID_COLLECTION } from '@interop/wallet-core/space'
 import { createLogger } from '@/lib/log'
-import { wasServiceDescription } from '@/lib/wasService'
+import { wasClientAt, wasServiceDescription } from '@/lib/wasService'
 import { verifiedAccountLog } from '@/session/verifiedLog'
 import { MENDER_WARNINGS } from '@/session/menders/warnings'
 import type { Session } from '@/types/auth'
@@ -105,8 +105,8 @@ export function clientAnnexReachOf({
   const { spaceId, generationId } = clientAnnexDidParts({
     did: clientAnnexDid
   })
-  const was = new WasClient({
-    serverUrl: pointer.host,
+  const was = wasClientAt({
+    baseUrl: pointer.host,
     zcapClient: session.profile.zcapClient,
     serviceDescription
   })
@@ -162,8 +162,8 @@ export function standingClientAnnexReachOf({
   const { spaceId, generationId } = clientAnnexDidParts({
     did: clientAnnexDid
   })
-  const was = new WasClient({
-    serverUrl: pointer.host,
+  const was = wasClientAt({
+    baseUrl: pointer.host,
     zcapClient: standing.standingClient.agents.zcapClient,
     serviceDescription
   })

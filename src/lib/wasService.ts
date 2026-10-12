@@ -3,20 +3,31 @@
  * Spaces Repository URL for its `rel="service"` link, then the unsigned read
  * of the linked document. Every `WasClient` this app builds takes the result
  * through its `serviceDescription` option, so no client discovers on its own
- * (each would `HEAD` the base URL, which the server need not answer) and the
- * document is fetched once per page load rather than once per client.
+ * (each would `HEAD` its Spaces Repository URL) and the document is fetched
+ * once per page load rather than once per client.
  *
  * This module is the app's only discoverer. A `WasClient` copies the
  * description it was constructed with, so `was.service({ refresh: true })`
- * must not be called on an app-built client: it re-discovers from the base
- * URL, which is exactly the request this module exists to avoid.
+ * must not be called on an app-built client: it re-discovers from the client's
+ * Spaces Repository URL, which is exactly the request this module exists to
+ * avoid.
  *
  * The discovery is memoized on success only, so entry points are the right
  * place to call it: a chain that threads the result down re-probes nothing
  * after a failure.
  */
-import type { ServiceDescription, ServiceInfo } from '@interop/was-client'
-import { discoverService, IncompatibleServerError } from '@interop/was-client'
+import type {
+  EncryptionProvider,
+  ServiceDescription,
+  ServiceInfo
+} from '@interop/was-client'
+import {
+  discoverService,
+  IncompatibleServerError,
+  WasClient
+} from '@interop/was-client'
+import type { ZcapClient } from '@interop/ezcap'
+import { spacesUrl } from '@interop/was-client/paths'
 
 import { WAS_SPACES_URL, withOneTrailingSlash } from '@/app.config'
 import { createLogger } from '@/lib/log'
@@ -25,6 +36,38 @@ import { isStorageUnreachable } from '@/lib/storageErrors'
 const log = createLogger('fw:was:service')
 
 let pending: Promise<ServiceInfo> | undefined
+
+/**
+ * A `WasClient` on a storage server named by its base URL: the configured
+ * server, or the `host` an account pointer records. The one place the app
+ * turns a base URL into the Spaces Repository URL a `WasClient` takes as
+ * `serverUrl`, so no call site carries the conversion.
+ *
+ * @param options {object}
+ * @param options.baseUrl {string}   the storage server's base URL
+ * @param options.zcapClient {ZcapClient}
+ * @param [options.serviceDescription] {ServiceDescription}
+ * @param [options.encryption] {EncryptionProvider}
+ * @returns {WasClient}
+ */
+export function wasClientAt({
+  baseUrl,
+  zcapClient,
+  serviceDescription,
+  encryption
+}: {
+  baseUrl: string
+  zcapClient: ZcapClient
+  serviceDescription?: ServiceDescription
+  encryption?: EncryptionProvider
+}): WasClient {
+  return new WasClient({
+    serverUrl: spacesUrl({ baseUrl }),
+    zcapClient,
+    ...(serviceDescription ? { serviceDescription } : {}),
+    ...(encryption ? { encryption } : {})
+  })
+}
 
 /**
  * The configured WAS server's service description.

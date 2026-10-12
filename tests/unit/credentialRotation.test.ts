@@ -10,6 +10,7 @@
  * pins, the adoption callback's paired persistence, the error discipline, and
  * the verified-log memo invalidation on both sides of the call.
  */
+import { spacesUrl } from '@interop/was-client/paths'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { TEST_SERVICE_DESCRIPTION } from '../shared/wasServiceFixture'
 
@@ -1011,7 +1012,7 @@ describe('the annex strike-or-swap stage', () => {
           generationId: GENERATION_ID,
           capability: SURVIVING_SIBLING,
           was: expect.objectContaining({
-            serverUrl: POINTER.host,
+            serverUrl: spacesUrl({ baseUrl: POINTER.host }),
             zcapClient: SURVIVING_ZCAP_CLIENT
           })
         })

@@ -1181,7 +1181,10 @@ describe('WASRemoteStore.declareCollectionIndexes', () => {
     const store = new WASRemoteStore({
       serviceDescription: TEST_SERVICE_DESCRIPTION,
       pinStore: memoryResourceLogPinStore(),
-      storageServerUrl: 'https://example.test',
+      // This store builds a real WasClient, which refuses a server URL that
+      // disagrees with the Spaces URL the service description advertises,
+      // so the host matches TEST_SERVICE_DESCRIPTION's.
+      storageServerUrl: 'http://localhost',
       zcapClient: {
         request,
         invocationSigner: { id: 'did:key:test#key' }

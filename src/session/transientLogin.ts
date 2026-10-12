@@ -61,12 +61,11 @@ import {
   type PublishedWebvhLog
 } from '@interop/wallet-core/webvh'
 import { webvhResourceLogController } from '@interop/wallet-core/resourceLog'
-import { WasClient } from '@interop/was-client'
 import { WAS_SERVER_URL } from '@/app.config'
 import { hasClientKeyRecord } from '@/lib/sessionKey'
 import { isStorageUnreachable } from '@/lib/storageErrors'
 import { createLogger } from '@/lib/log'
-import { wasServiceDescription } from '@/lib/wasService'
+import { wasClientAt, wasServiceDescription } from '@/lib/wasService'
 import {
   ladderMendAuthority,
   mendCredentialAnchoredAccount,
@@ -405,8 +404,8 @@ export async function ensureClientAnnexGenerationReady({
       standingClient: { did: found.standingClient.clientDid, zcapClient },
       serviceDescription,
       bootstrapWasFor: ({ keyAgent }) =>
-        new WasClient({
-          serverUrl: pointer.host,
+        wasClientAt({
+          baseUrl: pointer.host,
           zcapClient: didKeyZcapClient({ keyAgent }),
           serviceDescription
         }),

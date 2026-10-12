@@ -35,7 +35,7 @@
  * leave -- with the same hook set, so any entry point into a torn account
  * runs the shared arms instead of hand-rolling its own heal.
  */
-import { WasClient } from '@interop/was-client'
+import type { WasClient } from '@interop/was-client'
 import type { EncryptionDescriptorStore } from '@interop/was-client/edv'
 import {
   accountCollectionStores,
@@ -99,7 +99,7 @@ import {
   type PassphraseUnlockMethod
 } from '@/session/unlockMethods'
 import { createLogger, stageMarker, stageSpan, stageTimer } from '@/lib/log'
-import { wasServiceDescription } from '@/lib/wasService'
+import { wasClientAt, wasServiceDescription } from '@/lib/wasService'
 import type { StageLabel } from '@/lib/log'
 
 export type { CredentialAnchoredEstablishment, CredentialAnchoredMendReport }
@@ -228,11 +228,20 @@ async function establishmentHooks({
   // Discovered once for every client this establishment builds, the ones
   // wallet-core builds from the parts below included.
   const serviceDescription = await wasServiceDescription()
-  const bootstrapWas = new WasClient({
-    serverUrl: host,
-    zcapClient: bootstrapZcap,
-    serviceDescription
-  })
+  // The one client shape of this establishment: the app-side `bootstrapWas`
+  // below (the KMS thunk and the id store), and the ones wallet-core builds
+  // from the agent it hands over, which owns the bootstrap identity.
+  const bootstrapWasFor = ({
+    keyAgent
+  }: {
+    keyAgent: Parameters<typeof didKeyZcapClient>[0]['keyAgent']
+  }) =>
+    wasClientAt({
+      baseUrl: host,
+      zcapClient: didKeyZcapClient({ keyAgent }),
+      serviceDescription
+    })
+  const bootstrapWas = bootstrapWasFor({ keyAgent: bootstrapAgent })
   const idStore = wasWebvhIdStore({
     was: bootstrapWas,
     spaceId,
@@ -399,19 +408,7 @@ async function establishmentHooks({
         serviceDescription,
         log
       }),
-    // Built from the agent wallet-core hands over (it owns the bootstrap
-    // identity); the app-side `bootstrapWas` above serves only the KMS thunk
-    // and the id store, derived from the same seed.
-    bootstrapWasFor: ({
-      keyAgent
-    }: {
-      keyAgent: Parameters<typeof didKeyZcapClient>[0]['keyAgent']
-    }) =>
-      new WasClient({
-        serverUrl: host,
-        zcapClient: didKeyZcapClient({ keyAgent }),
-        serviceDescription
-      }),
+    bootstrapWasFor,
     idStore,
     ...(provideKmsAuthentication ? { provideKmsAuthentication } : {}),
     // The keystore half of the promotion, only when the KMS stage bound a
@@ -678,8 +675,8 @@ export async function ladderMendAuthority({
   const serviceDescription = await wasServiceDescription()
   return {
     invocation: {
-      was: new WasClient({
-        serverUrl: pointer.host,
+      was: wasClientAt({
+        baseUrl: pointer.host,
         zcapClient,
         serviceDescription
       }),

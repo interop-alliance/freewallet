@@ -1,8 +1,10 @@
 import { describe, expect, it, vi, beforeEach } from 'vitest'
+import type { TFunction } from 'i18next'
 import type {
   CheckResult,
   CheckOutcome,
-  CredentialVerificationResult
+  CredentialVerificationResult,
+  ProblemDetail
 } from '@interop/verifier-core'
 
 const coreVerifyMock = vi.fn()
@@ -15,9 +17,11 @@ vi.mock('@interop/verifier-core', async importActual => {
   }
 })
 
-const { ProblemTypes, EXPIRED_PROBLEM_TYPE } =
-  await import('@interop/verifier-core')
+const { ProblemTypes } = await import('@interop/verifier-core')
 const { verifyCredential } = await import('@/lib/verify')
+const { isExpiredOnly } = await import('@interop/vc-display')
+const { verifyResultToChecklist } =
+  await import('@/lib/viewMappers/mapVerificationToUi')
 
 const CREDENTIAL = {
   '@context': ['https://www.w3.org/ns/credentials/v2'],
@@ -50,9 +54,42 @@ type LogEntry = {
   error?: { message?: string; name?: string }
 }
 
+/**
+ * An identity `TFunction`: the checklist labels read back as their keys.
+ */
+const t = ((key: string) => key) as unknown as TFunction
+
+function logOf(
+  payload: Awaited<ReturnType<typeof verifyCredential>>
+): LogEntry[] {
+  return (payload.results?.[0]?.log ?? payload.log ?? []) as LogEntry[]
+}
+
 function logById(payload: Awaited<ReturnType<typeof verifyCredential>>) {
-  const log = (payload.results?.[0]?.log ?? payload.log ?? []) as LogEntry[]
+  const log = logOf(payload)
   return (id: string) => log.find(entry => entry.id === id)
+}
+
+const EXPIRED_PROBLEM = {
+  type: ProblemTypes.CREDENTIAL_EXPIRED,
+  title: 'Credential Expired',
+  detail: 'Credential expired on 2020-01-01T00:00:00Z.'
+}
+
+const NOT_YET_VALID_PROBLEM = {
+  type: ProblemTypes.CREDENTIAL_NOT_YET_VALID,
+  title: 'Credential Not Yet Valid',
+  detail: 'Credential is not valid until 2099-01-01T00:00:00Z.'
+}
+
+/**
+ * A fatal `proof.signature` failure carrying one problem.
+ */
+function fatalSignatureFailure(problem: ProblemDetail): CheckResult {
+  return {
+    ...check('proof.signature', { status: 'failure', problems: [problem] }),
+    fatal: true
+  }
 }
 
 const MATCHING_ISSUERS = [
@@ -65,6 +102,12 @@ const MATCHING_ISSUERS = [
     }
   }
 ]
+
+const ISSUER_OK = check('trust.issuer-details', {
+  status: 'success',
+  message: 'ok',
+  payload: { matchingIssuers: MATCHING_ISSUERS }
+})
 
 describe('verify.ts adapter', () => {
   beforeEach(() => {
@@ -87,11 +130,7 @@ describe('verify.ts adapter', () => {
         check('proof.signature', { status: 'success', message: 'ok' }),
         check('status.bitstring', { status: 'success', message: 'ok' }),
         check('validity.expiration', { status: 'success', message: 'ok' }),
-        check('trust.issuer-details', {
-          status: 'success',
-          message: 'ok',
-          payload: { matchingIssuers: MATCHING_ISSUERS }
-        })
+        ISSUER_OK
       ])
     )
 
@@ -112,19 +151,9 @@ describe('verify.ts adapter', () => {
         check('proof.signature', { status: 'success', message: 'ok' }),
         check('validity.expiration', {
           status: 'failure',
-          problems: [
-            {
-              type: EXPIRED_PROBLEM_TYPE,
-              title: 'Credential Expired',
-              detail: 'Credential expired on 2020-01-01T00:00:00Z.'
-            }
-          ]
+          problems: [EXPIRED_PROBLEM]
         }),
-        check('trust.issuer-details', {
-          status: 'success',
-          message: 'ok',
-          payload: { matchingIssuers: MATCHING_ISSUERS }
-        })
+        ISSUER_OK
       ])
     )
 
@@ -136,6 +165,82 @@ describe('verify.ts adapter', () => {
     expect(payload.verified).toBe(false)
   })
 
+  it.each([
+    ['expired', EXPIRED_PROBLEM],
+    ['not-yet-valid', NOT_YET_VALID_PROBLEM]
+  ])(
+    'maps an %s signature verdict onto a passing signature row and a failing expiry row',
+    async (_label, problem) => {
+      coreVerifyMock.mockResolvedValue(
+        coreResult([fatalSignatureFailure(problem), ISSUER_OK])
+      )
+
+      const payload = await verifyCredential(CREDENTIAL)
+      const byId = logById(payload)
+
+      expect(byId('valid_signature')).toEqual({
+        id: 'valid_signature',
+        valid: true
+      })
+      expect(byId('expiration')?.valid).toBe(false)
+      expect(byId('expiration')?.error?.message).toBe(problem.detail)
+      expect(payload.verified).toBe(false)
+    }
+  )
+
+  it('reaches the "expired but authentic" checklist summary', async () => {
+    coreVerifyMock.mockResolvedValue(
+      coreResult([fatalSignatureFailure(EXPIRED_PROBLEM), ISSUER_OK])
+    )
+
+    const payload = await verifyCredential(CREDENTIAL)
+    const checklist = verifyResultToChecklist({
+      raw: payload as never,
+      credential: CREDENTIAL,
+      t
+    })
+
+    expect(checklist.signature.valid).toBe(true)
+    expect(isExpiredOnly(checklist)).toBe(true)
+  })
+
+  it('writes one expiry row when the signature verdict and the expiration suite both report', async () => {
+    coreVerifyMock.mockResolvedValue(
+      coreResult([
+        fatalSignatureFailure(EXPIRED_PROBLEM),
+        check('validity.expiration', {
+          status: 'failure',
+          problems: [EXPIRED_PROBLEM]
+        })
+      ])
+    )
+
+    const payload = await verifyCredential(CREDENTIAL)
+    expect(
+      logOf(payload).filter(entry => entry.id === 'expiration')
+    ).toHaveLength(1)
+  })
+
+  it('keeps a tampered credential as a failing signature row', async () => {
+    coreVerifyMock.mockResolvedValue(
+      coreResult([
+        fatalSignatureFailure({
+          type: ProblemTypes.INVALID_SIGNATURE,
+          title: 'Invalid Signature',
+          detail: 'Invalid signature.'
+        })
+      ])
+    )
+
+    const payload = await verifyCredential(CREDENTIAL)
+    const byId = logById(payload)
+
+    expect(byId('valid_signature')?.valid).toBe(false)
+    expect(byId('valid_signature')?.error?.message).toBe('Invalid signature.')
+    expect(byId('expiration')).toBeUndefined()
+    expect(payload.verified).toBe(false)
+  })
+
   it('omits the expiration row when the check is skipped', async () => {
     coreVerifyMock.mockResolvedValue(
       coreResult([
@@ -144,11 +249,7 @@ describe('verify.ts adapter', () => {
           status: 'skipped',
           reason: 'no expiry'
         }),
-        check('trust.issuer-details', {
-          status: 'success',
-          message: 'ok',
-          payload: { matchingIssuers: MATCHING_ISSUERS }
-        })
+        ISSUER_OK
       ])
     )
 
@@ -170,11 +271,7 @@ describe('verify.ts adapter', () => {
             }
           ]
         }),
-        check('trust.issuer-details', {
-          status: 'success',
-          message: 'ok',
-          payload: { matchingIssuers: MATCHING_ISSUERS }
-        })
+        ISSUER_OK
       ])
     )
 
@@ -193,17 +290,13 @@ describe('verify.ts adapter', () => {
           status: 'failure',
           problems: [
             {
-              type: ProblemTypes.CREDENTIAL_REVOKED_OR_SUSPENDED,
+              type: ProblemTypes.CREDENTIAL_REVOKED,
               title: 'Credential Revoked or Suspended',
               detail: 'The credential has been revoked.'
             }
           ]
         }),
-        check('trust.issuer-details', {
-          status: 'success',
-          message: 'ok',
-          payload: { matchingIssuers: MATCHING_ISSUERS }
-        })
+        ISSUER_OK
       ])
     )
 

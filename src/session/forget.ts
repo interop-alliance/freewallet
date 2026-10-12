@@ -66,7 +66,7 @@
  * this browser already fetched stays readable to whoever holds it.
  */
 import { deriveNextKeyHash } from '@interop/did-method-webvh'
-import { WasClient, type ServiceDescription } from '@interop/was-client'
+import type { WasClient, ServiceDescription } from '@interop/was-client'
 import {
   clientAnnexLogStore,
   forgetEnrolledClient,
@@ -126,7 +126,7 @@ import {
 import { disposeSession } from '@/session/sessionLifecycle'
 import { cascadeCollections } from '@/session/userKeyCascade'
 import { createLogger } from '@/lib/log'
-import { wasServiceDescription } from '@/lib/wasService'
+import { wasClientAt, wasServiceDescription } from '@/lib/wasService'
 
 const log = createLogger('fw:session:forget')
 import { invalidateVerifiedLog } from '@/session/verifiedLog'
@@ -606,8 +606,8 @@ function annexCeremonyReach({
   pointer: { host: string; spaceId: string }
   serviceDescription: ServiceDescription
 }) {
-  const was = new WasClient({
-    serverUrl: pointer.host,
+  const was = wasClientAt({
+    baseUrl: pointer.host,
     zcapClient: session.profile.zcapClient,
     serviceDescription
   })

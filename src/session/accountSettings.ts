@@ -46,7 +46,8 @@ import {
   DID_LOG_RESOURCE,
   ID_COLLECTION,
   PASSKEY_KDF,
-  WAS_SERVER_URL
+  WAS_SERVER_URL,
+  WAS_SPACES_URL
 } from '@/app.config'
 import { assertPasskeyPrf, registerPasskey } from '@/lib/passkey'
 import { establishStandingUnlock } from '@/session/standingUnlock'
@@ -1856,7 +1857,7 @@ async function accountLogAnswers({
   pointer: { spaceId: string; host: string }
 }): Promise<boolean> {
   const url = toUrl({
-    serverUrl: pointer.host,
+    baseUrl: pointer.host,
     path: resourcePath(pointer.spaceId, ID_COLLECTION.id, DID_LOG_RESOURCE)
   })
   try {
@@ -2595,7 +2596,7 @@ async function runAccountDeletion({
       } else {
         ;({ outcome } = await new WasClient({
           serviceDescription: await wasServiceDescription(),
-          serverUrl: WAS_SERVER_URL as string,
+          serverUrl: WAS_SPACES_URL as string,
           zcapClient: profile.zcapClient
         })
           .space(spaceId)
@@ -2864,7 +2865,7 @@ async function runAccountDeletion({
   if (credential && (accountGone || !remote)) {
     const { spaceId, zcapClient } = credential.unlock
     onPhase?.({ phase: 'acting-unlock-space', spaceId })
-    if (WAS_SERVER_URL && remote) {
+    if (WAS_SPACES_URL && remote) {
       let outcome: 'deleted' | 'not-found' | undefined
       // The in-run recourse comes first: the credential is derived and in
       // memory, so one bounded retry costs nothing and mends the common tear
@@ -2874,7 +2875,7 @@ async function runAccountDeletion({
         try {
           ;({ outcome } = await new WasClient({
             serviceDescription: await wasServiceDescription(),
-            serverUrl: WAS_SERVER_URL,
+            serverUrl: WAS_SPACES_URL,
             zcapClient
           })
             .space(spaceId)
