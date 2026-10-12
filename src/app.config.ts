@@ -70,9 +70,9 @@ function deriveWasBaseUrl(spacesUrl: string): string {
   const baseUrl = baseUrlOfSpacesUrl(spacesUrl)
   if (baseUrl === null) {
     throw new Error(
-      `VITE_WAS_SERVER_URL is not an absolute Spaces Repository URL: ` +
-        `"${spacesUrl}". Configure it as the WAS server's Spaces Repository ` +
-        'URL, for example "https://host/spaces/".'
+      `VITE_WAS_SERVER_URL is not an absolute URL ending in a "spaces" ` +
+        `segment: "${spacesUrl}". Configure it as the WAS server's Spaces ` +
+        'Repository URL, for example "https://host/spaces/".'
     )
   }
   return baseUrl

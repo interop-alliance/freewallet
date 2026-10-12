@@ -81,9 +81,9 @@ row or an agent row. A get request carrying a standalone
 would leave a grantee no listing covers, so the pre-consent matrix refuses it
 (`standaloneZcapRequest`) before the login form renders. The refusal stays
 in the popup: Cancel answers the channel with `null`, as for every other
-block. The consent panel's default revoke note names the Applications page,
-which is true on the App Connect path, the only popup path that still
-renders it.
+block. The consent panel states its default revoke note once, above the
+grant list. It names the Applications page, which is true on the App
+Connect path, the only popup path that still renders it.
 
 **The store popup refuses a DID-Auth request before login.** A
 `navigator.credentials.store()` may name a VC API exchange that opens with a

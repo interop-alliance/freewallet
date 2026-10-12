@@ -161,7 +161,7 @@ class SessionSyncController {
         port: {
           wasClient,
           spaceId,
-          serverUrl: WAS_BASE_URL,
+          baseUrl: WAS_BASE_URL,
           collections: SYNCED_COLLECTIONS,
           // The local end of replication IS the page-facing active replica.
           rxCollection: key => session.storage.localCollection(key),

@@ -69,7 +69,7 @@ interface CoreOptions {
   port: {
     wasClient: unknown
     spaceId: string
-    serverUrl: string
+    baseUrl: string
     collections: Array<{ key: string; id: string }>
     rxCollection: (key: string) => unknown
     batchSize?: number
@@ -134,7 +134,7 @@ describe('sync binding: the port handed to the core', () => {
     await syncController.restart({ session: fakeSession() })
 
     const { port, pollMs } = lastOptions()
-    expect(port.serverUrl).toBe('https://was.example')
+    expect(port.baseUrl).toBe('https://was.example')
     expect(port.spaceId).toBe('space-1')
     expect(port.wasClient).toEqual({ fake: 'client' })
     expect(port.collections).toEqual([

@@ -25,6 +25,16 @@
 
 ### Changed
 
+- The storage-access consent panel (the App Connect popup and the
+  interaction-URL page) is more compact. The recipient block, the expiry,
+  and the revoke note are stated once above the grant list when the grants
+  share them. The summary's expiry is the one a majority of the grants its
+  revoke note covers hold. A grant whose recipient or expiry differs keeps
+  its own on its card, and a share beside ordinary grants keeps its expiry
+  and its revoke note together on its card. Each card
+  puts its target and action chips on one line, and a site-supplied reason
+  carries its "The site says:" label inline. The CHAPI and
+  interaction-URL page card is up to 720px wide, in place of 480px.
 - The derived base-URL constant in `src/app.config.ts` is `WAS_BASE_URL`,
   in place of `WAS_SERVER_URL`: the parent of `WAS_SPACES_URL`, which the
   KMS and CORS-proxy facets hang off and an account pointer records as
@@ -36,7 +46,9 @@
   `serverUrl`: the configured `WAS_SPACES_URL`, or `spacesUrl({ baseUrl })` of
   an account pointer's `host`, which stays a base URL. `toUrl` and
   `parseSpaceTarget` calls pass `baseUrl`. `@interop/was-client` moves to
-  `^0.97.0` and `@interop/wallet-core` to `^0.106.0`.
+  `^0.97.0` and `@interop/wallet-core` to `^0.106.0`. `@interop/was-sync`
+  moves to `^0.10.0`, whose controller port takes the server root as
+  `baseUrl` in place of `serverUrl`.
 - The mender registry's `ceremony-tail` trigger is site-backed, on
   `@interop/wallet-core` 0.105.0. The client revocation's and the
   unlock-credential rotation's tails are registered as report-only sites,
@@ -66,6 +78,9 @@
 
 ### Fixed
 
+- The CHAPI and interaction-URL pages carry bottom padding to match the
+  top, so an expanded request source block no longer ends flush with the
+  bottom of the page, where it read as cut off.
 - The CORS-proxy fallback no longer retries an aborted verification fetch
   through the proxy. verifier-core 3.8.0's built-in HTTP service wraps every
   fetch rejection in a fixed-text error, and the abort check now reads

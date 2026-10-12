@@ -52,11 +52,22 @@
  * TTL the grant takes, and that access renews while the connection stands.
  * Each read row also states that the agent passes read access on to people
  * it chooses.
+ *
+ * What is the same on every row is stated once, in a summary above the
+ * list. The recipient block moves there when every grant names the same
+ * recipient, which an App Connect request always does. The expiry sentence
+ * moves there when two or more grants share it (or the request has one),
+ * and a grant whose sentence differs states its own on its card. The revoke
+ * note is always stated there. A share's own revoke note stays on its card
+ * when ordinary grants sit beside it. The consolidation compares the values
+ * themselves, not the request kind, so the interaction-URL page gets the
+ * same treatment. The warnings stay on their cards.
  */
 import Box from '@mui/material/Box'
 import Chip from '@mui/material/Chip'
 import Stack from '@mui/material/Stack'
 import Typography from '@mui/material/Typography'
+import type { TFunction } from 'i18next'
 import { useTranslation } from 'react-i18next'
 import {
   isSatisfiable,
@@ -70,10 +81,7 @@ import { SiteProvidedText } from './SiteProvidedText'
  * renders its id as a distinct monospace badge so it stands out from the
  * surrounding copy; the other targets stay plain text.
  */
-function targetLabel(
-  grant: ResolvedGrant,
-  t: (key: string, opts?: Record<string, unknown>) => string
-) {
+function targetLabel(grant: ResolvedGrant, t: TFunction) {
   const { target } = grant
   if (target.targetClass === 'inbox') {
     return t('chapi.get.zcapTarget.inbox')
@@ -125,7 +133,7 @@ function expiryLine({
   writeTtlDays,
   shareTtlDays
 }: {
-  t: (key: string, opts?: Record<string, unknown>) => string
+  t: TFunction
   share: boolean
   connectionRequest: boolean
   write: boolean
@@ -140,6 +148,106 @@ function expiryLine({
     return t('chapi.get.zcapConnectionExpiry', { days: shareTtlDays })
   }
   return t('chapi.get.zcapExpiry', { days: write ? writeTtlDays : ttlDays })
+}
+
+/**
+ * The value held by every entry, or by a strict majority of them. A value
+ * held by a single entry among several is no common value, and neither is
+ * one half of an even split, so in both cases each entry keeps its own.
+ *
+ * @param values {string[]}
+ * @returns {string | undefined}
+ */
+function commonValue(values: string[]): string | undefined {
+  const counts = new Map<string, number>()
+  for (const value of values) {
+    counts.set(value, (counts.get(value) ?? 0) + 1)
+  }
+  let best: string | undefined
+  let bestCount = 0
+  for (const [value, count] of counts) {
+    if (count > bestCount) {
+      best = value
+      bestCount = count
+    }
+  }
+  return bestCount * 2 > values.length ? best : undefined
+}
+
+/**
+ * Whether there is a recipient to show: a `controller` DID, or App Connect's
+ * wallet marking.
+ *
+ * @param options {object}
+ * @param [options.controller] {string}
+ * @param options.walletMintedRecipient {boolean}
+ * @returns {boolean}
+ */
+function hasRecipient({
+  controller,
+  walletMintedRecipient
+}: {
+  controller?: string
+  walletMintedRecipient: boolean
+}): boolean {
+  return Boolean(controller) || walletMintedRecipient
+}
+
+/**
+ * The recipient block: the "Access granted to:" label, the recipient DID in
+ * monospace on its own line, and App Connect's wallet marking. Renders
+ * nothing when there is no recipient to show.
+ *
+ * @param options {object}
+ * @param options.t {Function}
+ * @param [options.controller] {string}
+ * @param options.walletMintedRecipient {boolean}
+ */
+function RecipientBlock({
+  t,
+  controller,
+  walletMintedRecipient
+}: {
+  t: TFunction
+  controller?: string
+  walletMintedRecipient: boolean
+}) {
+  if (!hasRecipient({ controller, walletMintedRecipient })) {
+    return null
+  }
+  return (
+    <Box sx={{ mb: 0.5 }}>
+      <Typography
+        variant="caption"
+        color="text.secondary"
+        sx={{ display: 'block' }}
+      >
+        {t('chapi.get.zcapRecipient')}
+      </Typography>
+      {controller && (
+        <Typography
+          variant="caption"
+          component="div"
+          sx={{ fontFamily: 'monospace', wordBreak: 'break-all' }}
+        >
+          {controller}
+        </Typography>
+      )}
+      {walletMintedRecipient && (
+        <Typography
+          variant="caption"
+          color="text.secondary"
+          sx={{ display: 'block' }}
+        >
+          {t(
+            controller
+              ? 'chapi.get.zcapRecipientWalletStored'
+              : 'chapi.get.zcapRecipientWalletMintedPending'
+          )}
+        </Typography>
+      )}
+    </Box>
+  )
 }
 
 // The existing-collection note per creator reading; `this-app` (the
@@ -185,15 +293,87 @@ export function ZcapGrantsPanel({
 }) {
   const { t } = useTranslation()
 
+  // A satisfiable grant's expiry sentence. An unsatisfiable grant states
+  // none.
+  const expiryOf = (grant: ResolvedGrant) =>
+    expiryLine({
+      t,
+      share: grant.target.targetClass === 'share',
+      connectionRequest,
+      write: grant.write,
+      ttlDays,
+      writeTtlDays,
+      shareTtlDays
+    })
+  // The ordinary revoke note covers every grant but a share. With only
+  // shares on the list, the share variant takes its place. The summary's
+  // expiry is drawn from the grants its revoke note covers, so a share's
+  // expiry sentence stays beside the share revoke note on its card when
+  // ordinary grants are present.
+  const satisfiableGrants = grants.filter(grant => isSatisfiable(grant.target))
+  const ordinaryGrants = satisfiableGrants.filter(
+    grant => grant.target.targetClass !== 'share'
+  )
+  const onlyShares = ordinaryGrants.length === 0
+  const summaryGrants = onlyShares ? satisfiableGrants : ordinaryGrants
+  const summaryRevokeNote =
+    summaryGrants.length > 0 &&
+    t(onlyShares ? 'chapi.get.zcapShareRevokeNote' : 'chapi.get.zcapRevokeNote')
+  const sharedExpiry = commonValue(summaryGrants.map(expiryOf))
+  const sharedRecipient =
+    grants.length > 0 &&
+    grants.every(
+      grant => grant.descriptor.controller === grants[0].descriptor.controller
+    )
+  const summaryRecipient =
+    sharedRecipient &&
+    hasRecipient({
+      controller: grants[0].descriptor.controller,
+      walletMintedRecipient
+    })
+  const summaryLine = [sharedExpiry, summaryRevokeNote]
+    .filter(Boolean)
+    .join(' ')
+
   return (
     <Stack spacing={1}>
       <Typography variant="subtitle1" sx={{ fontWeight: 600 }}>
         {heading ?? t('chapi.get.zcapHeading')}
       </Typography>
+      {(summaryRecipient || summaryLine) && (
+        <Box data-testid="zcap-summary">
+          {summaryRecipient && (
+            <RecipientBlock
+              t={t}
+              controller={grants[0].descriptor.controller}
+              walletMintedRecipient={walletMintedRecipient}
+            />
+          )}
+          {summaryLine && (
+            <Typography
+              variant="caption"
+              color="text.secondary"
+              sx={{ display: 'block' }}
+            >
+              {summaryLine}
+            </Typography>
+          )}
+        </Box>
+      )}
       {grants.map((grant, index) => {
         const { target, allowedActions, descriptor, write } = grant
         const satisfiable = isSatisfiable(target)
         const share = target.targetClass === 'share'
+        // A card states its own expiry only where it differs from the
+        // summary's, and a share its own revoke note only beside ordinary
+        // grants.
+        const ownExpiry = satisfiable ? expiryOf(grant) : undefined
+        const cardExpiryLine = [
+          ownExpiry !== sharedExpiry && ownExpiry,
+          share && !onlyShares && t('chapi.get.zcapShareRevokeNote')
+        ]
+          .filter(Boolean)
+          .join(' ')
         // The inbox grant can only create messages, so it reads as neither
         // an ordinary write nor a read the agent passes on.
         const inbox = target.targetClass === 'inbox'
@@ -206,8 +386,10 @@ export function ZcapGrantsPanel({
         return (
           <Box
             key={descriptor.referenceId ?? index}
+            data-testid="zcap-grant"
             sx={{
-              p: 1.5,
+              px: 1.5,
+              py: 1,
               // A share is the strongest grant here: a heavier border sets it
               // apart from the ordinary warning rows above and below it.
               border: share ? 2 : 1,
@@ -221,56 +403,34 @@ export function ZcapGrantsPanel({
               label={t('chapi.get.zcapReasonLabel')}
             />
 
-            {(descriptor.controller || walletMintedRecipient) && (
-              <Typography
-                variant="caption"
-                color="text.secondary"
-                sx={{ display: 'block', mb: 0.5 }}
-              >
-                {t('chapi.get.zcapRecipient')}
-              </Typography>
-            )}
-            {descriptor.controller && (
-              <Typography
-                variant="caption"
-                component="div"
-                sx={{
-                  fontFamily: 'monospace',
-                  wordBreak: 'break-all',
-                  mb: 0.5
-                }}
-              >
-                {descriptor.controller}
-              </Typography>
-            )}
-            {walletMintedRecipient && (
-              <Typography
-                variant="caption"
-                color="text.secondary"
-                sx={{ display: 'block', mb: 0.5 }}
-              >
-                {t(
-                  descriptor.controller
-                    ? 'chapi.get.zcapRecipientWalletStored'
-                    : 'chapi.get.zcapRecipientWalletMintedPending'
-                )}
-              </Typography>
+            {!sharedRecipient && (
+              <RecipientBlock
+                t={t}
+                controller={descriptor.controller}
+                walletMintedRecipient={walletMintedRecipient}
+              />
             )}
 
             {satisfiable ? (
               <>
-                <Typography variant="subtitle2">
-                  {targetLabel(grant, t)}
-                </Typography>
-
+                {/* The target and its action chips share one wrapping line. */}
                 <Stack
                   direction="row"
-                  spacing={0.5}
-                  sx={{ flexWrap: 'wrap', gap: 0.5, mt: 0.5 }}
+                  sx={{
+                    flexWrap: 'wrap',
+                    alignItems: 'center',
+                    columnGap: 1,
+                    rowGap: 0.5
+                  }}
                 >
-                  {allowedActions.map(action => (
-                    <Chip key={action} size="small" label={action} />
-                  ))}
+                  <Typography variant="subtitle2" component="span">
+                    {targetLabel(grant, t)}
+                  </Typography>
+                  <Stack direction="row" sx={{ flexWrap: 'wrap', gap: 0.5 }}>
+                    {allowedActions.map(action => (
+                      <Chip key={action} size="small" label={action} />
+                    ))}
+                  </Stack>
                 </Stack>
 
                 {target.targetClass === 'public-collection' && (
@@ -364,27 +524,15 @@ export function ZcapGrantsPanel({
                   </Typography>
                 )}
 
-                <Typography
-                  variant="caption"
-                  color="text.secondary"
-                  sx={{ display: 'block', mt: 0.5 }}
-                >
-                  {/* A share's expiry covers the fetch axis only -- the epoch
-                      roster entry does not expire -- so it gets its own line
-                      rather than the flat "expires in N days". */}
-                  {expiryLine({
-                    t,
-                    share,
-                    connectionRequest,
-                    write,
-                    ttlDays,
-                    writeTtlDays,
-                    shareTtlDays
-                  })}{' '}
-                  {share
-                    ? t('chapi.get.zcapShareRevokeNote')
-                    : t('chapi.get.zcapRevokeNote')}
-                </Typography>
+                {cardExpiryLine && (
+                  <Typography
+                    variant="caption"
+                    color="text.secondary"
+                    sx={{ display: 'block', mt: 0.5 }}
+                  >
+                    {cardExpiryLine}
+                  </Typography>
+                )}
               </>
             ) : (
               <Typography variant="body2" color="text.secondary">

@@ -464,11 +464,17 @@ export const chapiStyles = {
     alignItems: 'flex-start',
     justifyContent: 'center',
     px: 2,
-    pt: 4
+    // Bottom padding to match the top: without it the last element (an
+    // expanded request source block) ends flush with the document's bottom
+    // edge, and reads as cut off with no page scroll left to reveal it.
+    pt: 4,
+    pb: 4
   },
   card: {
     width: '100%',
-    maxWidth: 480,
+    // Wide enough that a grant card is a line or two tall; the mediator's
+    // handler window is 800px wide.
+    maxWidth: 720,
     display: 'flex',
     flexDirection: 'column',
     gap: 2
