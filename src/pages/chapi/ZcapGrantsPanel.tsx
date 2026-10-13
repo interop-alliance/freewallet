@@ -56,9 +56,10 @@
  * What is the same on every row is stated once, in a summary above the
  * list. The recipient block moves there when every grant names the same
  * recipient, which an App Connect request always does. The expiry sentence
- * moves there when two or more grants share it (or the request has one),
- * and a grant whose sentence differs states its own on its card. The revoke
- * note is always stated there. A share's own revoke note stays on its card
+ * moves there when a strict majority of the grants its revoke note covers
+ * share it (so a request with one grant states it there too), and a grant
+ * whose sentence differs states its own on its card. The revoke note is
+ * always stated there. A share's own revoke note stays on its card
  * when ordinary grants sit beside it. The consolidation compares the values
  * themselves, not the request kind, so the interaction-URL page gets the
  * same treatment. The warnings stay on their cards.
@@ -305,12 +306,12 @@ export function ZcapGrantsPanel({
       writeTtlDays,
       shareTtlDays
     })
+  const satisfiableGrants = grants.filter(grant => isSatisfiable(grant.target))
   // The ordinary revoke note covers every grant but a share. With only
   // shares on the list, the share variant takes its place. The summary's
   // expiry is drawn from the grants its revoke note covers, so a share's
   // expiry sentence stays beside the share revoke note on its card when
   // ordinary grants are present.
-  const satisfiableGrants = grants.filter(grant => isSatisfiable(grant.target))
   const ordinaryGrants = satisfiableGrants.filter(
     grant => grant.target.targetClass !== 'share'
   )

@@ -70,15 +70,16 @@
   in place of `WAS_SERVER_URL`: the parent of `WAS_SPACES_URL`, which the
   KMS and CORS-proxy facets hang off and an account pointer records as
   `host`. It is derived by was-client's `baseUrlOfSpacesUrl`, so a
-  `VITE_WAS_SERVER_URL` whose last path segment is not `spaces` is refused
+  `VITE_WAS_SERVER_URL` that is not a Spaces Repository URL by its rule
+  (a last segment other than `spaces`, an empty path segment) is refused
   at startup. `VITE_WAS_SERVER_URL` is otherwise unchanged, and nothing on
   the wire changes.
 - Every `WasClient` takes the Spaces Repository URL (`<base>/spaces/`) as
   `serverUrl`: the configured `WAS_SPACES_URL`, or `spacesUrl({ baseUrl })` of
   an account pointer's `host`, which stays a base URL. `toUrl` and
   `parseSpaceTarget` calls pass `baseUrl`. `@interop/was-client` moves to
-  `^0.97.0` and `@interop/wallet-core` to `^0.106.0`. `@interop/was-sync`
-  moves to `^0.10.0`, whose controller port takes the server root as
+  `^0.97.1` and `@interop/wallet-core` to `^0.107.0`. `@interop/was-sync`
+  moves to `^0.10.1`, whose controller port takes the server root as
   `baseUrl` in place of `serverUrl`.
 - The mender registry's `ceremony-tail` trigger is site-backed, on
   `@interop/wallet-core` 0.105.0. The client revocation's and the

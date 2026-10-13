@@ -36,7 +36,7 @@ export const WAS_SPACES_URL: string | undefined = env.VITE_WAS_SERVER_URL
 // The WAS server base URL, the parent of the Spaces Repository URL: the base
 // every Space path, the KMS facet, and the CORS proxy facet hang off, and
 // the `host` an account pointer records. Written without a trailing slash.
-// A value that is not an absolute Spaces Repository URL (a scheme-less
+// A value was-client's `baseUrlOfSpacesUrl` refuses (a scheme-less
 // `localhost:3002/spaces/`, say) is refused by name here, rather than
 // leaving the app a white screen at module evaluation.
 export const WAS_BASE_URL: string | undefined = WAS_SPACES_URL
@@ -63,16 +63,16 @@ export function withOneTrailingSlash(url: string): string {
  * @param spacesUrl {string}   the configured `VITE_WAS_SERVER_URL`, in its
  *   canonical trailing-slash form
  * @returns {string}   the parent URL, without a trailing slash
- * @throws {Error}   when the configured value is not an absolute URL ending
- *   in a `spaces` segment
+ * @throws {Error}   when was-client's `baseUrlOfSpacesUrl` refuses the
+ *   configured value
  */
 function deriveWasBaseUrl(spacesUrl: string): string {
   const baseUrl = baseUrlOfSpacesUrl(spacesUrl)
   if (baseUrl === null) {
     throw new Error(
-      `VITE_WAS_SERVER_URL is not an absolute URL ending in a "spaces" ` +
-        `segment: "${spacesUrl}". Configure it as the WAS server's Spaces ` +
-        'Repository URL, for example "https://host/spaces/".'
+      `VITE_WAS_SERVER_URL "${spacesUrl}" is not a Spaces Repository URL. ` +
+        "Configure it as the WAS server's Spaces Repository URL, for " +
+        'example "https://host/spaces/".'
     )
   }
   return baseUrl

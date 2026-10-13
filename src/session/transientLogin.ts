@@ -798,11 +798,16 @@ export async function transientSessionFromKeyringHit({
       // The re-point ends every App Connect grant chained under the old
       // generation delegation, as any swap does. A connected agent's grant
       // there is renewed by the inbox pass. Said here, since the mint runs
-      // with no dialog to say it on.
+      // with no dialog to say it on. A first visit mints a Space with no
+      // prior delegation to end, so the mint alone is logged there.
+      const firstSpace =
+        readiness.outcome.spaceMinted && !readiness.outcome.pointedSpaceMissing
       log.info(
-        'The readiness ensure minted a fresh annex generation; the App ' +
-          'Connect grants chained under the old generation delegation end ' +
-          'with it',
+        firstSpace
+          ? 'The readiness ensure minted the first annex Space'
+          : 'The readiness ensure minted a fresh annex generation; the App ' +
+              'Connect grants chained under the old generation delegation ' +
+              'end with it',
         { clientAnnexDid: readiness.outcome.clientAnnexDid }
       )
       // The pointer moved: the pre-mend document names a generation that is

@@ -185,15 +185,19 @@ const OUT_OF_DATE_PROBLEM_TYPES: readonly string[] = [
 /**
  * The expired or not-yet-valid problem a failed signature check reports,
  * or undefined for a success, a skip, or any other failure (a tampered
- * credential included).
+ * credential included). A check reporting a date problem beside any other
+ * problem is not out of date: a crypto service may report a bad signature
+ * and an expiry together, and the signature row must not pass on it.
  */
 function outOfDateProblem(check: CheckResult): ProblemDetail | undefined {
   if (check.outcome.status !== 'failure') {
     return undefined
   }
-  return check.outcome.problems.find(problem =>
-    OUT_OF_DATE_PROBLEM_TYPES.includes(problem.type)
-  )
+  const { problems } = check.outcome
+  const allOutOfDate =
+    problems.length > 0 &&
+    problems.every(problem => OUT_OF_DATE_PROBLEM_TYPES.includes(problem.type))
+  return allOutOfDate ? problems[0] : undefined
 }
 
 function problemDetail(check: CheckResult): string | undefined {
