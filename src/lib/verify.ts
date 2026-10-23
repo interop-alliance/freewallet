@@ -8,18 +8,18 @@
  * built-in registry suite is disabled (`registries: []`).
  *
  * Unpublished status lists (`STATUS_LIST_NOT_FOUND`) are dropped rather than
- * treated as revocation.
+ * treated as revocation. The non-fatal `proof.unsupported-proofs` row (a proof
+ * in a proof set no suite could check) has no legacy row and is not mapped;
+ * it is logged as a diagnostic instead.
  */
 import {
   verifyCredential as coreVerify,
   ProblemTypes,
-  expirationSuite,
   createIssuerDetailsSuite
 } from '@interop/verifier-core'
 import type {
   CredentialVerificationResult,
-  CheckResult,
-  ProblemDetail
+  CheckResult
 } from '@interop/verifier-core'
 import type { IVerifiableCredential } from '@interop/data-integrity-core'
 import { registryManager } from '@/lib/registryManager'
@@ -43,12 +43,14 @@ const CredentialErrorTypes = {
   DidNotInRegistry: 'Could not find issuer in registry with given DID.'
 } as const
 
+// The phase-qualified ids verifier-core stamps on `results[]` rows.
 const CHECK_ID = {
-  signature: 'proof.signature',
-  status: 'status.bitstring',
-  expiration: 'validity.expiration',
+  signature: 'cryptographic.proof.signature',
+  status: 'cryptographic.status.bitstring',
+  validityPeriod: 'cryptographic.proof.validity-period',
+  unsupportedProofs: 'cryptographic.proof.unsupported-proofs',
   issuerDetails: 'trust.issuer-details',
-  parsing: 'parsing.envelope'
+  parsing: 'cryptographic.parsing.envelope'
 } as const
 
 type MatchingIssuer = Record<string, unknown>
@@ -61,14 +63,13 @@ export async function verifyCredential(
     const core = (await coreVerify({
       credential: credential as never,
       registries: [],
-      additionalSuites: [expirationSuite, issuerDetailsSuite],
-      verbose: true,
+      additionalSuites: [issuerDetailsSuite],
       httpGetService
     })) as CredentialVerificationResult
 
     const parseFailure = core.results.find(
       result =>
-        result.check === CHECK_ID.parsing && result.outcome.status === 'failure'
+        result.id === CHECK_ID.parsing && result.outcome.status === 'failure'
     )
     if (parseFailure) {
       return createFatalErrorResult(
@@ -90,24 +91,19 @@ export async function verifyCredential(
 function mapCoreResultToLegacyPayload(
   core: CredentialVerificationResult
 ): VerifyCredentialPayload {
-  const byCheck = (checkId: string): CheckResult | undefined =>
-    core.results.find(result => result.check === checkId)
+  const byId = (checkId: string): CheckResult | undefined =>
+    core.results.find(result => result.id === checkId)
 
-  const log: LegacyLogEntry[] = []
+  const legacyLog: LegacyLogEntry[] = []
 
-  // verifier-core judges the validity dates only once the signature has
-  // verified, so a `proof.signature` failure typed as expired or not yet
-  // valid proves an authentic, out-of-date credential: the signature row
-  // passes and the expiry row carries the failure instead.
-  const signature = byCheck(CHECK_ID.signature)
-  const outOfDate = signature && outOfDateProblem(signature)
-  if (outOfDate) {
-    log.push({ id: 'valid_signature', valid: true })
-  } else if (signature) {
-    log.push(legacyEntryFromCheck('valid_signature', signature))
+  // `proof.signature` judges the proof alone, so an authentic out-of-date
+  // credential passes here and fails `proof.validity-period` below.
+  const signature = byId(CHECK_ID.signature)
+  if (signature) {
+    legacyLog.push(legacyEntryFromCheck('valid_signature', signature))
   }
 
-  const status = byCheck(CHECK_ID.status)
+  const status = byId(CHECK_ID.status)
   // A status check that failed only because the status list could not be
   // fetched says nothing about the credential, so it is left out of the log
   // entirely rather than counting as a failed check.
@@ -115,24 +111,33 @@ function mapCoreResultToLegacyPayload(
     status?.outcome.status === 'failure' &&
     status.outcome.problems[0]?.type === ProblemTypes.STATUS_LIST_NOT_FOUND
   if (status && status.outcome.status !== 'skipped' && !statusListMissing) {
-    log.push(legacyEntryFromCheck('revocation_status', status))
+    legacyLog.push(legacyEntryFromCheck('revocation_status', status))
   }
 
-  // A fatal signature failure halts the opt-in expiration suite, but the
-  // signature row having already claimed the expiry keeps one row either way.
-  const expiration = byCheck(CHECK_ID.expiration)
-  if (outOfDate) {
-    log.push({
-      id: 'expiration',
-      valid: false,
-      error: { message: problemMessage(outOfDate) }
+  // The legacy `expiration` row is the one validity-date row the checklist
+  // has, so a not-yet-valid credential rides it with the library's detail.
+  // The check passes a credential stating no end date, where the checklist
+  // expects no row at all, so that pass is read off the credential itself.
+  const validityPeriod = byId(CHECK_ID.validityPeriod)
+  if (validityPeriod?.outcome.status === 'failure') {
+    legacyLog.push(legacyEntryFromCheck('expiration', validityPeriod))
+  } else if (
+    validityPeriod?.outcome.status === 'success' &&
+    statesExpiry(core.verifiableCredential)
+  ) {
+    legacyLog.push({ id: 'expiration', valid: true })
+  }
+
+  const unsupportedProofs = byId(CHECK_ID.unsupportedProofs)
+  if (unsupportedProofs?.outcome.status === 'failure') {
+    log.warn('Some proofs in the credential could not be checked', {
+      credentialId: core.verifiableCredential?.id,
+      proofs: unsupportedProofs.outcome.problems.map(problem => problem.detail)
     })
-  } else if (expiration && expiration.outcome.status !== 'skipped') {
-    log.push(legacyEntryFromCheck('expiration', expiration))
   }
 
-  const matchingIssuers = matchingIssuersFrom(byCheck(CHECK_ID.issuerDetails))
-  log.push({
+  const matchingIssuers = matchingIssuersFrom(byId(CHECK_ID.issuerDetails))
+  legacyLog.push({
     id: 'registered_issuer',
     valid: matchingIssuers.length > 0,
     matchingIssuers,
@@ -141,17 +146,19 @@ function mapCoreResultToLegacyPayload(
       : {})
   })
 
-  const hasStatusError = log.some(
+  const hasStatusError = legacyLog.some(
     entry => entry.id === 'revocation_status' && !!entry.error
   )
 
-  const verified = log.every(entry => entry.valid)
+  const verified = legacyLog.every(entry => entry.valid)
 
   return {
     verified,
     credential: core.verifiableCredential,
-    log,
-    results: [{ verified, log, credential: core.verifiableCredential }],
+    log: legacyLog,
+    results: [
+      { verified, log: legacyLog, credential: core.verifiableCredential }
+    ],
     ...(hasStatusError ? { hasStatusError } : {})
   }
 }
@@ -177,27 +184,16 @@ function legacyEntryFromCheck(id: string, check: CheckResult): LegacyLogEntry {
   }
 }
 
-const OUT_OF_DATE_PROBLEM_TYPES: readonly string[] = [
-  ProblemTypes.CREDENTIAL_EXPIRED,
-  ProblemTypes.CREDENTIAL_NOT_YET_VALID
-]
-
 /**
- * The expired or not-yet-valid problem a failed signature check reports,
- * or undefined for a success, a skip, or any other failure (a tampered
- * credential included). A check reporting a date problem beside any other
- * problem is not out of date: a crypto service may report a bad signature
- * and an expiry together, and the signature row must not pass on it.
+ * Whether the credential states an end to its validity period, as VC 2.0
+ * `validUntil` or VC 1.1 `expirationDate`.
  */
-function outOfDateProblem(check: CheckResult): ProblemDetail | undefined {
-  if (check.outcome.status !== 'failure') {
-    return undefined
-  }
-  const { problems } = check.outcome
-  const allOutOfDate =
-    problems.length > 0 &&
-    problems.every(problem => OUT_OF_DATE_PROBLEM_TYPES.includes(problem.type))
-  return allOutOfDate ? problems[0] : undefined
+function statesExpiry(credential: unknown): boolean {
+  const { validUntil, expirationDate } = (credential ?? {}) as Record<
+    string,
+    unknown
+  >
+  return validUntil !== undefined || expirationDate !== undefined
 }
 
 function problemDetail(check: CheckResult): string | undefined {
@@ -208,10 +204,6 @@ function problemDetail(check: CheckResult): string | undefined {
   if (!problem) {
     return undefined
   }
-  return problemMessage(problem)
-}
-
-function problemMessage(problem: ProblemDetail): string {
   return problem.detail || problem.title
 }
 

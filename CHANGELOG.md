@@ -30,6 +30,13 @@
 
 ### Changed
 
+- `@interop/verifier-core` is on 4.0.0. The verify adapter selects rows by
+  the phase-qualified `id`, no longer asks for `verbose` results, and reads
+  the `expiration` row from the built-in `proof.validity-period` check in
+  place of the removed opt-in `expirationSuite`. The row is omitted when the
+  credential states no `validUntil` / `expirationDate`. The non-fatal
+  `proof.unsupported-proofs` row is not mapped; a proof set with a proof
+  no suite could check is logged as an `fw:verify` warning instead.
 - Follows @interop/wallet-core 0.107.0 (FW-220). A credential's client-annex
   rung is static, the same key on every generation, and a generation swap
   restates the superseded generation's standing set. A swap therefore no
@@ -119,16 +126,15 @@
   top, so an expanded request source block no longer ends flush with the
   bottom of the page, where it read as cut off.
 - The CORS-proxy fallback no longer retries an aborted verification fetch
-  through the proxy. verifier-core 3.8.0's built-in HTTP service wraps every
+  through the proxy. verifier-core's built-in HTTP service wraps every
   fetch rejection in a fixed-text error, and the abort check now reads
   through that wrapper's `cause`.
 - An expired or not-yet-valid credential whose signature verifies now shows
   a passing signature row and a failing expiry row carrying the date
-  detail, instead of a failed signature and no expiry row. The adapter maps
-  verifier-core 3.8.0's `CREDENTIAL_EXPIRED` and `CREDENTIAL_NOT_YET_VALID`
-  signature verdicts onto the `expiration` row, so the "expired but
-  authentic" summary is reachable. A tampered credential still fails the
-  signature row. Needs `@interop/verifier-core` 3.8.0.
+  detail, instead of a failed signature and no expiry row, so the "expired
+  but authentic" summary is reachable. Its revocation and issuer rows are
+  reported too, where before the signature failure halted them. A tampered
+  credential still fails the signature row.
 
 ## 0.44.0 - 2026-10-09
 

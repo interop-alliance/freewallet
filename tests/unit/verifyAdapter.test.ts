@@ -1,4 +1,5 @@
 import { describe, expect, it, vi, beforeEach } from 'vitest'
+import { addSink, captureSink } from '@interop/logger'
 import type { TFunction } from 'i18next'
 import type {
   CheckResult,
@@ -26,22 +27,41 @@ const { verifyResultToChecklist } =
 const CREDENTIAL = {
   '@context': ['https://www.w3.org/ns/credentials/v2'],
   type: ['VerifiableCredential'],
+  issuer: 'did:key:zABC',
+  validUntil: '2099-01-01T00:00:00Z'
+} as never
+
+const CREDENTIAL_WITHOUT_EXPIRY = {
+  '@context': ['https://www.w3.org/ns/credentials/v2'],
+  type: ['VerifiableCredential'],
   issuer: 'did:key:zABC'
 } as never
 
+const SIGNATURE = 'cryptographic.proof.signature'
+const STATUS = 'cryptographic.status.bitstring'
+const VALIDITY_PERIOD = 'cryptographic.proof.validity-period'
+const ISSUER_DETAILS = 'trust.issuer-details'
+
+/**
+ * A `results[]` row as verifier-core stamps it: the phase-qualified id,
+ * with the suite the segment after the phase.
+ */
 function check(checkId: string, outcome: CheckOutcome): CheckResult {
+  const segments = checkId.split('.')
   return {
     id: checkId,
-    check: checkId,
-    suite: checkId.split('.')[0],
+    suite: segments[segments.length - 2],
     outcome
   }
 }
 
-function coreResult(results: CheckResult[]): CredentialVerificationResult {
+function coreResult(
+  results: CheckResult[],
+  credential: unknown = CREDENTIAL
+): CredentialVerificationResult {
   return {
     verified: !results.some(r => r.fatal && r.outcome.status === 'failure'),
-    verifiableCredential: CREDENTIAL as never,
+    verifiableCredential: credential as never,
     results,
     summary: []
   }
@@ -83,14 +103,21 @@ const NOT_YET_VALID_PROBLEM = {
 }
 
 /**
- * A fatal `proof.signature` failure carrying one problem.
+ * A fatal failure of the check `checkId` carrying one problem.
  */
-function fatalSignatureFailure(problem: ProblemDetail): CheckResult {
+function fatalFailure(checkId: string, problem: ProblemDetail): CheckResult {
   return {
-    ...check('proof.signature', { status: 'failure', problems: [problem] }),
+    ...check(checkId, { status: 'failure', problems: [problem] }),
     fatal: true
   }
 }
+
+const SIGNATURE_OK = check(SIGNATURE, { status: 'success', message: 'ok' })
+const STATUS_OK = check(STATUS, { status: 'success', message: 'ok' })
+const VALIDITY_PERIOD_OK = check(VALIDITY_PERIOD, {
+  status: 'success',
+  message: 'ok'
+})
 
 const MATCHING_ISSUERS = [
   {
@@ -103,7 +130,7 @@ const MATCHING_ISSUERS = [
   }
 ]
 
-const ISSUER_OK = check('trust.issuer-details', {
+const ISSUER_OK = check(ISSUER_DETAILS, {
   status: 'success',
   message: 'ok',
   payload: { matchingIssuers: MATCHING_ISSUERS }
@@ -126,12 +153,7 @@ describe('verify.ts adapter', () => {
 
   it('maps a fully valid result to a passing legacy payload', async () => {
     coreVerifyMock.mockResolvedValue(
-      coreResult([
-        check('proof.signature', { status: 'success', message: 'ok' }),
-        check('status.bitstring', { status: 'success', message: 'ok' }),
-        check('validity.expiration', { status: 'success', message: 'ok' }),
-        ISSUER_OK
-      ])
+      coreResult([SIGNATURE_OK, STATUS_OK, VALIDITY_PERIOD_OK, ISSUER_OK])
     )
 
     const payload = await verifyCredential(CREDENTIAL)
@@ -145,34 +167,19 @@ describe('verify.ts adapter', () => {
     expect(byId('registered_issuer')?.matchingIssuers).toEqual(MATCHING_ISSUERS)
   })
 
-  it('marks an expired credential as not verified', async () => {
-    coreVerifyMock.mockResolvedValue(
-      coreResult([
-        check('proof.signature', { status: 'success', message: 'ok' }),
-        check('validity.expiration', {
-          status: 'failure',
-          problems: [EXPIRED_PROBLEM]
-        }),
-        ISSUER_OK
-      ])
-    )
-
-    const payload = await verifyCredential(CREDENTIAL)
-    const byId = logById(payload)
-
-    expect(byId('expiration')?.valid).toBe(false)
-    expect(byId('expiration')?.error?.message).toContain('expired')
-    expect(payload.verified).toBe(false)
-  })
-
   it.each([
     ['expired', EXPIRED_PROBLEM],
     ['not-yet-valid', NOT_YET_VALID_PROBLEM]
   ])(
-    'maps an %s signature verdict onto a passing signature row and a failing expiry row',
+    'maps an %s credential onto a passing signature row and a failing expiry row',
     async (_label, problem) => {
       coreVerifyMock.mockResolvedValue(
-        coreResult([fatalSignatureFailure(problem), ISSUER_OK])
+        coreResult([
+          SIGNATURE_OK,
+          fatalFailure(VALIDITY_PERIOD, problem),
+          STATUS_OK,
+          ISSUER_OK
+        ])
       )
 
       const payload = await verifyCredential(CREDENTIAL)
@@ -184,13 +191,32 @@ describe('verify.ts adapter', () => {
       })
       expect(byId('expiration')?.valid).toBe(false)
       expect(byId('expiration')?.error?.message).toBe(problem.detail)
+      // The validity check does not halt, so the later suites still report.
+      expect(byId('revocation_status')?.valid).toBe(true)
+      expect(byId('registered_issuer')?.valid).toBe(true)
       expect(payload.verified).toBe(false)
     }
   )
 
+  it('writes a failing expiry row for a not-yet-valid credential stating no end date', async () => {
+    coreVerifyMock.mockResolvedValue(
+      coreResult(
+        [SIGNATURE_OK, fatalFailure(VALIDITY_PERIOD, NOT_YET_VALID_PROBLEM)],
+        CREDENTIAL_WITHOUT_EXPIRY
+      )
+    )
+
+    const payload = await verifyCredential(CREDENTIAL_WITHOUT_EXPIRY)
+    expect(logById(payload)('expiration')?.valid).toBe(false)
+  })
+
   it('reaches the "expired but authentic" checklist summary', async () => {
     coreVerifyMock.mockResolvedValue(
-      coreResult([fatalSignatureFailure(EXPIRED_PROBLEM), ISSUER_OK])
+      coreResult([
+        SIGNATURE_OK,
+        fatalFailure(VALIDITY_PERIOD, EXPIRED_PROBLEM),
+        ISSUER_OK
+      ])
     )
 
     const payload = await verifyCredential(CREDENTIAL)
@@ -204,27 +230,52 @@ describe('verify.ts adapter', () => {
     expect(isExpiredOnly(checklist)).toBe(true)
   })
 
-  it('writes one expiry row when the signature verdict and the expiration suite both report', async () => {
+  it('logs the proofs no suite could check and maps no row for them', async () => {
+    const unsupported = {
+      type: ProblemTypes.PROOF_UNSUPPORTED,
+      title: 'Proof Unsupported',
+      detail:
+        'Proof 2 of 2 (DataIntegrityProof, bbs-2023): no registered suite supports this cryptosuite.'
+    }
     coreVerifyMock.mockResolvedValue(
       coreResult([
-        fatalSignatureFailure(EXPIRED_PROBLEM),
-        check('validity.expiration', {
+        SIGNATURE_OK,
+        check('cryptographic.proof.unsupported-proofs', {
           status: 'failure',
-          problems: [EXPIRED_PROBLEM]
-        })
+          problems: [unsupported]
+        }),
+        VALIDITY_PERIOD_OK,
+        ISSUER_OK
       ])
     )
+    const capture = captureSink()
+    const stopCapture = addSink(capture.sink)
 
-    const payload = await verifyCredential(CREDENTIAL)
-    expect(
-      logOf(payload).filter(entry => entry.id === 'expiration')
-    ).toHaveLength(1)
+    try {
+      const payload = await verifyCredential(CREDENTIAL)
+
+      expect(payload.verified).toBe(true)
+      expect(logOf(payload).map(entry => entry.id)).toEqual([
+        'valid_signature',
+        'expiration',
+        'registered_issuer'
+      ])
+      expect(capture.events).toContainEqual(
+        expect.objectContaining({
+          ns: 'fw:verify',
+          msg: 'Some proofs in the credential could not be checked',
+          data: expect.objectContaining({ proofs: [unsupported.detail] })
+        })
+      )
+    } finally {
+      stopCapture()
+    }
   })
 
   it('keeps a tampered credential as a failing signature row', async () => {
     coreVerifyMock.mockResolvedValue(
       coreResult([
-        fatalSignatureFailure({
+        fatalFailure(SIGNATURE, {
           type: ProblemTypes.INVALID_SIGNATURE,
           title: 'Invalid Signature',
           detail: 'Invalid signature.'
@@ -241,13 +292,26 @@ describe('verify.ts adapter', () => {
     expect(payload.verified).toBe(false)
   })
 
-  it('omits the expiration row when the check is skipped', async () => {
+  it('omits the expiration row when the credential states no end date', async () => {
+    coreVerifyMock.mockResolvedValue(
+      coreResult(
+        [SIGNATURE_OK, VALIDITY_PERIOD_OK, ISSUER_OK],
+        CREDENTIAL_WITHOUT_EXPIRY
+      )
+    )
+
+    const payload = await verifyCredential(CREDENTIAL_WITHOUT_EXPIRY)
+    expect(logById(payload)('expiration')).toBeUndefined()
+    expect(payload.verified).toBe(true)
+  })
+
+  it('omits the expiration row when the validity check is skipped', async () => {
     coreVerifyMock.mockResolvedValue(
       coreResult([
-        check('proof.signature', { status: 'success', message: 'ok' }),
-        check('validity.expiration', {
+        SIGNATURE_OK,
+        check(VALIDITY_PERIOD, {
           status: 'skipped',
-          reason: 'no expiry'
+          reason: 'validUntil is not a date'
         }),
         ISSUER_OK
       ])
@@ -260,8 +324,8 @@ describe('verify.ts adapter', () => {
   it('drops a status_list_not_found revocation row instead of failing', async () => {
     coreVerifyMock.mockResolvedValue(
       coreResult([
-        check('proof.signature', { status: 'success', message: 'ok' }),
-        check('status.bitstring', {
+        SIGNATURE_OK,
+        check(STATUS, {
           status: 'failure',
           problems: [
             {
@@ -285,8 +349,8 @@ describe('verify.ts adapter', () => {
   it('keeps a genuine revocation as a failing, status-error row', async () => {
     coreVerifyMock.mockResolvedValue(
       coreResult([
-        check('proof.signature', { status: 'success', message: 'ok' }),
-        check('status.bitstring', {
+        SIGNATURE_OK,
+        check(STATUS, {
           status: 'failure',
           problems: [
             {
@@ -309,8 +373,8 @@ describe('verify.ts adapter', () => {
   it('marks an unregistered issuer as not verified', async () => {
     coreVerifyMock.mockResolvedValue(
       coreResult([
-        check('proof.signature', { status: 'success', message: 'ok' }),
-        check('trust.issuer-details', {
+        SIGNATURE_OK,
+        check(ISSUER_DETAILS, {
           status: 'success',
           message: 'none',
           payload: { matchingIssuers: [] }
@@ -328,22 +392,11 @@ describe('verify.ts adapter', () => {
   it('returns a fatal result for a malformed credential', async () => {
     coreVerifyMock.mockResolvedValue(
       coreResult([
-        {
-          id: 'parsing.envelope',
-          check: 'parsing.envelope',
-          suite: 'parsing',
-          fatal: true,
-          outcome: {
-            status: 'failure',
-            problems: [
-              {
-                type: ProblemTypes.PARSING_ERROR,
-                title: 'Credential Parsing Failed',
-                detail: 'type: missing'
-              }
-            ]
-          }
-        }
+        fatalFailure('cryptographic.parsing.envelope', {
+          type: ProblemTypes.PARSING_ERROR,
+          title: 'Credential Parsing Failed',
+          detail: 'type: missing'
+        })
       ])
     )
 
