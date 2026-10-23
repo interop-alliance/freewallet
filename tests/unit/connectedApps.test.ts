@@ -153,12 +153,16 @@ describe('deriveGrantsState', () => {
   const ANNEX_DID = 'did:webvh:a:h:gen-1'
   const check = {
     accountDid: ACCOUNT_DID,
-    currentSigningKeys: new Set(['zKey']),
-    doc: {},
+    doc: {
+      verificationMethod: [
+        { id: `${ACCOUNT_DID}#zKey`, publicKeyMultibase: 'zKey' }
+      ],
+      capabilityDelegation: [`${ACCOUNT_DID}#zKey`]
+    },
     annexDocument: async () => undefined
   }
 
-  it('is unknown without a verified key set to check against', () => {
+  it('is unknown without a verified document to check against', () => {
     expect(
       deriveGrantsState({ grants: grantsSignedBy([`${ACCOUNT_DID}#zKey`]) })
     ).toBe('unknown')
@@ -173,7 +177,7 @@ describe('deriveGrantsState', () => {
     ).toBe('unknown')
   })
 
-  it('is active when a signer is in the current key set', () => {
+  it('is active when a signer is listed under capabilityDelegation', () => {
     expect(
       deriveGrantsState({
         grants: grantsSignedBy([`${ACCOUNT_DID}#zGone`, `${ACCOUNT_DID}#zKey`]),
@@ -191,7 +195,7 @@ describe('deriveGrantsState', () => {
     ).toBe('active')
   })
 
-  it('is orphaned when no recorded signer is in the current key set', () => {
+  it('is orphaned when no recorded signer is listed', () => {
     expect(
       deriveGrantsState({
         grants: grantsSignedBy([`${ACCOUNT_DID}#zGone`]),

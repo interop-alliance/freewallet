@@ -56,6 +56,7 @@ import {
 } from '@/session/inboxPass'
 import { renewAgentGrantsAfterCeremony } from '@/session/menders/encounterSites'
 import { isSessionDisposed } from '@/session/sessionLifecycle'
+import { verifiedAccountLog } from '@/session/verifiedLog'
 import type { Session } from '@/types/auth'
 
 const log = createLogger('fw:inbox')
@@ -145,9 +146,11 @@ function affectedAgentOf(read: ReadConnection): AffectedAgent {
  * from one directory listing: a root-anchored grant signed by the key, or an
  * annex-anchored grant whose generation delegation the key minted
  * (wallet-core's `agentConnectionsSignedBy`). Each key is a
- * verification-method id in either DID form, or a bare multibase. A session
- * with no remote Space, or no keys, names none. Throws when the directory
- * cannot be listed.
+ * verification-method id in either DID form, or a bare multibase, and is
+ * read against the verified account document as it stands before the
+ * withdrawal, the same document each grant's signer resolves through. A
+ * session with no remote Space, or no keys, names none. Throws when the
+ * directory cannot be listed or the log cannot be verified.
  *
  * @param options {object}
  * @param options.session {Session}
@@ -168,13 +171,15 @@ export async function agentsSignedByWithdrawnAuthority({
   if (spaceUrl === undefined) {
     return []
   }
+  const { doc } = await verifiedAccountLog({ session })
   const entries = listing.entries.map(read => read.entry)
   const signed = new Set<string>()
   for (const keyId of keys) {
     for (const entry of agentConnectionsSignedBy({
       entries,
       keyId,
-      spaceUrl
+      spaceUrl,
+      doc
     })) {
       signed.add(entry.id!)
     }

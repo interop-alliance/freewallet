@@ -496,8 +496,7 @@ export async function accountKeys(): Promise<Record<AccountKeyName, string>> {
 
 /**
  * The account signer check the agent grant fixtures verify against: the
- * enrolled client as the one current signing key, the client and the ladder
- * VM under `capabilityDelegation`, the pointer naming {@link ANNEX_DID}, and
+ * client and the ladder VM under `capabilityDelegation`, the pointer naming {@link ANNEX_DID}, and
  * the annex-document resolver the wallet supplies. The resolver resolves the
  * pointed generation and the superseded {@link STANDING_ANNEX_DID} to a
  * document listing the default visit key under `capabilityDelegation`, and
@@ -533,7 +532,6 @@ export async function fixtureSignerCheck(): Promise<AccountSignerCheck> {
   }
   return {
     accountDid: ACCOUNT_DID,
-    currentSigningKeys: new Set([keys.client]),
     doc: {
       id: ACCOUNT_DID,
       verificationMethod: [

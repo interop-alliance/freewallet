@@ -406,8 +406,8 @@ function sortByLastSeen(rows: Array<{ lastConnectedAt?: string }>): void {
  * @param options {object}
  * @param options.grants {AppGrant[]}
  * @param [options.signerCheck] {AccountSignerCheck}   the account DID and
- *   the enrolled clients' signing keys, or undefined when no verified
- *   document is available this session
+ *   the verified document, or undefined when no verified document is
+ *   available this session
  * @returns {GrantSignerState}
  */
 export function deriveGrantsState({
@@ -420,11 +420,11 @@ export function deriveGrantsState({
   if (!signerCheck) {
     return 'unknown'
   }
-  const { accountDid, currentSigningKeys } = signerCheck
+  const { accountDid, doc } = signerCheck
   return deriveGrantSignerState({
     signerKeyIds: grants.map(grant => grant.signerKeyId),
     accountDid,
-    currentSigningKeys
+    doc
   })
 }
 

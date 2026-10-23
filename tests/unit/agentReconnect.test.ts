@@ -352,6 +352,31 @@ describe('the withdrawn keys each ceremony names', () => {
 })
 
 describe('agentsSignedByWithdrawnAuthority', () => {
+  // The document as it stands before the withdrawal: the struck key is
+  // still listed, since the read names the agents a ceremony WOULD cut off.
+  beforeEach(() => {
+    vi.mocked(verifiedAccountLog).mockResolvedValue({
+      log: [],
+      doc: {
+        id: ACCOUNT_DID,
+        verificationMethod: [
+          {
+            id: `${ACCOUNT_DID}#${KEYS.client}`,
+            publicKeyMultibase: KEYS.client
+          },
+          {
+            id: `${ACCOUNT_DID}#${KEYS.struck}`,
+            publicKeyMultibase: KEYS.struck
+          }
+        ],
+        capabilityDelegation: [
+          `${ACCOUNT_DID}#${KEYS.client}`,
+          `${ACCOUNT_DID}#${KEYS.struck}`
+        ]
+      }
+    } as never)
+  })
+
   it('lists exactly the agents a withdrawn key signed for, root- or annex-anchored', async () => {
     // Root-anchored, signed by the struck key.
     await connectAgent({ did: AGENT_DID, signer: 'struck' })

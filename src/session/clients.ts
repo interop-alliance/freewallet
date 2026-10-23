@@ -449,14 +449,6 @@ export async function currentAccountSignerCheck({
   }
   const { pointer } = await requireClientListing(session)
   const verifiedLog = await verifiedAccountLog({ session, pointer })
-  const currentSigningKeys = await sharedCurrentAccountSigningKeys({
-    pointer: {
-      did: pointer.did,
-      spaceId: pointer.spaceId,
-      host: pointer.host
-    },
-    verifiedLog
-  })
   const clientAnnexDid = delegatedClientsPointer({ doc: verifiedLog.doc })
   const readGeneration = async (generationDid: string) => {
     const reach = await namedAnnexReachUnder({
@@ -489,7 +481,6 @@ export async function currentAccountSignerCheck({
   }
   return {
     accountDid: pointer.did,
-    currentSigningKeys,
     doc: verifiedLog.doc,
     ...(clientAnnexDid !== undefined ? { clientAnnexDid } : {}),
     annexDocument

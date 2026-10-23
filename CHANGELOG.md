@@ -49,6 +49,12 @@
 
 ### Changed
 
+- `currentAccountSignerCheck` no longer builds a `currentSigningKeys` set:
+  wallet-core's `deriveGrantSignerState` and `agentConnectionsSignedBy` read
+  the verified account document itself, so a recorded grant's signer is
+  known by the key the document publishes for it, not by its id fragment.
+  `agentsSignedByWithdrawnAuthority` reads the verified log for that
+  document.
 - `@interop/verifier-core` is on 4.0.0. The verify adapter selects rows by
   the phase-qualified `id`, no longer asks for `verbose` results, and reads
   the `expiration` row from the built-in `proof.validity-period` check in
