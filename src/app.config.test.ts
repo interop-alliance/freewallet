@@ -23,6 +23,19 @@ describe('roster projections', () => {
     )
   })
 
+  it('reads a boolean grantable off every installed roster entry', () => {
+    // Guards the installed dist: a wallet-core release whose roster carried
+    // no `grantable` would project `undefined` on both sides, pass the
+    // verbatim checks, and refuse every standard collection at runtime.
+    for (const { id, grantable } of WALLET_STANDARD_COLLECTIONS) {
+      expect(typeof grantable, id).toBe('boolean')
+    }
+    expect(
+      WALLET_STANDARD_COLLECTIONS.find(({ id }) => id === 'private-credentials')
+        ?.grantable
+    ).toBe(true)
+  })
+
   it('projects grantable verbatim onto the system collections', () => {
     expect(
       SYSTEM_COLLECTIONS.map(({ id, grantable }) => [id, grantable])

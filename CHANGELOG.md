@@ -4,6 +4,11 @@
 
 ### Added
 
+- Unit tests against the installed `@interop/wallet-core` dist: every
+  standard collection's `grantable` is a boolean, `private-credentials` is
+  grantable, and a private-collection grant naming it resolves satisfiable.
+  The range moved past 0.94.0 (the release that carries `grantable`) with
+  the earlier bumps; this guards the projection.
 - Unit test: an agent-provisioned collection whose `connections` entry
   holds no grant on it, and whose consent left no activity row, is rotated
   off the agent through its `generator` stamp alone. The re-admit case is

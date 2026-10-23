@@ -355,6 +355,24 @@ describe('never-grantable system collections', () => {
     expect([...declared].sort()).toEqual([...NEVER].sort())
   })
 
+  it('grants a private-collection descriptor on private-credentials', () => {
+    // The standard credential collection is grantable on the installed
+    // roster, so an App Connect grant naming it is satisfiable.
+    const { target } = resolveGrant({
+      descriptor: {
+        ...DESCRIPTOR,
+        invocationTarget: {
+          type: 'https://w3id.org/byoe#private-collection',
+          name: 'private-credentials'
+        }
+      },
+      space: SPACE,
+      collections: existingCollectionsFrom([{ id: 'private-credentials' }])
+    })
+    expect(isSatisfiable(target)).toBe(true)
+    expect(target.collectionId).toBe('private-credentials')
+  })
+
   it('still grants a read of the id collection', () => {
     const { target, allowedActions } = resolveGrant({
       descriptor: {

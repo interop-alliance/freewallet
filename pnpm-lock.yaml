@@ -33,8 +33,8 @@ importers:
         specifier: ^3.4.8
         version: 3.4.8
       '@interop/did-method-webvh':
-        specifier: ^5.15.0
-        version: 5.15.0
+        specifier: ^5.17.0
+        version: 5.17.0
       '@interop/ed25519-signature':
         specifier: ^7.2.5
         version: 7.2.5(@interop/jsonld-signatures@11.9.0)
@@ -57,11 +57,11 @@ importers:
         specifier: ^0.8.1
         version: 0.8.1
       '@interop/space-archive':
-        specifier: ^0.8.1
-        version: 0.8.1
+        specifier: ^0.8.2
+        version: 0.8.2
       '@interop/storage-core':
-        specifier: ^0.36.0
-        version: 0.36.0
+        specifier: ^0.37.0
+        version: 0.37.0
       '@interop/vc':
         specifier: ^11.1.2
         version: 11.1.2
@@ -69,8 +69,8 @@ importers:
         specifier: ^0.1.0
         version: 0.1.0
       '@interop/verifier-core':
-        specifier: ^3.9.0
-        version: 3.9.0
+        specifier: ^4.0.0
+        version: 4.0.0
       '@interop/vh-resource-log':
         specifier: ^0.8.1
         version: 0.8.1
@@ -630,6 +630,10 @@ packages:
     resolution: {integrity: sha512-hTnwwgBj7SIMfauGW+Zjxo9vDGoNAwbv3H2tyJM4PIUSd0tVXVlTJllIXGUDa4wRCHjcaYvohnb3BUduy4tivw==}
     engines: {node: '>=22'}
 
+  '@interop/did-method-webvh@5.17.0':
+    resolution: {integrity: sha512-uiRbttXN0zLF29U1ETMz7PIBnPXp/vut0+wnMj7y6YrUIBXA0tXrqYuziN1Cl6I4EQ0qORuYgRk9j8s8pb7IYA==}
+    engines: {node: '>=22'}
+
   '@interop/did-web-resolver@6.5.0':
     resolution: {integrity: sha512-rK7Y4XBabua8/FeNOos1/mX6nkKLsR95iLPzTldbKoqqXgYj/3xZqy09qbFiX2T1JzcZTb3pm3991+g4xxGjhQ==}
     engines: {node: '>=24.0'}
@@ -731,8 +735,8 @@ packages:
     resolution: {integrity: sha512-WxnkYKmg4y0eSMlXVUPlzHkZlWSRVlyjTBRQkrEtcmPY5A7gw/K/ANB9S8YPtOVWreV+RAATEvjF56CJGDU3Yg==}
     engines: {node: '>=24.0'}
 
-  '@interop/space-archive@0.8.1':
-    resolution: {integrity: sha512-8W6tEhoUm351KI+OWFFbPnLxSZ83fT9swmcu6pBWy+5K+a4VSb1U8OFRD+R3yIAUJA2EL1/7ZFp965sYyGZoSw==}
+  '@interop/space-archive@0.8.2':
+    resolution: {integrity: sha512-2pqxMtHdfp7/zTr1we4xGFub6E1Lum2FkPk7JTcnmrp0blnehb6+GR6bUvDZQ1OY5viwa7qVMphg4WEZ6aU5Ug==}
     engines: {node: '>=24.0'}
 
   '@interop/storage-core@0.33.0':
@@ -741,6 +745,10 @@ packages:
 
   '@interop/storage-core@0.36.0':
     resolution: {integrity: sha512-yoBABfWtLwcUK8caPXKlPPNjq6AX4/SUJ/JRwa0ps8ihuxVfqwz6sMKbsvMDmVrLLjSOApY0innoTIDrtRGjrg==}
+    engines: {node: '>=22.0'}
+
+  '@interop/storage-core@0.37.0':
+    resolution: {integrity: sha512-3m/KE9+57nycL9/AQ3PTvwtZQztKgTSt383k7taN8MPkALeduDpyA6HQ9HLphfBxdFhFxp1qUpZcCZd5O/5Urg==}
     engines: {node: '>=22.0'}
 
   '@interop/vc-bitstring-status-list@3.4.1':
@@ -755,8 +763,8 @@ packages:
     resolution: {integrity: sha512-H3d71CbEeyYiplj062xbxoCJyVGdea9ppdaT0Ks/vXywWsjBJ622O3KjDxZnI7MqTFgTCASAVV6KYVcVC73TVA==}
     engines: {node: '>=24.0'}
 
-  '@interop/verifier-core@3.9.0':
-    resolution: {integrity: sha512-/TSJnL0Cq+eZBFbROilqf2wd/nVyseOC0bEZttBgHyXmPIwCQ0w6y8SglExvenBgruK+IEb7J9zBo7OF5f9o4w==}
+  '@interop/verifier-core@4.0.0':
+    resolution: {integrity: sha512-vcoqPGafxDBC7ADnJC7e8Pw1kr0Jn3FYgCxjN/xvQZSfeJ7ZU3CExwW4pyYGsFsTqszLyS52vuzT0oIAr2IyFA==}
     engines: {node: '>=24.0'}
 
   '@interop/vh-resource-log@0.8.1':
@@ -4504,6 +4512,14 @@ snapshots:
       '@scure/base': 2.4.0
       json-canonicalize: 3.0.0
 
+  '@interop/did-method-webvh@5.17.0':
+    dependencies:
+      '@interop/data-integrity-core': 8.9.0
+      '@noble/curves': 2.4.0
+      '@noble/hashes': 2.4.0
+      '@scure/base': 2.4.0
+      json-canonicalize: 3.0.0
+
   '@interop/did-web-resolver@6.5.0':
     dependencies:
       '@interop/bnid': 6.0.2
@@ -4664,7 +4680,7 @@ snapshots:
 
   '@interop/social-core@0.8.1': {}
 
-  '@interop/space-archive@0.8.1':
+  '@interop/space-archive@0.8.2':
     dependencies:
       '@interop/storage-core': 0.36.0
       events: 3.3.0
@@ -4681,6 +4697,10 @@ snapshots:
       '@interop/data-integrity-core': 8.9.0
 
   '@interop/storage-core@0.36.0':
+    dependencies:
+      '@interop/data-integrity-core': 8.9.0
+
+  '@interop/storage-core@0.37.0':
     dependencies:
       '@interop/data-integrity-core': 8.9.0
 
@@ -4703,7 +4723,7 @@ snapshots:
       '@interop/jsonld-signatures': 11.9.0
       credentials-context: 2.0.0
 
-  '@interop/verifier-core@3.9.0':
+  '@interop/verifier-core@4.0.0':
     dependencies:
       '@interop/data-integrity-core': 8.9.0
       '@interop/data-integrity-proof': 3.4.8
@@ -4729,13 +4749,13 @@ snapshots:
 
   '@interop/vh-resource-log@0.8.1':
     dependencies:
-      '@interop/did-method-webvh': 5.15.0
+      '@interop/did-method-webvh': 5.17.0
       '@interop/storage-core': 0.36.0
 
   '@interop/wallet-backup@0.6.1(@interop/wallet-core@0.107.0(@interop/jsonld-signatures@11.9.0)(@interop/was-client@0.98.0(@interop/jsonld-signatures@11.9.0)))(@interop/was-client@0.98.0(@interop/jsonld-signatures@11.9.0))':
     dependencies:
       '@interop/social-core': 0.8.1
-      '@interop/space-archive': 0.8.1
+      '@interop/space-archive': 0.8.2
       '@interop/storage-core': 0.36.0
       '@interop/vh-resource-log': 0.8.1
       '@interop/wallet-core': 0.107.0(@interop/jsonld-signatures@11.9.0)(@interop/was-client@0.98.0(@interop/jsonld-signatures@11.9.0))
@@ -4754,7 +4774,7 @@ snapshots:
       '@interop/capability-agent': 0.2.2
       '@interop/data-integrity-core': 8.9.0
       '@interop/data-integrity-proof': 3.4.8
-      '@interop/did-method-webvh': 5.15.0
+      '@interop/did-method-webvh': 5.17.0
       '@interop/ed25519-signature': 7.2.5(@interop/jsonld-signatures@11.9.0)
       '@interop/ed25519-verification-key': 8.2.2
       '@interop/ezcap': 7.5.3
@@ -8320,7 +8340,7 @@ snapshots:
       '@interop/data-integrity-core': 8.9.0
       '@interop/data-integrity-proof': 3.4.8
       '@interop/did-method-key': 7.5.1
-      '@interop/did-method-webvh': 5.15.0
+      '@interop/did-method-webvh': 5.17.0
       '@interop/ed25519-signature': 7.2.5(@interop/jsonld-signatures@11.9.0)
       '@interop/ed25519-verification-key': 8.2.2
       '@interop/http-digest-header': 3.2.0
@@ -8330,7 +8350,7 @@ snapshots:
       '@interop/lru-memoize': 4.0.3
       '@interop/minimal-cipher': 7.11.0
       '@interop/security-document-loader': 10.1.6
-      '@interop/space-archive': 0.8.1
+      '@interop/space-archive': 0.8.2
       '@interop/storage-core': 0.33.0
       '@interop/x25519-key-agreement-key': 5.4.3
       '@interop/zcap': 11.3.5
