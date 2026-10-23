@@ -460,6 +460,38 @@ export function sessionAuthorityKind({ session }: { session: Session }):
 }
 
 /**
+ * The standing members a ladder-kind session reaches the annex Space with,
+ * as a `standing` option to spread into an annex reach, or nothing for the
+ * enrolled kind, which reaches it as itself. Throws when the ladder kind's
+ * record carries no sibling delegation, since the per-visit annex VM cannot
+ * read the annex log itself.
+ *
+ * @param options {object}
+ * @param options.session {Session}
+ * @returns {{ standing?: object }}
+ */
+export function sessionAnnexStanding({ session }: { session: Session }): {
+  standing?: {
+    standingClient: NonNullable<
+      ControllerProfile['standingUnlock']
+    >['standingClient']
+    delegatedClients: IZcap
+  }
+} {
+  const authority = sessionAuthorityKind({ session })
+  if (authority?.kind !== 'ladder') {
+    return {}
+  }
+  const { standingClient, delegatedClients } = authority.standingUnlock
+  if (!delegatedClients) {
+    throw new Error(
+      'The session holds no sibling delegation to read the generation log.'
+    )
+  }
+  return { standing: { standingClient, delegatedClients } }
+}
+
+/**
  * The key-agreement key this session holds a user key roster wrap for, and
  * so the key every roster read and escrow unwrap of this session uses: an
  * enrolled client's own identity key, or on the ladder kind the standing

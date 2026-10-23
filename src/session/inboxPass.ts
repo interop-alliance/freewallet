@@ -82,7 +82,6 @@ import { httpStatus } from '@interop/was-client'
 import {
   classifyGrantRevocationRefusal,
   embeddedGenerationDelegation,
-  readClientAnnexLogOrAbsent,
   type AccountSignerCheck
 } from '@interop/wallet-core/clientAnnex'
 import {
@@ -135,13 +134,9 @@ import {
 } from '@/app.config'
 import { createLogger } from '@/lib/log'
 import { EXTERNAL_REQUEST_ORIGIN } from '@/lib/walletRequest/externalRequest'
+import { forcedAgentGrantRenewalWindowMs } from '@/lib/e2eSeams'
 import type { InboxRead } from '@/stores/storageManager'
-import { sessionAuthorityKind } from '@/session/accountCeremonyContext'
-import {
-  annexReachUnder,
-  renewTransientGenerationDelegation
-} from '@/session/annexReach'
-import { promotedAccountPointer } from '@/session/registryPasses'
+import { renewTransientGenerationDelegation } from '@/session/annexReach'
 import { isSessionDisposed } from '@/session/sessionLifecycle'
 import type { Session } from '@/types/auth'
 
@@ -244,8 +239,7 @@ export interface InboxPassOutcome {
  */
 interface InboxPassDeps {
   readPointedDelegationId: (options: {
-    session: Session
-    doc: PublishedKeyDocument
+    check: AccountSignerCheck
   }) => Promise<string | undefined>
   push: (options: {
     channel: ConnectionZcap
@@ -296,57 +290,34 @@ function emptyOutcome(): InboxPassOutcome {
 
 /**
  * Reads the pointed generation delegation's id off the head of the
- * generation log the account document points at: an enrolled client reads
- * it as itself, a ladder-kind session through its credential's sibling
- * delegation. `undefined` when the document points at no generation, or the
- * generation's log is absent or embeds no delegation. Throws when the log
- * cannot be read.
+ * generation log the account document points at, through the signer check's
+ * annex-document resolver, so the proof checks that follow under the same
+ * check find the pointed generation already read. `undefined` when the
+ * document points at no generation, or the generation's log is absent or
+ * embeds no delegation. Throws what the resolver throws when the log cannot
+ * be read.
  *
  * @param options {object}
- * @param options.session {Session}
- * @param options.doc {PublishedKeyDocument}   the verified account document
+ * @param options.check {AccountSignerCheck}
  * @returns {Promise<string | undefined>}
  */
 export async function readPointedDelegationId({
-  session,
-  doc
+  check
 }: {
-  session: Session
-  doc: PublishedKeyDocument
+  check: AccountSignerCheck
 }): Promise<string | undefined> {
-  const pointer = promotedAccountPointer({ session })
-  if (!pointer) {
-    throw new Error('The account is not promoted; no generation log to read.')
-  }
-  const authority = sessionAuthorityKind({ session })
-  let standing: Parameters<typeof annexReachUnder>[0]['standing']
-  if (authority?.kind === 'ladder') {
-    const { standingClient, delegatedClients } = authority.standingUnlock
-    if (!delegatedClients) {
-      throw new Error(
-        'The session holds no sibling delegation to read the generation log.'
-      )
-    }
-    standing = { standingClient, delegatedClients }
-  }
-  const reach = await annexReachUnder({
-    session,
-    pointer,
-    doc: doc as Parameters<typeof annexReachUnder>[0]['doc'],
-    ...(standing ? { standing } : {})
-  })
-  if (reach === null) {
+  if (check.clientAnnexDid === undefined || check.annexDocument === undefined) {
     return undefined
   }
-  const published = await readClientAnnexLogOrAbsent({
-    store: reach.logStore(),
-    expectedDid: reach.clientAnnexDid
+  const doc = await check.annexDocument({
+    clientAnnexDid: check.clientAnnexDid
   })
-  if (!published) {
+  if (!doc) {
     return undefined
   }
-  const delegation = embeddedGenerationDelegation({ doc: published.doc }) as
-    { id?: unknown } | undefined
+  const delegation = embeddedGenerationDelegation({
+    doc: doc as Parameters<typeof embeddedGenerationDelegation>[0]['doc']
+  }) as { id?: unknown } | undefined
   return typeof delegation?.id === 'string' ? delegation.id : undefined
 }
 
@@ -983,6 +954,8 @@ export function renewableAgentGrants({
  * @param options.signerCheck {AccountSignerCheck}
  * @param [options.pointedDelegationId] {string}   read off the pointed
  *   generation log's head
+ * @param [options.renewalWindowMs] {number}   how far ahead of its `expires`
+ *   a grant counts as due
  * @param options.now {Date}
  * @returns {Promise<{ candidates: RenewalCandidate[], unverified: number }>}
  */
@@ -991,48 +964,63 @@ export async function dueAgentGrants({
   spaceUrl,
   signerCheck,
   pointedDelegationId,
+  renewalWindowMs = AGENT_GRANT_RENEWAL_WINDOW_MS,
   now
 }: {
   withChannel: Array<{ read: ReadConnection; pairwiseDid: string }>
   spaceUrl: string
   signerCheck: AccountSignerCheck
   pointedDelegationId?: string
+  renewalWindowMs?: number
   now: Date
 }): Promise<{ candidates: RenewalCandidate[]; unverified: number }> {
   const candidates: RenewalCandidate[] = []
   let unverified = 0
-  for (const { read, pairwiseDid } of withChannel) {
-    const latest = renewableAgentGrants({ entry: read.entry, spaceUrl })
-    const proofs = await Promise.all(
-      latest.map(grant =>
-        verifyRecordedGrantProof({ zcap: grant.zcap, signerCheck })
-      )
-    )
-    const due: ConnectionGrant[] = []
-    latest.forEach((grant, index) => {
-      const proof = proofs[index]!
-      if (!proof.verified) {
-        unverified += 1
-        log.info(
-          "A recorded agent grant's proof does not verify as this account's; not renewed",
-          { did: read.entry.id, zcapId: grant.zcapId, reason: proof.reason }
+  const perEntry = await Promise.all(
+    withChannel.map(async ({ read, pairwiseDid }) => {
+      const latest = renewableAgentGrants({ entry: read.entry, spaceUrl })
+      const proofs = await Promise.all(
+        latest.map(grant =>
+          verifyRecordedGrantProof({ zcap: grant.zcap, signerCheck })
         )
-        return
-      }
-      if (
-        agentGrantDue({
-          zcap: grant.zcap,
-          ...(pointedDelegationId !== undefined ? { pointedDelegationId } : {}),
-          doc: signerCheck.doc,
-          renewalWindowMs: AGENT_GRANT_RENEWAL_WINDOW_MS,
-          now: now.getTime()
-        })
-      ) {
-        due.push(grant)
-      }
+      )
+      const due: ConnectionGrant[] = []
+      let unverifiedHere = 0
+      latest.forEach((grant, index) => {
+        const proof = proofs[index]!
+        if (!proof.verified) {
+          unverifiedHere += 1
+          log.info(
+            "A recorded agent grant's proof does not verify as this account's; not renewed",
+            { did: read.entry.id, zcapId: grant.zcapId, reason: proof.reason }
+          )
+          return
+        }
+        if (
+          agentGrantDue({
+            zcap: grant.zcap,
+            ...(pointedDelegationId !== undefined
+              ? { pointedDelegationId }
+              : {}),
+            doc: signerCheck.doc,
+            renewalWindowMs,
+            now: now.getTime()
+          })
+        ) {
+          due.push(grant)
+        }
+      })
+      return { read, pairwiseDid, due, unverified: unverifiedHere }
     })
-    if (due.length > 0) {
-      candidates.push({ read, pairwiseDid, due })
+  )
+  for (const entry of perEntry) {
+    unverified += entry.unverified
+    if (entry.due.length > 0) {
+      candidates.push({
+        read: entry.read,
+        pairwiseDid: entry.pairwiseDid,
+        due: entry.due
+      })
     }
   }
   return { candidates, unverified }
@@ -1152,6 +1140,43 @@ export async function addAgentGrantActivity({
 }
 
 /**
+ * A generation log read the proof check's resolver could not complete,
+ * carrying the read's own error as `cause`. It marks the one failure the
+ * renewal reports as `no-generation-head`.
+ */
+class GenerationLogReadFailure extends Error {
+  constructor(cause: unknown) {
+    super("A recorded grant's generation log could not be read", { cause })
+    this.name = 'GenerationLogReadFailure'
+  }
+}
+
+/**
+ * The signer check with its annex-document resolver's throws wrapped in
+ * {@link GenerationLogReadFailure}, so the renewal tells a failed log read
+ * from any other failure of the due check.
+ *
+ * @param check {AccountSignerCheck}
+ * @returns {AccountSignerCheck}
+ */
+function taggingGenerationReads(check: AccountSignerCheck): AccountSignerCheck {
+  const { annexDocument } = check
+  if (annexDocument === undefined) {
+    return check
+  }
+  return {
+    ...check,
+    annexDocument: async options => {
+      try {
+        return await annexDocument(options)
+      } catch (err) {
+        throw new GenerationLogReadFailure(err)
+      }
+    }
+  }
+}
+
+/**
  * Renews the connected agents' due grants and reports
  * `agent-grants-are-current`. Reads the listing as the drain left it.
  *
@@ -1204,10 +1229,7 @@ export async function renewAgentGrants({
   }
   let pointedDelegationId: string | undefined
   try {
-    pointedDelegationId = await deps.readPointedDelegationId({
-      session,
-      doc: check.doc
-    })
+    pointedDelegationId = await deps.readPointedDelegationId({ check })
   } catch (err) {
     log.warn(
       'Could not read the pointed generation delegation; renewing no agent grant',
@@ -1223,13 +1245,39 @@ export async function renewAgentGrants({
       failed: 1
     }
   }
-  const { candidates, unverified } = await dueAgentGrants({
-    withChannel,
-    spaceUrl: directory.spaceUrl,
-    signerCheck: check,
-    ...(pointedDelegationId !== undefined ? { pointedDelegationId } : {}),
-    now
-  })
+  let due
+  try {
+    due = await dueAgentGrants({
+      withChannel,
+      spaceUrl: directory.spaceUrl,
+      signerCheck: taggingGenerationReads(check),
+      ...(pointedDelegationId !== undefined ? { pointedDelegationId } : {}),
+      renewalWindowMs:
+        forcedAgentGrantRenewalWindowMs() ?? AGENT_GRANT_RENEWAL_WINDOW_MS,
+      now
+    })
+  } catch (err) {
+    // The proof check's one read past the document is a grant's generation
+    // log, through the signer check's resolver. What that read throws is
+    // reported here, and renews nothing; anything else propagates.
+    if (!(err instanceof GenerationLogReadFailure)) {
+      throw err
+    }
+    log.warn(
+      "Could not read a recorded grant's generation log; renewing no agent grant",
+      { err: err.cause }
+    )
+    return {
+      entry: {
+        invariant,
+        outcome: 'partial',
+        detail: { reason: 'no-generation-head' },
+        errorName: errorNameOf(err.cause)
+      },
+      failed: 1
+    }
+  }
+  const { candidates, unverified } = due
   const unverifiedDetail = unverified > 0 ? { unverified } : {}
   if (candidates.length === 0) {
     return {

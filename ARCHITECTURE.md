@@ -351,9 +351,15 @@ connection entry. The agent then posts a channel capability into the
 `inbox`, and the login-time inbox pass stores it. While the connection
 stands, the pass renews the agent's grants in the same scope with no
 prompt, and pushes the renewals through that channel. The consent rows
-state both facts. The request and its refusals are in "The interaction-URL
-request page" (external-request.md), and the channel, the renewal, and the
-revoke are in "The agent connection" (app-connect.md).
+state both facts. A grant is renewed only once its recorded proof verifies
+as this account's. A grant a transient session minted is checked twice: its
+generation delegation against the account document, and its own leaf
+against that generation's annex document, which the session reads under
+the log's chain-head pin. A grant whose generation was collected is not
+renewed and lapses into a re-consent. The request and its refusals are in
+"The interaction-URL request page" (external-request.md), and the channel,
+the renewal, and the revoke are in "The agent connection"
+(app-connect.md).
 
 Both paths record a consent the same way (`composeAndDeliverResponse` in
 `src/lib/walletRequest/respond.ts`). Once the delegations are signed, the

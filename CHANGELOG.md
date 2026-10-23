@@ -2,6 +2,25 @@
 
 ## 0.45.0 - TBD
 
+### Security
+
+- The agent grant renewal verifies a transient-minted grant's own leaf, not
+  only its generation delegation. `currentAccountSignerCheck` supplies
+  wallet-core's `annexDocument` resolver: the named generation's annex
+  document, read under the session's authority and the log's chain-head
+  pin, for any generation of the account's auxiliary Space, or `undefined`
+  for a collected one. A forged leaf planted under the genuine generation
+  delegation is refused (`leaf-signature-invalid`, `leaf-signer-unlisted`),
+  a grant whose generation was collected is refused rather than renewed
+  (`leaf-generation-collected`) and lapses into a re-consent, and a
+  generation log that cannot be read grades the pass `partial`. Needs
+  wallet-core 0.107.1. The agent-connect e2e forces its one renewal through
+  two non-production seams, a short share TTL at consent
+  (`window.__E2E_SHARE_ZCAP_TTL_MS__`) and a wide renewal window at the
+  renewing login (`window.__E2E_AGENT_GRANT_RENEWAL_WINDOW_MS__`), instead
+  of editing a recorded grant's `expires`, which the leaf check reads as a
+  forged leaf.
+
 ### Added
 
 - Unit tests against the installed `@interop/wallet-core` dist: every

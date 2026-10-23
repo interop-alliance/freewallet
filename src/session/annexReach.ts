@@ -303,16 +303,62 @@ export async function annexReachUnder({
     delegatedClients: IZcap
   }
 }): Promise<ClientAnnexReach | null> {
+  const clientAnnexDid = delegatedClientsPointer({ doc })
+  if (clientAnnexDid === undefined) {
+    return null
+  }
+  return namedAnnexReachUnder({
+    session,
+    pointer,
+    clientAnnexDid,
+    ...(standing ? { standing } : {})
+  })
+}
+
+/**
+ * The reach for a generation the caller names, under the authority the
+ * caller acts with: the twin of {@link annexReachUnder} for an annex DID
+ * read off a recorded grant rather than off the document's pointer. Any
+ * generation of the account's auxiliary Space is reachable, pointed or
+ * superseded; a collected one reaches a log that reads as absent.
+ *
+ * @param options {object}
+ * @param options.session {Session}
+ * @param options.pointer {ReachPointer}   the account pointer
+ * @param options.clientAnnexDid {string}   the generation's did:webvh
+ * @param [options.standing] {object}   the credential's client identity and
+ *   its annex-Space sibling delegation, on the ladder kind
+ * @returns {Promise<ClientAnnexReach>}
+ */
+export async function namedAnnexReachUnder({
+  session,
+  pointer,
+  clientAnnexDid,
+  standing
+}: {
+  session: Session
+  pointer: ReachPointer
+  clientAnnexDid: string
+  standing?: {
+    standingClient: { agents: { zcapClient: ZcapClient } }
+    delegatedClients: IZcap
+  }
+}): Promise<ClientAnnexReach> {
   const serviceDescription = await wasServiceDescription()
   return standing
-    ? standingClientAnnexReachFor({
+    ? standingClientAnnexReachOf({
         pointer,
-        doc,
+        clientAnnexDid,
         standing,
         pinStore: session.persistence.logPins,
         serviceDescription
       })
-    : clientAnnexReachFor({ session, pointer, doc, serviceDescription })
+    : clientAnnexReachOf({
+        session,
+        pointer,
+        clientAnnexDid,
+        serviceDescription
+      })
 }
 
 /**

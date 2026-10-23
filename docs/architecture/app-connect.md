@@ -640,8 +640,22 @@ a session with no Space run none. Each pass has three steps, in order.
    HEAD on a collection, or POST on `inbox`, recorded by a consent that also
    recorded an inbox grant. Any other grant lapses at its own TTL. A grant
    is renewed when it is due and its proof verifies as this account's
-   against the current document (`renewalSignerCheck` on `StorageManager`).
-   A document that cannot be read renews nothing. A grant is due when its
+   against the current document (`renewalSignerCheck` on `StorageManager`,
+   over wallet-core's `verifyRecordedGrantProof`). A grant delegated under
+   the Space root is verified by its own proof. A grant a transient session
+   minted embeds its generation delegation, and both links are verified:
+   the generation delegation against the account document, and the leaf
+   against the annex document of that generation, which the signer check's
+   `annexDocument` resolver reads (`currentAccountSignerCheck`) under the
+   session's authority and the log's chain-head pin. Any generation of the
+   account's auxiliary Space resolves, so a grant under a superseded
+   generation stays renewable while its log stands. A grant whose
+   generation was collected resolves no document and is refused
+   (`leaf-generation-collected`), so it lapses into a re-consent. The leaf
+   check is what stops a host from planting a leaf of its own under the
+   genuine, host-held generation delegation. A document that cannot be
+   read renews nothing, and a generation log that cannot be read grades
+   the pass `partial`. A grant is due when its
    `expires` falls inside the agent renewal window
    (`AGENT_GRANT_RENEWAL_WINDOW_MS`), or when it is chained under a
    generation delegation other than the pointed one while that delegation's
@@ -693,10 +707,13 @@ connected agent learns the owner's IP address, user agent, and login
 cadence, and its server must serve cross-origin requests on its inbox.
 
 **Withdrawn authority and the owner's tick.** A grant whose parent was
-replaced while the parent's signer still stands is renewed silently. The
-annex GC's quarterly swap and the in-place generation renewal leave such
-grants, and so does a client revocation's generation swap for a grant
-under a delegation a remaining key signed. A grant whose signing authority
+replaced while the parent's signer still stands is renewed silently, as
+long as the superseded generation's log still stands. The annex GC's
+quarterly swap and the in-place generation renewal leave such grants, and
+so does a client revocation's generation swap for a grant under a
+delegation a remaining key signed. Once the GC collects the superseded
+generation, the leaf check can no longer verify the grant, and it lapses
+into a re-consent at its own expiry. A grant whose signing authority
 was withdrawn fails the proof check and is never renewed silently. A
 genuine grant and one a stolen client planted look the same, so only the
 owner can tell them apart. Withdrawal is a client revocation, a forget, the

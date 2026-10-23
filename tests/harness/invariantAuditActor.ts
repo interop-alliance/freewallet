@@ -561,8 +561,7 @@ export async function actorKeyHolder({
           return undetermined('The account key set could not be read.')
         }
         const pointedDelegationId = await modules.readPointedDelegationId({
-          session,
-          doc: signerCheck.doc
+          check: signerCheck
         })
         const { candidates } = await modules.dueAgentGrants({
           withChannel,

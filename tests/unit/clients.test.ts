@@ -5,7 +5,8 @@
  * rows from the `connections` directory's wallet-client entries; and the
  * rename writes the user's `label` on the client's entry. Also the user key
  * generation kids a collection key rotation keeps, read off the verified
- * user key roster.
+ * user key roster, and the signer check's annex-document resolver, which
+ * reads a named generation's log under the session's authority.
  */
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import type { Session } from '@/types/auth'
@@ -53,6 +54,10 @@ const state = {
   contextResolves: true,
   /** what the context's roster store `read()` does */
   rosterRead: (async () => null) as () => Promise<unknown>,
+  /** the standing members `sessionAnnexStanding` resolves for the session */
+  standing: {} as { standing?: unknown },
+  /** what the named generation's log read resolves */
+  annexLog: (async () => undefined) as () => Promise<unknown>,
   /** the session's `connections` directory */
   directory: memoryConnectionsStore()
 }
@@ -81,7 +86,24 @@ vi.mock('@/session/accountCeremonyContext', () => ({
       : null
   ),
   canRunAccountCeremonies: vi.fn(() => true),
-  enrolledCeremonyContext: vi.fn(() => null)
+  enrolledCeremonyContext: vi.fn(() => null),
+  sessionAnnexStanding: vi.fn(() => state.standing)
+}))
+
+vi.mock('@/session/annexReach', () => ({
+  namedAnnexReachUnder: vi.fn(
+    async ({ clientAnnexDid }: { clientAnnexDid: string }) => ({
+      clientAnnexDid,
+      logStore: () => ({ store: `store-of-${clientAnnexDid}` })
+    })
+  )
+}))
+
+vi.mock('@interop/wallet-core/clientAnnex', async importOriginal => ({
+  ...(await importOriginal<
+    typeof import('@interop/wallet-core/clientAnnex')
+  >()),
+  readClientAnnexLogOrAbsent: vi.fn(async () => await state.annexLog())
 }))
 
 vi.mock('@/session/verifiedLog', () => ({
@@ -115,13 +137,16 @@ import {
   connectionResourceId,
   parseConnectionEntry
 } from '@interop/wallet-core/connections'
+import { readClientAnnexLogOrAbsent } from '@interop/wallet-core/clientAnnex'
 import {
   accountUserKeyGenerationKids,
+  currentAccountSignerCheck,
   disconnectAccountClient,
   listAccountClients,
   renameAccountClient
 } from '@/session/clients'
 import { HMAC_KEY, memoryConnectionsStore } from './memoryConnections'
+import { namedAnnexReachUnder } from '@/session/annexReach'
 import { revokeEnrolledClient } from '@/session/revocation'
 import { reportCeremonyTail } from '@/session/menders/ceremonyTail'
 
@@ -163,6 +188,8 @@ beforeEach(() => {
   state.directory = memoryConnectionsStore()
   state.contextResolves = true
   state.rosterRead = async () => null
+  state.standing = {}
+  state.annexLog = async () => undefined
   vi.clearAllMocks()
 })
 
@@ -309,5 +336,78 @@ describe('accountUserKeyGenerationKids', () => {
     await expect(
       accountUserKeyGenerationKids({ session: makeSession() })
     ).rejects.toBe(failure)
+  })
+})
+
+describe("currentAccountSignerCheck's annex-document resolver", () => {
+  const GENERATION_DID =
+    'did:webvh:QmAnnex:was.example:space:aux:gen-CCCCCCCCCCCCCCCC'
+  const ANNEX_DOC = { id: GENERATION_DID, capabilityDelegation: [] }
+
+  it('reads the named generation as this client and resolves its verified document', async () => {
+    state.annexLog = async () => ({ doc: ANNEX_DOC })
+    const session = makeSession()
+
+    const check = await currentAccountSignerCheck({ session })
+    const doc = await check!.annexDocument!({ clientAnnexDid: GENERATION_DID })
+
+    expect(doc).toBe(ANNEX_DOC)
+    expect(vi.mocked(namedAnnexReachUnder)).toHaveBeenCalledWith({
+      session,
+      pointer: expect.objectContaining({ did: ACCOUNT_DID }),
+      clientAnnexDid: GENERATION_DID
+    })
+    expect(vi.mocked(readClientAnnexLogOrAbsent)).toHaveBeenCalledWith({
+      store: { store: `store-of-${GENERATION_DID}` },
+      expectedDid: GENERATION_DID
+    })
+  })
+
+  it('resolves undefined for a collected generation, whose log is absent', async () => {
+    const check = await currentAccountSignerCheck({ session: makeSession() })
+    await expect(
+      check!.annexDocument!({ clientAnnexDid: GENERATION_DID })
+    ).resolves.toBeUndefined()
+  })
+
+  it('reads through the sibling delegation on the ladder kind', async () => {
+    const standingClient = { agents: { zcapClient: {} } }
+    const delegatedClients = { id: 'urn:zcap:sibling' }
+    state.standing = { standing: { standingClient, delegatedClients } }
+    state.annexLog = async () => ({ doc: ANNEX_DOC })
+    const check = await currentAccountSignerCheck({ session: makeSession() })
+
+    await expect(
+      check!.annexDocument!({ clientAnnexDid: GENERATION_DID })
+    ).resolves.toBe(ANNEX_DOC)
+    expect(vi.mocked(namedAnnexReachUnder)).toHaveBeenCalledWith(
+      expect.objectContaining({
+        clientAnnexDid: GENERATION_DID,
+        standing: { standingClient, delegatedClients }
+      })
+    )
+  })
+
+  it('reads each generation once per check, however many grants chain under it', async () => {
+    state.annexLog = async () => ({ doc: ANNEX_DOC })
+    const check = await currentAccountSignerCheck({ session: makeSession() })
+
+    const docs = await Promise.all([
+      check!.annexDocument!({ clientAnnexDid: GENERATION_DID }),
+      check!.annexDocument!({ clientAnnexDid: GENERATION_DID })
+    ])
+
+    expect(docs).toEqual([ANNEX_DOC, ANNEX_DOC])
+    expect(vi.mocked(readClientAnnexLogOrAbsent)).toHaveBeenCalledTimes(1)
+  })
+
+  it('propagates a failed log read', async () => {
+    state.annexLog = async () => {
+      throw new Error('annex unreachable')
+    }
+    const check = await currentAccountSignerCheck({ session: makeSession() })
+    await expect(
+      check!.annexDocument!({ clientAnnexDid: GENERATION_DID })
+    ).rejects.toThrow('annex unreachable')
   })
 })

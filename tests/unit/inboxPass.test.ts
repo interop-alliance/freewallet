@@ -24,6 +24,7 @@ import {
   type ConnectionEntry
 } from '@interop/wallet-core/connections'
 import type { IZcap } from '@interop/data-integrity-core'
+import type { AccountSignerCheck } from '@interop/wallet-core/clientAnnex'
 import type { Session } from '@/types/auth'
 import type {
   InboxMessageMeta,
@@ -34,12 +35,14 @@ import { HMAC_KEY, memoryConnectionsStore } from './memoryConnections'
 import {
   ACCOUNT_DID,
   AGENT_DID,
+  COLLECTED_ANNEX_DID,
   DAY_MS,
   INBOX_URL,
   NEWS_URL,
   OTHER_AGENT_DID,
   POINTED_DELEGATION,
   SPACE_URL,
+  STANDING_ANNEX_DID,
   annexGrant,
   channelZcap,
   fakeZcapClient,
@@ -56,8 +59,6 @@ const { sessionDisposalSignal } = await import('@/session/sessionLifecycle')
 
 const PHOTOS_URL = `${SPACE_URL}photos/`
 const NOTES_URL = `${SPACE_URL}notes/`
-const COLLECTED_ANNEX_DID =
-  'did:webvh:scid:was.example:space:aux:gen-BBBBBBBBBBBBBBBB'
 
 const SIGNER_CHECK = await fixtureSignerCheck()
 
@@ -67,28 +68,61 @@ const SIGNER_CHECK = await fixtureSignerCheck()
 type Message = { meta: Omit<InboxMessageMeta, 'resourceId'>; body: unknown }
 
 /**
+ * An agent's two grants under one generation delegation, a read grant and
+ * the inbox `POST` grant, both parented at `urn:uuid:<prefix>` and signed by
+ * the default visit key of `parentController`.
+ *
+ * @param options {object}
+ * @param options.prefix {string}
+ * @param options.parentController {string}
+ * @returns {ReturnType<typeof annexGrant>[]}
+ */
+function generationGrants({
+  prefix,
+  parentController
+}: {
+  prefix: string
+  parentController: string
+}): ReturnType<typeof annexGrant>[] {
+  return [
+    annexGrant({
+      id: `${prefix}-read`,
+      parentId: `urn:uuid:${prefix}`,
+      parentController
+    }),
+    annexGrant({
+      id: `${prefix}-inbox`,
+      target: INBOX_URL,
+      actions: ['POST'],
+      parentId: `urn:uuid:${prefix}`,
+      parentController
+    })
+  ]
+}
+
+/**
  * A fake session over an in-memory directory and a fake inbox.
  *
  * @param [options] {object}
  * @param [options.trust] {'trusted' | 'absent' | UntrustedInboxReason}
- * @param [options.noSignerCheck] {boolean}   the signer check reads
- *   `undefined`
+ * @param [options.signerCheck] {AccountSignerCheck | null}   the signer
+ *   check to read in place of the fixture's; `null` reads `undefined`
  * @param [options.invocationCapability] {object}
  * @param [options.listingFails] {boolean}
  * @returns {object}
  */
 function fixture({
   trust = 'trusted',
-  noSignerCheck = false,
+  signerCheck: signerCheckOption = SIGNER_CHECK,
   invocationCapability,
   listingFails = false
 }: {
   trust?: 'trusted' | 'absent' | UntrustedInboxReason
-  noSignerCheck?: boolean
+  signerCheck?: AccountSignerCheck | null
   invocationCapability?: Record<string, unknown>
   listingFails?: boolean
 } = {}) {
-  const signerCheck = noSignerCheck ? undefined : SIGNER_CHECK
+  const signerCheck = signerCheckOption ?? undefined
   const directory = memoryConnectionsStore()
   const inbox = new Map<string, Message>()
   const { zcapClient, calls } = fakeZcapClient()
@@ -783,7 +817,7 @@ describe('the renewal', () => {
 
   it('renews nothing when the signer check is undefined', async () => {
     const { directory, deps, storage, pass } = fixture({
-      noSignerCheck: true
+      signerCheck: null
     })
     const pairwise = await pairwiseSeed()
     await connect({ directory, pairwise })
@@ -799,7 +833,7 @@ describe('the renewal', () => {
     expect(deps.push).not.toHaveBeenCalled()
   })
 
-  it('renews a grant whose collected generation a still-listed key minted, and none whose parent signer left', async () => {
+  it('renews a grant whose superseded generation a still-listed key minted, and none whose parent signer left', async () => {
     const { directory, deps, pass } = fixture({
       invocationCapability: await generationDelegation()
     })
@@ -807,20 +841,10 @@ describe('the renewal', () => {
     await connect({
       directory,
       pairwise,
-      grants: [
-        annexGrant({
-          id: 'collected-read',
-          parentId: 'urn:uuid:collected',
-          parentController: COLLECTED_ANNEX_DID
-        }),
-        annexGrant({
-          id: 'collected-inbox',
-          target: INBOX_URL,
-          actions: ['POST'],
-          parentId: 'urn:uuid:collected',
-          parentController: COLLECTED_ANNEX_DID
-        })
-      ]
+      grants: generationGrants({
+        prefix: 'superseded',
+        parentController: STANDING_ANNEX_DID
+      })
     })
     const other = await pairwiseSeed()
     await connect({
@@ -859,6 +883,138 @@ describe('the renewal', () => {
     })
     expect(deps.readPointedDelegationId).toHaveBeenCalledTimes(1)
     expect(deps.push).toHaveBeenCalledTimes(1)
+  })
+
+  it('refuses a grant whose generation was collected, without throwing', async () => {
+    const capture = captureSink()
+    stopCapture = addSink(capture.sink)
+    const { directory, deps, pass, storage } = fixture({
+      invocationCapability: await generationDelegation()
+    })
+    const pairwise = await pairwiseSeed()
+    await connect({
+      directory,
+      pairwise,
+      grants: generationGrants({
+        prefix: 'collected',
+        parentController: COLLECTED_ANNEX_DID
+      })
+    })
+    await storeChannel({ directory, pairwiseDid: pairwise.did })
+
+    const { entries } = await pass()
+
+    expect(entries[1]).toMatchObject({
+      outcome: 'noop',
+      detail: { unverified: 2 }
+    })
+    expect(storage.delegateRenewalGrants).not.toHaveBeenCalled()
+    expect(deps.push).not.toHaveBeenCalled()
+    expect(capture.events).toContainEqual(
+      expect.objectContaining({
+        ns: 'fw:inbox',
+        msg: "A recorded agent grant's proof does not verify as this account's; not renewed",
+        data: expect.objectContaining({
+          zcapId: 'collected-read',
+          reason: 'leaf-generation-collected'
+        })
+      })
+    )
+  })
+
+  it('renews nothing for a forged leaf planted under the genuine generation delegation', async () => {
+    const capture = captureSink()
+    stopCapture = addSink(capture.sink)
+    const { directory, deps, pass, storage } = fixture({
+      invocationCapability: await generationDelegation()
+    })
+    // A host holding the genuine generation delegation plants two leaves
+    // under it on the agent's entry: one re-labelled after the genuine
+    // visit key signed it, and one signed by a visit key the generation's
+    // annex document never listed.
+    const genuine = await annexGrant({ id: 'genuine-read' })
+    const relabelled = Promise.resolve({ ...genuine, id: 'planted-read' })
+    const pairwise = await pairwiseSeed()
+    await connect({
+      directory,
+      pairwise,
+      grants: [
+        relabelled,
+        annexGrant({
+          id: 'planted-inbox',
+          target: INBOX_URL,
+          actions: ['POST'],
+          visitSeed: 7
+        })
+      ]
+    })
+    await storeChannel({ directory, pairwiseDid: pairwise.did })
+
+    const { entries } = await pass()
+
+    expect(entries[1]).toMatchObject({
+      outcome: 'noop',
+      detail: { unverified: 2 }
+    })
+    expect(storage.delegateRenewalGrants).not.toHaveBeenCalled()
+    expect(deps.push).not.toHaveBeenCalled()
+    const refusals = capture.events
+      .filter(
+        event =>
+          event.msg ===
+          "A recorded agent grant's proof does not verify as this account's; not renewed"
+      )
+      .map(event => event.data)
+    expect(refusals).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          zcapId: 'planted-read',
+          reason: 'leaf-signature-invalid'
+        }),
+        expect.objectContaining({
+          zcapId: 'planted-inbox',
+          reason: 'leaf-signer-unlisted'
+        })
+      ])
+    )
+  })
+
+  it('grades the pass partial when a generation log cannot be read for the leaf check', async () => {
+    const { directory, deps, pass, storage } = fixture({
+      invocationCapability: await generationDelegation(),
+      signerCheck: {
+        ...SIGNER_CHECK,
+        annexDocument: async () => {
+          throw Object.assign(new Error('annex unreachable'), {
+            name: 'NetworkError'
+          })
+        }
+      }
+    })
+    const pairwise = await pairwiseSeed()
+    await connect({
+      directory,
+      pairwise,
+      grants: [
+        annexGrant({ id: 'annex-read' }),
+        annexGrant({
+          id: 'annex-inbox',
+          target: INBOX_URL,
+          actions: ['POST']
+        })
+      ]
+    })
+    await storeChannel({ directory, pairwiseDid: pairwise.did })
+
+    const { entries } = await pass()
+
+    expect(entries[1]).toMatchObject({
+      outcome: 'partial',
+      detail: { reason: 'no-generation-head' },
+      errorName: 'NetworkError'
+    })
+    expect(storage.delegateRenewalGrants).not.toHaveBeenCalled()
+    expect(deps.push).not.toHaveBeenCalled()
   })
 
   it('renews a stale parent first, and renews nothing when it cannot be renewed', async () => {
@@ -1363,33 +1519,23 @@ describe('the outbox', () => {
 
 describe('the prune', () => {
   /**
-   * An agent whose grants a collected generation parented, with a live
-   * channel: due by replacement, and dead-chained once superseded.
+   * An agent whose grants a superseded, still-standing generation parented,
+   * with a live channel: due by replacement, and dead-chained once renewed.
    *
    * @param fixtureOf {object}
    * @returns {Promise<void>}
    */
-  async function collectedConnection(
+  async function supersededConnection(
     fixtureOf: ReturnType<typeof fixture>
   ): Promise<void> {
     const pairwise = await pairwiseSeed()
     await connect({
       directory: fixtureOf.directory,
       pairwise,
-      grants: [
-        annexGrant({
-          id: 'collected-read',
-          parentId: 'urn:uuid:collected',
-          parentController: COLLECTED_ANNEX_DID
-        }),
-        annexGrant({
-          id: 'collected-inbox',
-          target: INBOX_URL,
-          actions: ['POST'],
-          parentId: 'urn:uuid:collected',
-          parentController: COLLECTED_ANNEX_DID
-        })
-      ]
+      grants: generationGrants({
+        prefix: 'superseded',
+        parentController: STANDING_ANNEX_DID
+      })
     })
     await storeChannel({
       directory: fixtureOf.directory,
@@ -1401,7 +1547,7 @@ describe('the prune', () => {
     const delivered = fixture({
       invocationCapability: await generationDelegation()
     })
-    await collectedConnection(delivered)
+    await supersededConnection(delivered)
 
     await delivered.pass()
 
@@ -1414,7 +1560,7 @@ describe('the prune', () => {
     const waiting = fixture({
       invocationCapability: await generationDelegation()
     })
-    await collectedConnection(waiting)
+    await supersededConnection(waiting)
     waiting.deps.push.mockRejectedValue(
       Object.assign(new Error('Bad Gateway'), { status: 502 })
     )
@@ -1424,8 +1570,8 @@ describe('the prune', () => {
     expect(
       (await waiting.entryOf(AGENT_DID))?.grants.map(grant => grant.zcap.id)
     ).toEqual([
-      'collected-read',
-      'collected-inbox',
+      'superseded-read',
+      'superseded-inbox',
       'urn:uuid:minted-1',
       'urn:uuid:minted-2'
     ])
@@ -1433,7 +1579,7 @@ describe('the prune', () => {
 })
 
 describe('the proof check the renewal reads', () => {
-  it('verifies a root grant by its signer and an annex grant by its parent', async () => {
+  it('verifies a root grant by its signer and an annex grant by its parent and leaf', async () => {
     /**
      * Whether a fixture grant verifies against the fixture account.
      *
@@ -1455,6 +1601,14 @@ describe('the proof check the renewal reads', () => {
     expect(await verified(annexGrant({ id: 'c' }))).toBe(true)
     expect(
       await verified(annexGrant({ id: 'd', parentSigner: 'struck' }))
+    ).toBe(false)
+    // A leaf signed by a visit key the generation's document never listed,
+    // and one under a generation the GC collected.
+    expect(await verified(annexGrant({ id: 'h', visitSeed: 7 }))).toBe(false)
+    expect(
+      await verified(
+        annexGrant({ id: 'i', parentController: COLLECTED_ANNEX_DID })
+      )
     ).toBe(false)
     // A parent delegated to an annex in another auxiliary Space.
     expect(

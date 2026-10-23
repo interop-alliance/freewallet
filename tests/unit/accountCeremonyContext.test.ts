@@ -25,7 +25,8 @@ vi.mock('@/app.config', async importOriginal => ({
 import {
   canRunUserKeyCeremonies,
   enrolledCeremonyContext,
-  requireEnrolledCeremonyContext
+  requireEnrolledCeremonyContext,
+  sessionAnnexStanding
 } from '@/session/accountCeremonyContext'
 import { canManageAccountClients } from '@/session/clients'
 import { canIssueRecoveryCode } from '@/session/recovery'
@@ -178,5 +179,37 @@ describe('the gates derived from it', () => {
     expect(canManageAccountClients({ session })).toBe(true)
     expect(canRunUserKeyCeremonies({ session })).toBe(false)
     expect(canIssueRecoveryCode({ session })).toBe(false)
+  })
+})
+
+describe('the annex standing a session reaches the generation log with', () => {
+  it('is nothing for the enrolled kind, which reaches it as itself', () => {
+    expect(sessionAnnexStanding({ session: sessionWith() })).toEqual({})
+  })
+
+  it("is the ladder kind's standing client and sibling delegation", () => {
+    const standingClient = { agents: { zcapClient: {} } }
+    const delegatedClients = { id: 'urn:zcap:sibling' }
+    const session = sessionWith({ clientWebvhKeys: undefined })
+    Object.assign(session.profile, {
+      ladderSeed: new Uint8Array(32),
+      standingUnlock: { standingClient, delegatedClients }
+    })
+
+    expect(sessionAnnexStanding({ session })).toEqual({
+      standing: { standingClient, delegatedClients }
+    })
+  })
+
+  it('refuses a ladder kind whose record carries no sibling delegation', () => {
+    const session = sessionWith({ clientWebvhKeys: undefined })
+    Object.assign(session.profile, {
+      ladderSeed: new Uint8Array(32),
+      standingUnlock: { standingClient: { agents: { zcapClient: {} } } }
+    })
+
+    expect(() => sessionAnnexStanding({ session })).toThrow(
+      'no sibling delegation'
+    )
   })
 })

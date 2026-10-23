@@ -154,7 +154,8 @@ describe('deriveGrantsState', () => {
   const check = {
     accountDid: ACCOUNT_DID,
     currentSigningKeys: new Set(['zKey']),
-    doc: {}
+    doc: {},
+    annexDocument: async () => undefined
   }
 
   it('is unknown without a verified key set to check against', () => {

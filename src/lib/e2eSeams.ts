@@ -96,3 +96,51 @@ export function forcedConnectOffer(): boolean {
       .__E2E_OFFER_CONNECT_CARD__
   )
 }
+
+/**
+ * A positive millisecond count a test has forced on the page under `key`, or
+ * `undefined` when none is set. Always `undefined` in production builds.
+ *
+ * @param key {string}
+ * @returns {number | undefined}
+ */
+function forcedPositiveMs(key: string): number | undefined {
+  if (import.meta.env.MODE === 'production') {
+    return undefined
+  }
+  if (typeof window === 'undefined') {
+    return undefined
+  }
+  const forced = (window as unknown as Record<string, unknown>)[key]
+  return typeof forced === 'number' && forced > 0 ? forced : undefined
+}
+
+/**
+ * The agent renewal window a test has forced, in milliseconds, or
+ * `undefined` when none is set. The agent-connect e2e sets it on the page
+ * ahead of the one login whose pass should renew every recorded agent
+ * grant: a recorded grant's `expires` cannot be edited to force a
+ * near-expiry, since the renewal's proof check verifies the grant's own
+ * signature over the capability. Read as the pass is composed, so the next
+ * reload clears it. Always `undefined` in production builds.
+ *
+ * @returns {number | undefined}
+ */
+export function forcedAgentGrantRenewalWindowMs(): number | undefined {
+  return forcedPositiveMs('__E2E_AGENT_GRANT_RENEWAL_WINDOW_MS__')
+}
+
+/**
+ * The share TTL a test has forced, in milliseconds, or `undefined` when none
+ * is set: the lifetime a connection request's agent grants are minted with
+ * at consent. The agent-connect e2e sets it on the consent page so the
+ * grants it mints are shorter than their generation delegation, which is
+ * what lets a later forced renewal outlast them (a renewal is minted under
+ * the same delegation and may not outlive it). Always `undefined` in
+ * production builds.
+ *
+ * @returns {number | undefined}
+ */
+export function forcedShareZcapTtlMs(): number | undefined {
+  return forcedPositiveMs('__E2E_SHARE_ZCAP_TTL_MS__')
+}

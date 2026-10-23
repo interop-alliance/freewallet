@@ -389,6 +389,24 @@ export const AGENT_INBOX = 'https://agent.example/space/a/inbox/'
 export const ANNEX_DID =
   'did:webvh:scid:was.example:space:aux:gen-AAAAAAAAAAAAAAAA'
 export const POINTED_DELEGATION = 'urn:uuid:generation-delegation-current'
+/**
+ * A superseded generation of the same auxiliary Space whose log still
+ * stands, so a grant minted under it is renewable until the GC collects it.
+ */
+export const STANDING_ANNEX_DID =
+  'did:webvh:scid:was.example:space:aux:gen-CCCCCCCCCCCCCCCC'
+/**
+ * A generation of the same auxiliary Space the GC collected: no annex
+ * document resolves for it.
+ */
+export const COLLECTED_ANNEX_DID =
+  'did:webvh:scid:was.example:space:aux:gen-BBBBBBBBBBBBBBBB'
+/**
+ * The seed byte of the per-visit key each standing generation's annex
+ * document lists under `capabilityDelegation`, and the one {@link annexGrant}
+ * signs with by default.
+ */
+const LISTED_VISIT_SEED = 6
 
 /**
  * An ISO time `days` from now.
@@ -452,31 +470,67 @@ async function accountSigners(): Promise<
 }
 
 /**
+ * The fragment of a verification method id, which the fixtures' ids carry as
+ * the key's multibase.
+ *
+ * @param vmId {string}
+ * @returns {string}
+ */
+function vmFragment(vmId: string): string {
+  return vmId.slice(vmId.indexOf('#') + 1)
+}
+
+/**
  * Each account key's multibase, the fragment of its verification method id.
  *
  * @returns {Promise<Record<AccountKeyName, string>>}
  */
 export async function accountKeys(): Promise<Record<AccountKeyName, string>> {
   const signers = await accountSigners()
-  const fragment = (signer: FixtureSigner): string =>
-    signer.id.slice(signer.id.indexOf('#') + 1)
   return {
-    client: fragment(signers.client),
-    ladder: fragment(signers.ladder),
-    struck: fragment(signers.struck)
+    client: vmFragment(signers.client.id),
+    ladder: vmFragment(signers.ladder.id),
+    struck: vmFragment(signers.struck.id)
   }
 }
 
 /**
  * The account signer check the agent grant fixtures verify against: the
  * enrolled client as the one current signing key, the client and the ladder
- * VM under `capabilityDelegation`, and the pointer naming {@link ANNEX_DID}.
+ * VM under `capabilityDelegation`, the pointer naming {@link ANNEX_DID}, and
+ * the annex-document resolver the wallet supplies. The resolver resolves the
+ * pointed generation and the superseded {@link STANDING_ANNEX_DID} to a
+ * document listing the default visit key under `capabilityDelegation`, and
+ * any other generation (the collected one) to `undefined`.
  *
  * @returns {Promise<AccountSignerCheck>}
  */
 export async function fixtureSignerCheck(): Promise<AccountSignerCheck> {
   const { client, ladder } = await accountSigners()
   const keys = await accountKeys()
+  const annexDocument = async ({
+    clientAnnexDid
+  }: {
+    clientAnnexDid: string
+  }) => {
+    if (clientAnnexDid !== ANNEX_DID && clientAnnexDid !== STANDING_ANNEX_DID) {
+      return undefined
+    }
+    const visit = await signerOf({
+      seedByte: LISTED_VISIT_SEED,
+      did: clientAnnexDid
+    })
+    return {
+      id: clientAnnexDid,
+      verificationMethod: [
+        {
+          id: visit.id,
+          publicKeyMultibase: vmFragment(visit.id)
+        }
+      ],
+      capabilityDelegation: [visit.id]
+    } as never
+  }
   return {
     accountDid: ACCOUNT_DID,
     currentSigningKeys: new Set([keys.client]),
@@ -488,7 +542,8 @@ export async function fixtureSignerCheck(): Promise<AccountSignerCheck> {
       ],
       capabilityDelegation: [client.id, ladder.id]
     },
-    clientAnnexDid: ANNEX_DID
+    clientAnnexDid: ANNEX_DID,
+    annexDocument
   } as unknown as AccountSignerCheck
 }
 
@@ -625,6 +680,9 @@ export async function rootGrant({
  * @param [options.parentId] {string}
  * @param [options.parentController] {string}   the annex DID
  * @param [options.parentSigner] {AccountKeyName}   the parent's signing key
+ * @param [options.visitSeed] {number}   the seed byte of the per-visit key
+ *   that signs the leaf; the default is the one the generation's annex
+ *   document lists, any other is a key it never listed
  * @returns {Promise<Record<string, unknown>>}
  */
 export async function annexGrant({
@@ -635,7 +693,8 @@ export async function annexGrant({
   expires = inDays(300),
   parentId = POINTED_DELEGATION,
   parentController = ANNEX_DID,
-  parentSigner = 'ladder'
+  parentSigner = 'ladder',
+  visitSeed = LISTED_VISIT_SEED
 }: {
   id: string
   controller?: string
@@ -645,6 +704,7 @@ export async function annexGrant({
   parentId?: string
   parentController?: string
   parentSigner?: AccountKeyName
+  visitSeed?: number
 }): Promise<Record<string, unknown>> {
   const parent = await generationDelegation({
     id: parentId,
@@ -660,7 +720,7 @@ export async function annexGrant({
       allowedAction: actions,
       expires
     },
-    signer: await signerOf({ seedByte: 6, did: parentController }),
+    signer: await signerOf({ seedByte: visitSeed, did: parentController }),
     capabilityChain: [ROOT, parent]
   })
 }
@@ -764,7 +824,10 @@ export function fakeZcapClient({
       const parent = options.capability as { id: string; controller: string }
       return await signedDelegation({
         zcap: { ...zcap, parentCapability: parent.id },
-        signer: await signerOf({ seedByte: 6, did: parent.controller }),
+        signer: await signerOf({
+          seedByte: LISTED_VISIT_SEED,
+          did: parent.controller
+        }),
         capabilityChain: [ROOT, options.capability]
       })
     }

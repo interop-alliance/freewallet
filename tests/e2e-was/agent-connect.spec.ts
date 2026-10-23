@@ -31,19 +31,30 @@ import { test, expect } from '../shared/consoleCapture'
  * an audience collection (`posts`, plaintext) holding one post.
  *
  * The run is one account and one double, in order: the whole connect
- * sequence and a forced renewal, a subscriber child of the renewed grant,
- * the outbox surviving a failed push, the inbox grant's reach, the signed
- * request refusals, an agent revoke, and the same agent returning. Each
- * "next login" is a fresh transient login on the same page, whose login
- * tail runs the inbox pass: the drain, the renewal, and the outbox push.
+ * sequence and a forced renewal whose push first fails and is then
+ * delivered from the outbox, a subscriber child of the renewed grant, the
+ * inbox grant's reach, the signed request refusals, an agent revoke, and
+ * the same agent returning. Each "next login" is a fresh transient login on
+ * the same page, whose login tail runs the inbox pass: the drain, the
+ * renewal, and the outbox push.
  *
- * A near-expiry is forced by editing the recorded grants' `expires` on the
- * agent's `connections` entry through the live session (the renewal reads
- * the recorded expiry, and its window is a build-time setting), then
- * putting the original values back once the renewal has superseded them.
+ * The one renewal is forced through two non-production seams. The consent
+ * mints its agent grants under a short share TTL
+ * (`window.__E2E_SHARE_ZCAP_TTL_MS__`, 100 days: outside the 90-day renewal
+ * window, and well inside the year-long generation delegation every
+ * transient grant chains under, so a renewal minted under that same
+ * delegation can outlast them). The renewing login then reads every
+ * recorded grant as due through the renewal-window seam
+ * (`window.__E2E_AGENT_GRANT_RENEWAL_WINDOW_MS__`), set on the page ahead
+ * of that one submit. The recorded grants themselves are never edited: the
+ * renewal verifies each grant's own signature over the capability, so an
+ * edited `expires` would read as a forged leaf and renew nothing. A second
+ * renewal cannot be forced, since the first already runs to the generation
+ * delegation's own expiry.
  */
 
 const APP_URL = 'http://localhost:5274'
+const DAY_MS = 24 * 60 * 60 * 1000
 const AGENT_NAME = 'e2e-connect-agent'
 const AUDIENCE_ID = 'posts'
 const POST_ID = 'post-1'
@@ -154,87 +165,6 @@ async function readAgentEntry({
 }
 
 /**
- * Rewrites the recorded `expires` of the named grants on the agent's entry,
- * through the live session's directory store under a compare-and-swap.
- * Returns the values it replaced, by zcap id.
- *
- * @param options {object}
- * @param options.page {Page}
- * @param options.did {string}
- * @param options.expires {Record<string, string>}   the new value per zcap id
- * @returns {Promise<Record<string, string>>}
- */
-async function rewriteGrantExpiry({
-  page,
-  did,
-  expires
-}: {
-  page: Page
-  did: string
-  expires: Record<string, string>
-}): Promise<Record<string, string>> {
-  return await page.evaluate(
-    async ({ agentDid, next }) => {
-      const storage = (
-        window as unknown as {
-          __E2E_STORAGE__?: {
-            connectionsDirectory(): Promise<{
-              store: {
-                list(): Promise<Array<{
-                  resourceId: string
-                  body?: unknown
-                }> | null>
-                get(options: {
-                  resourceId: string
-                }): Promise<{ body: unknown; etag?: string } | undefined>
-                put(options: {
-                  resourceId: string
-                  body: Record<string, unknown>
-                  ifMatch?: string
-                }): Promise<unknown>
-              }
-            }>
-          }
-        }
-      ).__E2E_STORAGE__
-      if (!storage) {
-        throw new Error('No session published __E2E_STORAGE__ on this page.')
-      }
-      const { store } = await storage.connectionsDirectory()
-      const listed = ((await store.list()) ?? []).find(({ body }) => {
-        const entry = (body ?? {}) as { kind?: string; id?: string }
-        return entry.kind === 'agent' && entry.id === agentDid
-      })
-      if (!listed) {
-        throw new Error('The directory holds no entry for the agent.')
-      }
-      const stored = await store.get({ resourceId: listed.resourceId })
-      if (!stored) {
-        throw new Error('The agent entry is gone.')
-      }
-      const body = structuredClone(stored.body) as {
-        grants: Array<{ zcap: { id: string; expires: string } }>
-      }
-      const replaced: Record<string, string> = {}
-      for (const grant of body.grants) {
-        const value = next[grant.zcap.id]
-        if (value !== undefined) {
-          replaced[grant.zcap.id] = grant.zcap.expires
-          grant.zcap.expires = value
-        }
-      }
-      await store.put({
-        resourceId: listed.resourceId,
-        body: body as unknown as Record<string, unknown>,
-        ...(stored.etag !== undefined && { ifMatch: stored.etag })
-      })
-      return replaced
-    },
-    { agentDid: did, next: expires }
-  )
-}
-
-/**
  * The account Space URL and id of the live session.
  *
  * @param page {Page}
@@ -305,14 +235,18 @@ async function createAudience(page: Page): Promise<void> {
  * @param options {object}
  * @param options.page {Page}
  * @param options.interactionUrl {string}
+ * @param [options.shareTtlMs] {number}   the share TTL seam to set before
+ *   approving, so the minted grants take that lifetime
  * @returns {Promise<void>}
  */
 async function approveRequest({
   page,
-  interactionUrl
+  interactionUrl,
+  shareTtlMs
 }: {
   page: Page
   interactionUrl: string
+  shareTtlMs?: number
 }): Promise<void> {
   await page.goto('/#/dashboard')
   await page.goto(`/#${externalRequestPath({ url: interactionUrl })}`)
@@ -322,6 +256,15 @@ async function approveRequest({
   await expect(
     page.getByText(`An agent calling itself "${AGENT_NAME}"`)
   ).toBeVisible()
+  if (shareTtlMs !== undefined) {
+    // The share TTL seam, read by the mint at approval; the hash routes
+    // above reload nothing, so it stands until the next reload.
+    await page.evaluate((ttlMs: number) => {
+      ;(
+        window as unknown as { __E2E_SHARE_ZCAP_TTL_MS__?: number }
+      ).__E2E_SHARE_ZCAP_TTL_MS__ = ttlMs
+    }, shareTtlMs)
+  }
   await page.getByRole('button', { name: 'Grant access' }).click()
   await expect(page.getByText('Access granted', { exact: false })).toBeVisible({
     timeout: 60_000
@@ -399,12 +342,31 @@ test.describe.serial('agent connection over the interaction URL', () => {
   /**
    * A fresh transient login on the same page: the reload drops the
    * in-memory session, and the wait covers the login tail's inbox pass.
+   * With `renewAll`, the renewal-window seam is set on the reloaded page
+   * ahead of the submit, so that one login's pass finds every recorded
+   * agent grant due; the next reload clears it.
    *
+   * @param [options] {object}
+   * @param [options.renewAll] {boolean}
    * @returns {Promise<void>}
    */
-  async function nextLogin(): Promise<void> {
+  async function nextLogin({
+    renewAll = false
+  }: { renewAll?: boolean } = {}): Promise<void> {
     await page.goto('/#/login')
     await page.reload()
+    if (renewAll) {
+      await page.evaluate(
+        (windowMs: number) => {
+          ;(
+            window as unknown as {
+              __E2E_AGENT_GRANT_RENEWAL_WINDOW_MS__?: number
+            }
+          ).__E2E_AGENT_GRANT_RENEWAL_WINDOW_MS__ = windowMs
+        },
+        10 * 365 * DAY_MS
+      )
+    }
     await submitTransientLogin(page, passphrase)
     await awaitLoginChain(page)
   }
@@ -436,25 +398,6 @@ test.describe.serial('agent connection over the interaction URL', () => {
     return entry!
   }
 
-  /**
-   * Moves every grant recorded on the agent's entry inside the renewal
-   * window, returning the values to put back once a renewal has superseded
-   * them. Every record moves, not only the latest per scope: a record left
-   * with its far expiry would become the latest and hide the rest.
-   *
-   * @returns {Promise<Record<string, string>>}
-   */
-  async function forceNearExpiry(): Promise<Record<string, string>> {
-    const soon = new Date(Date.now() + 2 * 60 * 60 * 1000).toISOString()
-    const ids = (await agentEntry()).grants.map(grant => grant.zcapId)
-    expect(ids.length).toBeGreaterThanOrEqual(2)
-    return await rewriteGrantExpiry({
-      page,
-      did: double.connectionKey.id,
-      expires: Object.fromEntries(ids.map(id => [id, soon]))
-    })
-  }
-
   test.beforeAll(async ({ browser }, testInfo) => {
     test.setTimeout(300_000)
     context = await browser.newContext({ baseURL: APP_URL })
@@ -474,7 +417,7 @@ test.describe.serial('agent connection over the interaction URL', () => {
     await context?.close()
   })
 
-  test('connects, stores the channel at the next login, and renews a near-expiry grant', async () => {
+  test('connects, stores the channel at the next login, and renews a due grant past a failed push', async () => {
     const challenge = crypto.randomUUID()
     const request = await double.connectionRequest({
       audienceUrls: [audienceUrl],
@@ -484,7 +427,7 @@ test.describe.serial('agent connection over the interaction URL', () => {
     const { exchangeUrl, interactionUrl } = await double.storeRequest({
       request
     })
-    await approveRequest({ page, interactionUrl })
+    await approveRequest({ page, interactionUrl, shareTtlMs: 100 * DAY_MS })
 
     // The double verifies the response before delegating anything to its
     // holder.
@@ -529,15 +472,49 @@ test.describe.serial('agent connection over the interaction URL', () => {
     ])
     expect(await ownerInbox()).toEqual([])
 
-    // A forced near-expiry: the next login renews both grants and pushes
-    // them through the channel into the double's inbox.
-    const originals = await forceNearExpiry()
+    // A forced renewal: the next login renews both grants and pushes them
+    // through the channel into the double's inbox. The double's server
+    // answers that first push with a 503, so the renewal waits on the
+    // entry's outbox.
+    let refusedPushes = 0
+    await page.route(
+      url => url.pathname.startsWith(`/space/${double.spaceId}/inbox`),
+      async route => {
+        if (route.request().method() === 'POST' && refusedPushes === 0) {
+          refusedPushes += 1
+          await route.fulfill({
+            status: 503,
+            headers: { 'access-control-allow-origin': '*' },
+            body: 'unavailable'
+          })
+          return
+        }
+        await route.fallback()
+      }
+    )
+    await nextLogin({ renewAll: true })
+    expect(refusedPushes).toBe(1)
+    expect(await double.readOwnInbox()).toEqual([])
+    const queued = await agentEntry()
+    expect(queued.outbox).toHaveLength(1)
+    const queuedIds = queued.outbox[0]!.zcapIds
+    expect(queuedIds).toHaveLength(2)
+
+    // The double's server recovers; the next pass delivers the queued
+    // envelope, once, and mints nothing new (the renewed records are not
+    // due).
+    await page.unrouteAll()
     await nextLogin()
     const messages = await double.readOwnInbox()
     expect(messages).toHaveLength(1)
     const [message] = messages
     expect(message!.createdBy).toBe(holder)
     expect((message!.body as { actor?: string }).actor).toBe(holder)
+    const delivered = (
+      message!.body as { object?: { zcaps?: IZcap[] } }
+    ).object?.zcaps?.map(zcap => zcap.id)
+    expect(delivered?.sort()).toEqual([...queuedIds].sort())
+    expect(double.repeatedDeliveries).toBe(0)
     const renewed = [...double.adopted.values()]
     expect(renewed).toHaveLength(2)
     const audience = renewed.find(zcap => zcap.invocationTarget === audienceUrl)
@@ -556,13 +533,6 @@ test.describe.serial('agent connection over the interaction URL', () => {
     expect(
       after.grants.filter(grant => grant.renewedAt !== undefined).length
     ).toBe(2)
-    // The edited records go back to what the consent minted, so a later
-    // revocation posts them as they were signed.
-    await rewriteGrantExpiry({
-      page,
-      did: double.connectionKey.id,
-      expires: originals
-    })
 
     // The double invokes the renewed grant and reads the post.
     expect(await readPost({ double, grant: renewedAudience })).toEqual(POST)
@@ -608,64 +578,6 @@ test.describe.serial('agent connection over the interaction URL', () => {
           doc.kind === 'resource' && (doc as { id?: string }).id === POST_ID
       )
     ).toBe(true)
-  })
-
-  test('a failed push keeps the renewal queued, and the next pass delivers it once', async () => {
-    const originals = await forceNearExpiry()
-
-    // The double's server answers the first push with a 503.
-    let refusedPushes = 0
-    await page.route(
-      url => url.pathname.startsWith(`/space/${double.spaceId}/inbox`),
-      async route => {
-        if (route.request().method() === 'POST' && refusedPushes === 0) {
-          refusedPushes += 1
-          await route.fulfill({
-            status: 503,
-            headers: { 'access-control-allow-origin': '*' },
-            body: 'unavailable'
-          })
-          return
-        }
-        await route.fallback()
-      }
-    )
-    await nextLogin()
-    expect(refusedPushes).toBe(1)
-    expect(await double.readOwnInbox()).toEqual([])
-    const queued = await agentEntry()
-    expect(queued.outbox).toHaveLength(1)
-    const queuedIds = queued.outbox[0]!.zcapIds
-    expect(queuedIds).toHaveLength(2)
-    await rewriteGrantExpiry({
-      page,
-      did: double.connectionKey.id,
-      expires: originals
-    })
-
-    // The double's server recovers; the next pass delivers the queued
-    // envelope, once.
-    await page.unrouteAll()
-    await nextLogin()
-    const messages = await double.readOwnInbox()
-    expect(messages).toHaveLength(1)
-    const delivered = (
-      messages[0]!.body as { object?: { zcaps?: IZcap[] } }
-    ).object?.zcaps?.map(zcap => zcap.id)
-    expect(delivered?.sort()).toEqual([...queuedIds].sort())
-    expect(double.repeatedDeliveries).toBe(0)
-    for (const id of queuedIds) {
-      expect(double.adopted.has(id)).toBe(true)
-    }
-    expect((await agentEntry()).outbox).toEqual([])
-    const deliveredZcaps = queuedIds.map(id => double.adopted.get(id)!)
-    renewedAudience = deliveredZcaps.find(
-      zcap => zcap.invocationTarget === audienceUrl
-    )!
-    inboxGrant = deliveredZcaps.find(zcap =>
-      zcap.invocationTarget.endsWith('/inbox/')
-    )!
-    expect(await readPost({ double, grant: renewedAudience })).toEqual(POST)
   })
 
   test('the inbox grant posts on the container', async () => {

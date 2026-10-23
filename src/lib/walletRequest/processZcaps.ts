@@ -132,6 +132,7 @@ import type { IDID } from '@interop/data-integrity-core'
 import type { CollectionGenerator, IDelegatedZcap } from '@interop/was-client'
 import type { ICapabilityQueryDetail, IZcap } from './types'
 import { granteeRecipientId } from '@/lib/zcap'
+import { forcedShareZcapTtlMs } from '@/lib/e2eSeams'
 import { isInboxDescriptor } from './connectionRequest'
 
 /**
@@ -1460,7 +1461,8 @@ export function resolveGrants({
  *   RP_ZCAP_WRITE_TTL_MS (shorter than the read TTL)
  * @param [options.shareTtlMs] {number}   share grant lifetime; defaults to
  *   SHARE_ZCAP_TTL_MS (deliberately long -- the settings panel, not expiry, is
- *   the removal mechanism for a share)
+ *   the removal mechanism for a share), or to the lifetime the agent-connect
+ *   e2e forces on the consent page
  * @param [options.app] {{ name: string, origin: string, appUrl: string }}
  *   present only on the App Connect path: the name and origin are recorded on
  *   each share activity so the settings panel can name the app instead of
@@ -1493,7 +1495,7 @@ export async function processZcaps({
   session,
   ttlMs = RP_ZCAP_TTL_MS,
   writeTtlMs = RP_ZCAP_WRITE_TTL_MS,
-  shareTtlMs = SHARE_ZCAP_TTL_MS,
+  shareTtlMs = forcedShareZcapTtlMs() ?? SHARE_ZCAP_TTL_MS,
   app,
   agent,
   requestKind,
