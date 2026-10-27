@@ -96,8 +96,11 @@ fresh mint would orphan the app's prior identity. Undecryptable Resources are pu
 the Applications page; the other two kinds stay unpurged.
 
 Which bucket a Resource lands in is decided by the error's NAME rather than by
-`instanceof`, through `isUnknownEpochError` and `isKeyUnwrapError`
-(`@interop/was-client/sync`, the latter also on `/edv`). The cipher is an
+`instanceof`, through `isIntegrityError`, `isUnknownEpochError`, and
+`isKeyUnwrapError` (`@interop/was-client/sync`, the latter two also on
+`/edv`). The integrity check is asked first, and it also catches a key epoch
+entry that names this wallet but fails its key-wrap check, which was-client
+raises as `IntegrityError` on the first decrypt under that epoch. The cipher is an
 injected seam, so a second resolved copy of `@interop/was-client` throws a
 class the store did not import, and a missed `KeyUnwrapError` would put real
 data in the purgeable bucket. The push handler classifies its `412` the same

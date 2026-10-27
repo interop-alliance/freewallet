@@ -965,14 +965,16 @@ describe('replica-less remote-direct StorageManager', () => {
     }
   })
 
-  it('fails the session build on a recipient entry that does not unwrap', async () => {
+  it('refuses a collection whose recipient entry does not unwrap, as tampered', async () => {
     const owner = await generateVaultKeys()
     const { remoteStore, descriptorLogs, descriptors, provision, seed } =
       makeFakeRemote()
     await provision(owner)
     // The reader IS named in the current epoch, but its entry is corrupt.
-    // The build throws `KeyUnwrapError` just as a stranded collection's
-    // would, and fails loudly since this is not the stranded shape.
+    // The build raises `IntegrityError` (a real tampered entry, not a
+    // mocked one), the session is still built, and the collection gets a
+    // refusing cipher of the integrity kind: not stranded, since no cascade
+    // converges a tampered entry, and listed as integrity-refused.
     const corrupt = structuredClone(descriptors['private-credentials'])
     const epoch = corrupt.epochs!.find(
       entry => entry.id === corrupt.currentEpoch
@@ -1003,20 +1005,19 @@ describe('replica-less remote-direct StorageManager', () => {
       .spyOn(WASRemoteStore, 'initClient')
       .mockResolvedValue({ remoteStore })
     try {
+      const { storage } = await StorageManager.initStorageClients({
+        user,
+        session: { profile, persistence },
+        descriptorLogs
+      })
+      expect(storage.strandedCollectionIds).toEqual([])
+      expect(storage.integrityRefusedCollectionIds).toEqual([
+        'private-credentials'
+      ])
+      await expect(storage.listCredentials()).resolves.toEqual([])
       await expect(
-        StorageManager.initStorageClients({
-          user,
-          session: { profile, persistence },
-          descriptorLogs
-        })
-      ).rejects.toThrow(
-        expect.objectContaining({
-          name: 'KeyUnwrapError',
-          cause: expect.objectContaining({
-            message: expect.stringMatching(/corrupt entry/)
-          })
-        })
-      )
+        storage.addCredential({ credential: makeCredential('Ada'), user })
+      ).rejects.toMatchObject({ name: 'IntegrityError' })
     } finally {
       initClientSpy.mockRestore()
     }

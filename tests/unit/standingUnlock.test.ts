@@ -18,7 +18,12 @@ import { KEYRING_KDF } from '@interop/wallet-core/keyring'
 import { ladderRung } from '@interop/wallet-core/webvh'
 import { transientSessionStores } from '@/session/persistence'
 
-vi.mock('@/session/accountCeremonyContext', () => ({
+vi.mock('@/session/accountCeremonyContext', async importOriginal => ({
+  // The real projection-store pick: the enrolled kind hands its own id
+  // store, so the stub's is what the publish receives.
+  ceremonyProjectionStore: (
+    await importOriginal<typeof import('@/session/accountCeremonyContext')>()
+  ).ceremonyProjectionStore,
   enrolledCeremonyContext: vi.fn(() => ({ pointer: POINTER })),
   requireEnrolledCeremonyContext: vi.fn(() => enrolledContextStub()),
   // The establishment resolves the ceremony context when the caller supplies

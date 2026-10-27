@@ -41,7 +41,7 @@ import {
   verifyAccountLog
 } from '@interop/wallet-core/webvh'
 import type {
-  DelegatedWebvhLogStore,
+  AccountLogStore,
   PublishedKeyDocument
 } from '@interop/wallet-core/webvh'
 import { ID_COLLECTION } from '@interop/wallet-core/space'
@@ -794,7 +794,7 @@ export async function renewTransientGenerationDelegation({
  *   pins; the store carries the account log's slot
  * @param options.serviceDescription {ServiceDescription}   the server's
  *   discovered service description, so the client skips discovery
- * @returns {DelegatedWebvhLogStore}
+ * @returns {AccountLogStore}
  */
 export function didWebProjectionStore({
   host,
@@ -808,8 +808,8 @@ export function didWebProjectionStore({
   invoker: () => { zcapClient: ZcapClient; capability?: IZcap }
   pinStore: ResourceLogPinStore
   serviceDescription: ServiceDescription
-}): DelegatedWebvhLogStore {
-  const storeNow = (): DelegatedWebvhLogStore => {
+}): AccountLogStore {
+  const storeNow = (): AccountLogStore => {
     const { zcapClient, capability } = invoker()
     if (!capability) {
       throw new Error(

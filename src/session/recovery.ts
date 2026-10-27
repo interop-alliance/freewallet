@@ -135,7 +135,7 @@ import {
   wrapUnlockRecord,
   zcapExpiring,
   type RecoveryClient,
-  type RecoveryLogStore,
+  type AccountLogStore,
   type RecoverySpendRetirement,
   type UnlockRecordProofState
 } from '@interop/wallet-core/recovery'
@@ -183,6 +183,7 @@ import {
 import {
   accountCeremonyContext,
   canRunUserKeyCeremonies,
+  ceremonyProjectionStore,
   requireEnrolledCeremonyContext,
   type AccountCeremonyContext
 } from '@/session/accountCeremonyContext'
@@ -654,6 +655,8 @@ export async function issueRecoveryCode({
       // and the authority half publishes the ladder's VM.
       ladderSeed: client.ladderSeed,
       part,
+      // The post-bind did:web projection, PUT after the entry lands.
+      projectionStore: ceremonyProjectionStore({ context }),
       expectedDid: pointer.did
     })
     invalidateVerifiedLog({ profile: session.profile })
@@ -697,7 +700,7 @@ export async function issueRecoveryCode({
  * @param options.client {RecoveryClient}
  * @param options.serviceDescription {ServiceDescription}   the server's
  *   discovered service description, so the store's client skips discovery
- * @returns {RecoveryLogStore}
+ * @returns {AccountLogStore}
  */
 function delegatedLogStore({
   pointer,
@@ -711,7 +714,7 @@ function delegatedLogStore({
   client: RecoveryClient
   pinStore: ResourceLogPinStore
   serviceDescription: ServiceDescription
-}): RecoveryLogStore {
+}): AccountLogStore {
   // The shared delegated store (public log GET + bridge-delegated PUT),
   // invoked with the code-derived did:key client, carrying the ceremony's
   // chain-head pins.
@@ -1773,8 +1776,11 @@ export async function recoverAccountWithCode({
       // can open every epoch whether or not the spent code's wraps survive.
       ownerKeyAgreementKey: newClientAgents.keyAgreementKey
     })
+    // The just-published client invokes as the controller, so its own store
+    // writes the post-bind did:web projection after the entry.
+    const newClientIdStore = remoteStore.webvhIdStore()
     await publishUnlockKey({
-      idStore: remoteStore.webvhIdStore(),
+      idStore: newClientIdStore,
       signer: { kind: 'enrolled', updateKeys: newClientUpdateSeeds },
       unlockKeys: {
         keyAgreement: {
@@ -1786,6 +1792,7 @@ export async function recoverAccountWithCode({
         updateKeyMultibase: newRung0.keyMultibase
       },
       ladderSeed: newLadderSeed,
+      projectionStore: newClientIdStore,
       expectedDid: pointer.did
     })
     standingEstablished = true
@@ -2429,14 +2436,18 @@ export async function resumeRecoverySpend({
           ladderSeed: standingLadderSeed,
           index: 0
         })
+        // This client invokes as the controller, so its own store writes the
+        // post-bind did:web projection after the entry.
+        const clientIdStore = remoteStore.webvhIdStore()
         await publishUnlockKey({
-          idStore: remoteStore.webvhIdStore(),
+          idStore: clientIdStore,
           signer: { kind: 'enrolled', updateKeys: clientKeys.webvhUpdateKeys },
           unlockKeys: {
             keyAgreement: { commitment },
             updateKeyMultibase: rung0.keyMultibase
           },
           ladderSeed: standingLadderSeed,
+          projectionStore: clientIdStore,
           expectedDid: did
         })
       }
@@ -3390,16 +3401,12 @@ async function revokeRecoveryCodeHeld({
     idStore,
     signer,
     recovery,
-    // The post-removal did:web projection, PUT immediately BEFORE the strike
-    // entry. A ladder-signed entry writes `did.jsonl` alone (all the bridge
-    // delegation allows), so without this the served `id/did.json` would keep
+    // The post-removal did:web projection's store. The strike entry writes
+    // `did.jsonl` alone, so without this the served `id/did.json` would keep
     // publishing the revoked code's key until a later visit's ensure caught
-    // it.
-    ...(context.kind === 'ladder'
-      ? {
-          projectionStore: context.projectionStore
-        }
-      : {}),
+    // it. The PUT lands immediately BEFORE the entry on the ladder branch and
+    // after it on the enrolled branch.
+    projectionStore: ceremonyProjectionStore({ context }),
     expectedDid: pointer.did
   })
   invalidateVerifiedLog({ profile: session.profile })

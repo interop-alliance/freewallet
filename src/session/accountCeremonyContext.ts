@@ -39,7 +39,8 @@ import {
 } from '@interop/wallet-core/webvh'
 import type {
   AccountLogSigner,
-  DelegatedWebvhLogStore
+  AccountLogStore,
+  DidWebProjectionStore
 } from '@interop/wallet-core/webvh'
 import {
   ladderVmAgent,
@@ -163,7 +164,7 @@ export interface LadderCeremonyContext extends CeremonyContextBase {
    * ceremony that strikes an inventory PUTs the post-strike projection
    * through this immediately before its own entry.
    */
-  readonly projectionStore: DelegatedWebvhLogStore
+  readonly projectionStore: AccountLogStore
   /**
    * the record's `delegatedClients` sibling: the one path into the annex
    */
@@ -189,6 +190,27 @@ export interface LadderCeremonyContext extends CeremonyContextBase {
 
 export type AccountCeremonyContext =
   EnrolledCeremonyContext | LadderCeremonyContext
+
+/**
+ * The store a ceremony's `did:web` projection is written through. The
+ * account-entry seam in wallet-core writes `did.json` through nothing but the
+ * `projectionStore` its caller hands in, on either arm, so every
+ * entry-writing ceremony hands this in: the enrolled arm's own
+ * controller-invoking log store, or the ladder arm's generation-delegated
+ * `id`-collection store. The seam decides the timing (before a ladder-signed
+ * strike, after every other entry) and the idempotent-path republish.
+ *
+ * @param options {object}
+ * @param options.context {AccountCeremonyContext}
+ * @returns {DidWebProjectionStore}
+ */
+export function ceremonyProjectionStore({
+  context
+}: {
+  context: AccountCeremonyContext
+}): DidWebProjectionStore {
+  return context.kind === 'ladder' ? context.projectionStore : context.idStore
+}
 
 /**
  * Which precondition a session misses, in the order they are checked.
@@ -558,7 +580,7 @@ export async function accountCeremonyContext({
   let ladderIdStore: WebvhIdStore | undefined
   let ladderRosterStore: SealableEncryptionDescriptorStore | undefined
   let ladderRosterCapability: IZcap | undefined
-  let ladderProjectionStore: DelegatedWebvhLogStore | undefined
+  let ladderProjectionStore: AccountLogStore | undefined
   // The live authority, read off the profile on every call rather than
   // snapshotted here: a ceremony that renews or replaces its generation
   // delegation mid-run must have every later request ride the replacement.

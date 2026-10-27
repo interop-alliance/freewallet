@@ -38,6 +38,23 @@ const state = vi.hoisted(() => ({
 }))
 
 /**
+ * An enrolled client's own id store, which doubles as its projection store:
+ * the enrolled arm PUTs `did.json` through it after the entry.
+ *
+ * @returns {object}
+ */
+function enrolledIdStore() {
+  return {
+    isWebvhIdStore: true,
+    getIdResourceRaw: vi.fn(async () => undefined),
+    putIdResource: vi.fn(async ({ content }: { content: string }) => {
+      state.calls.push('putDidWebProjection')
+      state.projectionPuts.push(JSON.parse(content))
+    })
+  }
+}
+
+/**
  * The post-strike did:web projection wallet-core derives from the entry it is
  * about to publish: the retired credential's members already gone.
  */
@@ -256,15 +273,23 @@ function ceremonyDriving({
   document
 }: { rotated?: boolean; document?: object } = {}) {
   return async (options: Parameters<typeof retireUnlockCredential>[0]) => {
-    // wallet-core PUTs the post-strike projection through the supplied store
-    // immediately BEFORE the strike entry publishes; the stand-in reproduces
-    // that placement.
-    await options.projectionStore?.putIdResource({
-      resourceId: 'did.json',
-      content: JSON.stringify(POST_STRIKE_WEB_DOC),
-      contentType: 'application/json'
-    })
+    // wallet-core PUTs the post-strike projection through the supplied store:
+    // immediately BEFORE the strike entry publishes on the ladder arm, after
+    // it on the enrolled arm. The stand-in reproduces both placements.
+    const putProjection = async () => {
+      await options.projectionStore?.putIdResource({
+        resourceId: 'did.json',
+        content: JSON.stringify(POST_STRIKE_WEB_DOC),
+        contentType: 'application/json'
+      })
+    }
+    if (options.signer.kind === 'ladder') {
+      await putProjection()
+    }
     state.calls.push('retireUnlockCredential')
+    if (options.signer.kind === 'enrolled') {
+      await putProjection()
+    }
     const userKey = rotated ? FRESH_USER_KEY : OLD_USER_KEY
     if (rotated) {
       await options.onUserKeyAdopted?.({
@@ -349,7 +374,7 @@ function sessionWith(
   const remoteStore =
     'remoteStore' in overrides
       ? overrides.remoteStore
-      : { webvhIdStore: vi.fn(() => ({ isWebvhIdStore: true })) }
+      : { webvhIdStore: vi.fn(() => enrolledIdStore()) }
   return {
     user: { id: 'did:key:z6MkRetiringClient' },
     isGuest: false,
@@ -461,7 +486,7 @@ describe('the ceremony hand-off', () => {
 
     expect(vi.mocked(retireUnlockCredential)).toHaveBeenCalledWith(
       expect.objectContaining({
-        idStore: { isWebvhIdStore: true },
+        idStore: expect.objectContaining({ isWebvhIdStore: true }),
         rosterStore: { rosterStore: true },
         // An enrolled client's context signs the retirement entry with its
         // own did:webvh update keys.
@@ -548,6 +573,7 @@ describe('the ceremony hand-off', () => {
       'loadUserKeyEpochPin',
       'invalidateVerifiedLog',
       'retireUnlockCredential',
+      'putDidWebProjection',
       'savePinFromDescriptor',
       'persistClientKeys',
       'invalidateVerifiedLog'
@@ -776,7 +802,7 @@ describe('the annex strike-or-swap stage', () => {
         accountSpaceId: POINTER.spaceId,
         wasServerUrl: POINTER.host,
         ladderSeed: SURVIVING_SEED,
-        idStore: { isWebvhIdStore: true },
+        idStore: expect.objectContaining({ isWebvhIdStore: true }),
         // The restating swap leaves the retired rung out.
         retiredLadderSeeds: [RETIRED_SEED]
       })
@@ -1064,16 +1090,23 @@ describe('the annex strike-or-swap stage', () => {
       )
     })
 
-    it('hands the enrolled kind no projection store of its own', async () => {
-      // An enrolled client's entry publishes `did.jsonl` beside its own
-      // projection, so wallet-core's client arm needs no store from here.
+    it('hands the enrolled kind its own id store as the projection store', async () => {
+      // An enrolled client's entry publishes `did.jsonl` through its own
+      // controller-invoking store, and the projection PUTs through the same
+      // store after the entry, so no delegated store is built here.
+      const session = sessionWith()
       await rotateOffUnlockCredential({
-        session: sessionWith(),
+        session,
         method: PASSPHRASE_METHOD,
         verb: 'changing the passphrase'
       })
       expect(vi.mocked(didWebProjectionStore)).not.toHaveBeenCalled()
-      expect(state.projectionPuts).toEqual([])
+      const options = vi.mocked(retireUnlockCredential).mock.calls[0]![0]
+      expect(options.projectionStore).toBe(options.idStore)
+      expect(state.projectionPuts).toEqual([POST_STRIKE_WEB_DOC])
+      expect(state.calls.indexOf('putDidWebProjection')).toBeGreaterThan(
+        state.calls.indexOf('retireUnlockCredential')
+      )
     })
 
     it("falls back to the acting credential's own sibling", async () => {
@@ -1143,6 +1176,7 @@ describe('the annex strike-or-swap stage', () => {
         'idStore',
         'onUserKeyAdopted',
         'pinnedEpochId',
+        'projectionStore',
         'retireClientAnnexInventory',
         'rosterStore',
         'signer',
@@ -1390,7 +1424,7 @@ describe('the retirement gate (WC-187)', () => {
     })
     expect(vi.mocked(preflightUnlockCredentialRetirement)).toHaveBeenCalledWith(
       expect.objectContaining({
-        idStore: { isWebvhIdStore: true },
+        idStore: expect.objectContaining({ isWebvhIdStore: true }),
         unlockKeys: {
           keyAgreement: { commitment },
           updateKeyMultibase: PASSPHRASE_METHOD.updateKeyMultibase

@@ -78,6 +78,11 @@ export function DashboardPage() {
   // takes no keys, so offering to delete it would let a host present
   // recoverable data as garbage and have the wallet destroy the evidence.
   const [integrityCount, setIntegrityCount] = useState(0)
+  // The credential collection refused whole: a key epoch entry naming this
+  // wallet failed its key-wrap check, so its cipher refuses every row. Told
+  // apart from the per-row integrity count above, which that refusal also
+  // feeds, since the one tampered entry is the collection's, not a row's.
+  const [integrityRefused, setIntegrityRefused] = useState(false)
   // Resources stored unencrypted in the encrypted credential collection. They
   // are refused rather than shown, and like the integrity ones get no remove
   // affordance: nothing about such a body says it is garbage.
@@ -120,6 +125,11 @@ export function DashboardPage() {
       setCredentials(vcs)
       setUndecryptableCount(session.storage.undecryptableCredentials)
       setIntegrityCount(session.storage.integrityCredentials)
+      setIntegrityRefused(
+        session.storage.integrityRefusedCollectionIds.includes(
+          PRIVATE_CREDENTIALS_COLLECTION
+        )
+      )
       setPlaintextCount(session.storage.plaintextCredentials)
       setLoadError(false)
     },
@@ -390,10 +400,16 @@ export function DashboardPage() {
         </Alert>
       )}
 
-      {integrityCount > 0 && (
+      {integrityRefused ? (
         <Alert severity="error" sx={{ mb: 2 }}>
-          {t('dashboard.integrity', { count: integrityCount })}
+          {t('dashboard.integrityRefused')}
         </Alert>
+      ) : (
+        integrityCount > 0 && (
+          <Alert severity="error" sx={{ mb: 2 }}>
+            {t('dashboard.integrity', { count: integrityCount })}
+          </Alert>
+        )
       )}
 
       {plaintextCount > 0 && (

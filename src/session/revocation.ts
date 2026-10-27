@@ -70,6 +70,7 @@ import {
 import type { UnlockMethodsRecord } from '@/session/unlockMethods'
 import {
   accountCeremonyContext,
+  ceremonyProjectionStore,
   type AccountCeremonyContext
 } from '@/session/accountCeremonyContext'
 import { assertNoPendingPassphraseEntry } from '@/session/forget'
@@ -365,17 +366,15 @@ async function revokeEnrolledClientHeld({
     idStore: context.idStore,
     signer: context.signer,
     revokedClient: client,
-    // The post-removal did:web projection, PUT immediately BEFORE the
-    // removal entry. A ladder-signed entry writes `did.jsonl` alone (the
-    // bridge delegation is a PUT on exactly that resource), so without this
-    // the served `id/did.json` would keep naming the client the log has
-    // struck -- a revocation bypass for a did:web verifier, though WAS
-    // authorization reads the log and never the projection. The store is
-    // aimed at the capability held at call time, since the renewal above may
-    // have replaced it.
-    ...(context.kind === 'ladder'
-      ? { projectionStore: context.projectionStore }
-      : {}),
+    // The post-removal did:web projection's store. The removal entry writes
+    // `did.jsonl` alone, so without this the served `id/did.json` would keep
+    // naming the client the log has struck -- a revocation bypass for a
+    // did:web verifier, though WAS authorization reads the log and never the
+    // projection. On the ladder branch the PUT lands immediately BEFORE the
+    // entry, through the capability held at call time, since the renewal
+    // above may have replaced it; on the enrolled branch it lands after,
+    // through this client's own controller-invoking store.
+    projectionStore: ceremonyProjectionStore({ context }),
     // The cascade's own did.jsonl read must resolve to the account the
     // session's pointer names.
     expectedDid: pointer.did,

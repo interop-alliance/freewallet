@@ -1166,8 +1166,15 @@ function makeNoEpochKeyCipher({ foreignRealm = false } = {}): DocCipher {
  *
  * @param [options.foreignRealm] {boolean}   raise the refusal from a second
  *   copy of the package instead of this one
+ * @param [options.tamperedEpoch] {boolean}   raise instead the
+ *   `IntegrityError` a lazily unwrapped read epoch raises when its recipient
+ *   entry names this wallet but fails its AES-KW check: the body is never
+ *   reached, the tamper signal comes from the key epoch
  */
-function makeMisboundCipher({ foreignRealm = false } = {}): DocCipher {
+function makeMisboundCipher({
+  foreignRealm = false,
+  tamperedEpoch = false
+} = {}): DocCipher {
   return {
     async encrypt({ data }: { data: Json }) {
       fakeCipherCounter += 1
@@ -1185,6 +1192,12 @@ function makeMisboundCipher({ foreignRealm = false } = {}): DocCipher {
       if (foreignRealm) {
         throw foreignRealmError('IntegrityError')
       }
+      if (tamperedEpoch) {
+        throw new IntegrityError(
+          'The recipient entry for epoch "urn:uuid:epoch-2" names this ' +
+            'reader but its wrapped key failed the AES-KW integrity check.'
+        )
+      }
       throw new IntegrityError(
         'Cannot decrypt this resource: the stored envelope is bound to a ' +
           `different resource id ("z6SealedFor") than the one requested ` +
@@ -1195,6 +1208,44 @@ function makeMisboundCipher({ foreignRealm = false } = {}): DocCipher {
 }
 
 describe('BrowserStore (misbound envelopes)', () => {
+  it('counts a row under a key epoch whose entry fails its key-wrap check as integrity, uncached and unpurged', async () => {
+    // was-client raises `IntegrityError` for a kid-matched recipient entry
+    // that fails its AES-KW check, on the first decrypt under that epoch. It
+    // is the same tamper signal as a misbound body: no refresh can change it,
+    // and purging it would destroy data a corrupt entry hides.
+    const { localStore } = await initLocalStore({
+      ciphers: {
+        privateCredentials: makeMisboundCipher({ tamperedEpoch: true }),
+        walletActivity: makeMisboundCipher({ tamperedEpoch: true })
+      }
+    })
+    await localStore.rxCollection('privateCredentials').insert({
+      id: 'z6UnderTamperedEpoch',
+      updatedAt: new Date().toISOString(),
+      data: {
+        id: 'z6UnderTamperedEpoch',
+        sequence: 0,
+        jwe: { ciphertext: JSON.stringify(makeCredential('Alice')) }
+      } as Json
+    })
+
+    expect(await localStore.listCredentials()).toHaveLength(0)
+    expect(localStore.integrityCredentials).toBe(1)
+    expect(localStore.noEpochKeyCredentials).toBe(0)
+    expect(localStore.undecryptableCredentials).toBe(0)
+    expect(localStore.unknownEpochCredentials).toBe(0)
+
+    // Not cached: the second read asks the cipher again and lands in the same
+    // bucket, rather than serving a remembered answer.
+    expect(await localStore.listCredentials()).toHaveLength(0)
+    expect(localStore.integrityCredentials).toBe(1)
+
+    expect(await localStore.purgeUndecryptableCredentials()).toBe(0)
+    expect(
+      await localStore.rxCollection('privateCredentials').find().exec()
+    ).toHaveLength(1)
+  })
+
   it('counts a misbound credential row apart from undecryptable and never purges it', async () => {
     // A misbound envelope takes no keys to produce: the host served one
     // resource's body under another's id. Bucketing it as purgeable garbage

@@ -64,7 +64,7 @@ import type { ServiceDescription } from '@interop/was-client'
 import {
   generateLadderSeed,
   publishUnlockKey,
-  type UnlockLogStore
+  type AccountLogStore
 } from '@interop/wallet-core/unlock'
 import type { ClientKeyRecord } from '@interop/wallet-core/keys'
 import {
@@ -105,6 +105,7 @@ import {
 import { WAS_BASE_URL } from '@/app.config'
 import {
   accountCeremonyContext,
+  ceremonyProjectionStore,
   requireEnrolledCeremonyContext,
   type AccountCeremonyContext
 } from '@/session/accountCeremonyContext'
@@ -148,7 +149,7 @@ const log = createLogger('fw:session:unlock')
  *   publish through it is checked against the pin and advances it
  * @param options.serviceDescription {ServiceDescription}   the server's
  *   discovered service description, so the store's client skips discovery
- * @returns {UnlockLogStore}
+ * @returns {AccountLogStore}
  */
 export function unlockLogStore({
   pointer,
@@ -162,7 +163,7 @@ export function unlockLogStore({
   zcapClient: ZcapClient
   pinStore: ResourceLogPinStore
   serviceDescription: ServiceDescription
-}): UnlockLogStore {
+}): AccountLogStore {
   return delegatedWebvhLogStore({
     host: pointer.host,
     spaceId: pointer.spaceId,
@@ -437,6 +438,8 @@ export async function establishStandingUnlock({
     await publishUnlockKey({
       idStore: ctx.idStore,
       signer: ctx.signer,
+      // The post-bind did:web projection, PUT after the entry lands.
+      projectionStore: ceremonyProjectionStore({ context: ctx }),
       unlockKeys: {
         keyAgreement: lowEntropy
           ? {
@@ -523,6 +526,8 @@ export async function establishStandingUnlock({
     await publishUnlockKey({
       idStore: ctx.idStore,
       signer: ctx.signer,
+      // The post-bind did:web projection, PUT after the entry lands.
+      projectionStore: ceremonyProjectionStore({ context: ctx }),
       unlockKeys: {
         keyAgreement: lowEntropy
           ? {
@@ -709,6 +714,7 @@ export async function establishClientAnnexGeneration({
     pointer
   })
   const serviceDescription = await wasServiceDescription()
+  const enrolledIdStore = remoteStore.webvhIdStore()
   const pointed = await ensurePointedClientAnnexGeneration({
     account: { did: pointer.did, doc: account.doc, log: account.log },
     wasServerUrl: pointer.host,
@@ -726,8 +732,11 @@ export async function establishClientAnnexGeneration({
         spaceId: pointer.spaceId,
         clientAnnexDid: generationDid
       }),
-    idStore: remoteStore.webvhIdStore(),
-    signer: { kind: 'enrolled', updateKeys: clientWebvhKeys }
+    idStore: enrolledIdStore,
+    signer: { kind: 'enrolled', updateKeys: clientWebvhKeys },
+    // The pointer entry republishes the did:web projection through this
+    // client's own controller-invoking store, as every enrolled entry does.
+    projectionStore: enrolledIdStore
   })
   const clientAnnexDid = pointed.clientAnnexDid
   if (pointed.generationMinted) {

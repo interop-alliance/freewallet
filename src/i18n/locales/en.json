@@ -527,6 +527,7 @@
     "strandedUnmended": "Your credentials are sealed to a key this visit could not catch up to, so they cannot be shown. Logging in again retries.",
     "integrity_one": "{{count}} credential failed its integrity check and is not shown. The storage server returned data that does not match the credential it was stored as. The credential has been left untouched.",
     "integrity_other": "{{count}} credentials failed their integrity check and are not shown. The storage server returned data that does not match the credentials they were stored as. They have been left untouched.",
+    "integrityRefused": "Your credentials cannot be shown. A key entry of their collection failed its integrity check, so the whole collection is refused until that entry is replaced. Nothing has been changed. If you did not expect this, contact your storage provider.",
     "plaintext_one": "{{count}} credential is stored unencrypted in an encrypted collection and is not shown. It has been left untouched.",
     "plaintext_other": "{{count}} credentials are stored unencrypted in an encrypted collection and are not shown. They have been left untouched.",
     "passkeySafety": {
@@ -811,6 +812,7 @@
       "causes": {
         "keyUnwrap": "No key from this backup opened the row.",
         "unknownEpoch": "The row names a key the backup does not carry.",
+        "integrity": "The item or a key entry of its collection failed its integrity check. It may be damaged or tampered with.",
         "chunked": "The item was stored in parts outside an encrypted app collection, which the import does not reassemble.",
         "notFound": "The item or one of its stored parts is missing from the backup.",
         "encryption": "The item does not match the key or location it was sealed for, or it was never finished writing.",

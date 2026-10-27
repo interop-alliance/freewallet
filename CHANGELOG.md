@@ -55,6 +55,15 @@
 
 ### Changed
 
+- Every entry-writing ceremony hands wallet-core's account-entry seam the
+  store its `did:web` projection is written through (`ceremonyProjectionStore`
+  on the ceremony context): the enrolled branch's own controller-invoking log
+  store, or the ladder branch's generation-delegated `id`-collection store.
+  Wallet-core no longer writes `did.json` through the log store by default, so
+  an enrolled client's passphrase bind, retirement, and recovery-code issuance
+  or revocation would otherwise leave the served projection lagging the log.
+  Needs wallet-core 0.108.0.
+
 - `currentAccountSignerCheck` no longer builds a `currentSigningKeys` set:
   wallet-core's `deriveGrantSignerState` and `agentConnectionsSignedBy` read
   the verified account document itself, so a recorded grant's signer is
@@ -171,6 +180,21 @@
   the transient block's tail, behind the registry-writing registrations, so
   `registryReady` does not wait on it. This closes the open gap for a
   credential-anchored account that never runs a remembered login.
+- A key epoch recipient entry that names this wallet but fails its key-wrap
+  check (`IntegrityError`, was-client 0.99.1) is handled as a tamper signal
+  at every cipher build. A standard collection whose build fails that way
+  gets a refusing cipher of the integrity kind, so the session is built, the
+  collection is not reported as stranded, and its rows are counted in the
+  integrity bucket and never purged. `integrityRefusedCollectionIds` lists
+  such collections, and the dashboard names a refused credential collection
+  under the new `dashboard.integrityRefused` string (English and Spanish)
+  in place of the per-row integrity count. The connections directory and an
+  app collection name the failure in one warn and keep the refusal cached
+  until a descriptor refresh. The index-schema install still degrades a
+  metadata envelope that fails its own check to a schema-less cipher, named
+  as such. The content migration report renders `IntegrityError` with its
+  own sentence (English and Spanish). Takes `@interop/was-client` through a
+  `link:` to the local checkout until 0.99.1 publishes.
 
 ## 0.44.0 - 2026-10-09
 

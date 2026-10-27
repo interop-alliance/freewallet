@@ -12,7 +12,12 @@
  * sealed under a KAK this wallet holds no key for raises `KeyUnwrapError`, and
  * a body that fails to authenticate or was served under an id it was not sealed
  * for raises `IntegrityError`, so `undecryptable` now names structural garbage
- * alone: an envelope that will not parse or decode at all.
+ * alone: an envelope that will not parse or decode at all. `IntegrityError`
+ * has a third source, the key epoch rather than the body: a descriptor
+ * recipient entry whose `kid` is this wallet's own key id but whose wrapped
+ * epoch key fails its AES-KW check, raised at the first decrypt under that
+ * epoch, or restated by the refusing cipher a build-time failure leaves. A
+ * malformed entry still raises `KeyUnwrapError`.
  */
 import {
   isIntegrityError,

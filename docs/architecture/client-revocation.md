@@ -103,11 +103,18 @@ is stranded when no key epoch on it names the current user key. Its cipher
 is built refusing, so the session serves every other collection and writes
 nothing under the epoch being retired. The refusal is a `KeyUnwrapError`,
 so a list read skips the collection's Resources and never offers them for
-removal. The fan-out rebuilds the ciphers whenever the session holds a
-stranded one, even when it rotated nothing itself, and the dashboard
-re-reads its credentials once `registryReady` settles. The post-rotation
-adoption installs no refusing cipher. A collection it cannot key makes it
-throw, and the session stays on its previous ciphers. The fan-out also
+removal. A collection whose epoch entry names the current user key but
+fails its key-wrap check is not stranded, since no cascade can converge a
+tampered entry. Its build raises `IntegrityError`, and it gets a refusing
+cipher of the integrity kind instead, so its rows are counted in the
+integrity bucket and never purged. A warn names the collection,
+`integrityRefusedCollectionIds` lists it, and the dashboard names a refused
+credential collection as such. The fan-out rebuilds the ciphers whenever
+the session holds a stranded one, even when it rotated nothing itself, and
+the dashboard re-reads its credentials once `registryReady` settles. The
+post-rotation adoption installs no refusing cipher. A collection it cannot
+key makes it throw, and the session stays on its previous ciphers. The
+fan-out also
 seals each collection descriptor log whose head anchors before the latest
 assertion-key removal, which closes the collection half of a forget
 ceremony's removal entry.

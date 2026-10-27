@@ -225,7 +225,12 @@ vi.mock('@/session/verifiedLog', () => ({
   })
 }))
 
-vi.mock('@/session/accountCeremonyContext', () => ({
+vi.mock('@/session/accountCeremonyContext', async importOriginal => ({
+  // The real projection-store pick, so the ladder kind's generation-delegated
+  // store is the one the orchestrator receives.
+  ceremonyProjectionStore: (
+    await importOriginal<typeof import('@/session/accountCeremonyContext')>()
+  ).ceremonyProjectionStore,
   accountCeremonyContext: vi.fn(async () => ladderContext())
 }))
 

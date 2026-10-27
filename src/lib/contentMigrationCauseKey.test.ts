@@ -46,6 +46,7 @@ function valueAt({ locale, key }: { locale: unknown; key: string }): unknown {
 const CAUSE_NAMES = [
   'KeyUnwrapError',
   'UnknownEpochError',
+  'IntegrityError',
   'ChunkedResourceUnsupportedError',
   'NotFoundError',
   'EncryptionError',

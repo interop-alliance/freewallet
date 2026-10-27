@@ -527,6 +527,7 @@
     "strandedUnmended": "Sus credenciales están selladas con una clave que esta visita no pudo alcanzar, así que no se pueden mostrar. Volver a iniciar sesión lo reintenta.",
     "integrity_one": "{{count}} credencial no superó su comprobación de integridad y no se muestra. El servidor de almacenamiento devolvió datos que no coinciden con la credencial guardada. La credencial no se ha modificado.",
     "integrity_other": "{{count}} credenciales no superaron su comprobación de integridad y no se muestran. El servidor de almacenamiento devolvió datos que no coinciden con las credenciales guardadas. No se han modificado.",
+    "integrityRefused": "Sus credenciales no se pueden mostrar. Una entrada de clave de su colección no superó su comprobación de integridad, así que toda la colección se rechaza hasta que esa entrada se reemplace. No se ha modificado nada. Si no esperaba esto, contacte a su proveedor de almacenamiento.",
     "plaintext_one": "{{count}} credencial está guardada sin cifrar en una colección cifrada y no se muestra. La credencial no se ha modificado.",
     "plaintext_other": "{{count}} credenciales están guardadas sin cifrar en una colección cifrada y no se muestran. No se han modificado.",
     "passkeySafety": {
@@ -811,6 +812,7 @@
       "causes": {
         "keyUnwrap": "Ninguna clave de esta copia abrió la fila.",
         "unknownEpoch": "La fila nombra una clave que la copia no incluye.",
+        "integrity": "El elemento o una entrada de clave de su colección no superó la comprobación de integridad. Puede estar dañado o manipulado.",
         "chunked": "El elemento se guardó en partes fuera de una colección de aplicación cifrada, y la importación no las vuelve a unir.",
         "notFound": "Falta en la copia el elemento o una de sus partes guardadas.",
         "encryption": "El elemento no coincide con la clave o la ubicación para la que se cifró, o su escritura nunca terminó.",

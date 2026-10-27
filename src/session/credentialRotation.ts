@@ -65,6 +65,7 @@ import {
 } from '@/session/annexReach'
 import {
   accountCeremonyContext,
+  ceremonyProjectionStore,
   type AccountCeremonyContext
 } from '@/session/accountCeremonyContext'
 import { sessionRosterStore } from '@/session/rosterStore'
@@ -351,17 +352,15 @@ async function rotateOffUnlockCredentialHeld({
     idStore: context.idStore,
     signer,
     unlockKeys: { keyAgreement, updateKeyMultibase },
-    // The post-strike did:web projection, PUT immediately BEFORE the strike
-    // entry. That entry publishes `did.jsonl` alone -- the bridge delegation
-    // a standing credential carries is a PUT on exactly that resource -- so
-    // without this the served `id/did.json` keeps naming the retired
-    // credential's `keyAgreement` entry and ladder VM, which a did:web
-    // verifier would accept. The store is aimed at the capability held at
-    // call time: the branch replaces its generation delegation before the
-    // strike lands.
-    ...(context.kind === 'ladder'
-      ? { projectionStore: context.projectionStore }
-      : {}),
+    // The post-strike did:web projection's store. The strike entry publishes
+    // `did.jsonl` alone, so without this the served `id/did.json` keeps
+    // naming the retired credential's `keyAgreement` entry and ladder VM,
+    // which a did:web verifier would accept. On the ladder branch the PUT
+    // lands immediately BEFORE the entry, and the store is aimed at the
+    // capability held at call time, since the branch replaces its generation
+    // delegation before the strike lands; on the enrolled branch it lands
+    // after, through this client's own controller-invoking store.
+    projectionStore: ceremonyProjectionStore({ context }),
     ...(ladders.retiredLadderSeed
       ? { ladderSeed: ladders.retiredLadderSeed }
       : {}),

@@ -32,6 +32,22 @@ const ACCOUNT_LOG = [
     parameters: {},
     state: {
       id: ACCOUNT_DID,
+      // Each member publishes its key: a reference nothing backs lists no
+      // client.
+      verificationMethod: [
+        {
+          id: `${ACCOUNT_DID}#${REVOKED_KEYS.signingKeyMultibase}`,
+          type: 'Multikey',
+          controller: ACCOUNT_DID,
+          publicKeyMultibase: REVOKED_KEYS.signingKeyMultibase
+        },
+        {
+          id: `${ACCOUNT_DID}#z6MkSecond`,
+          type: 'Multikey',
+          controller: ACCOUNT_DID,
+          publicKeyMultibase: 'z6MkSecond'
+        }
+      ],
       capabilityInvocation: [
         `${ACCOUNT_DID}#${REVOKED_KEYS.signingKeyMultibase}`,
         `${ACCOUNT_DID}#z6MkSecond`
@@ -87,6 +103,9 @@ vi.mock('@/session/accountCeremonyContext', () => ({
   ),
   canRunAccountCeremonies: vi.fn(() => true),
   enrolledCeremonyContext: vi.fn(() => null),
+  // The session under test holds neither authority kind, so the encounter
+  // runner behind the directory listing read admits its `none` entries only.
+  sessionAuthorityKind: vi.fn(() => undefined),
   sessionAnnexStanding: vi.fn(() => state.standing)
 }))
 

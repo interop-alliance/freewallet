@@ -45,6 +45,7 @@ import {
 } from '@interop/social-core'
 import type { RxCollection, RxStorage } from 'rxdb/plugins/core'
 import {
+  IntegrityError,
   KeyUnwrapError,
   isGovernedDescriptor,
   type CollectionEncryption,
@@ -81,7 +82,7 @@ import {
   sessionCollectionStores
 } from '@/session/collectionLogStore'
 import type { ControllerProfile, SessionCore, User } from '@/types/auth'
-import { cidFrom, contentCid } from '@interop/was-client/sync'
+import { cidFrom, contentCid, isIntegrityError } from '@interop/was-client/sync'
 import { equalBytes } from '@noble/ciphers/utils.js'
 import { classifyDecryptFailure } from '@/lib/decryptFailure'
 import { refreshingCollectionCipher } from '@/stores/refreshingCollectionCipher'
@@ -559,6 +560,14 @@ type DirectoryRefusal =
   | 'generator'
 
 /**
+ * Why a standard encrypted collection's installed cipher refuses, when the
+ * refusal is one a page reports: `stranded` when no key epoch names the
+ * vault KAK, `integrity` when an epoch entry naming it failed its key-wrap
+ * check. A missing-descriptor refusal is reported by neither.
+ */
+type CipherRefusal = 'stranded' | 'integrity'
+
+/**
  * The directory refusals the descriptor alone decides, with no read: an
  * absent descriptor, a stranded one, and one with no blinded-index key.
  *
@@ -974,10 +983,12 @@ export class StorageManager {
   // decrypt at the WAS seam (`decryptCollectionResource`) and rebuilt on a
   // descriptor refresh.
   #ciphers?: Record<string, DocCipher>
-  // The WAS ids of the encrypted collections whose current cipher refuses
-  // because no key epoch names the vault KAK (see `strandsReader`). Rewritten
-  // at every cipher (re)build, so it always describes the installed ciphers.
-  #strandedCollectionIds: string[]
+  // The encrypted collections whose current cipher refuses, by WAS id, and
+  // why: `stranded` when no key epoch names the vault KAK (see
+  // `strandsReader`), `integrity` when an epoch entry naming it failed its
+  // key-wrap check (`IntegrityError`). Rewritten at every cipher (re)build,
+  // so it always describes the installed ciphers.
+  #refusals: Record<string, CipherRefusal>
   // Told, fire-and-forget and with no argument, whenever a cipher rebuild
   // records a stranded collection. Set by the session binding after
   // construction (see `setOnStranded`), since the static factory runs before
@@ -1039,7 +1050,7 @@ export class StorageManager {
   #refreshPolicy = new DescriptorRefreshPolicy({
     refresh: async ({ collectionId }) => {
       if (ENCRYPTED_COLLECTION_IDS.includes(collectionId)) {
-        await this.#refreshDescriptors({ refuseStranded: true })
+        await this.#refreshDescriptors({ installRefusingCiphers: true })
       } else {
         // An app-provisioned collection: drop the cached descriptor and cipher so
         // the re-read rebuilds them from a fresh Description fetch.
@@ -1101,7 +1112,7 @@ export class StorageManager {
     localStore,
     remoteStore,
     ciphers,
-    strandedCollectionIds,
+    refusals,
     remoteDirect = false,
     vaultKeys,
     descriptors,
@@ -1114,7 +1125,7 @@ export class StorageManager {
     localStore?: BrowserStore
     remoteStore?: WASRemoteStore
     ciphers?: Record<string, DocCipher>
-    strandedCollectionIds?: string[]
+    refusals?: Record<string, CipherRefusal>
     remoteDirect?: boolean
     vaultKeys: {
       keyAgreementKey: IKeyAgreementKey
@@ -1130,7 +1141,7 @@ export class StorageManager {
     this.#localStore = localStore
     this.#remoteStore = remoteStore
     this.#ciphers = ciphers
-    this.#strandedCollectionIds = strandedCollectionIds ?? []
+    this.#refusals = refusals ?? {}
     this.#vaultKeys = vaultKeys
     this.#descriptors = descriptors ?? {}
     this.#metas = metas ?? {}
@@ -1195,7 +1206,35 @@ export class StorageManager {
    * @returns {string[]}
    */
   get strandedCollectionIds(): string[] {
-    return [...this.#strandedCollectionIds]
+    return this.#refusedCollectionIds({ refusal: 'stranded' })
+  }
+
+  /**
+   * The WAS ids of the standard encrypted collections whose current cipher
+   * refuses because a key epoch entry naming the vault KAK failed its
+   * key-wrap check (`IntegrityError`): the entry is tampered or corrupt. No
+   * cascade converges it, so the set is disjoint from
+   * {@link strandedCollectionIds} and fires no callback. A page reads it to
+   * tell a collection refused whole from a few misbound rows, which the
+   * integrity count reports. The refusal clears when a descriptor refresh
+   * rebuilds the ciphers from a replaced epoch.
+   *
+   * @returns {string[]}
+   */
+  get integrityRefusedCollectionIds(): string[] {
+    return this.#refusedCollectionIds({ refusal: 'integrity' })
+  }
+
+  /**
+   * @param options {object}
+   * @param options.refusal {CipherRefusal}
+   * @returns {string[]}   the WAS ids of the collections whose current
+   *   cipher refuses for that reason
+   */
+  #refusedCollectionIds({ refusal }: { refusal: CipherRefusal }): string[] {
+    return Object.entries(this.#refusals)
+      .filter(([, reason]) => reason === refusal)
+      .map(([id]) => id)
   }
 
   /**
@@ -1436,11 +1475,12 @@ export class StorageManager {
    * @param [options.refresh] {object}   the descriptor source and cache the
    *   contacts cipher's own unknown-epoch refresh re-reads through; absent
    *   when the session has no remote Space
-   * @param options.refuseStranded {boolean}   see
+   * @param options.installRefusingCiphers {boolean}   see
    *   {@link StorageManager.#buildCipher}
    * @returns {Promise<{ ciphers: Record<string, DocCipher>,
-   *   strandedCollectionIds: string[] }>}   the cipher map, keyed by logical
-   *   key, and the WAS ids of the collections given a stranded refusing cipher
+   *   refusals: Record<string, CipherRefusal> }>}   the cipher map, keyed by
+   *   logical key, and the collections given a refusing cipher, by WAS id,
+   *   with the reason
    */
   static async #buildCiphers({
     keyAgreementKey,
@@ -1448,7 +1488,7 @@ export class StorageManager {
     descriptors,
     metas,
     refresh,
-    refuseStranded
+    installRefusingCiphers
   }: {
     keyAgreementKey: IKeyAgreementKey
     keyResolver: IKeyResolver
@@ -1458,10 +1498,10 @@ export class StorageManager {
       source?: EncryptionDescriptorSource
       cache: EncryptionDescriptorCache
     }
-    refuseStranded: boolean
+    installRefusingCiphers: boolean
   }): Promise<{
     ciphers: Record<string, DocCipher>
-    strandedCollectionIds: string[]
+    refusals: Record<string, CipherRefusal>
   }> {
     const built = await Promise.all(
       ENCRYPTED_STANDARD_COLLECTIONS.map(collection =>
@@ -1472,7 +1512,7 @@ export class StorageManager {
           descriptor: descriptors?.[collection.id],
           meta: metas?.[collection.id],
           refresh,
-          refuseStranded
+          installRefusingCiphers
         })
       )
     )
@@ -1480,18 +1520,18 @@ export class StorageManager {
       ciphers: Object.fromEntries(
         built.map(({ key, cipher }) => [key, cipher])
       ),
-      strandedCollectionIds: [
-        ...ENCRYPTED_STANDARD_COLLECTIONS.filter(
-          (_collection, index) => built[index].stranded
-        ).map(({ id }) => id),
+      refusals: Object.fromEntries([
+        ...ENCRYPTED_STANDARD_COLLECTIONS.flatMap((collection, index) =>
+          built[index].refusal ? [[collection.id, built[index].refusal]] : []
+        ),
         ...(StorageManager.#directoryStranded({
           descriptor: descriptors?.[CONNECTIONS_COLLECTION],
           keyAgreementKey,
-          refuseStranded
+          installRefusingCiphers
         })
-          ? [CONNECTIONS_COLLECTION]
+          ? [[CONNECTIONS_COLLECTION, 'stranded']]
           : [])
-      ]
+      ])
     }
   }
 
@@ -1504,28 +1544,31 @@ export class StorageManager {
    * left out: the key is installed at provisioning or never, so no cascade
    * supplies one, and every directory operation refuses it anyway. An absent
    * one is not stranded, as a synced collection's missing descriptor is not.
-   * With
-   * `refuseStranded` false (the post-rotation adoption) a stranded directory
-   * throws `KeyUnwrapError` instead, as a synced collection the fan-out did
-   * not reach does, so the caller learns the adoption did not land.
+   * With `installRefusingCiphers` false (the post-rotation adoption) a
+   * stranded directory throws `KeyUnwrapError` instead, as a synced
+   * collection the fan-out did not reach does, so the caller learns the
+   * adoption did not land. An
+   * entry that fails its key-wrap check is not read here: the directory's
+   * cipher build raises it (`IntegrityError`) at the first directory call
+   * (see {@link #directoryKeysFor}).
    *
    * @param options {object}
    * @param [options.descriptor] {CollectionEncryption}
    * @param options.keyAgreementKey {IKeyAgreementKey}
-   * @param options.refuseStranded {boolean}
+   * @param options.installRefusingCiphers {boolean}
    * @returns {boolean}
    */
   static #directoryStranded({
     descriptor,
     keyAgreementKey,
-    refuseStranded
+    installRefusingCiphers
   }: {
     descriptor?: CollectionEncryption
     keyAgreementKey: IKeyAgreementKey
-    refuseStranded: boolean
+    installRefusingCiphers: boolean
   }): boolean {
     const refusal = directoryDescriptorRefusal({ descriptor, keyAgreementKey })
-    if (refusal === 'stranded' && !refuseStranded) {
+    if (refusal === 'stranded' && !installRefusingCiphers) {
       throw new KeyUnwrapError(
         `Collection "${CONNECTIONS_COLLECTION}" has no key epoch naming the ` +
           'adopted user key; the collection fan-out has not reached it.'
@@ -1557,11 +1600,16 @@ export class StorageManager {
    * @param [options.meta] {object}   the collection's stored `/meta` value
    * @param [options.refresh] {object}   the descriptor source and cache the
    *   contacts cipher's own unknown-epoch refresh re-reads through
-   * @param options.refuseStranded {boolean}   true gives a collection whose
-   *   epochs name no vault KAK (see `strandsReader`) a refusing cipher; false
-   *   lets its build throw `KeyUnwrapError`, as the post-rotation adoption
-   *   needs
-   * @returns {Promise<{ key: string, cipher: DocCipher, stranded: boolean }>}
+   * @param options.installRefusingCiphers {boolean}   true gives a
+   *   collection whose epochs name no vault KAK (see `strandsReader`) a
+   *   refusing cipher, and a collection whose entry for the vault KAK fails
+   *   its key-wrap check (`IntegrityError`) a refusing cipher of the
+   *   integrity kind; false lets either build failure throw, as the
+   *   post-rotation adoption needs
+   * @returns {Promise<{ key: string, cipher: DocCipher,
+   *   refusal?: CipherRefusal }>}   `refusal` names why a stranded or
+   *   integrity refusing cipher refuses, and is absent for a built cipher
+   *   and for the missing-descriptor refusal
    */
   static async #buildCipher({
     collection: { key, id, idDerivation },
@@ -1570,7 +1618,7 @@ export class StorageManager {
     descriptor,
     meta,
     refresh,
-    refuseStranded
+    installRefusingCiphers
   }: {
     collection: (typeof ENCRYPTED_STANDARD_COLLECTIONS)[number]
     keyAgreementKey: IKeyAgreementKey
@@ -1581,8 +1629,8 @@ export class StorageManager {
       source?: EncryptionDescriptorSource
       cache: EncryptionDescriptorCache
     }
-    refuseStranded: boolean
-  }): Promise<{ key: string; cipher: DocCipher; stranded: boolean }> {
+    installRefusingCiphers: boolean
+  }): Promise<{ key: string; cipher: DocCipher; refusal?: CipherRefusal }> {
     // Every encrypted collection carries its key epochs from
     // provisioning, so a missing (or epoch-less) descriptor -- an
     // unprovisioned or torn collection, or an offline session with
@@ -1594,11 +1642,13 @@ export class StorageManager {
     if (!descriptor?.epochs?.length) {
       return {
         key,
-        cipher: StorageManager.#refusingCipher({ collectionId: id }),
-        stranded: false
+        cipher: StorageManager.#refusingCipher({ collectionId: id })
       }
     }
-    if (refuseStranded && strandsReader({ descriptor, keyAgreementKey })) {
+    if (
+      installRefusingCiphers &&
+      strandsReader({ descriptor, keyAgreementKey })
+    ) {
       // No epoch names the current user key: a user key rotation torn
       // mid-fan-out left this collection on a retired generation. It gets a
       // refusing cipher rather than one built from the retired key, so this
@@ -1617,16 +1667,116 @@ export class StorageManager {
           collectionId: id,
           reason: 'stranded'
         }),
-        stranded: true
+        refusal: 'stranded'
       }
     }
+    try {
+      return {
+        key,
+        cipher: await StorageManager.#buildDescriptorCipher({
+          collection: { id, idDerivation },
+          keyAgreementKey,
+          keyResolver,
+          descriptor,
+          meta,
+          refresh
+        })
+      }
+    } catch (err) {
+      if (!installRefusingCiphers || !isIntegrityError(err)) {
+        throw err
+      }
+      return {
+        key,
+        cipher: StorageManager.#integrityRefusingCipher({
+          collectionId: id,
+          err
+        }),
+        refusal: 'integrity'
+      }
+    }
+  }
+
+  /**
+   * The cipher a collection gets when its build raised `IntegrityError`: the
+   * write epoch's entry names this wallet and fails its AES-KW check, or the
+   * blinded-index key's does. The entry is tampered or corrupt, so it is no
+   * stranding (a user key cascade cannot converge it) and no missing key.
+   * The refusing cipher restates the failure on every operation, so every
+   * row of the collection lands in the integrity bucket, counted and never
+   * purged, and the rest of the session is built. The one warn names the
+   * collection.
+   *
+   * @param options {object}
+   * @param options.collectionId {string}
+   * @param options.err {unknown}   the build failure
+   * @returns {DocCipher}
+   */
+  static #integrityRefusingCipher({
+    collectionId,
+    err
+  }: {
+    collectionId: string
+    err: unknown
+  }): DocCipher {
+    log.warn(
+      'A key epoch entry naming this wallet failed its key-wrap check; ' +
+        'refusing the collection as tampered until its epoch is replaced',
+      { collectionId, err }
+    )
+    return StorageManager.#refusingCipher({
+      collectionId,
+      reason: 'integrity',
+      cause: err
+    })
+  }
+
+  /**
+   * Builds one standard encrypted collection's cipher from a descriptor that
+   * carries epochs and names this reader: the contacts cipher with its own
+   * unknown-epoch refresh, or the plain one with the persisted index schema
+   * installed. The build failures ({@link KeyUnwrapError}, `IntegrityError`)
+   * propagate to {@link StorageManager.#buildCipher}, which decides them.
+   *
+   * @param options {object}
+   * @param options.collection {object}
+   * @param options.collection.id {string}   the WAS collection id
+   * @param options.collection.idDerivation {IdDerivation}   its id mint
+   * @param options.keyAgreementKey {IKeyAgreementKey}
+   * @param options.keyResolver {IKeyResolver}
+   * @param options.descriptor {CollectionEncryption}
+   * @param [options.meta] {object}   the collection's stored `/meta` value
+   * @param [options.refresh] {object}   the contacts cipher's refresh seam
+   * @returns {Promise<DocCipher>}
+   */
+  static async #buildDescriptorCipher({
+    collection: { id, idDerivation },
+    keyAgreementKey,
+    keyResolver,
+    descriptor,
+    meta,
+    refresh
+  }: {
+    collection: Pick<
+      (typeof ENCRYPTED_STANDARD_COLLECTIONS)[number],
+      'id' | 'idDerivation'
+    >
+    keyAgreementKey: IKeyAgreementKey
+    keyResolver: IKeyResolver
+    descriptor: CollectionEncryption
+    meta?: { custom?: unknown }
+    refresh?: {
+      source?: EncryptionDescriptorSource
+      cache: EncryptionDescriptorCache
+    }
+  }): Promise<DocCipher> {
     // The contacts head is decrypted inside the sync driver's conflict
     // handler, out of reach of the session's read-level refresh guard, so
     // its cipher carries the unknown-epoch refresh itself. It declares no
     // blinded index, so the index-schema install below has nothing to
     // apply to it.
     if (id === CONTACTS_COLLECTION) {
-      const cipher = await refreshingCollectionCipher({
+      return refreshingCollectionCipher({
         collectionId: id,
         idDerivation,
         descriptor,
@@ -1635,7 +1785,6 @@ export class StorageManager {
         ...refresh,
         onFetchError: warnDescriptorFetchError
       })
-      return { key, cipher, stranded: false }
     }
     const cipher = await createEdvDocCipher({
       keyAgreementKey,
@@ -1653,7 +1802,7 @@ export class StorageManager {
       collectionId: id,
       meta
     })
-    return { key, cipher, stranded: false }
+    return cipher
   }
 
   /**
@@ -1664,7 +1813,11 @@ export class StorageManager {
    * schema-less cipher -- writes stay encrypted, they just carry no `indexed`
    * entries until the next refresh -- rather than failing the whole cipher
    * build. `applyMeta` itself is a no-op on a collection whose descriptor
-   * declares no blinded-index key.
+   * declares no blinded-index key. An `IntegrityError` here is the metadata
+   * envelope's own (served misbound, failed to authenticate, or sealed under
+   * an epoch whose entry fails its check) and degrades the same way, named
+   * as such. It is not the key-wrap check of the blinded-index key's entry,
+   * which `createEdvDocCipher` runs before any metadata is read.
    *
    * @param options {object}
    * @param options.cipher {EdvDocCipher}
@@ -1698,23 +1851,31 @@ export class StorageManager {
   /**
    * A {@link DocCipher} that refuses every operation: the stand-in for an
    * encrypted collection whose descriptor could not be acquired, or whose
-   * epochs name no current user key generation (`stranded`). The refusal clears
-   * when a descriptor refresh rebuilds the ciphers. A stranded refusal is a
-   * `KeyUnwrapError`, so a list read skips the collection's Resources as
+   * epochs name no current user key generation (`stranded`), or whose epoch
+   * entry for this wallet failed its key-wrap check (`integrity`). The refusal
+   * clears when a descriptor refresh rebuilds the ciphers. A stranded refusal
+   * is a `KeyUnwrapError`, so a list read skips the collection's Resources as
    * not-a-recipient rather than collecting them for the undecryptable purge,
-   * which would delete them from the server.
+   * which would delete them from the server. An integrity refusal is an
+   * `IntegrityError`, so a list read counts them in the integrity bucket,
+   * which is never purged either.
    *
    * @param options {object}
    * @param options.collectionId {string}
-   * @param [options.reason] {'stranded'}   omitted for a missing descriptor
+   * @param [options.reason] {CipherRefusal}   omitted for a missing
+   *   descriptor
+   * @param [options.cause] {unknown}   the build failure an integrity
+   *   refusal restates
    * @returns {DocCipher}
    */
   static #refusingCipher({
     collectionId,
-    reason
+    reason,
+    cause
   }: {
     collectionId: string
-    reason?: 'stranded'
+    reason?: CipherRefusal
+    cause?: unknown
   }): DocCipher {
     const refuse = (): never => {
       if (reason === 'stranded') {
@@ -1722,6 +1883,14 @@ export class StorageManager {
           `Collection "${collectionId}" has no key epoch naming the ` +
             'current user key; refusing to read or write until it is ' +
             're-epoched onto it.'
+        )
+      }
+      if (reason === 'integrity') {
+        throw new IntegrityError(
+          `Collection "${collectionId}" carries a key epoch entry naming ` +
+            'this wallet that failed its key-wrap check; refusing to read ' +
+            'or write under a tampered or corrupt entry.',
+          { cause }
         )
       }
       throw new Error(
@@ -1759,31 +1928,30 @@ export class StorageManager {
    * vault keys, then swaps them into the local store (and this facade).
    *
    * @param options {object}
-   * @param options.refuseStranded {boolean}   see
+   * @param options.installRefusingCiphers {boolean}   see
    *   {@link StorageManager.#buildCipher}
    * @returns {Promise<void>}
    */
   async #rebuildCiphers({
-    refuseStranded
+    installRefusingCiphers
   }: {
-    refuseStranded: boolean
+    installRefusingCiphers: boolean
   }): Promise<void> {
-    const { ciphers, strandedCollectionIds } =
-      await StorageManager.#buildCiphers({
-        keyAgreementKey: this.#vaultKeys.keyAgreementKey,
-        keyResolver: this.#vaultKeys.keyResolver,
-        descriptors: this.#descriptors,
-        metas: this.#metas,
-        refresh: this.#cipherRefresh(),
-        refuseStranded
-      })
+    const { ciphers, refusals } = await StorageManager.#buildCiphers({
+      keyAgreementKey: this.#vaultKeys.keyAgreementKey,
+      keyResolver: this.#vaultKeys.keyResolver,
+      descriptors: this.#descriptors,
+      metas: this.#metas,
+      refresh: this.#cipherRefresh(),
+      installRefusingCiphers
+    })
     this.#ciphers = ciphers
-    this.#strandedCollectionIds = strandedCollectionIds
+    this.#refusals = refusals
     // Swap into the active backend (the local store in the normal case, the
     // remote-direct backend in the popup); both honor `setCiphers` for the
     // descriptor-refresh path.
     this.#store.setCiphers(ciphers)
-    if (strandedCollectionIds.length > 0) {
+    if (Object.values(refusals).includes('stranded')) {
       this.#reportStranded()
     }
   }
@@ -1814,15 +1982,12 @@ export class StorageManager {
       const stranded = StorageManager.#directoryStranded({
         descriptor: this.#descriptors[collectionId],
         keyAgreementKey: this.#vaultKeys.keyAgreementKey,
-        refuseStranded: true
+        installRefusingCiphers: true
       })
-      this.#strandedCollectionIds = [
-        ...this.#strandedCollectionIds.filter(id => id !== collectionId),
-        ...(stranded ? [collectionId] : [])
-      ]
-      if (stranded) {
-        this.#reportStranded()
-      }
+      this.#recordRefusal({
+        collectionId,
+        ...(stranded ? { refusal: 'stranded' } : {})
+      })
       return
     }
     const collection = ENCRYPTED_STANDARD_COLLECTIONS.find(
@@ -1831,22 +1996,43 @@ export class StorageManager {
     if (!collection) {
       return
     }
-    const { key, cipher, stranded } = await StorageManager.#buildCipher({
+    const { key, cipher, refusal } = await StorageManager.#buildCipher({
       collection,
       keyAgreementKey: this.#vaultKeys.keyAgreementKey,
       keyResolver: this.#vaultKeys.keyResolver,
       descriptor: this.#descriptors[collectionId],
       meta: this.#metas[collectionId],
       refresh: this.#cipherRefresh(),
-      refuseStranded: true
+      installRefusingCiphers: true
     })
     this.#ciphers = { ...this.#ciphers, [key]: cipher }
-    this.#strandedCollectionIds = [
-      ...this.#strandedCollectionIds.filter(id => id !== collectionId),
-      ...(stranded ? [collectionId] : [])
-    ]
     this.#store.setCiphers(this.#ciphers)
-    if (stranded) {
+    this.#recordRefusal({
+      collectionId,
+      ...(refusal ? { refusal } : {})
+    })
+  }
+
+  /**
+   * Restates one collection's entry in the refusal map after its single
+   * cipher rebuild, and reports a stranding to the session binding.
+   *
+   * @param options {object}
+   * @param options.collectionId {string}   the WAS collection id
+   * @param [options.refusal] {CipherRefusal}   absent when the rebuilt
+   *   cipher does not refuse
+   * @returns {void}
+   */
+  #recordRefusal({
+    collectionId,
+    refusal
+  }: {
+    collectionId: string
+    refusal?: CipherRefusal
+  }): void {
+    const { [collectionId]: _previous, ...rest } = this.#refusals
+    this.#refusals = refusal ? { ...rest, [collectionId]: refusal } : rest
+    if (refusal === 'stranded') {
       this.#reportStranded()
     }
   }
@@ -1860,14 +2046,14 @@ export class StorageManager {
    * from a stale descriptor. No-op without a remote store.
    *
    * @param options {object}
-   * @param options.refuseStranded {boolean}   see
+   * @param options.installRefusingCiphers {boolean}   see
    *   {@link StorageManager.#buildCipher}
    * @returns {Promise<void>}
    */
   async #refreshDescriptors({
-    refuseStranded
+    installRefusingCiphers
   }: {
-    refuseStranded: boolean
+    installRefusingCiphers: boolean
   }): Promise<void> {
     if (!this.#remoteStore || !this.#descriptorCache) {
       return
@@ -1886,7 +2072,7 @@ export class StorageManager {
         collectionIds: ENCRYPTED_COLLECTION_IDS
       })
     ])
-    await this.#rebuildCiphers({ refuseStranded })
+    await this.#rebuildCiphers({ installRefusingCiphers })
   }
 
   /**
@@ -1927,7 +2113,10 @@ export class StorageManager {
    * The in-band step that precedes the fan-out takes
    * {@link holdRotatedVaultKeys} instead. A collection the fan-out did not
    * reach throws `KeyUnwrapError` here rather than getting a refusing
-   * cipher, so the caller learns the adoption did not land.
+   * cipher, so the caller learns the adoption did not land. A collection
+   * whose entry for the fresh key fails its key-wrap check throws
+   * `IntegrityError` the same way, since `installRefusingCiphers` false
+   * installs no refusing cipher of any kind.
    *
    * @param options {object}
    * @param options.keyAgreementKey {IKeyAgreementKey}   the fresh user key's KAK
@@ -1942,7 +2131,7 @@ export class StorageManager {
     keyResolver: IKeyResolver
   }): Promise<void> {
     this.holdRotatedVaultKeys({ keyAgreementKey, keyResolver })
-    await this.#refreshEncrypted({ refuseStranded: false })
+    await this.#refreshEncrypted({ installRefusingCiphers: false })
   }
 
   /**
@@ -1959,7 +2148,7 @@ export class StorageManager {
    * @returns {Promise<void>}
    */
   async refreshEncryptedDescriptors(): Promise<void> {
-    await this.#refreshEncrypted({ refuseStranded: true })
+    await this.#refreshEncrypted({ installRefusingCiphers: true })
   }
 
   /**
@@ -1968,22 +2157,22 @@ export class StorageManager {
    * collection is treated.
    *
    * @param options {object}
-   * @param options.refuseStranded {boolean}   see
+   * @param options.installRefusingCiphers {boolean}   see
    *   {@link StorageManager.#buildCipher}
    * @returns {Promise<void>}
    */
   async #refreshEncrypted({
-    refuseStranded
+    installRefusingCiphers
   }: {
-    refuseStranded: boolean
+    installRefusingCiphers: boolean
   }): Promise<void> {
     this.#appCiphers = {}
     this.#appDescriptors = {}
     this.#importCiphers.clear()
     if (this.#remoteStore && this.#descriptorCache) {
-      await this.#refreshDescriptors({ refuseStranded })
+      await this.#refreshDescriptors({ installRefusingCiphers })
     } else {
-      await this.#rebuildCiphers({ refuseStranded })
+      await this.#rebuildCiphers({ installRefusingCiphers })
     }
     this.#refreshPolicy.reset()
   }
@@ -2180,7 +2369,21 @@ export class StorageManager {
       return { cipher, hmacKey }
     })()
     this.#directoryKeys = { descriptor, keyAgreementKey, built }
-    built.catch(() => {
+    built.catch(err => {
+      // The directory has no refusing cipher: the error reaches every
+      // directory operation. A failed key-wrap check is deterministic for
+      // this descriptor, so the rejected build stays held and every later
+      // operation gets the same refusal without a rebuild or a second warn,
+      // until a refresh replaces the descriptor. Any other failure drops
+      // the build, so the next directory call runs it again.
+      if (isIntegrityError(err)) {
+        log.warn(
+          'A key epoch entry naming this wallet failed its key-wrap check; ' +
+            'every connections directory operation refuses',
+          { collectionId: CONNECTIONS_COLLECTION, err }
+        )
+        return
+      }
       if (this.#directoryKeys?.built === built) {
         this.#directoryKeys = undefined
       }
@@ -2467,24 +2670,23 @@ export class StorageManager {
     // rest of a guest session) plus any multi-recipient descriptor. The local store
     // holds EDV envelopes for these collections and replication ships them
     // verbatim.
-    const { ciphers, strandedCollectionIds } =
-      await StorageManager.#buildCiphers({
-        keyAgreementKey,
-        keyResolver,
-        descriptors,
-        metas,
-        // A collection a torn rotation left behind gets a refusing cipher, so
-        // the session is built and the login's fan-out can re-epoch it.
-        refuseStranded: true,
-        ...(descriptorCache
-          ? {
-              refresh: {
-                ...(descriptorLogs ? { source: descriptorLogs.source } : {}),
-                cache: descriptorCache
-              }
+    const { ciphers, refusals } = await StorageManager.#buildCiphers({
+      keyAgreementKey,
+      keyResolver,
+      descriptors,
+      metas,
+      // A collection a torn rotation left behind gets a refusing cipher, so
+      // the session is built and the login's fan-out can re-epoch it.
+      installRefusingCiphers: true,
+      ...(descriptorCache
+        ? {
+            refresh: {
+              ...(descriptorLogs ? { source: descriptorLogs.source } : {}),
+              cache: descriptorCache
             }
-          : {})
-      })
+          }
+        : {})
+    })
 
     // The local store is the active replica -- for a session on the
     // browser-local strategy. A transient session is replica-less:
@@ -2525,7 +2727,7 @@ export class StorageManager {
       localStore,
       remoteStore,
       ciphers,
-      strandedCollectionIds,
+      refusals,
       remoteDirect,
       vaultKeys: { keyAgreementKey, keyResolver },
       descriptors,
@@ -3509,31 +3711,45 @@ export class StorageManager {
             return { value: undefined, unknownEpoch: false }
           }
           this.#appDescriptors[collectionId] = descriptor
-          const built = await createEdvDocCipher({
-            keyAgreementKey,
-            keyResolver,
-            collectionId,
-            encryption: descriptor
-          })
-          // Install the collection's persisted blinded-index schema (its
-          // stored `/meta`), best-effort like the descriptor fetch above, so
-          // this cached cipher matches the standard-collection ones -- a
-          // schema-less cipher still decrypts, it just could not emit
-          // `indexed` entries.
           try {
-            const meta = await remote.collectionMeta({ collectionId })
-            await StorageManager.#installIndexSchema({
-              cipher: built,
+            const edvCipher = await createEdvDocCipher({
+              keyAgreementKey,
+              keyResolver,
               collectionId,
-              meta
+              encryption: descriptor
             })
+            // Install the collection's persisted blinded-index schema (its
+            // stored `/meta`), best-effort like the descriptor fetch above,
+            // so this cached cipher matches the standard-collection ones --
+            // a schema-less cipher still decrypts, it just could not emit
+            // `indexed` entries.
+            try {
+              const meta = await remote.collectionMeta({ collectionId })
+              await StorageManager.#installIndexSchema({
+                cipher: edvCipher,
+                collectionId,
+                meta
+              })
+            } catch (err) {
+              log.warn(
+                'Could not fetch the stored metadata for app collection',
+                { collectionId, err }
+              )
+            }
+            cipher = edvCipher
           } catch (err) {
-            log.warn('Could not fetch the stored metadata for app collection', {
+            // The integrity refusing cipher is cached like a built one, so
+            // the failure is named once per descriptor: every later decrypt
+            // lands in the integrity bucket through it, and the next
+            // descriptor refresh drops it and re-asks.
+            if (!isIntegrityError(err)) {
+              throw err
+            }
+            cipher = StorageManager.#integrityRefusingCipher({
               collectionId,
               err
             })
           }
-          cipher = built
           this.#appCiphers[collectionId] = cipher
         }
         return await decryptEnvelope({

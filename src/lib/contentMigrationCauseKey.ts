@@ -20,6 +20,10 @@ const CAUSE_KEYS: Record<string, string> = {
   KeyUnwrapError: 'storage.migration.causes.keyUnwrap',
   // The Resource names a key epoch the archived roster does not carry.
   UnknownEpochError: 'storage.migration.causes.unknownEpoch',
+  // A key epoch entry naming a key of this wallet or of the backup fails its
+  // key-wrap check, or an envelope fails to authenticate or was sealed for
+  // another Resource: tampered or corrupt, never a missing key.
+  IntegrityError: 'storage.migration.causes.integrity',
   // The archived Resource is chunked outside an encrypted app collection,
   // where the walk does not reassemble it.
   ChunkedResourceUnsupportedError: 'storage.migration.causes.chunked',

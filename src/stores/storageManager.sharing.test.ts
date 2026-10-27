@@ -841,7 +841,8 @@ function entryBody({
     })),
     grantsReceived: [],
     outbox: [],
-    writers: []
+    writers: [],
+    replicas: []
   }
 }
 

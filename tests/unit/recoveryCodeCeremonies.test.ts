@@ -106,8 +106,10 @@ vi.mock('@interop/wallet-core/recovery', async importOriginal => {
     ),
     removeRecoveryKey: vi.fn(
       async ({
+        signer,
         projectionStore
       }: {
+        signer: { kind: 'enrolled' | 'ladder' }
         projectionStore?: {
           putIdResource: (options: {
             resourceId: string
@@ -117,17 +119,25 @@ vi.mock('@interop/wallet-core/recovery', async importOriginal => {
         }
       }) => {
         // wallet-core PUTs the post-strike projection through the supplied
-        // store immediately BEFORE the entry publishes; the stand-in
-        // reproduces that placement.
-        if (projectionStore) {
-          await projectionStore.putIdResource({
-            resourceId: 'did.json',
-            content: JSON.stringify(POST_STRIKE_WEB_DOC),
-            contentType: 'application/json'
-          })
-          account.trace.push('projection')
+        // store: immediately BEFORE the entry publishes on the ladder arm,
+        // after it on the enrolled arm. The stand-in reproduces both.
+        const putProjection = async () => {
+          if (projectionStore) {
+            await projectionStore.putIdResource({
+              resourceId: 'did.json',
+              content: JSON.stringify(POST_STRIKE_WEB_DOC),
+              contentType: 'application/json'
+            })
+            account.trace.push('projection')
+          }
+        }
+        if (signer.kind === 'ladder') {
+          await putProjection()
         }
         stage('strike')
+        if (signer.kind === 'enrolled') {
+          await putProjection()
+        }
         account.published.clear()
         return {
           did: 'did:webvh:test',
@@ -295,7 +305,14 @@ async function ceremonyContext(): Promise<AccountCeremonyContext> {
     remoteStore: { webvhIdStore: () => ({}) },
     pointer: POINTER,
     controller: POINTER.did,
-    idStore: {},
+    // The enrolled kind's own id store doubles as its projection store, so
+    // it counts the projection PUTs the way the delegated store does.
+    idStore: {
+      putIdResource: async ({ content }: { content: string }) => {
+        account.projections += 1
+        account.projectionPuts.push(JSON.parse(content))
+      }
+    },
     rosterStore: {}
   }
   if (contextKind === 'enrolled') {
@@ -587,12 +604,18 @@ describe('recovery-code revocation on the ladder branch', () => {
     expect(account.registry?.methods).toEqual([])
   })
 
-  it('root-signs the Space delete and republishes no projection on the enrolled kind', async () => {
+  it('root-signs the Space delete and projects through its own id store on the enrolled kind', async () => {
     contextKind = 'enrolled'
     const { session, entry } = await issued()
     await revokeRecoveryCode({ session, entry })
     expect(account.spaceDeletions).toEqual([undefined])
-    expect(account.projections).toBe(0)
+    // The enrolled arm PUTs the post-strike projection after the entry,
+    // through the context's own controller-invoking id store.
+    expect(account.projections).toBe(1)
+    expect(account.projectionPuts).toEqual([POST_STRIKE_WEB_DOC])
+    expect(account.trace.indexOf('projection')).toBeGreaterThan(
+      account.trace.indexOf('strike')
+    )
     expect(account.registryCalls).toHaveLength(1)
     expect(account.registryCalls[0]!.session).toBe(session)
     expect(account.registryCalls[0]!.capabilityOverride).toBe(false)
