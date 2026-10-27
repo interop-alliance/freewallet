@@ -9,7 +9,7 @@ third-party websites can request or deliver credentials through a browser
 popup without sharing the user's passphrase. It also grants apps and agents
 scoped access to the user's storage, through App Connect and interaction URLs.
 
-On a deployment with a **Wallet Attached Storage (WAS)** server, wallet data
+On a deployment with a **Portable Web Spaces (PWS, formerly Wallet Attached Storage / WAS)** server, wallet data
 lives in the user's WAS Space. The default (transient) session reads and
 writes the Space directly. A remembered session keeps a local IndexedDB
 replica that replicates to the Space in the background. A guest session and a
@@ -149,7 +149,7 @@ Read them locally instead of fetching. Use them to ground changes against the
 specs and the shared libraries' actual source. Check with the user before
 editing anything in them.
 
-- [wallet-attached-storage-spec](https://github.com/w3c-ccg/wallet-attached-storage-spec)
+- [portable-web-spaces-spec](https://github.com/w3c-ccg/portable-web-spaces-spec)
   -- the WAS spec: the Space / Collection / Resource model, the HTTP API, and
   the zCap authorization profile.
 - [app-connect-spec](https://github.com/interop-alliance/app-connect-spec)

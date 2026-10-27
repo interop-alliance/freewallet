@@ -8,8 +8,9 @@
 - Affects: freewallet (`src/stores/storageManager.ts`'s directory store
   seam and its two adapters, `src/stores/browserStore.ts`'s collection
   set, `src/app.config.ts`'s collection sets, the local descriptor mint
-  `localOnlyDescriptors`, `src/stores/syncController.ts`); dcw (the same
-  seam).
+  `localOnlyDescriptors`, `src/stores/syncController.ts`, the replica
+  registration ceremony, which leaves the directory in the copy); dcw
+  (the same seam).
 
 ## Context
 
@@ -26,8 +27,17 @@ and removes it.
 
 ## Decision
 
-The directory is never replicated. It is outside the synced collection
-set, and the sync controller never touches it.
+The directory is never replicated to a local replica. It is outside the
+synced collection set, and the sync controller never touches it.
+
+Server-to-server replication is a different axis. A replica server's
+copy of the account Space includes the `connections` collection as
+ciphertext, since the copy is whole (0050), and a login against the
+replica would need it there. That copy raises no merge question. The
+replica server applies the source's changes one way, and the wallet
+neither reads nor writes the copy while the source stands. The
+directory keeps one writer and one grant index, on the source Space
+(0034).
 
 It rides the session's storage backend through one store seam with two
 adapters. On a session with a Space it is read and written remote-direct:
@@ -77,3 +87,14 @@ Reopen this decision when one or more of the following holds:
    per-grant tombstone the revocation writes.
 2. Offline revocation becomes a requirement, which needs a local copy
    and the merge rule above.
+3. Server-to-server replication becomes two-way, so a replica server's
+   copy of the directory can be written and merged back into the
+   source.
+
+## Changelog
+
+- 2026-10-26: Scoped the rule to the wallet's own local replica, and
+  stated that a replica server's server-to-server copy of the directory
+  is a different axis the rule does not forbid. Added revisit criterion
+  3 for two-way replication. The rule for the local replica is
+  unchanged.

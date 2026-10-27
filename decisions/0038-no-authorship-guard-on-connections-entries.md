@@ -4,8 +4,8 @@
 - Date: 2026-10-01
 - Driving work: the question FW-612's design left open, of what the
   storage host can do to a `connections` entry, tracked by FW-620.
-- Affects: freewallet (the directory's reader rules, unchanged; the
-  host-bound prose in ARCHITECTURE.md and
+- Affects: freewallet (the directory's reader rules; the replica pass's
+  restate and renewal; the host-bound prose in ARCHITECTURE.md and
   `docs/architecture/app-connect.md`). No wire contract, and no change to
   any shared package's API.
 
@@ -22,7 +22,10 @@ an entry's body. The question was whether to guard against a host-written
 Three reader rules already bound a planted entry:
 
 - Every reader drops a grant whose `zcap.controller` is not the entry's
-  `id`, and one whose target lies outside this Space.
+  `id`, and one whose target lies outside this Space. On a
+  `replica-server` entry, the Spaces its `replicas` items record as
+  `fromSpace` count as this Space, so the auxiliary Space's pull grant
+  stays visible until it is revoked.
 - A disconnect deletes an app key only when the key's own seed derives the
   entry's `id` (`appKeySeedBindsSubject`).
 - The admitted-recipient resolver fails closed, so nothing rotates, when
@@ -106,6 +109,22 @@ hook for reopening this record.
   seed, the one member a plant could use to speak as the wallet, carries
   its own HMAC tag under the blinded-index key, so a planted seed is
   refused and a replayed seed is the genuine one.
+- Replica servers carry the same residue (the replica registration
+  design, 2026-10-26). The replica pass turns `replica-server` entry
+  content into wallet-signed annex pointers and minted pull grants. A
+  planted entry carries no wallet-signed grant, so no restate selects
+  it, and the pass finishes a torn registration only from a rung-signed
+  annex pointer plus an entry whose grant proof verifies. A planted
+  entry therefore stays in the not-set-up state. The residue is a
+  rollback. A host that serves a pre-Stop or pre-Delete body whose grant
+  proof verifies can resume a stopped replica, or re-create a deleted
+  one, through the pass's renewal, until the user stops it again. Stop
+  revoked the rolled-back grant at the source, so a restated pointer
+  admits nothing for it, but the renewal mints a fresh one. The pass
+  does not ask the source whether a grant is revoked, since no such
+  read exists. The Storage page shows the resumed replica. A withheld
+  entry makes a legitimate pointer look orphaned, and the pass drops
+  it, which stops that pull until the user re-starts it.
 
 ## Revisit Criteria
 
@@ -115,7 +134,9 @@ Reopen this decision when one or more of the following holds:
    example, a `contact` kind or an audiences producer that acts on `name`
    or `label`. Met 2026-10-05 by agent-grant renewal; answered with the
    bounded residue and the seed tag above, not with a signature, since
-   signing would still not stop a replay of a genuine entry.
+   signing would still not stop a replay of a genuine entry. Met
+   again 2026-10-26 by the replica pass's restate and renewal; answered
+   with the bounded rollback residue above, for the same reason.
 2. The log layer gains witnessing, or the Resource Log Profile gives a
    plain Resource a verifiable version. Rollback then becomes detectable,
    and signing would close the plant half as well.
@@ -130,3 +151,8 @@ covers.
   grants. The record was refined rather than reversed: no signature is
   added, the seed gains a keyed tag, and the Consequences state the
   bounded replay residue renewal leaves.
+- 2026-10-26: Revisit criterion 1 was met again, by the replica pass's
+  restate and renewal of `replica-server` entries. Refined, not
+  reversed: no signature is added, the reader rule's Space check covers
+  a replica-server entry's recorded source Spaces, and the Consequences
+  state the rollback residue a replica carries.

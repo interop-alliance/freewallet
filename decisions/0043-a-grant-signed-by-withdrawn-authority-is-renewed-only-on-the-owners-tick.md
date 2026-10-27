@@ -10,8 +10,10 @@
   dialogs of client revocation, the forget, the last-client transition,
   and the ladder-kind credential ceremonies, the post-ceremony
   encounter, the Notifications page, the `declined` marker on an agent
-  entry), wallet-core (`markDeclined`, `recordGrants` clearing the
-  marker), dcw (the same pass).
+  or replica-server entry, the replica pass and the Storage page's
+  lapsed state), wallet-core (`markDeclined`, `recordGrants` clearing
+  the marker), dcw (the same pass, and the lapsed-offer reading of a
+  pull grant whose signer its client revocation revoked).
 
 ## Context
 
@@ -40,16 +42,29 @@ renewal. Withdrawn authority is a revoked or forgotten client's key, the
 departing client of a last-client transition, and a ladder VM struck by a
 passphrase change, a backup-credential removal, or a recovery spend.
 
+The rule covers every party whose grants the wallet renews: a connected
+agent, and a replica server holding a pull grant on the account Space or
+the auxiliary Space (the replica registration design, 2026-10-26). For a
+replica server the re-mint is a pull grant swapped into the existing
+registration, and record 0051 sets when the swap runs relative to the
+ceremony's strike.
+
 For such a grant the owner decides. Before a client revocation, the
 last-client transition, or a ladder-kind credential rotation runs, its
-dialog lists the connected agents whose grants the withdrawn key or
-ladder VM signed, read from the entries (each proof names its signer, and
-an annex-anchored grant's parent names its minter). The owner ticks which
-agents to keep. Once the ceremony resolves, the wallet re-mints the
-ticked agents' in-scope grants under the current authority, records each
-as a fresh consent with its Grant activity, and queues the push. An
+dialog lists the connected agents and the replica servers whose grants
+the withdrawn key or ladder VM signed, read from the entries (each proof
+names its signer, and an annex-anchored grant's parent names its
+minter). A credential rotation on the enrolled kind lists the replica
+servers too, since a remembered session's passphrase change strikes a
+ladder VM that may have signed a pull grant on an earlier transient
+visit. The owner ticks which parties to keep. Once the ceremony
+resolves, the wallet re-mints the ticked agents' in-scope grants under
+the current authority, records each as a fresh consent with its Grant
+activity, and queues the push. An
 unticked agent stays dead, listed for revocation, and its entry gains the
-`declined` marker.
+`declined` marker. An unticked replica server's entry gains the same
+marker, its registration is paused, its replica pointer is dropped, and
+its pull grants are revoked. Its copy stays as a snapshot.
 
 Two ceremonies cannot take the tick in their own visit, the ordinary
 forget and a recovery spend. For those, and for any agent an encounter
@@ -57,10 +72,14 @@ could not restore, the Notifications page offers each such agent later
 for a one-tick restore as a fresh consent, or a decline that writes the
 marker. The page reads its offers from the entries alone: an unretired
 agent entry with no `declined` marker, holding a channel, whose in-scope
-grants are all past `expires` or signed by withdrawn authority. A
+grants are all past `expires` or signed by withdrawn authority. It reads
+a replica server's withdrawn pull grant the same way, off the grant's
+proof, whichever ceremony withdrew it. Until that surface lists replica
+servers, the Storage page offers their re-connect. A
 declined agent is not offered again until a fresh consent, Restore on
 its detail page or an approved new connection request, clears the
-marker.
+marker. A declined replica server's marker is cleared only by the
+user's explicit Re-start.
 
 The proof check that sorts a dead grant into one kind or the other reads
 no log history. It is limited to what the account signer check can
@@ -118,3 +137,10 @@ Reopen this decision when one or more of the following holds:
 If revisited, silent renewal after a client revocation still needs its
 own record; the tick stays the default for the ladder-kind ceremonies,
 whose struck VM is the owner's own credential.
+
+## Changelog
+
+- 2026-10-26: Widened the rule to replica servers. Their dialogs list
+  the replica servers whose pull grant a withdrawn signer signed, an
+  untick declines and pauses the replica, and the lapsed-offer reading
+  covers them. The rule for agents is unchanged.

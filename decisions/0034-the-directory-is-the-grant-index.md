@@ -10,8 +10,8 @@
   `src/session/applications.ts`, `src/session/shares.ts`,
   `src/session/revocation.ts`, the Applications page, the shares dialog,
   Settings > Connected wallets, the admitted-recipient resolver in
-  `src/stores/storageManager.ts`); dcw (the same listings and
-  revocations).
+  `src/stores/storageManager.ts`, the replica registration ceremony and
+  the replica pass); dcw (the same listings and revocations).
 
 ## Context
 
@@ -44,8 +44,11 @@ Consent is not the only recording site (the cleartext audiences design,
 2026-10-05). The renewal pass records a re-minted agent grant on the
 entry in one compare-and-swap with its pending push, and
 `delegateAudienceGrant`'s caller records a member grant on the member's
-entry. Each writes a Grant activity after the entry write, so the audit
-trail shows every auto-renewal and every audience membership. A grant
+entry. The replica registration records each pull grant on the
+`replica-server` entry before the registration delivers it to the
+replica server. Each writes a Grant activity after the entry write, so
+the audit trail shows every auto-renewal, every audience membership,
+and every replica pull grant. A grant
 the owner restores at a ceremony dialog or on the Notifications page is
 recorded as a fresh consent with its own Grant activity. The order is
 the same at every site: the entry first, the activity after, nothing
@@ -83,7 +86,11 @@ Reopen this decision when one or more of the following holds:
 1. The storage host offers a server-side grant index the wallet can read
    under its own authority, making a wallet-side record redundant.
 2. The directory is replicated (0035 reopened), so a replica merge rule
-   has to decide which grants survive a conflict.
+   has to decide which grants survive a conflict. A server-to-server
+   copy of the `connections` ciphertext to a replica server does not
+   meet this criterion. The directory still has one writer, the wallet,
+   and one grant index, on the source Space. The replica server holds
+   an inert copy that no reader on the source consults.
 
 ## Changelog
 
@@ -91,3 +98,6 @@ Reopen this decision when one or more of the following holds:
   pass and the audience member grant, each writing its Grant activity
   after the entry write. A refinement of "at consent"; the rule and its
   order are unchanged.
+- 2026-10-26: Named the replica registration as a recording site, and
+  stated that a server-to-server copy of the directory to a replica
+  server does not meet revisit criterion 2. The rule is unchanged.

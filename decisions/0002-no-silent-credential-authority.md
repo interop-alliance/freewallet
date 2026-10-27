@@ -9,10 +9,12 @@
   mechanism by which a session holding only the unlock credential can
   approve app grants from an untrusted terminal, and surveyed widening
   the credential's latent authority to do it.
-- Affects: freewallet (the login and App Connect popup flows),
+- Affects: freewallet (the login and App Connect popup flows; the
+  replica maintenance and Delete replica paths on the ladder kind),
   `@interop/wallet-core` (the unlock record's bridge delegation and the
   ladder machinery), was-teaching-server (the authorization clause that
-  makes the adopted alternative's loudness load-bearing).
+  makes the adopted alternative's loudness load-bearing; the replicas
+  route's delegated invocation and its POST bound).
 
 ## Context
 
@@ -28,11 +30,13 @@ nothing else.
 
 ## Decision
 
-An unlock credential's latent authority is never widened into grant
-authority that leaves no record. Any authority a credential-derived key
-exercises must first extend a hash-chained, auditable log before it can
-read or grant anything. Concretely: the bridge delegation stays
-log-targeted, and transient-session app grants chain through a
+An unlock credential's latent authority is not widened into grant
+authority that leaves no record, except in the scoped shapes the
+amendments below name, each with its own justification. Any other
+authority a credential-derived key exercises must first extend a
+hash-chained, auditable log before it can read or grant anything.
+Concretely: the bridge delegation stays log-targeted, and
+transient-session app grants chain through a
 delegation to a companion DID whose log records the visit -- a rule the
 server's chain-verification clause enforces rather than trusts.
 
@@ -186,3 +190,71 @@ recipients the verified account document lists, and the thief already
 holds the code's own wrap.
 
 The decision itself is unchanged.
+
+## Amendment (2026-10-26)
+
+The design that lets every session kind register a replica server,
+approved 2026-10-26, adds a second scoped exception. It needs its own
+justification, since the deletion exception's does not carry over.
+
+The scope is two capability shapes, each on a replica Space on a
+replica server, each minted by the ladder VM to its own bare did:key
+and invoked as that did:key, the `LadderDeleter` pattern.
+
+- A grant on the replica Space's replicas route. Its target is the
+  replicas container URL exactly, or its `*` subtree form once the
+  explicit subtree scope ships. Its actions lie within GET, POST, and
+  DELETE, plus the verbs that pause a registration (PUT) and replace
+  its capability in place. Its parent is the
+  Space's root. It is short-lived, minutes. It lists, re-registers,
+  pauses, and replaces the capability of a registration.
+- The DELETE-only grant of `decisions/0014`'s shape, on a replica
+  Space's own URL, which the replica server's ladder clause admits as
+  its third predicate.
+
+Neither writes a log entry. The deletion exception rests on the
+account-Space DELETE destroying the log an entry would live in. A
+replica's deletion destroys no log of record, so that reason does not
+hold here. Two other facts carry this exception.
+
+- A credential-anchored account reaches a replica only through the
+  ladder. It has no enrolled client, and a per-visit annex key may not
+  hold root over a Space. Without these shapes such an account could
+  neither maintain nor delete a replica it registered.
+- A replica is not the log of record. The account log lives on the
+  source server, and the replica's copy advances only by pulls. Nothing
+  the wallet or the source server decides reads the replica's copy
+  today. The replica itself was recorded loudly. Its registration
+  rests on the replica pointer a credential's annex rung wrote
+  (`decisions/0045`).
+
+The replica server bounds a delegated POST on the replicas route. It
+admits only a registration whose `fromSpace` equals the `fromSpace` of
+a registration already on that Space. So the ladder path can
+re-register against a source the replica already has, and cannot
+introduce a new one. A root invocation keeps the unbounded POST. The
+bound exists because the source check at registration only compares
+the controller string the source serves. Without the bound, a phished
+credential's holder could register its own server as a second source
+and have its tombstones applied to the user's copy.
+
+Stated plainly: a phished credential's holder can pause, re-register,
+or delete a replica with no record anywhere. The replica server's guard
+refuses the removal of the one registration that maps the account DID,
+and the POST bound refuses a new source. The replica server verifies
+these shapes against its own copy of the account log, so a ladder VM
+retired after the copy last advanced keeps this reach there. That
+covers a stopped snapshot, the frozen copy a recovery spend leaves
+(`decisions/0051`), and a replica that survives account deletion.
+
+This exception is reopened when a login against the replica reads the
+replica's copy as the account's log, since a replica is then a log of
+record for that login.
+
+## Changelog
+
+- 2026-10-26: Added the replica server's no-entry ladder shapes, the
+  delegated replicas-route grant and the replica Space DELETE, as a
+  second scoped exception with its own justification and the POST
+  bound. The Decision now says the exceptions are the scoped shapes the
+  amendments name.
