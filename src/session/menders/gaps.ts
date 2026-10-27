@@ -35,15 +35,9 @@ export const MENDER_GAPS: ReadonlyArray<InvariantGap> = [
   // 2. Retired: the transient chain's collection fan-out completes a user-key
   // rotation torn mid-fan-out on a credential-anchored account. The number
   // stays, so the rows below keep theirs.
-  // 3
-  {
-    invariant: 'keystore-controller-is-the-account-did',
-    tornState:
-      "An establishment torn between the record re-bind and the promotion leaves the KMS keystore's controller on the ladder's bare did:key. The promotion is registered on the remembered login chain alone, which the affected account may never run.",
-    standsOn: ['ladder-anchored'],
-    item: 'FW-420',
-    kind: 'unreachable'
-  },
+  // 3. Retired: the transient chain's tail promotes a keystore an
+  // establishment left on the ladder's bare did:key. The number stays, so
+  // the rows below keep theirs.
   // 4
   {
     invariant: 'every-document-key-agreement-entry-has-a-locatable-credential',

@@ -531,18 +531,19 @@ const DECLARATIONS: ReadonlyArray<
   // converger: `promoteAccountKeystore` (`src/stores/storageManager.ts`),
   // fired by `ensurePromotedController` and reported by the remembered
   // block's tail registration, which awaits the promise the pointer heal
-  // left on its deps (or, with no heal, the one provisioning fired). The
-  // report sits in the tail so
-  // `registryReady` does not wait on a KMS round trip. Its authority is the
-  // account's rather than the ladder's, since the one registration that
-  // reports it runs on the remembered chain.
+  // left on its deps (or, with no heal, the one provisioning fired). On the
+  // transient chain the block's tail registration
+  // (`TRANSIENT_KEYSTORE_PROMOTION`) lists under the ladder VM's bare
+  // did:key and promotes what it finds. Both reports sit in a tail so
+  // `registryReady` does not wait on a KMS round trip. The authority is the
+  // account's, which both a remembered and a ladder-held session hold.
   {
     id: 'keystore-controller-is-the-account-did',
     statement:
       "The WebKMS keystore's controller is the account's did:webvh rather than the ladder's bare did:key.",
     standsOn: ['ladder-anchored'],
     authority: 'account',
-    triggers: ['remembered-login-chain'],
+    triggers: ['remembered-login-chain', 'transient-login-chain'],
     ceremonies: ['credential-anchored-genesis'],
     // The keystore configuration the KMS serves, which the promotion reads
     // before it writes.

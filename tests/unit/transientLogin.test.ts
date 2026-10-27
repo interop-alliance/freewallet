@@ -1927,8 +1927,9 @@ describe('transientSessionFromKeyringHit -- the login-time registry chain', () =
     primeHappyPath()
     primeChainSession({ invocationCapability: LIVE_CAPABILITY })
     // The CHAPI popup runs no registry pass of the block: each declares
-    // itself off that route. The collection fan-out alone still runs, as
-    // the remembered sweep does in a remembered popup.
+    // itself off that route. The collection fan-out still runs, as the
+    // remembered sweep does in a remembered popup, and so does the tail's
+    // keystore promotion, as the remembered keystore report does.
     const popup = await transientSessionFromKeyringHit({
       found: makeFound({ manageCapability: MANAGE_CAPABILITY } as never),
       type: 'passphrase',
@@ -1938,7 +1939,8 @@ describe('transientSessionFromKeyringHit -- the login-time registry chain', () =
     await popup.session.registryReady
     // The routing entries the composition itself ran still report, and so
     // does the did:web projection mend, which the popup fires and the
-    // block's settle point waits for; of the block, only the fan-out does.
+    // block's settle point waits for; of the block, only the fan-out and
+    // the keystore promotion do.
     expect(
       (await popup.session.mends)!.map(entry => entry.invariant).sort()
     ).toEqual(
@@ -1948,7 +1950,8 @@ describe('transientSessionFromKeyringHit -- the login-time registry chain', () =
         'generation-delegation-is-current',
         'did-web-projection-matches-the-log',
         'collection-epochs-name-the-current-user-key',
-        'governed-log-heads-anchor-past-the-membership-change'
+        'governed-log-heads-anchor-past-the-membership-change',
+        'keystore-controller-is-the-account-did'
       ].sort()
     )
     expect(backfillPassphraseUnlockMethodReport).not.toHaveBeenCalled()

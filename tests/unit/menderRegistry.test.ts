@@ -110,7 +110,7 @@ describe('census completeness', () => {
 })
 
 describe('the transient-reachable set', () => {
-  it('is the twenty-two entries the design pins', () => {
+  it('is the twenty-three entries the design pins', () => {
     const reachable = transientReachableInvariants({
       registry: freewalletMenderRegistry
     })
@@ -125,10 +125,12 @@ describe('the transient-reachable set', () => {
     // which runs behind the transient chain's block and at two encounter
     // sites. Row 30 joined when the dead-pointer prompt gave its
     // account-is-gone half a routing site, which a login or a recovery spend
-    // on any credential reaches.
+    // on any credential reaches. Row 27 joined when the transient chain's
+    // tail began promoting a keystore left on the ladder's bare did:key,
+    // listing under that did:key on every visit with no document gate.
     expect(reachable.map(rowOf)).toEqual([
-      2, 3, 4, 5, 6, 7, 8, 10, 12, 13, 14, 15, 16, 17, 18, 25, 26, 30, 32, 35,
-      38, 39
+      2, 3, 4, 5, 6, 7, 8, 10, 12, 13, 14, 15, 16, 17, 18, 25, 26, 27, 30, 32,
+      35, 38, 39
     ])
   })
 })
@@ -156,12 +158,15 @@ describe('the gap allowlist', () => {
     // with its declaration: nothing rotates the pairwise seed until FW-647.
     // Row 30 left `none` when the dead-pointer prompt's accept began
     // reporting it from the login-routing site; its declared rows stay,
-    // each scoped to a torn state the prompt does not reach.
+    // each scoped to a torn state the prompt does not reach. Row 27 left
+    // `unreachable` when the transient chain's tail began reporting it, and
+    // declares no row of its own: the tail's lookup is unconditional, so no
+    // torn state of the keystore stands outside it.
     expect(
       derived
         .filter(gap => gap.kind === 'unreachable')
         .map(gap => rowOf(gap.invariant))
-    ).toEqual([1, 11, 19, 22, 24, 27, 33, 37])
+    ).toEqual([1, 11, 19, 22, 24, 33, 37])
     expect(undeclaredGaps({ derived, declared: MENDER_GAPS })).toEqual([])
   })
 

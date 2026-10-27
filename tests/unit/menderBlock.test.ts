@@ -23,7 +23,10 @@ vi.mock('@interop/wallet-core/menders', async importOriginal => ({
 import { runMenderBlock } from '@interop/wallet-core/menders'
 import { startLoginMenderBlock } from '@/session/menders/run'
 import { armEncounterGate } from '@/session/sessionLifecycle'
-import { TRANSIENT_REGISTRATIONS } from '@/session/menders'
+import {
+  TRANSIENT_REGISTRATIONS,
+  TRANSIENT_REGISTRY_REGISTRATIONS
+} from '@/session/menders'
 import { captureCeremonyEvents } from './ceremonyEventCapture'
 
 const { runMenderBlock: realRunMenderBlock } = await vi.importActual<
@@ -56,6 +59,21 @@ beforeEach(() => {
   vi.mocked(runMenderBlock).mockReset()
   vi.mocked(runMenderBlock).mockResolvedValue([])
 })
+
+/**
+ * Whether a promise has settled, read after the pending microtasks run.
+ *
+ * @param promise {Promise<unknown>}
+ * @returns {Promise<boolean>}
+ */
+async function hasSettled(promise: Promise<unknown>): Promise<boolean> {
+  let settled = false
+  void promise.then(() => {
+    settled = true
+  })
+  await new Promise(resolve => setTimeout(resolve, 0))
+  return settled
+}
 
 describe('the block starter', () => {
   it('settles both promises when the runner itself rejects', async () => {
@@ -105,24 +123,55 @@ describe('the block starter', () => {
       'did-web-projection-matches-the-log'
     ])
   })
+
+  it("settles the transient registryReady without waiting on the block's tail", async () => {
+    // The real runner over the real transient list: the registry writers
+    // report at once, and the tail (the keystore promotion) holds until
+    // released, as a slow KMS round trip would.
+    let releaseTail: () => void = () => undefined
+    const tailHeld = new Promise<void>(resolve => {
+      releaseTail = resolve
+    })
+    const stubbed = TRANSIENT_REGISTRATIONS.map(
+      (registration): Registration<LoginMenderDeps, CeremonyId> => ({
+        ...registration,
+        converge: async () => {
+          if (!TRANSIENT_REGISTRY_REGISTRATIONS.includes(registration)) {
+            await tailHeld
+          }
+          return registration.reports.map(invariant => ({
+            invariant,
+            outcome: 'noop' as const
+          }))
+        }
+      })
+    )
+    vi.mocked(runMenderBlock).mockImplementation(options =>
+      realRunMenderBlock({
+        ...(options as Parameters<typeof realRunMenderBlock>[0]),
+        registrations: stubbed as never
+      })
+    )
+    const session = {
+      profile: { ladderSeed: new Uint8Array(32), standingUnlock: {} }
+    } as unknown as Session
+
+    startLoginMenderBlock({
+      accumulator: mendReportAccumulator<CeremonyId>(),
+      route: { popup: false },
+      deps: fakeDeps(session)
+    })
+
+    await session.registryReady
+    expect(await hasSettled(session.mends!)).toBe(false)
+    releaseTail()
+    expect((await session.mends)!.map(entry => entry.invariant)).toContain(
+      'keystore-controller-is-the-account-did'
+    )
+  })
 })
 
 describe('the encounter gate', () => {
-  /**
-   * Whether a promise has settled, read after the pending microtasks run.
-   *
-   * @param promise {Promise<unknown>}
-   * @returns {Promise<boolean>}
-   */
-  async function hasSettled(promise: Promise<unknown>): Promise<boolean> {
-    let settled = false
-    void promise.then(() => {
-      settled = true
-    })
-    await new Promise(resolve => setTimeout(resolve, 0))
-    return settled
-  }
-
   it('stays shut while the block runs and opens behind registryReady', async () => {
     let finish: () => void = () => undefined
     vi.mocked(runMenderBlock).mockReturnValue(

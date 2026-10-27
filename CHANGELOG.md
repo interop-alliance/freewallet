@@ -4,6 +4,12 @@
 
 ### Security
 
+- The verification checklist's revocation step fails closed. A credential
+  carrying `credentialStatus` that the verifier did not status-check now
+  renders as not verified under the new
+  `verification.checklist.revocationUnchecked` string (English and Spanish),
+  instead of "has not been revoked" and verified. Takes
+  `@interop/vc-display` 0.2.0.
 - The agent grant renewal verifies a transient-minted grant's own leaf, not
   only its generation delegation. `currentAccountSignerCheck` supplies
   wallet-core's `annexDocument` resolver: the named generation's annex
@@ -160,6 +166,11 @@
   but authentic" summary is reachable. Its revocation and issuer rows are
   reported too, where before the signature failure halted them. A tampered
   credential still fails the signature row.
+- A transient login promotes a WebKMS keystore that an establishment left on
+  the ladder's bare did:key to the account did:webvh. The promotion runs in
+  the transient block's tail, behind the registry-writing registrations, so
+  `registryReady` does not wait on it. This closes the open gap for a
+  credential-anchored account that never runs a remembered login.
 
 ## 0.44.0 - 2026-10-09
 

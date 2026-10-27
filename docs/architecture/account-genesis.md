@@ -59,8 +59,11 @@ ladder seed, with an interim bridge delegated by the ladder's bare did:key,
 is durably written BEFORE the Space is created and before rung 0 publishes.
 The Space is bootstrapped under the ladder VM's bare did:key, re-derivable
 from the record's ladder seed, so a tab death before promotion strands
-nothing. The roster's epoch[0] wraps the user key to the credential's
-standing KAK under a ladder-signed entry proof.
+nothing. A tear between the record re-bind and the promotion can leave the
+keystore controlled by that bare did:key. The next transient login's tail
+re-derives it from the ladder seed and promotes the keystore. The roster's
+epoch[0] wraps the user key to the credential's standing KAK under a
+ladder-signed entry proof.
 
 Entry paths. A non-remembered browser continues into the transient
 composition (see "Session persistence" in session-persistence.md), with zero local residue. A

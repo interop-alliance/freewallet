@@ -60,26 +60,26 @@ importers:
         specifier: ^0.8.2
         version: 0.8.2
       '@interop/storage-core':
-        specifier: ^0.37.0
-        version: 0.37.0
+        specifier: ^0.38.0
+        version: 0.38.0
       '@interop/vc':
         specifier: ^11.1.2
         version: 11.1.2
       '@interop/vc-display':
-        specifier: ^0.1.0
-        version: 0.1.0
+        specifier: ^0.2.0
+        version: 0.2.0
       '@interop/verifier-core':
         specifier: ^4.0.0
         version: 4.0.0
       '@interop/vh-resource-log':
-        specifier: ^0.8.1
-        version: 0.8.1
+        specifier: ^0.9.0
+        version: 0.9.0
       '@interop/wallet-backup':
         specifier: ^0.6.1
-        version: 0.6.1(@interop/wallet-core@wallet-core)(@interop/was-client@0.98.0(@interop/jsonld-signatures@11.9.0))
+        version: 0.6.1(@interop/wallet-core@0.107.1(@interop/jsonld-signatures@11.9.0)(@interop/was-client@0.98.0(@interop/jsonld-signatures@11.9.0)))(@interop/was-client@0.98.0(@interop/jsonld-signatures@11.9.0))
       '@interop/wallet-core':
-        specifier: link:../wallet-core
-        version: link:../wallet-core
+        specifier: ^0.107.1
+        version: 0.107.1(@interop/jsonld-signatures@11.9.0)(@interop/was-client@0.98.0(@interop/jsonld-signatures@11.9.0))
       '@interop/wallet-request':
         specifier: ^0.5.2
         version: 0.5.2
@@ -747,16 +747,16 @@ packages:
     resolution: {integrity: sha512-yoBABfWtLwcUK8caPXKlPPNjq6AX4/SUJ/JRwa0ps8ihuxVfqwz6sMKbsvMDmVrLLjSOApY0innoTIDrtRGjrg==}
     engines: {node: '>=22.0'}
 
-  '@interop/storage-core@0.37.0':
-    resolution: {integrity: sha512-3m/KE9+57nycL9/AQ3PTvwtZQztKgTSt383k7taN8MPkALeduDpyA6HQ9HLphfBxdFhFxp1qUpZcCZd5O/5Urg==}
+  '@interop/storage-core@0.38.0':
+    resolution: {integrity: sha512-wavRRv4uzKz9m21sdfZtOGeBy8TSgYWRgHTfq+SE7Dak/E2u77xmn4x7EaV4q3sPgmjFhSbz+YlzG6WpQor3mA==}
     engines: {node: '>=22.0'}
 
   '@interop/vc-bitstring-status-list@3.4.1':
     resolution: {integrity: sha512-aDosf9z9H/7r3iVknLQ5LQjBVSgD1hypACuF+IarwChoCEyBknKIynJ/tHhYwx7tT7ELzkxC97+thN53p4wW/A==}
     engines: {node: '>=24.0'}
 
-  '@interop/vc-display@0.1.0':
-    resolution: {integrity: sha512-+naZ6vsKlB/G7kjD6bDKnxNDEJ2stRPi7Hq/OiPq12y+0FhiwPbNu8+Spx56isx6SfgBcXntum2fx4Q4vj86ag==}
+  '@interop/vc-display@0.2.0':
+    resolution: {integrity: sha512-cUVsicm7ndVLoEzkizh/F9F0/RX2a1tOTe3fI2T0Ax4mSutETXepYb17DRf6FJ5blnK/lEw07CLGD4sswtTC2A==}
     engines: {node: '>=24.0'}
 
   '@interop/vc@11.1.2':
@@ -771,12 +771,22 @@ packages:
     resolution: {integrity: sha512-4w+yKQXWImZHvntW4f+DO0u7oe31dC319R+uHnjaRSjaUEx2SgDwdKnFEuVrU5xBGTqF2GGias8LLxq7keWT2Q==}
     engines: {node: '>=24.0'}
 
+  '@interop/vh-resource-log@0.9.0':
+    resolution: {integrity: sha512-9QP1XExxu95IuHlB3b9V3QKAKF4tLbp+agF4YByVlywgWcSrUCRD9YxYctacummgPIQTTV+iKBMZJIu72i8OnQ==}
+    engines: {node: '>=24.0'}
+
   '@interop/wallet-backup@0.6.1':
     resolution: {integrity: sha512-LdnaiI0zn50l+lK53P/XBctk0VpUDlWSTdYQZN7jzJ4/P0Yix0bLI1R91hWzNp+9lDh8GL77iHGK9BGmHYkEBg==}
     engines: {node: '>=24.0'}
     peerDependencies:
       '@interop/wallet-core': '>=0.80.0 <1.0.0'
       '@interop/was-client': '>=0.80.0 <1.0.0'
+
+  '@interop/wallet-core@0.107.1':
+    resolution: {integrity: sha512-nMLWnuGeX/iFbtQxIIErgxyxsYT+WeSi1eEqlMb2qBV7RD+yqo+yI/pc6HMq2FYbWnym4M/YZ2OB90dnOfkYOA==}
+    engines: {node: '>=24.0'}
+    peerDependencies:
+      '@interop/was-client': '>=0.96.0 <1.0.0'
 
   '@interop/wallet-request@0.5.2':
     resolution: {integrity: sha512-VVu173mujCKN8Rz7aHlgUhc4aK4bP/UcIiCYdrhwkuJWVI7ZOLABn1esmJjtOpuqCLx3tD85WJCtsbqy0NY0rg==}
@@ -4694,7 +4704,7 @@ snapshots:
     dependencies:
       '@interop/data-integrity-core': 8.9.0
 
-  '@interop/storage-core@0.37.0':
+  '@interop/storage-core@0.38.0':
     dependencies:
       '@interop/data-integrity-core': 8.9.0
 
@@ -4705,7 +4715,7 @@ snapshots:
       '@digitalbazaar/vc-bitstring-status-list-context': 1.1.0
       '@interop/vc': 11.1.2
 
-  '@interop/vc-display@0.1.0':
+  '@interop/vc-display@0.2.0':
     dependencies:
       '@interop/data-integrity-core': 8.9.0
 
@@ -4746,13 +4756,18 @@ snapshots:
       '@interop/did-method-webvh': 5.17.0
       '@interop/storage-core': 0.36.0
 
-  '@interop/wallet-backup@0.6.1(@interop/wallet-core@wallet-core)(@interop/was-client@0.98.0(@interop/jsonld-signatures@11.9.0))':
+  '@interop/vh-resource-log@0.9.0':
+    dependencies:
+      '@interop/did-method-webvh': 5.17.0
+      '@interop/storage-core': 0.38.0
+
+  '@interop/wallet-backup@0.6.1(@interop/wallet-core@0.107.1(@interop/jsonld-signatures@11.9.0)(@interop/was-client@0.98.0(@interop/jsonld-signatures@11.9.0)))(@interop/was-client@0.98.0(@interop/jsonld-signatures@11.9.0))':
     dependencies:
       '@interop/social-core': 0.8.1
       '@interop/space-archive': 0.8.2
       '@interop/storage-core': 0.36.0
       '@interop/vh-resource-log': 0.8.1
-      '@interop/wallet-core': link:../wallet-core
+      '@interop/wallet-core': 0.107.1(@interop/jsonld-signatures@11.9.0)(@interop/was-client@0.98.0(@interop/jsonld-signatures@11.9.0))
       '@interop/was-client': 0.98.0(@interop/jsonld-signatures@11.9.0)
       '@scure/base': 2.4.0
       events: 3.3.0
@@ -4762,6 +4777,28 @@ snapshots:
       - bare-abort-controller
       - bare-buffer
       - react-native-b4a
+
+  '@interop/wallet-core@0.107.1(@interop/jsonld-signatures@11.9.0)(@interop/was-client@0.98.0(@interop/jsonld-signatures@11.9.0))':
+    dependencies:
+      '@interop/capability-agent': 0.2.2
+      '@interop/data-integrity-core': 8.9.0
+      '@interop/data-integrity-proof': 3.4.8
+      '@interop/did-method-webvh': 5.17.0
+      '@interop/ed25519-signature': 7.2.5(@interop/jsonld-signatures@11.9.0)
+      '@interop/ed25519-verification-key': 8.2.2
+      '@interop/ezcap': 7.5.3
+      '@interop/social-core': 0.8.1
+      '@interop/vh-resource-log': 0.9.0
+      '@interop/was-client': 0.98.0(@interop/jsonld-signatures@11.9.0)
+      '@interop/x25519-key-agreement-key': 5.4.3
+      '@noble/ciphers': 2.4.0
+      '@noble/hashes': 2.4.0
+      '@scure/base': 2.4.0
+      byoe-context: 0.5.0
+    transitivePeerDependencies:
+      - '@interop/jsonld-signatures'
+      - expo-crypto
+      - react-native-get-random-values
 
   '@interop/wallet-request@0.5.2':
     dependencies:

@@ -5,11 +5,12 @@
  * within a list is execution order; there is no dependency graph and no
  * priority.
  *
- * Two lists are run by the runner, one per chain trigger. The remembered
- * list is split at the settle point: the registry-writing part settles
- * `session.registryReady`, and the tail (the annex GC, then the keystore
- * report last, so the sweep does not queue behind its KMS round trip)
- * settles only `session.mends`. Beside them sit the sites that
+ * Two lists are run by the runner, one per chain trigger. Each is split at
+ * the settle point: the registry-writing part settles
+ * `session.registryReady`, and the tail settles only `session.mends`. The
+ * remembered tail is the annex GC, then the keystore report last, so the
+ * sweep does not queue behind its KMS round trip. The transient tail is the
+ * keystore promotion alone. Beside them sit the sites that
  * report from their own call sites: the routing entries, whose control flow
  * decides whether a session is built at all, and the did:web projection
  * mend, which a transient visit fires before its chain and in the CHAPI
@@ -46,7 +47,11 @@ import {
 import type { CollectionEncryption } from '@interop/was-client'
 import type { SealableEncryptionDescriptorStore } from '@interop/wallet-core/keys'
 import type { IZcap } from '@interop/data-integrity-core'
-import type { PublishedKeyDocument } from '@interop/wallet-core/webvh'
+import {
+  didKeyZcapClient,
+  type PublishedKeyDocument
+} from '@interop/wallet-core/webvh'
+import { ladderVmAgent } from '@interop/wallet-core/clientAnnex'
 import type { Session } from '@/types/auth'
 import type { CeremonyId } from '@interop/wallet-core'
 import type {
@@ -97,6 +102,8 @@ import { sweepClientAnnexGenerations } from '@/session/clientAnnexGc'
 import { refreshTransientManageCapability } from '@/session/unlockMethods'
 import { sweepHeldConnectionWriters } from '@/session/connectionWriters'
 import { INBOX_PASS_REPORTS, runInboxPass } from '@/session/inboxPass'
+import { KMS_SERVER_URL } from '@/app.config'
+import { findKeystoreAgent, promoteKeystoreController } from '@/lib/kms'
 import { wasServiceDescription } from '@/lib/wasService'
 import { CEREMONY_TAIL_SITES } from '@/session/menders/ceremonyTail'
 
@@ -710,10 +717,10 @@ const ANNEX_GC: Registration<LoginMenderDeps, CeremonyId> = {
 }
 
 /**
- * The acting credential's management-zcap refresh, last on the transient
- * chain: it compare-and-swaps the same registry entry the passes above
- * rewrite, and two writers racing one entry would spend the retry budget
- * undoing each other.
+ * The acting credential's management-zcap refresh, last among the transient
+ * chain's registry writers: it compare-and-swaps the same registry entry the
+ * passes above rewrite, and two writers racing one entry would spend the
+ * retry budget undoing each other.
  */
 const TRANSIENT_MANAGE_ZCAP_REFRESH: Registration<LoginMenderDeps, CeremonyId> =
   {
@@ -759,6 +766,68 @@ const TRANSIENT_MANAGE_ZCAP_REFRESH: Registration<LoginMenderDeps, CeremonyId> =
       ]
     }
   }
+
+/**
+ * The keystore promotion on the transient chain, in the block's tail. A
+ * credential-anchored establishment creates the WebKMS keystore under the
+ * ladder VM's bare did:key and promotes its controller to the account
+ * did:webvh only in its own tail, so a tear between the unlock-record re-bind
+ * and that tail leaves the keystore on the did:key. This registration
+ * re-derives that did:key from the login credential's ladder seed, lists
+ * keystores under it, and promotes the one it finds. The KMS verifies a
+ * keystore configuration update as a root invocation by the stored
+ * controller, so the ladder VM's key is the signer that update needs.
+ *
+ * A miss is a `noop`, and creates nothing. Either the keystore is promoted
+ * already, or this credential's ladder never created one. A transient visit
+ * cannot list under the account DID to tell the two apart: the ladder VM has
+ * no invocation relation, and the KMS answers a failed verification with a
+ * 404, as it answers an absence. A keystore created by another credential's
+ * ladder lists under that ladder's did:key, so only a login on that
+ * credential reaches it.
+ */
+export const TRANSIENT_KEYSTORE_PROMOTION: Registration<
+  LoginMenderDeps,
+  CeremonyId
+> = {
+  trigger: 'transient-login-chain',
+  reports: ['keystore-controller-is-the-account-did'],
+  async converge(deps) {
+    const { session, found } = transient(deps)
+    const invariant = 'keystore-controller-is-the-account-did' as const
+    const noop = (reason: string) => [
+      { invariant, outcome: 'noop' as const, detail: { reason } }
+    ]
+    if (KMS_SERVER_URL === undefined) {
+      return noop('no-kms')
+    }
+    // Narrows the type: the transient login refuses a record with no seed.
+    const ladderSeed = found.standing?.ladderSeed
+    if (!ladderSeed) {
+      return noop('no-ladder-seed')
+    }
+    const pointer = promotedAccountPointer({ session })
+    if (!pointer) {
+      return noop('unpromoted-account')
+    }
+    const keyAgent = await ladderVmAgent({ ladderSeed })
+    const keystoreAgent = await findKeystoreAgent({
+      kmsServerUrl: KMS_SERVER_URL,
+      keyAgent,
+      zcapClient: didKeyZcapClient({ keyAgent })
+    })
+    if (!keystoreAgent) {
+      return noop('no-keystore-under-ladder-did-key')
+    }
+    const didPromote = await promoteKeystoreController({
+      keystoreAgent,
+      controller: pointer.did
+    })
+    return didPromote
+      ? [{ invariant, outcome: 'clean' as const, detail: { promoted: true } }]
+      : noop('already-promoted')
+  }
+}
 
 /**
  * The collection half of a ladder-kind session's fan-out: every candidate
@@ -1320,18 +1389,35 @@ export const REMEMBERED_REGISTRATIONS: ReadonlyArray<
 > = [...REMEMBERED_REGISTRY_REGISTRATIONS, ...REMEMBERED_TAIL_REGISTRATIONS]
 
 /**
- * The transient block, every entry of which settles `session.registryReady`:
- * the collection fan-out first, then the registry-writing passes. The inbox
- * tail is not part of it, so `registryReady` never waits on another party's
- * server.
+ * The transient block's registry-writing registrations, in execution order:
+ * the collection fan-out first, then the registry-writing passes, the
+ * management-zcap refresh last among them. `session.registryReady` settles
+ * when the last of these has reported.
  */
-export const TRANSIENT_REGISTRATIONS: ReadonlyArray<
+export const TRANSIENT_REGISTRY_REGISTRATIONS: ReadonlyArray<
   Registration<LoginMenderDeps, CeremonyId>
 > = [
   TRANSIENT_COLLECTION_CASCADE,
   ...sharedRegistryPasses('transient-login-chain'),
   TRANSIENT_MANAGE_ZCAP_REFRESH
 ]
+
+/**
+ * The transient block's tail: the keystore promotion, which nothing waits on
+ * but `session.mends`.
+ */
+const TRANSIENT_TAIL_REGISTRATIONS: ReadonlyArray<
+  Registration<LoginMenderDeps, CeremonyId>
+> = [TRANSIENT_KEYSTORE_PROMOTION]
+
+/**
+ * The transient block: the registry-writing registrations, then the tail.
+ * The inbox tail is not part of it, so neither `registryReady` nor `mends`
+ * waits on another party's server.
+ */
+export const TRANSIENT_REGISTRATIONS: ReadonlyArray<
+  Registration<LoginMenderDeps, CeremonyId>
+> = [...TRANSIENT_REGISTRY_REGISTRATIONS, ...TRANSIENT_TAIL_REGISTRATIONS]
 
 /**
  * The sites that report from their own call sites rather than from a block:

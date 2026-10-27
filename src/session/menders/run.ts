@@ -39,6 +39,7 @@ import {
   REMEMBERED_SEED,
   TRANSIENT_INBOX_TAIL,
   TRANSIENT_REGISTRATIONS,
+  TRANSIENT_REGISTRY_REGISTRATIONS,
   type LoginMenderDeps
 } from './registrations.js'
 
@@ -104,8 +105,10 @@ export function heldFor({
  * remembered chain runs the provisioning seed, the six registry-writing
  * registrations, then the annex GC and the keystore report; the transient
  * chain runs the collection fan-out, the shared registry passes, then the
- * acting credential's management-zcap refresh, and has no seed, a transient
- * session provisioning nothing.
+ * acting credential's management-zcap refresh, then the keystore promotion
+ * as its tail, and has no seed, a transient session provisioning nothing.
+ * On either chain the tail settles `session.mends` alone, so
+ * `registryReady` never waits on a KMS round trip.
  *
  * The session's three promises are stamped before anything is awaited, so
  * a caller that returns the session at once finds them. The inbox tail runs
@@ -133,9 +136,10 @@ export function heldFor({
  * @param [options.pendingReports] {ReadonlyArray<Promise<unknown>>}   the
  *   reports the composition fired beside the block -- the transient
  *   composition's did:web projection mend -- awaited before `session.mends`
- *   settles. In the CHAPI popup the block runs the collection fan-out alone
- *   and can settle first, so without this the projection's entry would land
- *   after the report was assembled. `registryReady` does not wait on them
+ *   settles. In the CHAPI popup the block runs the collection fan-out and
+ *   the keystore promotion alone and can settle first, so without this the
+ *   projection's entry would land after the report was assembled.
+ *   `registryReady` does not wait on them
  * @returns {void}   the block runs on `session.registryReady` and
  *   `session.mends`, both stamped before this returns
  */
@@ -165,7 +169,7 @@ export function startLoginMenderBlock({
           // The block alone: the inbox tail behind it is not in this list,
           // so `registryReady` never waits on another party's server.
           registrations: TRANSIENT_REGISTRATIONS,
-          registryWriting: TRANSIENT_REGISTRATIONS,
+          registryWriting: TRANSIENT_REGISTRY_REGISTRATIONS,
           seed: undefined
         }
   const inboxTail =

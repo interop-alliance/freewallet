@@ -1141,6 +1141,7 @@
       "issuerFail": "no figura en un registro de emisores conocido",
       "revocationOk": "no ha sido revocada",
       "revocationFail": "ha sido revocada",
+      "revocationUnchecked": "no se ha comprobado su estado de revocación",
       "expirationOk": "no ha vencido",
       "expirationFail": "ha vencido",
       "noExpiration": "no tiene fecha de vencimiento"

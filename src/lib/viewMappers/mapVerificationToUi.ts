@@ -18,6 +18,7 @@ const CHECKLIST_MSG_KEYS: ChecklistMsgKey[] = [
   'issuerFail',
   'revocationOk',
   'revocationFail',
+  'revocationUnchecked',
   'expirationOk',
   'expirationFail',
   'noExpiration'

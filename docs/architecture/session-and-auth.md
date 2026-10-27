@@ -475,6 +475,7 @@ four of those passes on an ordered chain of its own: the re-seal repair, the
 torn-retirement repair, the bare-passkey rebuild, and the registry backfill.
 Each rides the visit's generation delegation and unwraps with the
 credential's standing key, and the management-zcap refresh follows them.
+The keystore promotion follows in the transient block's tail.
 Ahead of all of them runs the user key sweep's collection fan-out: every
 encrypted collection whose current epoch names a retired user key
 generation takes a fresh epoch on the roster's current key, the appends
@@ -539,15 +540,22 @@ The transient chain has no seed, a transient session provisioning nothing.
 Two promises settle it, and both session types set both. A third settles
 the inbox tail behind it (below).
 `session.registryReady` settles when the registry-writing registrations have
-reported. The keystore promotion is not among them: the pointer heal fires
-it and the block's tail reports it, so no `registryReady` awaiter waits on a
-KMS round trip. A Settings-entered ceremony that writes the unlock-methods
-registry (passphrase change, passphrase or passkey add, rename, or remove,
+reported. The keystore promotion is not among them, so no `registryReady`
+awaiter waits on a KMS round trip. On a remembered login the pointer heal
+fires it and the block's tail reports it. On a transient login the block's
+tail runs it itself. It re-derives the ladder VM's bare did:key from the
+login credential's ladder seed, lists keystores under that did:key, and
+promotes the one it finds to the account did:webvh. A miss is a no-op,
+since the promotion creates nothing: the keystore is promoted already, or
+this credential's ladder never created one. A Settings-entered ceremony
+that writes the unlock-methods registry (passphrase change, passphrase or
+passkey add, rename, or remove,
 account deletion, client disconnect, the forget ceremony, recovery-code
 issuance and revocation) awaits it at its own entry rather than racing those
 writes; so do update-key rotation, the Settings registry load, and the
 recovery-codes health check. `session.mends` settles when the whole block
-has run -- the annex GC and the keystore report behind it included -- and
+has run -- the tail's annex GC and keystore report, or its keystore
+promotion, included -- and
 behind any report the composition fired beside the block,
 which today is the transient login's did:web projection mend. It carries the
 login's mend report: one entry per invariant a mender reported, the routing

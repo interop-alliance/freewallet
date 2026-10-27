@@ -146,6 +146,26 @@ describe('verifyResultToChecklist', () => {
     expect(result.expiration.message).toBe('has no expiration date set')
   })
 
+  it('fails the revocation step closed when a status-bearing credential was not status-checked', () => {
+    const result = verifyResultToChecklist({
+      raw: payload([
+        { id: 'valid_signature', valid: true },
+        { id: 'registered_issuer', valid: true }
+      ]),
+      credential: {
+        ...BASE_VC,
+        credentialStatus: { id: 'status:1' }
+      } as IVerifiableCredential,
+      t
+    })
+    expect(result.revocation.valid).toBe(false)
+    expect(result.revocation.status).toBe('negative')
+    expect(result.revocation.message).toBe(
+      en.verification.checklist.revocationUnchecked
+    )
+    expect(getVerificationAggregateStatus(result)).toBe('not_verified')
+  })
+
   it('defaults revocation to valid when no credentialStatus is present', () => {
     const result = verifyResultToChecklist({
       raw: payload([{ id: 'valid_signature', valid: true }]),
