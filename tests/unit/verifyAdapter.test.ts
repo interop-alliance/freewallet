@@ -114,9 +114,25 @@ function fatalFailure(checkId: string, problem: ProblemDetail): CheckResult {
 
 const SIGNATURE_OK = check(SIGNATURE, { status: 'success', message: 'ok' })
 const STATUS_OK = check(STATUS, { status: 'success', message: 'ok' })
+/**
+ * A passing validity-period check on `CREDENTIAL`: verifier-core carries
+ * the stated dates on every success outcome, and the adapter reads the
+ * expiry row off that `end`.
+ */
 const VALIDITY_PERIOD_OK = check(VALIDITY_PERIOD, {
   status: 'success',
-  message: 'ok'
+  message: 'ok',
+  payload: { end: '2099-01-01T00:00:00Z' }
+})
+
+/**
+ * The same check passing on `CREDENTIAL_WITHOUT_EXPIRY`: an empty payload,
+ * since the credential states no validity period.
+ */
+const VALIDITY_PERIOD_OK_NO_EXPIRY = check(VALIDITY_PERIOD, {
+  status: 'success',
+  message: 'ok',
+  payload: {}
 })
 
 const MATCHING_ISSUERS = [
@@ -295,7 +311,7 @@ describe('verify.ts adapter', () => {
   it('omits the expiration row when the credential states no end date', async () => {
     coreVerifyMock.mockResolvedValue(
       coreResult(
-        [SIGNATURE_OK, VALIDITY_PERIOD_OK, ISSUER_OK],
+        [SIGNATURE_OK, VALIDITY_PERIOD_OK_NO_EXPIRY, ISSUER_OK],
         CREDENTIAL_WITHOUT_EXPIRY
       )
     )
