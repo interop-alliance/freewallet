@@ -2,19 +2,19 @@
  * The content-migration ceremony: a backup bundle's content read back into
  * the account this session is logged into.
  *
- * `@interop/wallet-backup` owns the reading -- the bundle's outer tar, the
- * old secret's derivation, the archived user key roster, and the decrypt
- * walk -- and pushes one plaintext Resource at a time at the sink this module
- * builds over `StorageManager`'s four import methods. The walk issues no
- * request and the module holds no reference to the secret past the call: it
- * is handed to `migrateBundle`, which zeroes the derived material when it
- * ends, and nothing here stores or logs it.
+ * `@interop/wallet-backup` owns the reading -- the bundle's outer tar, the old
+ * secret's derivation, the archived user key roster, and the decrypting of each
+ * Resource -- and pushes one plaintext Resource at a time at the sink this
+ * module builds over `StorageManager`'s four import methods. The migration
+ * issues no request and the module holds no reference to the secret past the
+ * call: it is handed to `migrateBundle`, which zeroes the derived material when
+ * it ends, and nothing here stores or logs it.
  *
  * What the import methods do not carry, this module does, because it alone
  * knows what the run has already written: the orphan rule for a contact
  * revision whose head is nowhere, the activity filter (only a credential's
  * own activities migrate), and the drop rule for an archived `Create` the
- * account already records. The walk's report then becomes the one Import
+ * account already records. The migration's report then becomes the one Import
  * activity the run writes, replacing any earlier run's Import activity for
  * the same bundle.
  *
@@ -29,7 +29,7 @@
  * every session kind, since no replica holds an app collection. A guest or a
  * no-WAS session leaves them counted as not migrated.
  */
-import { migrateBundle, MIGRATION_WALK_ORDER } from '@interop/wallet-backup'
+import { migrateBundle, MIGRATION_ORDER } from '@interop/wallet-backup'
 import type {
   AppCollectionResource,
   ByteSource,
@@ -81,13 +81,13 @@ export class ContentMigrationInProgressError extends Error {
 let migrationRunning = false
 
 /**
- * The migration's stage ids for the ceremony event channel, in run order:
- * the waits and pre-checks before the walk, the walk itself, and the Import
- * activity write.
+ * The migration's stage ids for the ceremony event channel, in run order: the
+ * waits and pre-checks before the migration, the migration itself, and the
+ * Import activity write.
  */
 export const CONTENT_MIGRATION_STAGES = [
   'preflight',
-  'walk',
+  'migration',
   'import-activity'
 ] as const
 
@@ -98,7 +98,7 @@ export type ContentMigrationStage = (typeof CONTENT_MIGRATION_STAGES)[number]
 
 /**
  * The thrown errors a migration run classifies as `refused`: a run already
- * going in this tab, the walk's own refusals of the bundle and the secret,
+ * going in this tab, the migration's own refusals of the bundle and the secret,
  * and the user's cancel. Each leaves what landed safe for a re-run to build
  * on. Every other throw is `failed`, a `QuotaExceededError` from the Import
  * activity write included.
@@ -112,9 +112,9 @@ const CONTENT_MIGRATION_REFUSALS: ReadonlyArray<string> = [
 ]
 
 /**
- * The quota pre-check's finding: the bundle is bigger than the Space has
- * room for. Surfaced rather than thrown -- the user decides whether to run
- * the walk anyway, and the walk stops on its own if the server refuses.
+ * The quota pre-check's finding: the bundle is bigger than the Space has room
+ * for. Surfaced rather than thrown -- the user decides whether to run the
+ * migration anyway, and the migration stops on its own if the server refuses.
  */
 export interface ContentMigrationQuotaWarning {
   bundleBytes: number
@@ -130,7 +130,8 @@ export interface ContentMigrationResult {
   quotaWarning?: ContentMigrationQuotaWarning
   /**
    * False when a remembered session's replication had not settled before the
-   * walk began, so the merge checks read a replica that may lag the remote.
+   * migration began, so the merge checks read a replica that may lag the
+   * remote.
    */
   replicaInSync: boolean
 }
@@ -160,7 +161,7 @@ function bundleSizeOf({
 /**
  * Reads the Space's quota report and says whether the bundle would overrun
  * what is left. Absent quotas (no remote storage, an unreported limit, an
- * unreachable server) are not a refusal: the check is skipped and the walk
+ * unreachable server) are not a refusal: the check is skipped and the migration
  * proceeds.
  *
  * @param options {object}
@@ -290,8 +291,8 @@ function appCollectionsSink({
  * and keep current, what this run did with each archived contact head, and
  * which credentials the account already records a `Create` activity for.
  *
- * The snapshot is read at the first Resource that needs it, which the walk order
- * puts before any contact or activity write, so a re-run reads the same
+ * The snapshot is read at the first Resource that needs it, which the migration
+ * order puts before any contact or activity write, so a re-run reads the same
  * `Create` set the first run did.
  *
  * @param options {object}
@@ -360,7 +361,7 @@ function migrationSink({ session }: { session: Session }): MigrationSink {
       if (head.contactId) {
         headOutcomes.set(head.contactId, outcome)
       }
-      // A seed twin is a skip to the walk: the account already stands for
+      // A seed twin is a skip to the migration: the account already stands for
       // the contact, and nothing was written.
       return outcome === 'seed-twin' ? 'skipped' : outcome
     },
@@ -371,8 +372,8 @@ function migrationSink({ session }: { session: Session }): MigrationSink {
       if (outcome === 'failed') {
         // The head may still land on a re-run, and its revisions land with it
         // then (nothing holds them yet). Reported skipped rather than failed,
-        // so one head that would not write does not count its revisions
-        // toward the walk's consecutive-failure stop and end the collection.
+        // so one head that would not write does not count its revisions toward
+        // the migration's consecutive-failure stop and end the collection.
         return 'skipped'
       }
       if (outcome === 'conflicting' || outcome === 'seed-twin') {
@@ -438,15 +439,15 @@ function importedCollections(
 /**
  * Migrates a backup bundle's content into the session's account.
  *
- * The bundle and the secret travel straight into the walk. Nothing here
- * keeps either past the call: the secret is a parameter of this function and
- * of `migrateBundle` alone, and the walk zeroes what it derived from it when
+ * The bundle and the secret travel straight into the migration. Nothing here
+ * keeps either past the call: the secret is a parameter of this function and of
+ * `migrateBundle` alone, and the migration zeroes what it derived from it when
  * it ends, whether it finished, was aborted, or threw.
  *
  * It refuses one thing of its own: a run started while another is still
  * running in this tab, with `ContentMigrationInProgressError`. A bundle that
  * cannot be opened, an archive with no account Space, and a secret that
- * opens nothing are the walk's refusals. All of them reach the caller as
+ * opens nothing are the migration's refusals. All of them reach the caller as
  * thrown errors it maps through {@link contentMigrationErrorKey}. Past those,
  * every failure is a count in the returned report.
  *
@@ -512,10 +513,10 @@ export async function migrateContent({
 }
 
 /**
- * The outcome event one returned migration maps to: `partial` when the walk
- * stopped early or left Resources unmigrated, `clean` otherwise. Detail is
- * totals across the collections: no collection name, bundle id, or other
- * bundle-supplied text.
+ * The outcome event one returned migration maps to: `partial` when the
+ * migration stopped early or left Resources unmigrated, `clean` otherwise.
+ * Detail is totals across the collections: no collection name, bundle id, or
+ * other bundle-supplied text.
  *
  * @param result {ContentMigrationResult}
  * @returns {{ outcome: CeremonyOutcome, detail: CeremonyDetail }}
@@ -539,7 +540,7 @@ function migrationOutcomeEvent(result: ContentMigrationResult): {
 }
 
 /**
- * A walk report's totals across its collections, as event detail.
+ * A migration report's totals across its collections, as event detail.
  *
  * @param report {MigrationReport}
  * @returns {object}   the totals, each a count
@@ -601,7 +602,7 @@ async function runMigration({
   events: CeremonyEmitter<ContentMigrationStage>
 }): Promise<ContentMigrationResult> {
   // The login-time mender block can rotate the user key and rebuild every
-  // cipher under a Resource in flight, so the walk waits it out. It never
+  // cipher under a Resource in flight, so the migration waits it out. It never
   // rejects.
   await session.mends
 
@@ -618,7 +619,7 @@ async function runMigration({
     // session is the replica; deciding "the account already holds this"
     // against a replica that lags the remote would import a second copy.
     replicaInSync = await awaitCollectionsInSync({
-      collectionIds: MIGRATION_WALK_ORDER.map(entry => entry.collectionId)
+      collectionIds: MIGRATION_ORDER.map(entry => entry.collectionId)
     })
     if (!replicaInSync) {
       log.warn(
@@ -647,12 +648,12 @@ async function runMigration({
     ...(signal !== undefined && { signal }),
     ...(onProgress !== undefined && { onProgress })
   })
-  events.stage('walk', {
+  events.stage('migration', {
     ...migrationCounts(report),
     stopped: report.stoppedAt !== undefined
   })
 
-  // The run record, written whenever the walk ended by its own rules (its
+  // The run record, written whenever the migration ended by its own rules (its
   // tail, a quota refusal, or a collection's consecutive-failure stop) and
   // never on an abort, which throws past this line. It replaces an earlier
   // run's Import activity for the same bundle rather than standing beside it.
@@ -693,10 +694,11 @@ export function contentMigrationErrorKey(err: unknown): string {
     // wrong passphrase or code, or a secret established after the export.
     case 'BundleRecipientMissingError':
       return 'storage.migration.errors.secretNotRecipient'
-    // The user cancelled. The walk stops between Resources, so what landed stays.
+    // The user cancelled. The migration stops between Resources, so what landed
+    // stays.
     case 'AbortError':
       return 'storage.migration.errors.cancelled'
-    // The Space is full. The walk itself stops on this and reports
+    // The Space is full. The migration itself stops on this and reports
     // `stoppedAt`; reaching here means the Import activity's own write was
     // refused.
     case 'QuotaExceededError':

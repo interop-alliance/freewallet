@@ -190,8 +190,8 @@ describe('StorageManager.importContactHead', () => {
       })
     })
 
-    // The seed-twin match is its own outcome: the ceremony maps it to
-    // `skipped` for the walk, and reads it to hold the contact's revisions.
+    // The seed-twin match is its own outcome: the ceremony maps it to `skipped`
+    // for the migration, and reads it to hold the contact's revisions.
     expect(outcome).toBe('seed-twin')
     expect(await storage.listContacts()).toHaveLength(1)
   })
@@ -318,7 +318,7 @@ describe('StorageManager.importContactRevision', () => {
     ).toHaveLength(1)
   })
 
-  it('propagates a QuotaExceededError so the walk stops', async () => {
+  it('propagates a QuotaExceededError so the migration stops', async () => {
     const { storage } = await memoryStorageManager()
     const held = await storage.snapshotHeldContent()
     vi.spyOn(BrowserStore.prototype, 'addContactRevision').mockRejectedValue(

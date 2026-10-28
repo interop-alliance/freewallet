@@ -616,8 +616,8 @@ async function committableAnnexFor({
 
 /**
  * The `versionId`s of every entry in the account archive's `did.jsonl`, in
- * archive order, or `undefined` when the archive carries none. The walk stops
- * at the log entry, so the rest of the archive stays unread.
+ * archive order, or `undefined` when the archive carries none. The entry
+ * cursor stops at the log entry, so the rest of the archive stays unread.
  *
  * @param options {object}
  * @param options.archive {Uint8Array}   the account Space's archive bytes

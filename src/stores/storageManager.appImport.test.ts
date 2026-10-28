@@ -845,7 +845,7 @@ describe('StorageManager app-collection import (encrypted bytes)', () => {
     ).toBe('conflicting')
   })
 
-  it('rethrows a 507 during a chunked write as QuotaExceededError, which ends the walk', async () => {
+  it('rethrows a 507 during a chunked write as QuotaExceededError, which ends the migration', async () => {
     const { server, ensure, importBytes } = await bytesSetup()
     const held = await ensure()
     server.failWhen.status = 507

@@ -124,7 +124,7 @@ import {
 import { credentialTitle } from '@/lib/viewMappers/credentialTitle'
 import { subjectId } from '@/lib/vcShape'
 import { SEED_CONTACT_NAMES } from '@/fixtures/defaultContacts'
-import { WALK_STOPPING_ERROR_NAME } from '@interop/wallet-backup'
+import { MIGRATION_STOPPING_ERROR_NAME } from '@interop/wallet-backup'
 import type {
   HeldAppResources,
   HeldContent,
@@ -6962,10 +6962,10 @@ export class StorageManager {
    * them.
    *
    * Every one reports an {@link ImportOutcome} rather than throwing, so the
-   * walk carries on past a Resource it could not write. The one exception is the
-   * walk-stopping error (`WALK_STOPPING_ERROR_NAME`, was-client's 507), which
-   * is a wall rather than a per-Resource failure and is rethrown so the walk
-   * stops.
+   * migration carries on past a Resource it could not write. The one exception
+   * is the migration-stopping error (`MIGRATION_STOPPING_ERROR_NAME`,
+   * was-client's 507), which is a wall rather than a per-Resource failure and
+   * is rethrown so the migration stops.
    *
    * The merge rule is "skip existing, by content identity", so a re-run of the
    * same bundle converges and a populated account keeps what it has. The
@@ -6989,9 +6989,10 @@ export class StorageManager {
     try {
       return await write()
     } catch (err) {
-      if (errorNameOf(err) === WALK_STOPPING_ERROR_NAME) {
+      if (errorNameOf(err) === MIGRATION_STOPPING_ERROR_NAME) {
         // The Space is full: every Resource behind this one would fail the same
-        // way, so the walk stops rather than wasting the rest of the bundle.
+        // way, so the migration stops rather than wasting the rest of the
+        // bundle.
         throw err
       }
       log.warn(`Could not import an archived ${what}`, { err })
@@ -7110,8 +7111,8 @@ export class StorageManager {
    * `seed-twin` is reported apart from `skipped` because the contact's
    * revisions ride on the difference: an already-held head stands for them,
    * while a seed twin's revisions carry the old account's identity in every
-   * snapshot and must not land. The walk maps it down to the sink vocabulary
-   * and owns the orphan rule for the revisions.
+   * snapshot and must not land. The migration maps it down to the sink
+   * vocabulary and owns the orphan rule for the revisions.
    *
    * @param options {object}
    * @param options.head {ContactHeadPayload}
@@ -7178,10 +7179,9 @@ export class StorageManager {
    * that contact; a match is `skipped`. The snapshot's one decrypt pass is
    * what a stored, blinded index would replace (FW-545).
    *
-   * Whether the revision's contact exists is deliberately not checked here.
-   * The orphan rule belongs to the walk, which knows what the bundle carried
-   * and what this run wrote; this method only refuses to crash without a
-   * head.
+   * Whether the revision's contact exists is deliberately not checked here. The
+   * orphan rule belongs to the migration, which knows what the bundle carried
+   * and what this run wrote; this method only refuses to crash without a head.
    *
    * @param options {object}
    * @param options.revision {ContactRevisionPayload}
@@ -7229,9 +7229,9 @@ export class StorageManager {
    * cannot be deduped, so every re-run would add another copy; reporting it as
    * failed would invite a retry that can never converge.
    *
-   * Which activities are worth migrating (only a credential's own, and the
-   * drop rule for an archived `created` activity) is the walk's filter, not this
-   * method's.
+   * Which activities are worth migrating (only a credential's own, and the drop
+   * rule for an archived `created` activity) is the migration's filter, not
+   * this method's.
    *
    * @param options {object}
    * @param options.activity {WalletActivity}
@@ -7439,9 +7439,9 @@ export class StorageManager {
       })
     } catch (err) {
       // The ensure wraps its failure; a full Space must still reach the
-      // walk under its own name, so the walk stops.
+      // migration under its own name, so the migration stops.
       const cause = (err as Error).cause
-      if (errorNameOf(cause) === WALK_STOPPING_ERROR_NAME) {
+      if (errorNameOf(cause) === MIGRATION_STOPPING_ERROR_NAME) {
         throw cause
       }
       throw err

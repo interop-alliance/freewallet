@@ -513,7 +513,7 @@ through `StorageManager`'s import methods, which skip a Resource the account
 already holds by its content identity. Every session kind may run it, and it
 contacts no server of the old account. App collections are re-provisioned
 remote-direct under their archived `generator`, need remote storage and a
-promoted account, and are merged by the same skip-existing rule. The walk
+promoted account, and are merged by the same skip-existing rule. The migration
 and its refusals are in "Content migration" and "Content migration's app
 collections" in docs/architecture/session-persistence.md.
 

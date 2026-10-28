@@ -11,17 +11,17 @@
  * bytes to a second account's import dialog through the file input, with A's
  * passphrase as the secret.
  *
- * What the cells assert is what migrates and what does not. Content travels:
- * B lists A's credential and A's contact. Nothing else does: the walk reads
- * the file alone, so no request reaches A's Space while it runs, and no
- * `Grant` or `CollectionShare` activity lands, so the importing account's
- * Applications page names no app of A's and its shares dialog names no reader
- * of A's. The importing account's own disconnect and unshare still complete
- * afterwards, which is the check that the migrated Resources did not poison the
- * grant and share harvesters.
+ * What the cells assert is what migrates and what does not. Content travels: B
+ * lists A's credential and A's contact. Nothing else does: the migration reads
+ * the file alone, so no request reaches A's Space while it runs, and no `Grant`
+ * or `CollectionShare` activity lands, so the importing account's Applications
+ * page names no app of A's and its shares dialog names no reader of A's. The
+ * importing account's own disconnect and unshare still complete afterwards,
+ * which is the check that the migrated Resources did not poison the grant and
+ * share harvesters.
  *
  * A's app collection is re-created in the importing account's Space, and
- * no collection's walk ends early.
+ * no collection stops early.
  *
  * The guest cell stands for the no-WAS deployment. A guest session holds no
  * remote Space (`hasRemoteStorage` is false, the same branch a deployment
@@ -552,8 +552,8 @@ test.describe.serial('Content migration from a backup bundle', () => {
   })
 
   test('the import run contacts no Space of the exporting account', async () => {
-    // The capture is the previous cell's: the walk reads the file alone, so
-    // nothing it issued may address A's Spaces or carry A's DID.
+    // The capture is the previous cell's: the migration reads the file alone,
+    // so nothing it issued may address A's Spaces or carry A's DID.
     expectNoContactWithBundleAccount({ captured: importCapture, identity })
   })
 

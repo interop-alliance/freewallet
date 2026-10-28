@@ -3,8 +3,9 @@
  * through, in the style of `src/session/loginErrorKey.ts`.
  *
  * The report carries error names rather than sentences: `stoppedBy` on a
- * collection, `stoppedAt.cause` on the whole walk, and each key of
- * `unopenableCauses`. They are minted in `@interop/wallet-backup` and in the
+ * collection, `stoppedAt.cause` on the whole migration, each key of
+ * `unopenableCauses` and of `generationCauses`, and `indexSchemaCause`. They
+ * are minted in `@interop/wallet-backup` and in the
  * packages under it, so they reach the page as bare strings and are matched
  * as such -- an `instanceof` check against a linked or duplicated copy would
  * silently miss. A name with no arm of its own falls back to a sentence that
@@ -25,7 +26,7 @@ const CAUSE_KEYS: Record<string, string> = {
   // another Resource: tampered or corrupt, never a missing key.
   IntegrityError: 'storage.migration.causes.integrity',
   // The archived Resource is chunked outside an encrypted app collection,
-  // where the walk does not reassemble it.
+  // where the migration does not reassemble it.
   ChunkedResourceUnsupportedError: 'storage.migration.causes.chunked',
   // A chunked Resource's chunk or chunk directory is missing, or the archive
   // holds a chunk directory no Resource names.
@@ -40,7 +41,7 @@ const CAUSE_KEYS: Record<string, string> = {
   Error: 'storage.migration.causes.error',
   // The collection's governing log would not read, so its epochs are unknown.
   CollectionLogUnreadableError: 'storage.migration.causes.logUnreadable',
-  // This account's Space is full, a chunked write included; the walk stops
+  // This account's Space is full, a chunked write included; the migration stops
   // rather than retry.
   QuotaExceededError: 'storage.migration.causes.quotaExceeded',
   // One Resource is larger than this server accepts.

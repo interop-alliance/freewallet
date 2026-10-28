@@ -803,6 +803,8 @@
         "unopenable": "No se pudieron abrir: {{count}}"
       },
       "collectionStoppedBy": "Se detuvo antes de tiempo: {{cause}}",
+      "generationsDropped": "Entradas de clave de la copia descartadas ({{count}}): {{cause}}",
+      "indexSchemaNotOpened": "Ajustes de búsqueda no trasladados: {{cause}}",
       "stoppedAt": "La importación se detuvo en {{collection}}: {{cause}}",
       "notMigratedCollectionsTitle": "Queda en la copia de seguridad",
       "notMigratedCollectionRow": "{{collection}}: {{count}} elementos",

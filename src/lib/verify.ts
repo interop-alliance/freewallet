@@ -19,7 +19,8 @@ import {
 } from '@interop/verifier-core'
 import type {
   CredentialVerificationResult,
-  CheckResult
+  CheckResult,
+  ValidityPeriodPayload
 } from '@interop/verifier-core'
 import type { IVerifiableCredential } from '@interop/data-integrity-core'
 import { registryManager } from '@/lib/registryManager'
@@ -117,15 +118,17 @@ function mapCoreResultToLegacyPayload(
   // The legacy `expiration` row is the one validity-date row the checklist
   // has, so a not-yet-valid credential rides it with the library's detail.
   // The check passes a credential stating no end date, where the checklist
-  // expects no row at all, so that pass is read off the credential itself.
+  // expects no row at all, so the pass makes a row only when the check's
+  // payload names the end date it judged.
   const validityPeriod = byId(CHECK_ID.validityPeriod)
   if (validityPeriod?.outcome.status === 'failure') {
     legacyLog.push(legacyEntryFromCheck('expiration', validityPeriod))
-  } else if (
-    validityPeriod?.outcome.status === 'success' &&
-    statesExpiry(core.verifiableCredential)
-  ) {
-    legacyLog.push({ id: 'expiration', valid: true })
+  } else if (validityPeriod?.outcome.status === 'success') {
+    const judged = validityPeriod.outcome.payload as
+      ValidityPeriodPayload | undefined
+    if (judged?.end !== undefined) {
+      legacyLog.push({ id: 'expiration', valid: true })
+    }
   }
 
   const unsupportedProofs = byId(CHECK_ID.unsupportedProofs)
@@ -182,18 +185,6 @@ function legacyEntryFromCheck(id: string, check: CheckResult): LegacyLogEntry {
     valid: false,
     ...(message ? { error: { message } } : {})
   }
-}
-
-/**
- * Whether the credential states an end to its validity period, as VC 2.0
- * `validUntil` or VC 1.1 `expirationDate`.
- */
-function statesExpiry(credential: unknown): boolean {
-  const { validUntil, expirationDate } = (credential ?? {}) as Record<
-    string,
-    unknown
-  >
-  return validUntil !== undefined || expirationDate !== undefined
 }
 
 function problemDetail(check: CheckResult): string | undefined {

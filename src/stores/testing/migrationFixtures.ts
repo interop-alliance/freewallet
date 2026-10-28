@@ -1,8 +1,8 @@
 /**
- * The archived Resources the content-migration tests feed the import methods:
- * a credential, a contact head, a contact revision, and the two activity
- * shapes the walk classifies. They are shared between the store-level tests
- * and the ceremony's, so both sides argue about the same bodies.
+ * The archived Resources the content-migration tests feed the import methods: a
+ * credential, a contact head, a contact revision, and the two activity shapes
+ * the migration classifies. They are shared between the store-level tests and
+ * the ceremony's, so both sides argue about the same bodies.
  */
 import type { IVerifiableCredential } from '@interop/data-integrity-core'
 import type {

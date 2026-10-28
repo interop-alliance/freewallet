@@ -69,8 +69,8 @@ interface BundleSpace {
 
 /**
  * A bundle read into memory: its manifest, its small top-level files, and
- * every Space archive. The package's own walk is one-shot and streams, which
- * a test does not need at e2e sizes.
+ * every Space archive. The package's own entry cursor is one-shot and streams,
+ * which a test does not need at e2e sizes.
  */
 interface OpenedBundle {
   manifest: Awaited<ReturnType<typeof readBundle>>['manifest']

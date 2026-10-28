@@ -803,6 +803,8 @@
         "unopenable": "Could not be opened: {{count}}"
       },
       "collectionStoppedBy": "Stopped early: {{cause}}",
+      "generationsDropped": "Backup key entries set aside ({{count}}): {{cause}}",
+      "indexSchemaNotOpened": "Search settings not carried over: {{cause}}",
       "stoppedAt": "The import stopped in {{collection}}: {{cause}}",
       "notMigratedCollectionsTitle": "Left in the backup",
       "notMigratedCollectionRow": "{{collection}}: {{count}} items",

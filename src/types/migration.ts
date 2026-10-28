@@ -2,10 +2,10 @@
  * The vocabulary the content-migration import methods report in, and the
  * held-content snapshot they decide against.
  *
- * A migration walk (`@interop/wallet-backup`) reads one archived Resource out
- * of a backup bundle and hands it to a host import method; the method says what
- * happened to it, and the walk tallies the report. The outcome vocabulary is
- * the package's `SinkOutcome`, under the name the store layer uses for it:
+ * A migration (`@interop/wallet-backup`) reads one archived Resource out of a
+ * backup bundle and hands it to a host import method; the method says what
+ * happened to it, and the migration tallies the report. The outcome vocabulary
+ * is the package's `SinkOutcome`, under the name the store layer uses for it:
  * `accepted` (written), `skipped` (already held, or content this build does not
  * migrate), `conflicting` (that identity is held under different content, and
  * the Resource landed nowhere), `failed` (the write did not land and may be

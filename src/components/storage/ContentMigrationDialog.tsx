@@ -1,15 +1,15 @@
 /**
  * The content-migration dialog behind the Storage page's "Import from another
  * wallet" action: a backup file, the one secret that opens it, and the report
- * the walk leaves behind.
+ * the migration leaves behind.
  *
  * It offers every session kind, a guest and a no-WAS deployment included --
  * `migrateContent` writes through the session's own import methods, so
  * there is nothing here to gate on remote storage. The three secret inputs
- * are the ones the walk accepts: the old wallet's passphrase, a recovery
- * code typed in, or the code the backup itself carries, unsealed with the
- * export passphrase where one was used. There is no passkey input, since evaluating
- * a passkey needs the old account's sealed unlock registry.
+ * are the ones the migration accepts: the old wallet's passphrase, a
+ * recovery code typed in, or the code the backup itself carries, unsealed
+ * with the export passphrase where one was used. There is no passkey input,
+ * since evaluating a passkey needs the old account's sealed unlock registry.
  *
  * The secret fields carry `autoComplete="off"` and no name a password manager
  * matches: the one saved entry for this origin is THIS account's passphrase,
@@ -18,6 +18,7 @@
  * and the state holding it is dropped when the dialog closes.
  */
 import { useCallback, useRef, useState } from 'react'
+import type { ReactNode } from 'react'
 import Alert from '@mui/material/Alert'
 import Button from '@mui/material/Button'
 import Dialog from '@mui/material/Dialog'
@@ -78,11 +79,23 @@ const NOT_MIGRATED_KEYS = [
 type SecretKind = 'passphrase' | 'recoveryCode' | 'packedCredential'
 
 /**
- * How often the per-collection counters are pushed into React state. The walk
- * reports every Resource and a large bundle carries thousands, so the counts
- * accumulate in a ref and land on screen at this interval instead.
+ * How often the per-collection counters are pushed into React state. The
+ * migration reports every Resource and a large bundle carries thousands, so
+ * the counts accumulate in a ref and land on screen at this interval instead.
  */
 const PROGRESS_FLUSH_MS = 200
+
+/**
+ * One detail line of a collection's report: a bucket count, a cause, or a
+ * stop.
+ */
+function ReportLine({ children }: { children: ReactNode }) {
+  return (
+    <Typography variant="body2" color="text.secondary">
+      {children}
+    </Typography>
+  )
+}
 
 /**
  * Renders the import form, the run, and the report.
@@ -406,33 +419,42 @@ export function ContentMigrationDialog({
                       {collectionLabel(collectionId)}
                     </Typography>
                     {REPORT_BUCKETS.map(bucket => (
-                      <Typography
-                        key={bucket}
-                        variant="body2"
-                        color="text.secondary"
-                      >
+                      <ReportLine key={bucket}>
                         {t(`storage.migration.buckets.${bucket}`, {
                           count: counts[bucket]
                         })}
-                      </Typography>
+                      </ReportLine>
                     ))}
                     {Object.entries(counts.unopenableCauses ?? {}).map(
                       ([cause, count]) => (
-                        <Typography
-                          key={cause}
-                          variant="body2"
-                          color="text.secondary"
-                        >
+                        <ReportLine key={cause}>
                           {`${causeText(cause)} (${count})`}
-                        </Typography>
+                        </ReportLine>
                       )
                     )}
                     {counts.stoppedBy && (
-                      <Typography variant="body2" color="text.secondary">
+                      <ReportLine>
                         {t('storage.migration.collectionStoppedBy', {
                           cause: causeText(counts.stoppedBy)
                         })}
-                      </Typography>
+                      </ReportLine>
+                    )}
+                    {Object.entries(counts.generationCauses ?? {}).map(
+                      ([cause, count]) => (
+                        <ReportLine key={`generation:${cause}`}>
+                          {t('storage.migration.generationsDropped', {
+                            cause: causeText(cause),
+                            count
+                          })}
+                        </ReportLine>
+                      )
+                    )}
+                    {counts.indexSchemaCause && (
+                      <ReportLine>
+                        {t('storage.migration.indexSchemaNotOpened', {
+                          cause: causeText(counts.indexSchemaCause)
+                        })}
+                      </ReportLine>
                     )}
                   </Stack>
                 )

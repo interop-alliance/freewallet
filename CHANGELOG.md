@@ -55,6 +55,20 @@
 
 ### Changed
 
+- The verification checklist's expiration row follows what
+  `proof.validity-period` judged: it is shown when the check's payload names
+  an end date, and the credential's own version-specific dates are no longer
+  read. Takes `@interop/verifier-core` 4.1.0.
+- Adapt to `@interop/wallet-backup`'s renamed exports: `MIGRATION_WALK_ORDER`
+  is `MIGRATION_ORDER` and `WALK_STOPPING_ERROR_NAME` is
+  `MIGRATION_STOPPING_ERROR_NAME`. The content-migration prose says "migration"
+  for the run, as that package's glossary now does, and the ceremony event
+  channel's stage id `walk` is now `migration`. The import report renders the
+  package's two new per-collection members: `generationCauses`, the backup
+  key entries set aside because they failed their key-wrap check, and
+  `indexSchemaCause`, the error that kept a collection's sealed index schema
+  from being carried over (English and Spanish). Needs the wallet-backup
+  release that carries the rename (0.6.2 as its changelog stands).
 - Every entry-writing ceremony hands wallet-core's account-entry seam the
   store its `did:web` projection is written through (`ceremonyProjectionStore`
   on the ceremony context): the enrolled branch's own controller-invoking log

@@ -445,7 +445,7 @@ backup credential the bundle carries. `@interop/wallet-backup` reads the
 bundle and pushes one plaintext Resource at a time at a sink built over
 `StorageManager`'s import methods. A standard-collection Resource lands on
 the session's own backend, so every session kind may run the migration, a
-guest included. The walk contacts no server of the old account, since
+guest included. The migration contacts no server of the old account, since
 everything it reads comes out of the file. Each import method skips a
 Resource the account already holds by its content identity. Only a
 credential's activities migrate, and a `Create` the account already records
@@ -453,29 +453,29 @@ for that credential is skipped
 (`decisions/0028-only-credential-activities-migrate.md`). The run's counts
 become one Import activity, which replaces any earlier run's Import activity
 for the same bundle. A full Space during any Resource write, a chunked one
-included, stops the walk under `QuotaExceededError`.
+included, stops the migration under `QuotaExceededError`.
 
-**Content migration's app collections**. Beside the standard collections, the walk hands the sink every app
-collection in the bundle's account archive, one at a time: an
-`ensureCollection` call, then its Resources. The sink carries that member only
-when `StorageManager.canProvisionAppCollections` holds (remote storage and
-descriptor logs), so a guest or a no-WAS session leaves app collections in
-the report's not-migrated counts. `ensureImportedAppCollection` reads the
-collection's standing state and checks a standing collection before it
+**Content migration's app collections**. Beside the standard collections, the
+migration hands the sink every app collection in the bundle's account archive,
+one at a time: an `ensureCollection` call, then its Resources. The sink carries
+that member only when `StorageManager.canProvisionAppCollections` holds (remote
+storage and descriptor logs), so a guest or a no-WAS session leaves app
+collections in the report's not-migrated counts. `ensureImportedAppCollection`
+reads the collection's standing state and checks a standing collection before it
 writes anything. It then runs was-client's guarded ensure, whose `created`
-report decides whether this run made the collection. The earlier read only
-feeds the checks. A create lost to a rival reads the rival's collection
-back and checks it the same way. An encrypted collection is ensured bare
-under its archived `generator`. It then gets a fresh governing log, whose
-first epoch is owner-only, and a fresh blinded-index key. That is the second
-half of `provisionEncryptedCollection` with no grantee. On a collection the run
-creates, it declares the archived index schema through was-client's
-add-only `declareIndexes`. It then builds the collection's cipher from
-the descriptor and the collection metadata as it then stands. A standing
-collection that predates the blinded index has no key to declare under, and
-its Resources land without index entries. A plaintext collection is ensured
-private with its archived attribution. When the run creates it and the
-archive says public, the world-read grant follows.
+report decides whether this run made the collection. The earlier read only feeds
+the checks. A create lost to a rival reads the rival's collection back and
+checks it the same way. An encrypted collection is ensured bare under its
+archived `generator`. It then gets a fresh governing log, whose first epoch is
+owner-only, and a fresh blinded-index key. That is the second half of
+`provisionEncryptedCollection` with no grantee. On a collection the run creates,
+it declares the archived index schema through was-client's add-only
+`declareIndexes`. It then builds the collection's cipher from the descriptor and
+the collection metadata as it then stands. A standing collection that predates
+the blinded index has no key to declare under, and its Resources land without
+index entries. A plaintext collection is ensured private with its archived
+attribution. When the run creates it and the archive says public, the world-read
+grant follows.
 
 A collection the account already holds keeps its own settings: its public
 read, its index schema, and its attribution are left as they are. The one
@@ -523,30 +523,30 @@ bytes and is not in the snapshot, so an id already taken is read back and
 compared by its bytes.
 
 An encrypted Resource arrives by what it decrypted to. A JSON one takes the
-route above. Its identity is its payload's own `id`, or its content cid when
-it has none. It is re-sealed under the new user key with its blinded index
-entries, under a fresh content-derived id. One that decrypted to bytes, a chunked Resource or a small
-binary or text one, arrives as raw bytes under its sealed content type. Its
-identity is its archived resource id. `WASRemoteStore.putEncryptedResourceBytes`
-writes it at that id through was-client's `Resource.put` with
-`ifNoneMatch`, on a handle carrying the verified descriptor and the vault
-keys as a per-handle encryption override, since the store's client holds no
-keystore. A payload over the codec's blob limit is written as a chunked
-document. A `412` reads the held copy back, reassembling a chunked one, and
-compares bytes: the same bytes are `skipped`, and other bytes (or a held
-JSON copy) are `conflicting`, with the held copy untouched. When that read
-fails with `EncryptionError`, the raw envelope is read, and a pending stub a
-killed chunked write left is deleted with its chunks through
-`resource.delete()`. The write then runs again. A stub is reaped only at an
-id the run is importing. The snapshot decrypts each held envelope with a
+route above. Its identity is its payload's own `id`, or its content cid when it
+has none. It is re-sealed under the new user key with its blinded index entries,
+under a fresh content-derived id. One that decrypted to bytes, a chunked
+Resource or a small binary or text one, arrives as raw bytes under its sealed
+content type. Its identity is its archived resource id.
+`WASRemoteStore.putEncryptedResourceBytes` writes it at that id through
+was-client's `Resource.put` with `ifNoneMatch`, on a handle carrying the
+verified descriptor and the vault keys as a per-handle encryption override,
+since the store's client holds no keystore. A payload over the codec's blob
+limit is written as a chunked document. A `412` reads the held copy back,
+reassembling a chunked one, and compares bytes: the same bytes are `skipped`,
+and other bytes (or a held JSON copy) are `conflicting`, with the held copy
+untouched. When that read fails with `EncryptionError`, the raw envelope is
+read, and a pending stub a killed chunked write left is deleted with its chunks
+through `resource.delete()`. The write then runs again. A stub is reaped only at
+an id the run is importing. The snapshot decrypts each held envelope with a
 chunk source that holds nothing, so a complete chunked Resource stops at its
 first chunk with `NotFoundError` and is recorded by id, as a small bytes
 Resource is. No held Resource is reassembled for the snapshot, and a pending
 stub is left out of it. A `507` during a chunked write surfaces as
-`QuotaExceededError`, which ends the walk. `migrateContent` refuses a second
-run while one is going in the same tab (`ContentMigrationInProgressError`),
-since that run could reap a stub the first is still filling. Runs in two tabs
-or two browsers are not held apart.
+`QuotaExceededError`, which ends the migration. `migrateContent` refuses a
+second run while one is going in the same tab
+(`ContentMigrationInProgressError`), since that run could reap a stub the first
+is still filling. Runs in two tabs or two browsers are not held apart.
 
 App collections are remote-only, so these writes go remote-direct
 on a remembered session too. The app's own recipient entry and grants do

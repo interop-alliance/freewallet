@@ -76,7 +76,7 @@ import {
 const SPACE_ID = 'zMigrationFixtureSpace'
 
 beforeEach(() => {
-  // Any request at all is a bug: the walk reads the bundle alone, and the
+  // Any request at all is a bug: the migration reads the bundle alone, and the
   // account side here has no remote store.
   vi.stubGlobal(
     'fetch',
@@ -504,7 +504,7 @@ describe('migrateContent', () => {
       failed: 1
     })
     // The failed head's revision is skipped rather than failed, so a head
-    // that will not write cannot end the collection through the walk's
+    // that will not write cannot end the collection through the migration's
     // consecutive-failure stop; the re-run retries the head and lands both.
     expect(
       result.report.collections[CONTACTS_HISTORY_COLLECTION]
@@ -733,14 +733,14 @@ describe('migrateContent', () => {
       result.report.collections[PRIVATE_CREDENTIALS_COLLECTION]
     expect(credentialCounts.failed).toBe(10)
     expect(credentialCounts.stoppedBy).toBe('failed')
-    // The stop is the collection's alone: the walk moves on.
+    // The stop is the collection's alone: the migration moves on.
     expect(result.report.collections[WALLET_ACTIVITY_COLLECTION]).toMatchObject(
       { accepted: 1 }
     )
     expect(result.report.stoppedAt).toBeUndefined()
   })
 
-  it('stops the whole walk on a quota refusal and records it in the import activity', async () => {
+  it('stops the whole migration on a quota refusal and records it in the import activity', async () => {
     const session = await memorySession()
     const { bundle, secret } = await makeBundle([
       {
@@ -780,7 +780,7 @@ describe('migrateContent', () => {
     })
   })
 
-  it('stops the whole walk when a bytes Resource of an app collection fills the Space', async () => {
+  it('stops the whole migration when a bytes Resource of an app collection fills the Space', async () => {
     const session = await memorySession()
     const { storage } = session
     vi.spyOn(storage, 'canProvisionAppCollections', 'get').mockReturnValue(true)
@@ -892,7 +892,7 @@ describe('content-migration ceremony events', () => {
 
     expect(capture.stageNames('content-migration')).toEqual([
       'preflight',
-      'walk',
+      'migration',
       'import-activity'
     ])
     const outcome = capture.soleOutcome('content-migration')
@@ -913,7 +913,7 @@ describe('content-migration ceremony events', () => {
     }
   })
 
-  it('classifies a quota-stopped walk as partial', async () => {
+  it('classifies a quota-stopped migration as partial', async () => {
     const session = await memorySession()
     const { bundle, secret } = await makeBundle([
       {
@@ -1031,7 +1031,7 @@ describe('content-migration ceremony events', () => {
 })
 
 describe('contentMigrationErrorKey', () => {
-  it('names one key per refusal the walk raises', () => {
+  it('names one key per refusal the migration raises', () => {
     const named = (name: string): Error => {
       const err = new Error('refused')
       err.name = name
