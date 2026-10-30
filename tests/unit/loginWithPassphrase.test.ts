@@ -24,7 +24,7 @@ const state = vi.hoisted(() => ({
 
 vi.mock('@/app.config', async importOriginal => ({
   ...(await importOriginal<typeof import('@/app.config')>()),
-  get WAS_BASE_URL() {
+  get WAS_BASE_SERVER_URL() {
     return state.wasUrl
   }
 }))
@@ -129,8 +129,7 @@ import {
 const PASSPHRASE = 'correct horse battery staple'
 const POINTER: AccountPointer = {
   did: 'did:webvh:QmScidForTests:was.example.test:space:space-123:id',
-  spaceId: 'space-123',
-  host: 'https://was.example.test'
+  spaceUrl: 'https://was.example.test/space/space-123/'
 }
 
 /**
@@ -861,8 +860,7 @@ describe('loginWithPassphrase -- remembered resume of a torn signup', () => {
   // A remembered signup torn before the establishment's re-bind: the record
   // carries the ladder seed but the pointer names no did:webvh yet.
   const TORN_POINTER: AccountPointer = {
-    spaceId: 'space-123',
-    host: 'https://was.example.test'
+    spaceUrl: 'https://was.example.test/space/space-123/'
   }
 
   it('mends the torn signup under rememberBrowser: true, then self-enrolls from the refreshed record', async () => {
@@ -922,7 +920,7 @@ describe('loginWithPassphrase -- remembered resume of a torn signup', () => {
       })
     )
     expect(passphraseRegistryUpsertHook).toHaveBeenCalledWith({
-      spaceId: TORN_POINTER.spaceId
+      spaceUrl: POINTER.spaceUrl
     })
     // The keyring was re-fetched after the heal, and the self-enrollment ran
     // over the refreshed (promoted) hit.
@@ -1036,7 +1034,7 @@ describe('loginWithPassphrase -- fetch failure', () => {
 
 describe('loginWithPassphrase -- the popup session (FW-203)', () => {
   it('routes the remembered popup arm remote-direct with suppressed local caches', async () => {
-    state.wasUrl = 'https://was.example.test'
+    state.wasUrl = 'https://was.example.test/'
     const clientSeed = randomSeed()
     const controller = await didFromSeed(clientSeed)
     vi.mocked(fetchKeyring).mockResolvedValue({
@@ -1085,7 +1083,7 @@ describe('loginWithPassphrase -- the popup session (FW-203)', () => {
     // refusal lands at the first-contact read, before the forgotten-browser
     // detector (which would stand down on the unreadable log) and before
     // any session is built, and carries the credential's own removal.
-    state.wasUrl = 'https://was.example.test'
+    state.wasUrl = 'https://was.example.test/'
     const clientSeed = randomSeed()
     const controller = await didFromSeed(clientSeed)
     vi.mocked(fetchKeyring).mockResolvedValue({

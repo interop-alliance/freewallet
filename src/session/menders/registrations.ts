@@ -734,8 +734,8 @@ const TRANSIENT_MANAGE_ZCAP_REFRESH: Registration<LoginMenderDeps, CeremonyId> =
       // registration above may have renewed the generation delegation.
       const capability =
         session.profile.invocationCapability ?? generationDelegation
-      const spaceId = session.profile.accountPointer?.spaceId
-      if (!found.manageCapability || !capability || !spaceId) {
+      const accountPointer = session.profile.accountPointer
+      if (!found.manageCapability || !capability || !accountPointer) {
         return [
           {
             invariant,
@@ -746,7 +746,7 @@ const TRANSIENT_MANAGE_ZCAP_REFRESH: Registration<LoginMenderDeps, CeremonyId> =
       }
       const refreshed = await refreshTransientManageCapability({
         zcapClient: session.profile.zcapClient,
-        spaceId,
+        spaceUrl: accountPointer.spaceUrl,
         userKey: rosterRead.userKey,
         capability,
         unlockSpaceId: found.unlockSpaceId,

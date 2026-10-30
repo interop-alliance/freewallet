@@ -35,7 +35,7 @@ import {
   relationIds,
   resolvedKeyAgreementMethods
 } from '@interop/wallet-core/webvh'
-import { WAS_BASE_URL } from '@/app.config'
+import { WAS_BASE_SERVER_URL } from '@/app.config'
 import { wasServiceDescription } from '@/lib/wasService'
 import type {
   PassphraseUnlockMethod,
@@ -147,7 +147,7 @@ export async function findPendingPassphraseEntries({
     try {
       const record = await getUnlockKeyring({
         serviceDescription,
-        storageServerUrl: WAS_BASE_URL as string,
+        baseServerUrl: WAS_BASE_SERVER_URL as string,
         zcapClient: reader.zcapClient,
         spaceId: entry.unlockSpaceId,
         capability: reader.capability

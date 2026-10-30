@@ -26,7 +26,10 @@ import type { Session } from '@/types/auth'
 const CLIENT_DID = 'did:key:z6MkhaXgBZDvotDkL5257faiztiGiC2QtKLGpbnnEGta2doK'
 const CLIENT_KEY = CLIENT_DID.slice('did:key:'.length)
 const ACCOUNT_DID = 'did:webvh:QmScid:was.example:space:s'
-const POINTER = { did: ACCOUNT_DID, spaceId: 's', host: 'https://was.example' }
+const POINTER = {
+  did: ACCOUNT_DID,
+  spaceUrl: 'https://was.example/space/s/'
+}
 const DAY_MS = 24 * 60 * 60 * 1000
 
 const state = vi.hoisted(() => ({

@@ -15,8 +15,7 @@ const OTHER_KAK = 'z6LStRqthDcQTuohXDkypMe9aQ2ZCLWrV7u79pB25oza2u7D'
 
 const POINTER = {
   did: 'did:webvh:QmScid:was.example.test:space:space-123:id',
-  spaceId: 'space-123',
-  host: 'https://was.example.test'
+  spaceUrl: 'https://was.example.test/space/space-123/'
 }
 
 const FRESH_USER_KEY = { id: 'did:key:z6LSFreshUserKey' }
@@ -99,7 +98,9 @@ vi.mock('@/session/credentialRotation', () => ({
   })
 }))
 
-vi.mock('@/session/userKeyAdoption', () => {
+vi.mock('@/session/userKeyAdoption', async importOriginal => {
+  const { rotationSpaceUrl } =
+    await importOriginal<typeof import('@/session/userKeyAdoption')>()
   const withOwnUserKeyRotation = vi.fn(
     async ({ run }: { run: () => Promise<unknown> }) => await run()
   )
@@ -114,11 +115,8 @@ vi.mock('@/session/userKeyAdoption', () => {
     adoptRotatedUserKey: vi.fn(async () => {
       state.calls.push('adoptRotatedUserKey')
     }),
-    // The real helper: the account pointer's Space id, else the storage's.
-    rotationSpaceId: vi.fn(
-      ({ session }: { session: Session }) =>
-        session.profile.accountPointer?.spaceId ?? session.storage.spaceId
-    )
+    // The real helper: the account pointer's Space URL, else the storage's.
+    rotationSpaceUrl: vi.fn(rotationSpaceUrl)
   }
 })
 
@@ -353,7 +351,7 @@ function makeSession(type: 'passphrase' | 'passkey' = 'passphrase'): Session {
   return {
     user: { id: 'did:key:zClient' },
     isGuest: false,
-    storage: { spaceId: POINTER.spaceId },
+    storage: { spaceUrl: POINTER.spaceUrl },
     profile: {
       accountPointer: POINTER,
       unlockMethod: { type, unlockSpaceId: 'unlock-space-new' }
@@ -410,7 +408,7 @@ describe('repairTornPassphraseRetirement', () => {
     )
     expect(vi.mocked(adoptRotatedUserKey)).toHaveBeenCalledWith(
       expect.objectContaining({
-        spaceId: POINTER.spaceId,
+        spaceUrl: POINTER.spaceUrl,
         userKey: FRESH_USER_KEY
       })
     )

@@ -43,7 +43,7 @@ import {
  * should throw.
  */
 const wasState = vi.hoisted(() => ({
-  url: 'https://was.example.test' as string | undefined,
+  url: 'https://was.example.test/' as string | undefined,
   spaces: new Map<string, unknown>(),
   getError: undefined as unknown,
   // Each unlock Space's record version: the fake's ETag is `"v<n>"`, and a
@@ -65,7 +65,7 @@ function etagFor(spaceId: string): string {
 
 vi.mock('@/app.config', async importOriginal => ({
   ...(await importOriginal<typeof import('@/app.config')>()),
-  get WAS_BASE_URL() {
+  get WAS_BASE_SERVER_URL() {
     return wasState.url
   }
 }))
@@ -186,8 +186,7 @@ const KDF = {
 const DATA_CONTROLLER = 'did:key:z6MkDataControllerForTests'
 const POINTER: AccountPointer = {
   did: 'did:webvh:QmScidForTests:was.example.test:space:space-123:id',
-  spaceId: 'space-123',
-  host: 'https://was.example.test'
+  spaceUrl: 'https://was.example.test/space/space-123/'
 }
 
 /**
@@ -436,7 +435,7 @@ function seedToBase64Url(bytes: Uint8Array): string {
 }
 
 beforeEach(() => {
-  wasState.url = 'https://was.example.test'
+  wasState.url = 'https://was.example.test/'
   wasState.spaces.clear()
   wasState.getError = undefined
   wasState.versions.clear()
@@ -629,13 +628,13 @@ describe('wrap / unwrap', () => {
     ).rejects.toThrow(/controller/)
   })
 
-  it('rejects a record whose pointer is malformed (missing host)', async () => {
+  it('rejects a record whose pointer is malformed (missing spaceUrl)', async () => {
     const idb = createFakeIdb()
     const { record, spaceId } = await craftRecord({
       passphrase: 'malformed pointer passphrase',
       plaintext: {
         controller: DATA_CONTROLLER,
-        pointer: { spaceId: 'space-123' },
+        pointer: { did: POINTER.did },
         createdAt: new Date().toISOString()
       }
     })
@@ -2340,8 +2339,8 @@ describe('management zcap delegation', () => {
    */
   function unlockSpaceUrl(spaceId: string): string {
     // The canonical container form: a trailing slash, which is the target
-    // was-client's `spacePath` builder emits and the server matches.
-    return new URL(`/space/${spaceId}/`, wasState.url).toString()
+    // was-client's `spaceUrlById` builder emits and the server matches.
+    return new URL(`space/${spaceId}/`, wasState.url).toString()
   }
 
   describe('bindUnlockSecret with delegateManagementTo', () => {
@@ -2373,7 +2372,7 @@ describe('management zcap delegation', () => {
       // path helpers against the server URL, so a hand-built root-anchored
       // target would drop the base path and the server would refuse every
       // child of it.
-      wasState.url = 'https://host.example.test/was'
+      wasState.url = 'https://host.example.test/was/'
       const idb = createFakeIdb()
       const { manageCapability, unlockSpaceId } = await bindUnlockSecret({
         clientSeed: randomSeed(),
@@ -2781,7 +2780,7 @@ describe('fetchTransientKeyring (FW-215)', () => {
     const minted = found!.manageCapability as IDelegatedZcap
     expect(minted.allowedAction).toEqual(['GET', 'PUT', 'DELETE', 'POST'])
     expect(minted.invocationTarget).toBe(
-      `${wasState.url}/space/${found!.unlockSpaceId}/`
+      `${wasState.url}space/${found!.unlockSpaceId}/`
     )
     expect(typeof found!.rebindStandingRecord).toBe('function')
     // And no IndexedDB database was created at any point.
@@ -2880,11 +2879,11 @@ describe('fetchTransientKeyring (FW-215)', () => {
     expect(found!.pointer).toEqual(POINTER)
     const settleArgs = vi.mocked(currentAccountRecordSigners).mock
       .calls[0][0] as unknown as {
-      pointer: { did: string }
+      did: string
       accountLogPinStore: unknown
     }
     expect(settleArgs.accountLogPinStore).toBe(accountLogPinStore)
-    expect(settleArgs.pointer.did).toBe(POINTER.did)
+    expect(settleArgs.did).toBe(POINTER.did)
   })
 
   it('refuses a re-minted record no enrolled client accounts for', async () => {
@@ -3325,7 +3324,10 @@ describe('the unlock record rewrite is a compare-and-swap (FW-343)', () => {
     // The credential is re-bound to another account's Space in between.
     await bindStanding({
       passphrase,
-      pointer: { ...unpromoted, spaceId: 'another-account-space' }
+      pointer: {
+        ...unpromoted,
+        spaceUrl: 'https://was.example.test/space/another-account-space/'
+      }
     })
     const before = wasState.spaces.get(unlockSpaceId)
 

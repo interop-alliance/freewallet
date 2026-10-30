@@ -5,7 +5,7 @@
  * live generation; its did:webvh splits into the auxiliary Space id and the
  * generation id, which together address the generation's log store (carrying
  * the log's chain-head pin), reached through a `WasClient` on the account
- * pointer's host under this session's own authority.
+ * Space's base server URL under this session's own authority.
  *
  * "No pointed generation" is resolved as `null` rather than thrown: an
  * account with no annex inventory is an ordinary state, and each caller keeps
@@ -44,8 +44,10 @@ import type {
   AccountLogStore,
   PublishedKeyDocument
 } from '@interop/wallet-core/webvh'
+import type { AccountPointer } from '@interop/wallet-core/keyring'
 import { ID_COLLECTION } from '@interop/wallet-core/space'
 import { createLogger } from '@/lib/log'
+import { spaceLocation } from '@/lib/spaceLocation'
 import { wasClientAt, wasServiceDescription } from '@/lib/wasService'
 import { verifiedAccountLog } from '@/session/verifiedLog'
 import { MENDER_WARNINGS } from '@/session/menders/warnings'
@@ -57,13 +59,6 @@ const log = createLogger('fw:session:annex')
  * The account document a `#DelegatedClients` pointer is read out of.
  */
 type AccountDoc = Parameters<typeof delegatedClientsPointer>[0]['doc']
-
-/**
- * Where the account Space lives: everything the reach needs from an account
- * pointer (the host it is served from, and the Space a generation delegation
- * targets).
- */
-type ReachPointer = { host: string; spaceId: string }
 
 /**
  * One pointed annex generation, as a ceremony reaches it: the generation's
@@ -85,7 +80,7 @@ export interface ClientAnnexReach {
  *
  * @param options {object}
  * @param options.session {Session}
- * @param options.pointer {ReachPointer}   the account pointer
+ * @param options.pointer {Pick<AccountPointer, 'spaceUrl'>}   the account pointer
  * @param options.clientAnnexDid {string}   the generation's did:webvh
  * @param options.serviceDescription {ServiceDescription}   the server's
  *   discovered service description, so the client skips discovery
@@ -98,7 +93,7 @@ export function clientAnnexReachOf({
   serviceDescription
 }: {
   session: Session
-  pointer: ReachPointer
+  pointer: Pick<AccountPointer, 'spaceUrl'>
   clientAnnexDid: string
   serviceDescription: ServiceDescription
 }): ClientAnnexReach {
@@ -106,7 +101,7 @@ export function clientAnnexReachOf({
     did: clientAnnexDid
   })
   const was = wasClientAt({
-    baseUrl: pointer.host,
+    baseServerUrl: spaceLocation({ spaceUrl: pointer.spaceUrl }).baseServerUrl,
     zcapClient: session.profile.zcapClient,
     serviceDescription
   })
@@ -133,7 +128,7 @@ export function clientAnnexReachOf({
  * credential-derived standing client instead of this session's own key.
  *
  * @param options {object}
- * @param options.pointer {ReachPointer}   the account pointer
+ * @param options.pointer {Pick<AccountPointer, 'spaceUrl'>}   the account pointer
  * @param options.clientAnnexDid {string}   the generation's did:webvh
  * @param options.standing {object}   the session's standing members: the
  *   credential's client identity and its annex-Space sibling delegation
@@ -150,7 +145,7 @@ export function standingClientAnnexReachOf({
   pinStore,
   serviceDescription
 }: {
-  pointer: ReachPointer
+  pointer: Pick<AccountPointer, 'spaceUrl'>
   clientAnnexDid: string
   standing: {
     standingClient: { agents: { zcapClient: ZcapClient } }
@@ -163,7 +158,7 @@ export function standingClientAnnexReachOf({
     did: clientAnnexDid
   })
   const was = wasClientAt({
-    baseUrl: pointer.host,
+    baseServerUrl: spaceLocation({ spaceUrl: pointer.spaceUrl }).baseServerUrl,
     zcapClient: standing.standingClient.agents.zcapClient,
     serviceDescription
   })
@@ -196,7 +191,7 @@ export function standingClientAnnexReachOf({
  * record's sibling delegation instead.
  *
  * @param options {object}
- * @param options.pointer {ReachPointer}   the account pointer
+ * @param options.pointer {Pick<AccountPointer, 'spaceUrl'>}   the account pointer
  * @param options.doc {object}   the account document to read the pointer out
  *   of (a ceremony's post-edit document, or a verified one)
  * @param options.standing {object}   the credential's client identity and its
@@ -214,7 +209,7 @@ export function standingClientAnnexReachFor({
   pinStore,
   serviceDescription
 }: {
-  pointer: ReachPointer
+  pointer: Pick<AccountPointer, 'spaceUrl'>
   doc: AccountDoc
   standing: {
     standingClient: { agents: { zcapClient: ZcapClient } }
@@ -242,7 +237,7 @@ export function standingClientAnnexReachFor({
  *
  * @param options {object}
  * @param options.session {Session}
- * @param options.pointer {ReachPointer}   the account pointer
+ * @param options.pointer {Pick<AccountPointer, 'spaceUrl'>}   the account pointer
  * @param options.doc {object}   the account document to read the pointer out
  *   of (a ceremony's post-edit document, or a verified one)
  * @param options.serviceDescription {ServiceDescription}   the server's
@@ -256,7 +251,7 @@ export function clientAnnexReachFor({
   serviceDescription
 }: {
   session: Session
-  pointer: ReachPointer
+  pointer: Pick<AccountPointer, 'spaceUrl'>
   doc: AccountDoc
   serviceDescription: ServiceDescription
 }): ClientAnnexReach | null {
@@ -282,7 +277,7 @@ export function clientAnnexReachFor({
  *
  * @param options {object}
  * @param options.session {Session}
- * @param options.pointer {ReachPointer}   the account pointer
+ * @param options.pointer {Pick<AccountPointer, 'spaceUrl'>}   the account pointer
  * @param options.doc {object}   the account document to read the pointer out
  *   of (a ceremony's post-edit document, or a verified one)
  * @param [options.standing] {object}   the credential's client identity and
@@ -296,7 +291,7 @@ export async function annexReachUnder({
   standing
 }: {
   session: Session
-  pointer: ReachPointer
+  pointer: Pick<AccountPointer, 'spaceUrl'>
   doc: AccountDoc
   standing?: {
     standingClient: { agents: { zcapClient: ZcapClient } }
@@ -324,7 +319,7 @@ export async function annexReachUnder({
  *
  * @param options {object}
  * @param options.session {Session}
- * @param options.pointer {ReachPointer}   the account pointer
+ * @param options.pointer {Pick<AccountPointer, 'spaceUrl'>}   the account pointer
  * @param options.clientAnnexDid {string}   the generation's did:webvh
  * @param [options.standing] {object}   the credential's client identity and
  *   its annex-Space sibling delegation, on the ladder kind
@@ -337,7 +332,7 @@ export async function namedAnnexReachUnder({
   standing
 }: {
   session: Session
-  pointer: ReachPointer
+  pointer: Pick<AccountPointer, 'spaceUrl'>
   clientAnnexDid: string
   standing?: {
     standingClient: { agents: { zcapClient: ZcapClient } }
@@ -377,7 +372,7 @@ export async function pointedClientAnnexReach({
   pointer
 }: {
   session: Session
-  pointer: ReachPointer & { did?: string }
+  pointer: AccountPointer & { did: string }
 }): Promise<
   | (ClientAnnexReach &
       Pick<Awaited<ReturnType<typeof verifiedAccountLog>>, 'doc' | 'log'>)
@@ -412,7 +407,7 @@ export async function pointedClientAnnexReach({
  *
  * @param options {object}
  * @param options.session {Session}
- * @param options.pointer {ReachPointer}   the account pointer
+ * @param options.pointer {Pick<AccountPointer, 'spaceUrl'>}   the account pointer
  * @param options.reach {ClientAnnexReach}   the pointed generation
  * @param options.ladderSeed {Uint8Array}   the seed whose committed rung
  *   signs the annex entry
@@ -428,7 +423,7 @@ export async function ensureGenerationDelegation({
   accountDoc
 }: {
   session: Session
-  pointer: ReachPointer
+  pointer: Pick<AccountPointer, 'spaceUrl'>
   reach: ClientAnnexReach
   ladderSeed: Uint8Array
   accountDoc?: PublishedKeyDocument
@@ -439,8 +434,7 @@ export async function ensureGenerationDelegation({
     mint: async ({ clientAnnexDid }) =>
       mintGenerationDelegation({
         zcapClient: session.profile.zcapClient,
-        wasServerUrl: pointer.host,
-        spaceId: pointer.spaceId,
+        ...spaceLocation({ spaceUrl: pointer.spaceUrl }),
         clientAnnexDid
       }),
     ...(accountDoc !== undefined ? { accountDoc } : {})
@@ -459,7 +453,7 @@ export async function ensureGenerationDelegation({
  * @param options {object}
  * @param options.accountDid {string}   the account did:webvh, whose ladder
  *   VM signs
- * @param options.pointer {ReachPointer}   the account pointer
+ * @param options.pointer {Pick<AccountPointer, 'spaceUrl'>}   the account pointer
  * @param options.reach {ClientAnnexReach}   the pointed generation, reached
  *   under an authority the caller holds over the annex Space
  * @param options.ladderSeed {Uint8Array}   the credential's ladder seed --
@@ -479,7 +473,7 @@ export async function ensureLadderSignedGenerationDelegation({
   retiringKeyMultibases
 }: {
   accountDid: string
-  pointer: ReachPointer
+  pointer: Pick<AccountPointer, 'spaceUrl'>
   reach: ClientAnnexReach
   ladderSeed: Uint8Array
   accountDoc?: PublishedKeyDocument
@@ -491,8 +485,7 @@ export async function ensureLadderSignedGenerationDelegation({
     mint: ladderSignedGenerationDelegationMinter({
       accountDid,
       ladderSeed,
-      wasServerUrl: pointer.host,
-      spaceId: pointer.spaceId
+      ...spaceLocation({ spaceUrl: pointer.spaceUrl })
     }),
     ...(accountDoc !== undefined ? { accountDoc } : {}),
     ...(retiringKeyMultibases !== undefined ? { retiringKeyMultibases } : {})
@@ -695,8 +688,6 @@ export async function tryRenewTransientGenerationDelegation({
     // ladder VM. It doubles as the ensure's signer-rot axis below.
     const verified = await verifyAccountLog({
       did: accountDid,
-      spaceId: accountPointer.spaceId,
-      host: accountPointer.host,
       pinStore: persistence.logPins
     })
     const doc = verified.doc
@@ -786,8 +777,7 @@ export async function renewTransientGenerationDelegation({
  * unauthenticated fetch and only the republish invokes the delegation.
  *
  * @param options {object}
- * @param options.host {string}   the storage server's base URL
- * @param options.spaceId {string}   the account Space
+ * @param options.spaceUrl {string}   the account Space's URL
  * @param options.invoker {Function}   `() => { zcapClient, capability? }`,
  *   read afresh on every call
  * @param options.pinStore {ResourceLogPinStore}   the session's chain-head
@@ -797,18 +787,17 @@ export async function renewTransientGenerationDelegation({
  * @returns {AccountLogStore}
  */
 export function didWebProjectionStore({
-  host,
-  spaceId,
+  spaceUrl,
   invoker,
   pinStore,
   serviceDescription
 }: {
-  host: string
-  spaceId: string
+  spaceUrl: string
   invoker: () => { zcapClient: ZcapClient; capability?: IZcap }
   pinStore: ResourceLogPinStore
   serviceDescription: ServiceDescription
 }): AccountLogStore {
+  const { baseServerUrl, spaceId } = spaceLocation({ spaceUrl })
   const storeNow = (): AccountLogStore => {
     const { zcapClient, capability } = invoker()
     if (!capability) {
@@ -818,7 +807,7 @@ export function didWebProjectionStore({
       )
     }
     return delegatedWebvhLogStore({
-      host,
+      baseServerUrl,
       spaceId,
       collectionId: ID_COLLECTION.id,
       delegation: capability,
@@ -861,9 +850,8 @@ export function didWebProjectionStore({
  * visit retries.
  *
  * @param options {object}
- * @param options.host {string}   the storage server's base URL
- * @param options.spaceId {string}   the account Space, holding the
- *   world-readable `id` collection
+ * @param options.spaceUrl {string}   the account Space's URL, the Space
+ *   holding the world-readable `id` collection
  * @param options.did {string}   the account's did:webvh
  * @param options.doc {object}   the resolved did:webvh document the
  *   projection is re-derived from
@@ -877,16 +865,14 @@ export function didWebProjectionStore({
  *   writer's projection stands, `failed` otherwise
  */
 export async function refreshDidWebProjection({
-  host,
-  spaceId,
+  spaceUrl,
   did,
   doc,
   pinStore,
   delegation,
   zcapClient
 }: {
-  host: string
-  spaceId: string
+  spaceUrl: string
   did: string
   doc: Parameters<typeof ensureDidWebProjection>[0]['doc']
   pinStore: ResourceLogPinStore
@@ -896,8 +882,7 @@ export async function refreshDidWebProjection({
   try {
     const { outcome } = await ensureDidWebProjection({
       store: didWebProjectionStore({
-        host,
-        spaceId,
+        spaceUrl,
         invoker: () => ({ zcapClient, capability: delegation }),
         pinStore,
         serviceDescription: await wasServiceDescription()
@@ -912,12 +897,7 @@ export async function refreshDidWebProjection({
       // under the visit's own pins -- a rollback or a fork served at that
       // moment is refused, and the refusal lands in the catch below.
       refresh: async () => {
-        const fresh = await verifyAccountLog({
-          did,
-          spaceId,
-          host,
-          pinStore
-        })
+        const fresh = await verifyAccountLog({ did, pinStore })
         // The DID is the account pointer's: `verifyAccountLog` refuses a log
         // resolving to any other, so the re-resolution cannot move it.
         return { did, doc: fresh.doc }

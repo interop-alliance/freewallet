@@ -312,7 +312,7 @@ export async function buildServerStateAccount<
     'enrolled-client': shared.buildEnrolledClientAccount
   }
   const account = await builders[shape]({
-    serverUrl: harness.serverUrl,
+    baseServerUrl: harness.serverUrl,
     ...(passphrase === undefined ? {} : { passphrase })
   })
   return account as Awaited<ReturnType<ServerStateBuilders[Shape]>>
@@ -335,9 +335,13 @@ export async function deletePointedGeneration({
 }): Promise<void> {
   const { pointedClientAnnexReach } = await import('@/session/annexReach')
   await actor.run(async session => {
+    const pointer = session.profile.accountPointer
+    if (!pointer?.did) {
+      throw new Error('The session carries no promoted account pointer.')
+    }
     const reach = await pointedClientAnnexReach({
       session,
-      pointer: session.profile.accountPointer!
+      pointer: { ...pointer, did: pointer.did }
     })
     await reach!.was
       .space(reach!.spaceId)

@@ -24,7 +24,7 @@ const state = vi.hoisted(() => ({
 
 vi.mock('@/app.config', async importOriginal => ({
   ...(await importOriginal<typeof import('@/app.config')>()),
-  get WAS_BASE_URL() {
+  get WAS_BASE_SERVER_URL() {
     return state.wasUrl
   }
 }))
@@ -138,8 +138,7 @@ let directory = memoryConnectionsStore()
 
 const POINTER = {
   did: 'did:webvh:QmScidForTests:was.example.test:space:space-123:id',
-  spaceId: 'space-123',
-  host: 'https://was.example.test'
+  spaceUrl: 'https://was.example.test/space/space-123/'
 }
 
 /**
@@ -601,7 +600,7 @@ describe('the cascade, rotated path', () => {
     expect(session.profile.keyAgreementKey?.id).toBe(`${FRESH_USER_KEY.id}#kak`)
     expect(vi.mocked(rewrapUnlockMethodsRecord)).toHaveBeenCalledWith(
       expect.objectContaining({
-        spaceId: POINTER.spaceId,
+        spaceUrl: SPACE_URL,
         from: previousUserKey,
         to: FRESH_USER_KEY
       })

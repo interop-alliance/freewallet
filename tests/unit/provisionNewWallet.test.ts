@@ -145,16 +145,15 @@ describe('seedWelcomeContent', () => {
     ).accountController = 'did:key:z6MkBootstrapLadderVm'
     ;(
       session.profile as unknown as {
-        accountPointer?: { did?: string; spaceId: string; host: string }
+        accountPointer?: { did?: string; spaceUrl: string }
       }
     ).accountPointer = {
-      did: 'did:webvh:QmScid:was.example.test:space:s1:id',
-      spaceId: 's1',
-      host: 'https://was.example.test'
+      did: 'did:webvh:QmZQHqm2a11FAhwmsVY5Sa9ZByNLWN1HQH68ze5WmtJqY7:was.example.test:space:s1:id',
+      spaceUrl: 'https://was.example.test/space/s1/'
     }
     const seedUser = {
       ...user,
-      id: 'did:webvh:QmScid:was.example.test:space:s1:id'
+      id: 'did:webvh:QmZQHqm2a11FAhwmsVY5Sa9ZByNLWN1HQH68ze5WmtJqY7:was.example.test:space:s1:id'
     }
 
     await seedWelcomeContent({ session })
@@ -171,7 +170,7 @@ describe('seedWelcomeContent', () => {
     })
     // The two default contacts mirror `provisionNewWallet`'s: the self
     // contact carries both of the account's DID forms, derived from the
-    // pointer (the profile resolves no `didWebvh` on a transient tail) --
+    // pointer's DID (the profile resolves no `didWebvh` on a transient tail) --
     // the did:web projection id first, then the did:webvh -- and the signup
     // email.
     expect(storage.addContact).toHaveBeenCalledWith({
@@ -181,7 +180,7 @@ describe('seedWelcomeContent', () => {
       contact: selfContact({
         dids: [
           'did:web:was.example.test:space:s1:id',
-          'did:webvh:QmScid:was.example.test:space:s1:id'
+          'did:webvh:QmZQHqm2a11FAhwmsVY5Sa9ZByNLWN1HQH68ze5WmtJqY7:was.example.test:space:s1:id'
         ],
         email: user.email
       })
@@ -203,28 +202,27 @@ describe('seedWelcomeContent', () => {
   it('prefers the profile-resolved didWebvh for the self-contact', async () => {
     const { session, storage } = sessionStub()
     ;(session.profile as unknown as { didWebvh?: { did: string } }).didWebvh = {
-      did: 'did:webvh:QmScid:was.example.test:space:s1:id'
+      did: 'did:webvh:QmZQHqm2a11FAhwmsVY5Sa9ZByNLWN1HQH68ze5WmtJqY7:was.example.test:space:s1:id'
     }
     ;(
       session.profile as unknown as {
-        accountPointer?: { did?: string; spaceId: string; host: string }
+        accountPointer?: { did?: string; spaceUrl: string }
       }
     ).accountPointer = {
       did: 'did:webvh:QmScid:stale',
-      spaceId: 's1',
-      host: 'https://was.example.test'
+      spaceUrl: 'https://was.example.test/space/s1/'
     }
 
     await seedWelcomeContent({ session })
 
-    // The projection id is derived from the pointer either way -- it is the
-    // account document under its did:web id, and the pointer is the whole
+    // The projection id is derived from the account did:webvh -- it is the
+    // account document under its did:web id, so the DID is the whole
     // evidence it exists.
     expect(storage.addContact).toHaveBeenCalledWith({
       contact: selfContact({
         dids: [
           'did:web:was.example.test:space:s1:id',
-          'did:webvh:QmScid:was.example.test:space:s1:id'
+          'did:webvh:QmZQHqm2a11FAhwmsVY5Sa9ZByNLWN1HQH68ze5WmtJqY7:was.example.test:space:s1:id'
         ],
         email: session.user.email
       })

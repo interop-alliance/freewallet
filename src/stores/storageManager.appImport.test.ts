@@ -102,7 +102,12 @@ async function sealSchema({
 }): Promise<{ custom: unknown }> {
   const codec = await createEdvEncryption({
     resolveKeys: async () => keys
-  }).codecFor({ spaceId: 's-space', collectionId, scheme: 'edv', encryption })
+  }).codecFor({
+    spaceUrl: 'http://localhost/space/s-space/',
+    collectionId,
+    scheme: 'edv',
+    encryption
+  })
   if (!codec) {
     throw new Error('expected an EDV codec')
   }
@@ -130,7 +135,7 @@ function makeFakeRemote(stores: MemoryDescriptorStores) {
   const bytesStore = new WASRemoteStore({
     serviceDescription: TEST_SERVICE_DESCRIPTION,
     pinStore: memoryResourceLogPinStore(),
-    storageServerUrl: MEMORY_SERVER_URL,
+    baseServerUrl: MEMORY_SERVER_URL,
     zcapClient: {} as ZcapClient,
     spaceId: 's-space',
     controller: 'did:key:test'

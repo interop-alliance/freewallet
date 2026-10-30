@@ -37,42 +37,24 @@
  */
 import { errorNameOf } from '@interop/wallet-core/menders'
 import { verifyAccountLog } from '@interop/wallet-core/webvh'
-import type {
-  AccountLogPointer,
-  VerifiedAccountLog
-} from '@interop/wallet-core/clients'
+import type { VerifiedAccountLog } from '@interop/wallet-core/clients'
+import type { AccountPointer } from '@interop/wallet-core/keyring'
 import type { ResourceLogPinStore } from '@interop/vh-resource-log'
 import type { ControllerProfile, SessionCore } from '@/types/auth'
 
 /**
- * One memoized verification, keyed on the pointer it was verified against.
+ * One memoized verification, keyed on the account DID it was verified
+ * against. A pointer naming a different DID is a different log, so it must
+ * never hit a memo taken against the old one (a signup promoting its
+ * controller changes the pointer mid-session). The DID locates the log on
+ * its own, so nothing else is keyed.
  */
 export interface VerifiedLogCache {
-  get: (options: { pointer: AccountLogPointer }) => Promise<VerifiedAccountLog>
-  peek: (options: {
-    pointer: AccountLogPointer
-  }) => VerifiedAccountLog | undefined
-  prime: (options: {
-    pointer: AccountLogPointer
-    verified: VerifiedAccountLog
-  }) => void
-  refresh: (options: {
-    pointer: AccountLogPointer
-  }) => Promise<VerifiedAccountLog>
+  get: (options: { did: string }) => Promise<VerifiedAccountLog>
+  peek: (options: { did: string }) => VerifiedAccountLog | undefined
+  prime: (options: { did: string; verified: VerifiedAccountLog }) => void
+  refresh: (options: { did: string }) => Promise<VerifiedAccountLog>
   invalidate: () => void
-}
-
-/**
- * The cache key: a pointer naming a different DID, Space, or host is a
- * different log, so it must never hit a memo taken against the old one (a
- * signup promoting its controller changes the pointer mid-session).
- *
- * @param options {object}
- * @param options.pointer {AccountLogPointer}
- * @returns {string}
- */
-function pointerKey({ pointer }: { pointer: AccountLogPointer }): string {
-  return `${pointer.did}|${pointer.spaceId}|${pointer.host}`
 }
 
 /**
@@ -104,39 +86,26 @@ export function createVerifiedLogCache({
   // not overwrite what replaced the value it was refreshing.
   let generation = 0
   /**
-   * Verifies the log a pointer names under the account-log chain-head pin:
-   * a served log that forks, rolls back, or switches identity against it is
+   * Verifies the log a DID names under the account-log chain-head pin: a
+   * served log that forks, rolls back, or switches identity against it is
    * refused here, before anything downstream reads the memo.
    *
    * @param options {object}
-   * @param options.pointer {AccountLogPointer}
+   * @param options.did {string}
    * @returns {Promise<VerifiedAccountLog>}
    */
-  function verify({
-    pointer
-  }: {
-    pointer: AccountLogPointer
-  }): Promise<VerifiedAccountLog> {
-    return verifyAccountLog({
-      did: pointer.did,
-      spaceId: pointer.spaceId,
-      host: pointer.host,
-      pinStore
-    })
+  function verify({ did }: { did: string }): Promise<VerifiedAccountLog> {
+    return verifyAccountLog({ did, pinStore })
   }
-  function get({
-    pointer
-  }: {
-    pointer: AccountLogPointer
-  }): Promise<VerifiedAccountLog> {
-    const wanted = pointerKey({ pointer })
+  function get({ did }: { did: string }): Promise<VerifiedAccountLog> {
+    const wanted = did
     if (pending && key === wanted) {
       return pending
     }
     key = wanted
     settled = undefined
     generation += 1
-    const verification = verify({ pointer })
+    const verification = verify({ did })
       .then(verified => {
         if (key === wanted) {
           settled = verified
@@ -159,26 +128,26 @@ export function createVerifiedLogCache({
   }
   return {
     get,
-    peek({ pointer }) {
-      return key === pointerKey({ pointer }) ? settled : undefined
+    peek({ did }) {
+      return key === did ? settled : undefined
     },
-    prime({ pointer, verified }) {
-      key = pointerKey({ pointer })
+    prime({ did, verified }) {
+      key = did
       pending = Promise.resolve(verified)
       settled = verified
       generation += 1
     },
-    refresh({ pointer }) {
-      // Nothing settled for this pointer yet: there is no old value to keep
+    refresh({ did }) {
+      // Nothing settled for this DID yet: there is no old value to keep
       // visible, so a refresh is an ordinary read (joining one in flight).
-      if (key !== pointerKey({ pointer }) || settled === undefined) {
-        return get({ pointer })
+      if (key !== did || settled === undefined) {
+        return get({ did })
       }
       if (refreshing) {
         return refreshing
       }
       const startedAt = generation
-      const verification = verify({ pointer })
+      const verification = verify({ did })
         .then(verified => {
           // The memo and the pin advance together: the pin moved inside the
           // verification, and the memo moves here, unless something replaced
@@ -231,7 +200,7 @@ export async function verifiedAccountLog({
   pointer
 }: {
   session: SessionCore
-  pointer?: { did?: string; spaceId: string; host: string }
+  pointer?: AccountPointer
 }): Promise<VerifiedAccountLog> {
   const target = pointer ?? profile.accountPointer
   if (!target?.did) {
@@ -243,9 +212,7 @@ export async function verifiedAccountLog({
   profile.verifiedLog ??= createVerifiedLogCache({
     pinStore: persistence.logPins
   })
-  return await profile.verifiedLog.get({
-    pointer: { did: target.did, spaceId: target.spaceId, host: target.host }
-  })
+  return await profile.verifiedLog.get({ did: target.did })
 }
 
 /**
@@ -279,9 +246,7 @@ export async function refreshVerifiedAccountLog({
   profile.verifiedLog ??= createVerifiedLogCache({
     pinStore: persistence.logPins
   })
-  return await profile.verifiedLog.refresh({
-    pointer: { did: target.did, spaceId: target.spaceId, host: target.host }
-  })
+  return await profile.verifiedLog.refresh({ did: target.did })
 }
 
 /**
@@ -308,38 +273,35 @@ export function peekVerifiedAccountLog({
   if (!pointer?.did) {
     return undefined
   }
-  return profile.verifiedLog?.peek({
-    pointer: { did: pointer.did, spaceId: pointer.spaceId, host: pointer.host }
-  })
+  return profile.verifiedLog?.peek({ did: pointer.did })
 }
 
 /**
  * Seeds the memo with a verification a login-path check already performed,
  * so the session's first reader does not fetch and re-verify the same log.
- * Takes the same pointer key `verifiedAccountLog` reads under, and is
- * superseded by any later `invalidate`.
+ * Takes the same DID key `verifiedAccountLog` reads under, and is superseded
+ * by any later `invalidate`.
  *
  * @param options {object}
  * @param options.session {object}   the live session's profile and
  *   persistence strategy
- * @param options.pointer {AccountLogPointer}   the pointer the log was
- *   verified against
+ * @param options.did {string}   the account DID the log was verified against
  * @param options.verified {VerifiedAccountLog}
  * @returns {void}
  */
 export function primeVerifiedAccountLog({
   session: { profile, persistence },
-  pointer,
+  did,
   verified
 }: {
   session: SessionCore
-  pointer: AccountLogPointer
+  did: string
   verified: VerifiedAccountLog
 }): void {
   profile.verifiedLog ??= createVerifiedLogCache({
     pinStore: persistence.logPins
   })
-  profile.verifiedLog.prime({ pointer, verified })
+  profile.verifiedLog.prime({ did, verified })
 }
 
 /**
@@ -406,7 +368,7 @@ export function invalidateVerifiedLog({
  * @param options {object}
  * @param options.session {object}   the live session's profile and
  *   persistence strategy
- * @param options.pointer {AccountLogPointer}   the pointer the ceremony
+ * @param options.pointer {AccountPointer}   the pointer the ceremony
  *   published under
  * @returns {Promise<void>}
  */
@@ -415,7 +377,7 @@ export async function reprimeVerifiedAccountLog({
   pointer
 }: {
   session: SessionCore
-  pointer: AccountLogPointer
+  pointer: AccountPointer & { did: string }
 }): Promise<void> {
   invalidateVerifiedLog({ profile: session.profile })
   try {

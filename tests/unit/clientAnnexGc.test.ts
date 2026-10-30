@@ -29,6 +29,9 @@ vi.mock('@/session/accountCeremonyContext', () => ({
   enrolledCeremonyContext: vi.fn()
 }))
 
+vi.mock('@/session/replicaRestate', () => ({
+  restatedReplicaServers: vi.fn(async () => [])
+}))
 vi.mock('@/session/verifiedLog', () => ({
   verifiedAccountLog: vi.fn(),
   refreshVerifiedAccountLog: vi.fn(),
@@ -36,6 +39,7 @@ vi.mock('@/session/verifiedLog', () => ({
 }))
 
 import { runClientAnnexGc } from '@interop/wallet-core/clientAnnex'
+import { restatedReplicaServers } from '@/session/replicaRestate'
 import { sweepClientAnnexGenerations } from '@/session/clientAnnexGc'
 import { enrolledCeremonyContext } from '@/session/accountCeremonyContext'
 import {
@@ -53,8 +57,7 @@ import type { Session } from '@/types/auth'
 
 const POINTER = {
   did: 'did:webvh:QmScidForTests:was.example.test:space:space-123:id',
-  spaceId: 'space-123',
-  host: 'https://was.example.test'
+  spaceUrl: 'https://was.example.test/space/space-123/'
 }
 const CLIENT_ANNEX_DID =
   'did:webvh:QmClientAnnexScid:was.example.test:space:clientAnnex-space-1:gen-Ux3v0kQf9aPmB2hZ'
@@ -208,6 +211,29 @@ describe('sweepClientAnnexGenerations -- the preconditions', () => {
 })
 
 describe('sweepClientAnnexGenerations -- the pass', () => {
+  it('hands the restated replica servers to the pass', async () => {
+    const session = makeSession()
+    vi.mocked(restatedReplicaServers).mockResolvedValueOnce([
+      'did:key:z6MkReplicaServer'
+    ])
+
+    await sweepClientAnnexGenerations({ session })
+
+    expect(gcOptions().replicaServerDids).toEqual(['did:key:z6MkReplicaServer'])
+  })
+
+  it('refuses the pass before its mint when the replica list cannot be read', async () => {
+    const session = makeSession()
+    vi.mocked(restatedReplicaServers).mockRejectedValueOnce(
+      new Error('directory unreadable')
+    )
+
+    await expect(sweepClientAnnexGenerations({ session })).rejects.toThrow(
+      'directory unreadable'
+    )
+    expect(runClientAnnexGc).not.toHaveBeenCalled()
+  })
+
   it('runs one pass with the account, the id store, and this client keys', async () => {
     const persistence = browserLocalSessionPersistence()
     const session = makeSession({ persistence })
@@ -218,8 +244,8 @@ describe('sweepClientAnnexGenerations -- the pass', () => {
     expect(swept).toEqual({ report: REPORT })
     expect(runClientAnnexGc).toHaveBeenCalledTimes(1)
     const options = gcOptions()
-    expect(options.wasServerUrl).toBe(POINTER.host)
-    expect(options.accountSpaceId).toBe(POINTER.spaceId)
+    expect(options.baseServerUrl).toBe('https://was.example.test/')
+    expect(options.accountSpaceId).toBe('space-123')
     expect(options.account).toEqual({
       did: POINTER.did,
       doc: accountDoc(),
@@ -227,6 +253,9 @@ describe('sweepClientAnnexGenerations -- the pass', () => {
     })
     expect(options.idStore).toBe(ID_STORE)
     expect(options.updateKeys).toBe(CLIENT_WEBVH_KEYS)
+    // An account with no replica-server entry restates an empty list.
+    expect(options.replicaServerDids).toEqual([])
+    expect(restatedReplicaServers).toHaveBeenCalledWith({ session })
     expect(options.ladderSeed).toBe(ladderSeed)
   })
 

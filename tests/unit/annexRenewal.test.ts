@@ -45,15 +45,13 @@ import {
 } from '@/session/annexReach'
 import type { Session } from '@/types/auth'
 
-const ACCOUNT_DID =
-  'did:webvh:QmScidForTests:was.example.test:space:space-123:id'
+const ACCOUNT_DID = 'did:webvh:QmScidForTests:localhost:space:space-123:id'
 const POINTER = {
   did: ACCOUNT_DID,
-  spaceId: 'space-123',
-  host: 'https://was.example.test'
+  spaceUrl: 'http://localhost/space/space-123/'
 }
 const CLIENT_ANNEX_DID =
-  'did:webvh:QmClientAnnexScid:was.example.test:space:clientAnnex-space-1:gen-Ux3v0kQf9aPmB2hZ'
+  'did:webvh:QmClientAnnexScid:localhost:space:clientAnnex-space-1:gen-Ux3v0kQf9aPmB2hZ'
 const LADDER_SEED = new Uint8Array(32).fill(7)
 const STALE_DELEGATION = { id: 'urn:zcap:generation-stale' }
 const FRESH_DELEGATION = { id: 'urn:zcap:generation-fresh' }

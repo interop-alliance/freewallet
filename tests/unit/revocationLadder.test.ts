@@ -72,7 +72,7 @@ const actualUnlockMethods = vi.hoisted(() => ({
 
 vi.mock('@/app.config', async importOriginal => ({
   ...(await importOriginal<typeof import('@/app.config')>()),
-  get WAS_BASE_URL() {
+  get WAS_BASE_SERVER_URL() {
     return state.wasUrl
   }
 }))
@@ -261,8 +261,7 @@ actualUnlockMethods.module = await vi.importActual<UnlockMethodsModule>(
 
 const POINTER = {
   did: 'did:webvh:QmScidForTests:was.example.test:space:space-123:id',
-  spaceId: 'space-123',
-  host: 'https://was.example.test'
+  spaceUrl: 'https://was.example.test/space/space-123/'
 }
 
 /**
@@ -342,8 +341,7 @@ function ladderContext(): object {
       return (projection ??= didWebProjectionStore({
         serviceDescription: TEST_SERVICE_DESCRIPTION,
         pinStore: memoryResourceLogPinStore(),
-        host: POINTER.host,
-        spaceId: POINTER.spaceId,
+        spaceUrl: POINTER.spaceUrl,
         invoker: invokerNow as never
       }))
     },

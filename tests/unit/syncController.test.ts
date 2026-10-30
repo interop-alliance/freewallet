@@ -14,7 +14,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 vi.mock('@/app.config', () => ({
-  WAS_BASE_URL: 'https://was.example',
+  WAS_BASE_SERVER_URL: 'http://localhost/',
   WAS_SYNC_BATCH_SIZE: undefined,
   WAS_SYNC_RETRY_MS: undefined,
   WAS_SYNC_POLL_MS: 0,
@@ -29,7 +29,7 @@ vi.mock('@/app.config', () => ({
 // count constructions and track which cores get stopped.
 const cores = vi.hoisted(() => ({
   created: [] as Array<{
-    spaceId: string
+    spaceUrl: string
     start: ReturnType<typeof vi.fn>
     stop: ReturnType<typeof vi.fn>
     reSync: ReturnType<typeof vi.fn>
@@ -37,9 +37,9 @@ const cores = vi.hoisted(() => ({
 }))
 
 vi.mock('@interop/was-sync/rxdb', () => ({
-  createSyncController: vi.fn(({ port }: { port: { spaceId: string } }) => {
+  createSyncController: vi.fn(({ port }: { port: { spaceUrl: string } }) => {
     const core = {
-      spaceId: port.spaceId,
+      spaceUrl: port.spaceUrl,
       start: vi.fn().mockResolvedValue(undefined),
       stop: vi.fn().mockResolvedValue(undefined),
       reSync: vi.fn()
@@ -65,21 +65,24 @@ import type { Session } from '@/types/auth'
  * its gate.
  *
  * @param options {object}
- * @param options.spaceId {string}
+ * @param options.spaceUrl {string}
  * @returns {Session}
  */
-function fakeSession({ spaceId }: { spaceId: string }): Session {
+function fakeSession({ spaceUrl }: { spaceUrl: string }): Session {
   return {
     isGuest: false,
     persistence: { getWriterId: () => 'writer-profile-1' },
     storage: {
       wasClient: { fake: true },
-      spaceId,
+      spaceUrl,
       hasLocalReplica: true,
       localCollection: vi.fn(() => ({ fakeCollection: true }))
     }
   } as unknown as Session
 }
+
+const SPACE_A = 'http://localhost/space/A/'
+const SPACE_B = 'http://localhost/space/B/'
 
 beforeEach(() => {
   cores.created.length = 0
@@ -92,16 +95,20 @@ afterEach(async () => {
 
 describe('sync binding lifecycle', () => {
   it('restart() stops the running core and constructs a fresh one', async () => {
-    await syncController.restart({ session: fakeSession({ spaceId: 'A' }) })
+    await syncController.restart({
+      session: fakeSession({ spaceUrl: SPACE_A })
+    })
     expect(cores.created).toHaveLength(1)
     expect(cores.created[0].start).toHaveBeenCalledTimes(1)
 
-    await syncController.restart({ session: fakeSession({ spaceId: 'B' }) })
+    await syncController.restart({
+      session: fakeSession({ spaceUrl: SPACE_B })
+    })
     // The first core is stopped -- terminal for that instance -- and the new
     // session gets a core of its own, aimed at account B's Space.
     expect(cores.created[0].stop).toHaveBeenCalledTimes(1)
     expect(cores.created).toHaveLength(2)
-    expect(cores.created[1].spaceId).toBe('B')
+    expect(cores.created[1].spaceUrl).toBe(SPACE_B)
     expect(cores.created[1].stop).not.toHaveBeenCalled()
   })
 
@@ -110,10 +117,10 @@ describe('sync binding lifecycle', () => {
     // one after the other, leaving exactly one live core and no dangling one
     // from the intermediate transition.
     const first = syncController.restart({
-      session: fakeSession({ spaceId: 'A' })
+      session: fakeSession({ spaceUrl: SPACE_A })
     })
     const second = syncController.restart({
-      session: fakeSession({ spaceId: 'B' })
+      session: fakeSession({ spaceUrl: SPACE_B })
     })
     await Promise.all([first, second])
 
@@ -123,7 +130,9 @@ describe('sync binding lifecycle', () => {
   })
 
   it('reSync() reaches the live core and is a no-op once stopped', async () => {
-    await syncController.restart({ session: fakeSession({ spaceId: 'A' }) })
+    await syncController.restart({
+      session: fakeSession({ spaceUrl: SPACE_A })
+    })
     syncController.reSync()
     expect(cores.created[0].reSync).toHaveBeenCalledTimes(1)
 
@@ -133,13 +142,16 @@ describe('sync binding lifecycle', () => {
   })
 
   it('a guest session does not start replication', async () => {
-    const guest = { ...fakeSession({ spaceId: 'A' }), isGuest: true } as Session
+    const guest = {
+      ...fakeSession({ spaceUrl: SPACE_A }),
+      isGuest: true
+    } as Session
     await syncController.restart({ session: guest })
     expect(createSyncController).not.toHaveBeenCalled()
   })
 
   it('a replica-less session does not start replication', async () => {
-    const session = fakeSession({ spaceId: 'A' })
+    const session = fakeSession({ spaceUrl: SPACE_A })
     ;(
       session.storage as unknown as { hasLocalReplica: boolean }
     ).hasLocalReplica = false
@@ -148,7 +160,7 @@ describe('sync binding lifecycle', () => {
   })
 
   it('a session with no remote Space does not start replication', async () => {
-    const session = fakeSession({ spaceId: '' })
+    const session = fakeSession({ spaceUrl: '' })
     await syncController.restart({ session })
     expect(createSyncController).not.toHaveBeenCalled()
   })

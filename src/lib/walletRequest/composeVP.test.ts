@@ -146,14 +146,13 @@ describe('composeVP from a transient session', () => {
     const accountDid = `did:webvh:QmScidT:was.example.test:space:${spaceId}:id`
     const pointer = {
       did: accountDid,
-      spaceId,
-      host: 'https://was.example.test'
+      spaceUrl: `https://was.example.test/space/${spaceId}/`
     }
     const cache = createVerifiedLogCache({
       pinStore: memoryResourceLogPinStore()
     })
     cache.prime({
-      pointer,
+      did: pointer.did,
       verified: {
         doc: {
           id: accountDid,
@@ -227,9 +226,10 @@ describe('composeVP from a transient session', () => {
  * method no resolver would find.
  */
 describe('the DIDAuth holder dispatch', () => {
-  const HOST = 'https://was.example.test'
+  const SCID = 'QmZQHqm2a11FAhwmsVY5Sa9ZByNLWN1HQH68ze5WmtJqY7'
   const SPACE_ID = 'spaceAbc'
-  const ACCOUNT_DID = `did:webvh:QmScid:was.example.test:space:${SPACE_ID}:id`
+  const SPACE_URL = `https://was.example.test/space/${SPACE_ID}/`
+  const ACCOUNT_DID = `did:webvh:${SCID}:was.example.test:space:${SPACE_ID}:id`
   const PROJECTION_DID = `did:web:was.example.test:space:${SPACE_ID}:id`
   const KMS_MULTIBASE = 'z6MkKmsAuthenticationKeyMultibase'
 
@@ -255,13 +255,13 @@ describe('the DIDAuth holder dispatch', () => {
       secret: new Uint8Array(32).fill(11),
       handle: 'promoted-client'
     })
-    const pointer = { did: ACCOUNT_DID, spaceId: SPACE_ID, host: HOST }
+    const pointer = { did: ACCOUNT_DID, spaceUrl: SPACE_URL }
     const cache = createVerifiedLogCache({
       pinStore: memoryResourceLogPinStore()
     })
     if (verifiedLog) {
       cache.prime({
-        pointer,
+        did: pointer.did,
         verified: {
           doc: {
             id: ACCOUNT_DID,
@@ -455,21 +455,21 @@ describe('the DIDAuth holder dispatch', () => {
     fetchSpy.mockRestore()
   })
 
-  it('takes the did:key arm when the pointer host does not parse', async () => {
-    // The projection id is built with `new URL(pointer.host)`, which throws
-    // on a host a served record could carry. Every account arm fails closed
-    // to the did:key rather than escaping into a caller with no refusal
-    // surface.
+  it('takes the did:key arm when the pointer DID does not parse', async () => {
+    // The projection id is read off the pointer's did:webvh by the library's
+    // parser, which throws on an identifier with no valid SCID. Every account
+    // arm fails closed to the did:key rather than escaping into a caller with
+    // no refusal surface.
     const session = await accountSession({
       authenticationMultibases: [clientMultibase]
     })
     session.profile.accountPointer = {
       ...session.profile.accountPointer!,
-      host: 'not a url'
+      did: `did:webvh:QmScid:was.example.test:space:${SPACE_ID}:id`
     }
-    // The memo is keyed on the pointer, so re-prime it under the broken one.
+    // The memo is keyed on the DID, so re-prime it under the broken one.
     session.profile.verifiedLog!.prime({
-      pointer: session.profile.accountPointer as never,
+      did: session.profile.accountPointer!.did!,
       verified: {
         doc: {
           id: ACCOUNT_DID,

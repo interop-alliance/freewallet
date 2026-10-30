@@ -64,8 +64,7 @@ import type { KeyringFetchResult } from '@/session/keyring'
 
 const POINTER = {
   did: 'did:webvh:QmScidForTests:was.example.test:space:space-123:id',
-  spaceId: 'space-123',
-  host: 'https://was.example.test'
+  spaceUrl: 'https://was.example.test/space/space-123/'
 }
 const BUILT_ON_HEAD = { scid: 'QmScidForTests', versionId: '2-head' }
 const USER_KEY = { id: 'did:key:zUserKey', secret: new Uint8Array(32) }
@@ -171,7 +170,10 @@ describe('isPendingKeyringHit', () => {
     const { found: recordless } = makeFound({ clientKeys: undefined })
     expect(isPendingKeyringHit({ found: recordless })).toBe(false)
     const { found: unpromoted } = makeFound({
-      pointer: { did: 'did:key:zAccount', spaceId: 's', host: 'h' }
+      pointer: {
+        did: 'did:key:zAccount',
+        spaceUrl: 'https://was.example.test/space/s/'
+      }
     })
     expect(isPendingKeyringHit({ found: unpromoted })).toBe(false)
   })

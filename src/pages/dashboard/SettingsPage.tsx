@@ -23,7 +23,7 @@ import { useCopyToClipboard } from '@/hooks/useCopyToClipboard'
 import { usePrfRetryPrompt } from '@/hooks/usePrfRetryPrompt'
 import { getFileUrl } from '@interop/did-method-webvh'
 import { isWebvhDid, relationIds } from '@interop/wallet-core/webvh'
-import { didWebFromSpace } from '@/lib/didWeb'
+import { didWebOfAccount } from '@/lib/didWeb'
 import {
   canRunAccountCeremonies,
   enrolledCeremonyContext
@@ -724,10 +724,7 @@ export function SettingsPage() {
   // "keystore present, no KMS binding" from a fully provisioned account.
   const accountPointer = session?.profile?.accountPointer
   const publishedDid = isWebvhDid(accountPointer?.did)
-    ? didWebFromSpace({
-        wasServerUrl: accountPointer!.host,
-        spaceId: accountPointer!.spaceId
-      })
+    ? didWebOfAccount({ did: accountPointer!.did! })
     : undefined
   // The evidence the DIDAuth holder dispatch reads, so the chip and the
   // dispatch cannot disagree: a verification method the account's verified

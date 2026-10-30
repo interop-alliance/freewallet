@@ -134,7 +134,7 @@ function collectionDir({
     name: collectionId,
     files: [
       jsonFile({
-        name: `.collection.${collectionId}.json`,
+        name: `.collection.meta.${collectionId}.json`,
         document: metadata ?? { id: collectionId }
       }),
       ...files
@@ -199,7 +199,7 @@ async function makeBundle(
   }
   const entries: ArchiveEntry[] = [
     jsonFile({
-      name: `.space.${SPACE_ID}.json`,
+      name: `.space.meta.${SPACE_ID}.json`,
       document: { id: SPACE_ID, type: ['Space'] }
     }),
     collectionDir({

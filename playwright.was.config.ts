@@ -47,7 +47,7 @@ export default defineConfig({
       reuseExistingServer: !process.env.CI,
       // SERVER_URL is the server's own base URL; the server derives the
       // expected invocation-target host from it, and the app's
-      // VITE_WAS_SERVER_URL below is the Spaces Repository URL under it.
+      // VITE_WAS_SERVER_URL below names the same base server URL.
       // WAS_DATA_DIR keeps the run's Spaces out of the server checkout's own
       // data/ directory, which would otherwise accumulate every past run's.
       // It only applies to a server this config starts: `reuseExistingServer`
@@ -68,7 +68,7 @@ export default defineConfig({
       url: APP_URL,
       reuseExistingServer: false,
       env: {
-        VITE_WAS_SERVER_URL: `${WAS_URL}/spaces/`,
+        VITE_WAS_SERVER_URL: WAS_URL,
         INTEROP_LOGGER_FILE: DEV_LOG_FILE
       }
     }

@@ -102,7 +102,7 @@ import {
   type PersistableClientKeys,
   type UnlockCredential
 } from '@/session/keyring'
-import { WAS_BASE_URL } from '@/app.config'
+import { WAS_BASE_SERVER_URL } from '@/app.config'
 import {
   accountCeremonyContext,
   ceremonyProjectionStore,
@@ -125,6 +125,7 @@ import {
   type StandingUnlockFields
 } from '@/session/unlockMethods'
 import { createLogger } from '@/lib/log'
+import { spaceLocation } from '@/lib/spaceLocation'
 import { wasClientAt, wasServiceDescription } from '@/lib/wasService'
 
 const log = createLogger('fw:session:unlock')
@@ -139,8 +140,8 @@ const log = createLogger('fw:session:unlock')
  * continuation.
  *
  * @param options {object}
- * @param options.pointer {AccountPointer}   the account pointer (host +
- *   Space id locate the world-readable `id` collection)
+ * @param options.pointer {AccountPointer}   the account pointer (its Space
+ *   URL locates the world-readable `id` collection)
  * @param options.delegation {IZcap}   the record's PUT-on-`did.jsonl` bridge
  * @param options.zcapClient {ZcapClient}   the credential-derived client the
  *   delegated PUT is invoked with
@@ -165,8 +166,7 @@ export function unlockLogStore({
   serviceDescription: ServiceDescription
 }): AccountLogStore {
   return delegatedWebvhLogStore({
-    host: pointer.host,
-    spaceId: pointer.spaceId,
+    ...spaceLocation({ spaceUrl: pointer.spaceUrl }),
     collectionId: ID_COLLECTION.id,
     delegation,
     zcapClient,
@@ -331,7 +331,8 @@ export async function establishStandingUnlock({
       if (clientAnnexDid) {
         delegatedClients = await mintDelegatedClientsDelegation({
           zcapClient: boundZcapClient,
-          wasServerUrl: pointer.host,
+          baseServerUrl: spaceLocation({ spaceUrl: pointer.spaceUrl })
+            .baseServerUrl,
           clientAnnexSpaceId: clientAnnexDidParts({ did: clientAnnexDid })
             .spaceId,
           controller: standing.clientDid
@@ -623,7 +624,7 @@ async function sealedLadderSeed({
   pointer: AccountPointer
   accountLogPinStore: ResourceLogPinStore
 }): Promise<Uint8Array | undefined> {
-  if (!WAS_BASE_URL) {
+  if (!WAS_BASE_SERVER_URL) {
     return undefined
   }
   const found = await fetchTransientKeyring({ credential, accountLogPinStore })
@@ -715,12 +716,15 @@ export async function establishClientAnnexGeneration({
   })
   const serviceDescription = await wasServiceDescription()
   const enrolledIdStore = remoteStore.webvhIdStore()
+  const { baseServerUrl, spaceId } = spaceLocation({
+    spaceUrl: pointer.spaceUrl
+  })
   const pointed = await ensurePointedClientAnnexGeneration({
     account: { did: pointer.did, doc: account.doc, log: account.log },
-    wasServerUrl: pointer.host,
+    baseServerUrl,
     ladderSeed,
     was: wasClientAt({
-      baseUrl: pointer.host,
+      baseServerUrl,
       zcapClient: didKeyZcapClient({ keyAgent }),
       serviceDescription
     }),
@@ -728,8 +732,8 @@ export async function establishClientAnnexGeneration({
     mintGenerationDelegation: async ({ clientAnnexDid: generationDid }) =>
       mintGenerationDelegation({
         zcapClient: session.profile.zcapClient,
-        wasServerUrl: pointer.host,
-        spaceId: pointer.spaceId,
+        baseServerUrl,
+        spaceId,
         clientAnnexDid: generationDid
       }),
     idStore: enrolledIdStore,
@@ -767,7 +771,7 @@ export async function establishClientAnnexGeneration({
   // check and the revocation cascade's re-mint walk.
   const delegatedClients = await mintDelegatedClientsDelegation({
     zcapClient,
-    wasServerUrl: pointer.host,
+    baseServerUrl,
     clientAnnexSpaceId: clientAnnex.spaceId,
     controller: found.standingClient.clientDid
   })
@@ -800,7 +804,7 @@ export function canSelfEnroll({
   found: KeyringFetchResult
 }): boolean {
   return !!(
-    WAS_BASE_URL &&
+    WAS_BASE_SERVER_URL &&
     found.standing?.ladderSeed &&
     found.standingClient &&
     found.enrollClientKeys &&

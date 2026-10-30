@@ -69,6 +69,7 @@ import {
   type AccountCeremonyContext
 } from '@/session/accountCeremonyContext'
 import { sessionRosterStore } from '@/session/rosterStore'
+import { restatedReplicaServers } from '@/session/replicaRestate'
 import { sessionCollectionStores } from '@/session/collectionLogStore'
 import {
   adoptRotatedUserKeyInBand,
@@ -85,6 +86,7 @@ import {
 import { keyAgreementPublicationOf } from '@/session/keyring'
 import type { StandingCredentialEntry } from '@/session/unlockMethods'
 import { createLogger } from '@/lib/log'
+import { spaceLocation } from '@/lib/spaceLocation'
 import { wasServiceDescription } from '@/lib/wasService'
 
 const log = createLogger('fw:session:rotation')
@@ -384,7 +386,7 @@ async function rotateOffUnlockCredentialHeld({
       // writes go out under the key the record is now sealed to.
       await adoptRotatedUserKeyInBand({
         session,
-        spaceId: pointer.spaceId,
+        spaceUrl: pointer.spaceUrl,
         accountDid: pointer.did,
         userKey,
         latestEpochId,
@@ -737,30 +739,50 @@ async function retireClientAnnexInventoryStage({
       )
       return { action: 'skipped', reason: 'no-ladder-seed' }
     }
-    const { revoke } = await swapClientAnnexGeneration({
-      was,
-      wasServerUrl: pointer.host,
-      accountSpaceId: pointer.spaceId,
-      account: {
-        did: pointer.did,
-        doc
-      },
-      idStore: remoteStore.webvhIdStore(),
-      signer: context.signer,
-      zcapClient: session.profile.zcapClient,
-      ladderSeed: survivingLadderSeed,
-      // The retired seed names the rung to leave out of the restated set.
-      // Two callers reach here with none: the passkey removal that does not
-      // tap the passkey (`unlockMethods.ts`) and the pending-retirement
-      // repair (`pendingRetirement.ts`). A restating swap would carry the
-      // retired rung forward, so they take the unnamed arm, which restates
-      // nothing. The other standing credentials re-admit themselves at
-      // their next transient visit, one extra mint each. Each such mint
-      // re-points the generation, ending the App Connect grants chained
-      // under the delegation it replaces, as any swap does.
-      retiredLadderSeeds:
-        retiredLadderSeed !== undefined ? [retiredLadderSeed] : 'unnamed'
+    const { baseServerUrl, spaceId: accountSpaceId } = spaceLocation({
+      spaceUrl: pointer.spaceUrl
     })
+    // A directory this session cannot list or verify refuses the swap before
+    // its mint; the restate predicate's throw propagates.
+    const replicaServerDids = await restatedReplicaServers({ session })
+    const { revoke, replicaPointersDropped, replicaPointersMissing } =
+      await swapClientAnnexGeneration({
+        was,
+        baseServerUrl,
+        accountSpaceId,
+        account: {
+          did: pointer.did,
+          doc
+        },
+        idStore: remoteStore.webvhIdStore(),
+        signer: context.signer,
+        zcapClient: session.profile.zcapClient,
+        ladderSeed: survivingLadderSeed,
+        replicaServerDids,
+        // The retired seed names the rung to leave out of the restated set.
+        // Two callers reach here with none: the passkey removal that does not
+        // tap the passkey (`unlockMethods.ts`) and the pending-retirement
+        // repair (`pendingRetirement.ts`). A restating swap would carry the
+        // retired rung forward, so they take the unnamed arm, which restates
+        // nothing. The other standing credentials re-admit themselves at
+        // their next transient visit, one extra mint each. Each such mint
+        // re-points the generation, ending the App Connect grants chained
+        // under the delegation it replaces, as any swap does.
+        retiredLadderSeeds:
+          retiredLadderSeed !== undefined ? [retiredLadderSeed] : 'unnamed'
+      })
+    if (
+      replicaPointersDropped.length > 0 ||
+      replicaPointersMissing.length > 0
+    ) {
+      // Dropped: pointers the superseded generation carried that the
+      // directory no longer restates. Missing: restated servers the install
+      // entry left out, for the replica pass to append.
+      log.warn('The generation swap changed the replica pointer set', {
+        replicaPointersDropped,
+        replicaPointersMissing
+      })
+    }
     if (revoke !== 'revoked') {
       // The re-point retires the old delegation on a conforming server;
       // the explicit revoke only covers the fail-open case, so a skipped

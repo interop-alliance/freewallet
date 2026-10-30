@@ -108,7 +108,7 @@ this record's Consequences claim that "there is no code path by which a
 key derived from an unlock credential grants or reads anything without a
 prior log entry" is not exactly true, and the reach of what a phished
 holder can delegate is bounded by a wallet-side convention rather than
-by the server until was-teaching-server WAS-67 lands.
+by the server until was-teaching-server WSS-67 lands.
 
 The second half, which surface shows the owner it happened, is not
 answered here. Client listings key on `capabilityInvocation`, so

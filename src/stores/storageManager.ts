@@ -7,7 +7,7 @@
  * (RxDB/IndexedDB), online or offline. A session that has none -- the
  * replica-less transient session, the default -- serves them remote-direct
  * over the remote WAS collections, and so does a CHAPI popup session. When
- * VITE_WAS_SERVER_URL (the server's Spaces Repository URL) is set (and the
+ * VITE_WAS_SERVER_URL (the server's base server URL) is set (and the
  * session is not a guest), a WASRemoteStore is attached as well: the sync
  * controller replicates a local replica's collections to it in the
  * background, and the storage browser / export / import / quota pages read
@@ -92,7 +92,7 @@ import {
   RP_ZCAP_TTL_MS,
   isProtectedCollection,
   WALLET_STANDARD_COLLECTIONS,
-  WAS_BASE_URL
+  WAS_BASE_SERVER_URL
 } from '@/app.config'
 import {
   clearReceivedGrants,
@@ -130,8 +130,8 @@ import type {
   HeldContent,
   ImportOutcome
 } from '@/types/migration'
-import { didWebFromSpace } from '@/lib/didWeb'
 import { ensureKmsAuthentication } from '@/lib/kms'
+import { didWebOfSpace } from '@/lib/didWeb'
 import { collectionIdFromTarget, granteeRecipientId } from '@/lib/zcap'
 import {
   didKeyZcapClient,
@@ -180,7 +180,6 @@ import {
   RemoteDirectStore,
   type SyncedCollectionStore
 } from '@/stores/remoteDirectStore'
-import type { SpaceLocation } from '@/lib/walletRequest/processZcaps'
 import type { CredentialActivityVerb } from '@/lib/historyActivity'
 import type { GrantRevocationStageHook } from '@/lib/connectedApps'
 import { uuidv7 } from 'uuidv7'
@@ -1394,25 +1393,12 @@ export class StorageManager {
   }
 
   /**
-   * The remote Space URL, or undefined when there is no remote backend.
+   * The remote Space URL, or undefined when there is no remote backend. Zcap
+   * grant resolution forms every target from it through was-client's path
+   * builders.
    */
   get spaceUrl(): string | undefined {
     return this.#remoteStore?.spaceUrl
-  }
-
-  /**
-   * The remote Space's structural coordinates -- the storage server's base URL
-   * and the Space id -- or undefined when there is no remote backend. Zcap
-   * grant resolution takes the pair rather than the Space URL, so it forms
-   * every target through was-client's path builders instead of parsing a URL
-   * back apart.
-   */
-  get spaceLocation(): SpaceLocation | undefined {
-    const remote = this.#remoteStore
-    if (!remote) {
-      return undefined
-    }
-    return { serverUrl: remote.storageServerUrl, spaceId: remote.spaceId }
   }
 
   /**
@@ -2574,8 +2560,8 @@ export class StorageManager {
     // Guest sessions never touch the remote WAS server -- they get no remote
     // replica. This keeps guest mode usable as a fallback even when the
     // configured WAS server is unreachable.
-    const storageServerUrl = isGuest ? undefined : WAS_BASE_URL
-    log.info('Initializing storage clients', { storageServerUrl })
+    const baseServerUrl = isGuest ? undefined : WAS_BASE_SERVER_URL
+    log.info('Initializing storage clients', { baseServerUrl })
 
     const { profile, persistence } = session
     const { keyAgreementKey, keyResolver } = profile
@@ -2587,9 +2573,9 @@ export class StorageManager {
     // can be fetched before the ciphers are built: a shared collection encrypts
     // under its current key epoch, discovered from the Collection Description.
     let remoteStore: WASRemoteStore | undefined
-    if (storageServerUrl) {
+    if (baseServerUrl) {
       ;({ remoteStore } = await WASRemoteStore.initClient({
-        storageServerUrl,
+        baseServerUrl,
         serviceDescription,
         user,
         session
@@ -4233,8 +4219,8 @@ export class StorageManager {
           lookupKeystoreAgent: async () => keystoreAgent,
           provideKeystoreAgent: async () => keystoreAgent,
           remoteStore,
-          did: didWebFromSpace({
-            wasServerUrl: remoteStore.storageServerUrl,
+          did: didWebOfSpace({
+            baseServerUrl: remoteStore.baseServerUrl,
             spaceId: remoteStore.spaceId
           }),
           spaceReady
@@ -4298,7 +4284,7 @@ export class StorageManager {
         try {
           const result = await ensureAccountGenesis({
             was: remoteStore.was,
-            wasServerUrl: remoteStore.storageServerUrl,
+            baseServerUrl: remoteStore.baseServerUrl,
             spaceId: remoteStore.spaceId,
             keyAgent,
             clientKeyAgreementKey,
@@ -4340,8 +4326,7 @@ export class StorageManager {
                 keyAgent,
                 pointer: {
                   did,
-                  spaceId: remoteStore.spaceId,
-                  host: remoteStore.storageServerUrl
+                  spaceUrl: remoteStore.spaceUrl
                 },
                 pinStore: this.#persistence.logPins,
                 serviceDescription: remoteStore.serviceDescription
@@ -4351,7 +4336,7 @@ export class StorageManager {
             // genesis, signed by this client's enrolled key.
             collectionStoreFor: ({ did }) =>
               accountCollectionStores({
-                storageServerUrl: remoteStore.storageServerUrl,
+                baseServerUrl: remoteStore.baseServerUrl,
                 zcapClient: profile.zcapClient,
                 spaceId: remoteStore.spaceId,
                 did,
@@ -4460,7 +4445,7 @@ export class StorageManager {
             await remoteStore.ensureSpaceEpochs({
               userKey: profile.userKey,
               storeFor: accountCollectionStores({
-                storageServerUrl: remoteStore.storageServerUrl,
+                baseServerUrl: remoteStore.baseServerUrl,
                 zcapClient: profile.zcapClient,
                 spaceId: remoteStore.spaceId,
                 did: pointer.did,
@@ -6058,8 +6043,7 @@ export class StorageManager {
     }
     return collectionIdFromTarget({
       invocationTarget,
-      baseUrl: remote.storageServerUrl,
-      spaceId: remote.spaceId
+      spaceUrl: remote.spaceUrl
     })
   }
 

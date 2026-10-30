@@ -1,16 +1,20 @@
 /**
- * The one service discovery for the configured WAS server: the `HEAD` of the
- * Spaces Repository URL for its `rel="service"` link, then the unsigned read
- * of the linked document. Every `WasClient` this app builds takes the result
- * through its `serviceDescription` option, so no client discovers on its own
- * (each would `HEAD` its Spaces Repository URL) and the document is fetched
- * once per page load rather than once per client.
+ * The one service discovery for the configured WAS server: the unsigned read
+ * of the service description at `{base}service`. Every `WasClient` this app
+ * builds takes the result through its `serviceDescription` option, so no
+ * client reads the document on its own and it is fetched once per page load
+ * rather than once per client.
  *
  * This module is the app's only discoverer. A `WasClient` copies the
  * description it was constructed with, so `was.service({ refresh: true })`
- * must not be called on an app-built client: it re-discovers from the client's
- * Spaces Repository URL, which is exactly the request this module exists to
- * avoid.
+ * must not be called on an app-built client: it re-reads the document from
+ * the client's base server URL, which is exactly the request this module
+ * exists to avoid. The discovery checks the description against the
+ * configured base (`url` equal to `{base}service`, `spaces` equal to
+ * `{base}spaces/`) before memoizing it, so a server that has moved its mount
+ * is refused by name here, ahead of the KMS, CORS-proxy, and did:web URLs
+ * derived from the configured value. A `WasClient` runs the same check on
+ * its first request.
  *
  * The discovery is memoized on success only, so entry points are the right
  * place to call it: a chain that threads the result down re-probes nothing
@@ -22,14 +26,17 @@ import type {
   ServiceInfo
 } from '@interop/was-client'
 import {
-  discoverService,
   IncompatibleServerError,
+  readServiceDescription,
   WasClient
 } from '@interop/was-client'
 import type { ZcapClient } from '@interop/ezcap'
-import { spacesUrl } from '@interop/was-client/paths'
+import {
+  serviceDescriptionUrl,
+  spacesRepositoryUrl
+} from '@interop/was-client/paths'
 
-import { WAS_SPACES_URL, withOneTrailingSlash } from '@/app.config'
+import { WAS_BASE_SERVER_URL } from '@/app.config'
 import { createLogger } from '@/lib/log'
 import { isStorageUnreachable } from '@/lib/storageErrors'
 
@@ -38,31 +45,32 @@ const log = createLogger('fw:was:service')
 let pending: Promise<ServiceInfo> | undefined
 
 /**
- * A `WasClient` on a storage server named by its base URL: the configured
- * server, or the `host` an account pointer records. The one place the app
- * turns a base URL into the Spaces Repository URL a `WasClient` takes as
- * `serverUrl`, so no call site carries the conversion.
+ * A `WasClient` on a storage server named by its base server URL: the
+ * configured server, or the one an account's Space URL sits under. The one
+ * place the app builds a `WasClient`, so every client is built the same way
+ * and carries the discovered description.
  *
  * @param options {object}
- * @param options.baseUrl {string}   the storage server's base URL
+ * @param options.baseServerUrl {string}   the storage server's base server
+ *   URL
  * @param options.zcapClient {ZcapClient}
  * @param [options.serviceDescription] {ServiceDescription}
  * @param [options.encryption] {EncryptionProvider}
  * @returns {WasClient}
  */
 export function wasClientAt({
-  baseUrl,
+  baseServerUrl,
   zcapClient,
   serviceDescription,
   encryption
 }: {
-  baseUrl: string
+  baseServerUrl: string
   zcapClient: ZcapClient
   serviceDescription?: ServiceDescription
   encryption?: EncryptionProvider
 }): WasClient {
   return new WasClient({
-    serverUrl: spacesUrl({ baseUrl }),
+    baseServerUrl,
     zcapClient,
     serviceDescription,
     encryption
@@ -87,38 +95,23 @@ export async function wasServiceDescription(): Promise<ServiceDescription> {
  *
  * @returns {Promise<ServiceInfo>}
  * @throws {Error}   when no WAS server is configured
- * @throws {IncompatibleServerError}   when the server's responses carry no
- *   `service` link, the document is malformed, it lists no version the
- *   client speaks, or the version entry advertises a Spaces Repository URL
- *   other than the configured `VITE_WAS_SERVER_URL` (a server that has moved
- *   its mount is refused by name rather than silently misrouting the KMS,
- *   CORS-proxy, and account-pointer URLs derived from the configured value)
+ * @throws {IncompatibleServerError}   when the document is malformed, lists
+ *   no version the client speaks, or describes a server other than the
+ *   configured base (its `url` is not `{base}service`, or its Spaces
+ *   Repository URL is not `{base}spaces/`)
  */
 export function wasServiceInfo(): Promise<ServiceInfo> {
-  if (!WAS_SPACES_URL) {
+  if (!WAS_BASE_SERVER_URL) {
     return Promise.reject(new Error('No WAS server is configured.'))
   }
-  const configuredSpacesUrl = WAS_SPACES_URL
+  const baseServerUrl = WAS_BASE_SERVER_URL
   if (pending === undefined) {
-    const attempt: Promise<ServiceInfo> = discoverService({
-      url: configuredSpacesUrl
+    const attempt: Promise<ServiceInfo> = readServiceDescription({
+      serviceUrl: serviceDescriptionUrl({ baseServerUrl })
     })
       .then(info => {
-        const { description, version, features, spacesUrl } = info
-        if (
-          spacesUrl !== undefined &&
-          withOneTrailingSlash(spacesUrl) !== configuredSpacesUrl
-        ) {
-          throw new IncompatibleServerError(
-            `The server advertises its Spaces Repository at "${spacesUrl}", ` +
-              'but VITE_WAS_SERVER_URL is configured as ' +
-              `"${configuredSpacesUrl}". Every URL this app derives from ` +
-              'the configured value (the KMS facet, the CORS-proxy facet, ' +
-              'and the host an account pointer records) would address the ' +
-              'wrong mount, so the configured value must be corrected.',
-            { requestUrl: configuredSpacesUrl }
-          )
-        }
+        assertDescribesConfiguredServer({ info, baseServerUrl })
+        const { description, version, features } = info
         log.debug('Service discovered', {
           url: description.url,
           version,
@@ -136,13 +129,47 @@ export function wasServiceInfo(): Promise<ServiceInfo> {
 }
 
 /**
+ * Refuses a service description that does not describe the server at the
+ * configured base: its `url` must be `{base}service` and its Spaces
+ * Repository URL, when it names one, `{base}spaces/`.
+ *
+ * @param options {object}
+ * @param options.info {ServiceInfo}
+ * @param options.baseServerUrl {string}
+ * @throws {IncompatibleServerError}
+ */
+function assertDescribesConfiguredServer({
+  info,
+  baseServerUrl
+}: {
+  info: ServiceInfo
+  baseServerUrl: string
+}): void {
+  const expectedUrl = serviceDescriptionUrl({ baseServerUrl })
+  if (info.description.url !== expectedUrl) {
+    throw new IncompatibleServerError(
+      `The service description names itself "${info.description.url}", ` +
+        `but the configured base server URL "${baseServerUrl}" places it ` +
+        `at "${expectedUrl}".`
+    )
+  }
+  const expectedSpaces = spacesRepositoryUrl({ baseServerUrl })
+  if (info.spacesUrl !== undefined && info.spacesUrl !== expectedSpaces) {
+    throw new IncompatibleServerError(
+      `The service description names the Spaces Repository ` +
+        `"${info.spacesUrl}", but the configured base server URL ` +
+        `"${baseServerUrl}" places it at "${expectedSpaces}".`
+    )
+  }
+}
+
+/**
  * The configured WAS server's service description, or `undefined` when the
  * server could not be reached. The offline seam: a login entry point that
  * must keep working off this browser's cached state calls this one, so an
  * unreachable server costs it the description rather than the session,
  * exactly as an unreachable server always did. A server that answers and
- * refuses -- an incompatible version, an advertised Spaces Repository URL
- * other than the configured one -- still rejects, since that is an answer
+ * refuses (an incompatible version) still rejects, since that is an answer
  * about the server rather than a missing one.
  *
  * @returns {Promise<ServiceDescription | undefined>}

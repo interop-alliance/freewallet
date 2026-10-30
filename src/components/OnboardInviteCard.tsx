@@ -129,9 +129,10 @@ export function OnboardInviteCard({
           )
         }
         const created = await createEphemeralExchange({
-          serverUrl: context.remoteStore.storageServerUrl,
+          serverUrl: context.remoteStore.baseServerUrl,
           request: composeWalletOnboardingRequest({
-            pointer: context.pointer,
+            did: context.pointer.did,
+            baseServerUrl: context.remoteStore.baseServerUrl,
             controller: context.controller
           })
         })

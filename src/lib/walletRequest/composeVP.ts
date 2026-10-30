@@ -28,7 +28,7 @@ import {
   relationIds
 } from '@interop/wallet-core/webvh'
 import type { Session } from '@/types/auth'
-import { didWebFromSpace } from '@/lib/didWeb'
+import { didWebOfAccount } from '@/lib/didWeb'
 import { kmsAuthenticationSigner } from '@/lib/kms'
 import { peekVerifiedAccountLog } from '@/session/verifiedLog'
 import type {
@@ -258,7 +258,7 @@ function acceptedMethodsOf({
  *    callers have no refusal surface -- the CHAPI store popup renders a
  *    thrown message raw, and the external-request delivery path resolves a
  *    signer it never uses -- so every account arm falls through to arm 3 on
- *    any throw (a pointer host that does not parse, a key that does not).
+ *    any throw (a pointer DID that does not parse, a key that does not).
  *    Arm 3 itself is the one thing left that can throw here, for a session
  *    holding no key agent at all, which is no session this wallet builds.
  *
@@ -286,8 +286,8 @@ export async function presentationSignerFor({
     signer: session.profile.keyAgent!.getSigner(),
     holder: session.user.id
   })
-  // The account arms, resolved inside one guard: a pointer whose host does
-  // not parse as a URL is all it takes for the projection id to throw, and
+  // The account arms, resolved inside one guard: a pointer DID that does not
+  // parse as a did:webvh is all it takes for the projection id to throw, and
   // this function has callers with no refusal surface. Anything the arms
   // cannot resolve falls through to arm 3.
   let resolved:
@@ -307,15 +307,12 @@ export async function presentationSignerFor({
           method as (typeof ACCOUNT_DID_METHODS)[number]
         )
       )
-    if (accountKey && pointer && accountAccepted) {
+    if (accountKey && pointer?.did && accountAccepted) {
       // Arm 1 when `webvh` is accepted; arms 2 and 4 both present the
       // projection, which is the account document under its did:web id.
       const holder = accepted?.includes('webvh')
         ? accountKey.accountDid
-        : didWebFromSpace({
-            wasServerUrl: pointer.host,
-            spaceId: pointer.spaceId
-          })
+        : didWebOfAccount({ did: pointer.did })
       resolved = { accountKey, holder }
     }
   } catch {

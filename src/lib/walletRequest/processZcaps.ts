@@ -121,12 +121,11 @@ import {
   x25519RecipientFromDidKey
 } from '@interop/was-client/edv'
 import {
-  collectionPath,
+  collectionUrl,
   isReservedCollectionId,
   parseSpaceTarget,
-  resourcePath,
-  rootCapabilityId,
-  toUrl
+  resourceUrl,
+  rootCapabilityId
 } from '@interop/was-client/paths'
 import type { IDID } from '@interop/data-integrity-core'
 import type { CollectionGenerator, IDelegatedZcap } from '@interop/was-client'
@@ -763,9 +762,9 @@ function standardCollection(
  * A reserved segment (`meta`, `policy`, `query`, `export`, `import`,
  * `backends`, `collections`, `linkset`, `quotas`) satisfies the naming rule
  * while addressing a server facet rather than a Collection. Two things ride on
- * refusing it here. was-client's `collectionPath` throws a `ValidationError`
+ * refusing it here. was-client's `collectionUrl` throws a `ValidationError`
  * on one, so admitting it would throw out of resolution instead of refusing
- * the grant, and `${spaceUrl}/meta` is the Space Metadata object, which a
+ * the grant, and `${spaceUrl}meta` is the Space Metadata object, which a
  * full-vocabulary collection grant would hand a requester write access to -- the
  * Space's `controller` included.
  *
@@ -776,42 +775,6 @@ function isCollectionName(name: string | undefined): name is string {
   return (
     !!name && COLLECTION_NAME_RE.test(name) && !isReservedCollectionId(name)
   )
-}
-
-/**
- * Where the user's Space lives, structurally: the storage server's base URL
- * and the Space id. Every target this module builds is formed from the pair
- * through was-client's path builders, since a target must match the server's
- * `allowedTarget` byte for byte and the trailing-slash and percent-encoding
- * rules are the builders' to own. `StorageManager.spaceLocation` hands a
- * session's pair to the callers.
- */
-export interface SpaceLocation {
-  serverUrl: string
-  spaceId: string
-}
-
-/**
- * The canonical URL of one Collection in the user's Space. `collectionId` has
- * already passed {@link isCollectionName}, so the reserved segments the path
- * builder refuses never reach it.
- *
- * @param options {object}
- * @param options.space {SpaceLocation}
- * @param options.collectionId {string}
- * @returns {string}
- */
-function collectionTargetIn({
-  space,
-  collectionId
-}: {
-  space: SpaceLocation
-  collectionId: string
-}): string {
-  return toUrl({
-    baseUrl: space.serverUrl,
-    path: collectionPath(space.spaceId, collectionId)
-  })
 }
 
 /**
@@ -826,21 +789,21 @@ function collectionTargetIn({
  *
  * Two refusals stay here, ahead of the grammar. `new URL` resolves dot
  * segments, so `${spaceUrl}../other-space/x` lands outside this Space and the
- * Space-id check refuses it. A query or a fragment is refused outright rather
+ * grammar refuses it. A query or a fragment is refused outright rather
  * than silently dropped: a WAS URL has neither, and showing the user one
  * target while delegating another is not consent.
  *
  * @param options {object}
  * @param options.target {string}
- * @param options.space {SpaceLocation}
+ * @param options.spaceUrl {string}   the user's Space URL
  * @returns {{ collectionId: string, resourceId?: string } | undefined}
  */
 function classifySpaceTarget({
   target,
-  space
+  spaceUrl
 }: {
   target: string
-  space: SpaceLocation
+  spaceUrl: string
 }): { collectionId: string; resourceId?: string } | undefined {
   let url: URL
   try {
@@ -851,17 +814,11 @@ function classifySpaceTarget({
   if (url.search || url.hash) {
     return undefined
   }
-  const parsed = parseSpaceTarget({
-    baseUrl: space.serverUrl,
-    target: url.href
-  })
-  if (!parsed || parsed.spaceId !== space.spaceId) {
-    return undefined
-  }
-  if (parsed.kind === 'collection') {
+  const parsed = parseSpaceTarget({ spaceUrl, target: url.href })
+  if (parsed?.kind === 'collection') {
     return { collectionId: parsed.collectionId }
   }
-  if (parsed.kind === 'resource') {
+  if (parsed?.kind === 'resource') {
     return { collectionId: parsed.collectionId, resourceId: parsed.resourceId }
   }
   return undefined
@@ -890,7 +847,7 @@ function classifySpaceTarget({
  *   segment that is not a valid collection id, a never-grantable
  *   collection -- is unsatisfiable;
  * - `{ type: 'https://w3id.org/byoe#private-collection', name }` -- the
- *   Collection's canonical URL in the Space (`collectionPath`) after
+ *   Collection's canonical URL in the Space (`collectionUrl`) after
  *   validating `name`, flagged `needsProvisioning` unless it is a standard
  *   collection (and `encrypted` for the two EDV collections). Like the string
  *   form, classed public-collection when the collection already is -- with
@@ -923,7 +880,7 @@ function classifySpaceTarget({
  *
  * @param options {object}
  * @param options.descriptor {string | { type: string; name?: string }}
- * @param options.space {SpaceLocation}   the user's Space, structurally
+ * @param options.spaceUrl {string}   the user's Space URL
  * @param options.collections {ExistingCollections}   the Space's existing
  *   collections as they stood before the request, their public state, and
  *   their attribution
@@ -941,7 +898,7 @@ function classifySpaceTarget({
  */
 export function resolveInvocationTarget(options: {
   descriptor: string | { type?: string; name?: string }
-  space: SpaceLocation
+  spaceUrl: string
   collections: ExistingCollections
   provisioned?: ProvisionedByRequest
   requester: { controller?: string; appUrl?: string }
@@ -957,8 +914,8 @@ export function resolveInvocationTarget(options: {
     }
     return {
       ...SATISFIABLE_DEFAULTS,
-      invocationTarget: collectionTargetIn({
-        space: options.space,
+      invocationTarget: collectionUrl({
+        spaceUrl: options.spaceUrl,
         collectionId: INBOX_COLLECTION
       }),
       collectionId: INBOX_COLLECTION,
@@ -1010,7 +967,7 @@ function withProvisioned({
  *
  * @param options {object}
  * @param options.descriptor {string | { type: string; name?: string }}
- * @param options.space {SpaceLocation}
+ * @param options.spaceUrl {string}   the user's Space URL
  * @param options.collections {ExistingCollections}
  * @param [options.provisioned] {ProvisionedByRequest}
  * @param options.requester {{ controller?: string; appUrl?: string }}
@@ -1018,20 +975,20 @@ function withProvisioned({
  */
 function resolveTargetForm({
   descriptor,
-  space,
+  spaceUrl,
   collections: snapshot,
   provisioned,
   requester
 }: {
   descriptor: string | { type?: string; name?: string }
-  space: SpaceLocation
+  spaceUrl: string
   collections: ExistingCollections
   provisioned?: ProvisionedByRequest
   requester: { controller?: string; appUrl?: string }
 }): ResolvedTarget {
   if (typeof descriptor === 'string') {
     const collections = snapshot
-    const parsed = classifySpaceTarget({ target: descriptor, space })
+    const parsed = classifySpaceTarget({ target: descriptor, spaceUrl })
     if (!parsed) {
       return UNSATISFIABLE
     }
@@ -1078,10 +1035,11 @@ function resolveTargetForm({
       ...SATISFIABLE_DEFAULTS,
       invocationTarget:
         resourceId === undefined
-          ? collectionTargetIn({ space, collectionId })
-          : toUrl({
-              baseUrl: space.serverUrl,
-              path: resourcePath(space.spaceId, collectionId, resourceId)
+          ? collectionUrl({ spaceUrl, collectionId })
+          : resourceUrl({
+              spaceUrl,
+              collectionId,
+              resourceId
             }),
       collectionId,
       encrypted: encryptedCollection && !currentRecipient,
@@ -1114,7 +1072,7 @@ function resolveTargetForm({
     })
     return {
       ...SATISFIABLE_DEFAULTS,
-      invocationTarget: collectionTargetIn({ space, collectionId: name }),
+      invocationTarget: collectionUrl({ spaceUrl, collectionId: name }),
       // A protected collection -- a standard one or the `id` system
       // collection -- is provisioned and maintained by the
       // wallet itself, never here. An existing private requester collection still
@@ -1166,7 +1124,7 @@ function resolveTargetForm({
     // re-grant only delegates.
     return {
       ...SATISFIABLE_DEFAULTS,
-      invocationTarget: collectionTargetIn({ space, collectionId: name }),
+      invocationTarget: collectionUrl({ spaceUrl, collectionId: name }),
       needsProvisioning: !existing,
       collectionId: name,
       targetClass: 'public-collection'
@@ -1189,7 +1147,10 @@ function resolveTargetForm({
     }
     return {
       ...SATISFIABLE_DEFAULTS,
-      invocationTarget: collectionTargetIn({ space, collectionId: shared.id }),
+      invocationTarget: collectionUrl({
+        spaceUrl,
+        collectionId: shared.id
+      }),
       collectionId: shared.id,
       encrypted: true,
       targetClass: 'share'
@@ -1284,7 +1245,7 @@ function capActions({
  *
  * @param options {object}
  * @param options.descriptor {ICapabilityQueryDetail}
- * @param options.space {SpaceLocation}
+ * @param options.spaceUrl {string}   the user's Space URL
  * @param options.collections {ExistingCollections}
  * @param [options.provisioned] {ProvisionedByRequest}   the collections
  *   earlier descriptors in the same request provision (see
@@ -1300,7 +1261,7 @@ function capActions({
  */
 export function resolveGrant({
   descriptor,
-  space,
+  spaceUrl,
   collections,
   provisioned,
   allowMissingController = false,
@@ -1308,7 +1269,7 @@ export function resolveGrant({
   requestKind
 }: {
   descriptor: ICapabilityQueryDetail
-  space: SpaceLocation
+  spaceUrl: string
   collections: ExistingCollections
   provisioned?: ProvisionedByRequest
   allowMissingController?: boolean
@@ -1317,7 +1278,7 @@ export function resolveGrant({
 }): ResolvedGrant {
   let target = resolveInvocationTarget({
     descriptor: descriptor.invocationTarget,
-    space,
+    spaceUrl,
     collections,
     provisioned,
     requester: { controller: descriptor.controller, appUrl },
@@ -1391,7 +1352,7 @@ export function resolveGrant({
  *
  * @param options {object}
  * @param options.zcapRequests {ICapabilityQueryDetail[]}
- * @param options.space {SpaceLocation}
+ * @param options.spaceUrl {string}   the user's Space URL
  * @param options.collections {ExistingCollections}
  * @param [options.allowMissingController] {boolean}   App Connect
  *   consent-preview only (see {@link resolveGrant})
@@ -1403,14 +1364,14 @@ export function resolveGrant({
  */
 export function resolveGrants({
   zcapRequests,
-  space,
+  spaceUrl,
   collections,
   allowMissingController,
   appUrl,
   requestKind
 }: {
   zcapRequests: ICapabilityQueryDetail[]
-  space: SpaceLocation
+  spaceUrl: string
   collections: ExistingCollections
   allowMissingController?: boolean
   appUrl?: string
@@ -1420,7 +1381,7 @@ export function resolveGrants({
   return zcapRequests.map(descriptor => {
     const grant = resolveGrant({
       descriptor,
-      space,
+      spaceUrl,
       collections,
       provisioned,
       allowMissingController,
@@ -1523,11 +1484,10 @@ export async function processZcaps({
     throw new ZcapUnavailableError()
   }
 
-  // `hasZcapStorage` above guarantees a remote backend, so the Space's
-  // structural coordinates and its URL both stand. Every collection target
-  // below is built from the coordinates through was-client's path builders;
-  // the Space URL is the store's own, the one its root capability id names.
-  const space = session.storage.spaceLocation!
+  // `hasZcapStorage` above guarantees a remote backend, so the Space URL
+  // stands. It is the store's own, the one its root capability id names, and
+  // every collection target below is built from it through was-client's path
+  // builders.
   const spaceUrl = session.storage.spaceUrl!
   const now = Date.now()
   const { zcapClient } = session.profile
@@ -1780,7 +1740,7 @@ export async function processZcaps({
   }> = []
   for (const { descriptor, target, allowedActions, write } of resolveGrants({
     zcapRequests,
-    space,
+    spaceUrl,
     collections,
     requestKind
   })) {

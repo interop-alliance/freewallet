@@ -126,6 +126,7 @@ import {
 import { disposeSession } from '@/session/sessionLifecycle'
 import { cascadeCollections } from '@/session/userKeyCascade'
 import { createLogger } from '@/lib/log'
+import { spaceLocation } from '@/lib/spaceLocation'
 import { wasClientAt, wasServiceDescription } from '@/lib/wasService'
 
 const log = createLogger('fw:session:forget')
@@ -468,7 +469,7 @@ async function forgetThisBrowserHeld({
       // resuming re-click.
       await adoptRotatedUserKeyInBand({
         session,
-        spaceId: pointer.spaceId,
+        spaceUrl: pointer.spaceUrl,
         accountDid: pointer.did,
         userKey,
         latestEpochId,
@@ -592,7 +593,8 @@ async function forgetThisBrowserHeld({
  *
  * @param options {object}
  * @param options.session {Session}
- * @param options.pointer {{ host: string, spaceId: string }}
+ * @param options.pointer {AccountPointer}   the account pointer, whose
+ *   Space URL names the base server URL and the account Space
  * @param options.serviceDescription {ServiceDescription}   the server's
  *   discovered service description, so the client skips discovery
  * @returns {object}   the ceremony's `annex` option
@@ -603,11 +605,14 @@ function annexCeremonyReach({
   serviceDescription
 }: {
   session: Session
-  pointer: { host: string; spaceId: string }
+  pointer: Pick<AccountPointer, 'spaceUrl'>
   serviceDescription: ServiceDescription
 }) {
+  const { baseServerUrl, spaceId: accountSpaceId } = spaceLocation({
+    spaceUrl: pointer.spaceUrl
+  })
   const was = wasClientAt({
-    baseUrl: pointer.host,
+    baseServerUrl,
     zcapClient: session.profile.zcapClient,
     serviceDescription
   })
@@ -627,8 +632,8 @@ function annexCeremonyReach({
       }),
     revoke: async (delegation: Parameters<WasClient['revoke']>[0]) =>
       was.revoke(delegation),
-    wasServerUrl: pointer.host,
-    accountSpaceId: pointer.spaceId
+    baseServerUrl,
+    accountSpaceId
   }
 }
 
@@ -739,13 +744,7 @@ export async function assertClientStillEnrolled({
       keyAgent: agents.keyAgent
     })
     verified =
-      firstContact ??
-      (await verifyAccountLog({
-        did: pointer.did,
-        spaceId: pointer.spaceId,
-        host: pointer.host,
-        pinStore
-      }))
+      firstContact ?? (await verifyAccountLog({ did: pointer.did, pinStore }))
   } catch {
     // Unverifiable is not "forgotten": a flap, a missing log, and a
     // continuity refusal all fall through to the ordinary login, whose own
@@ -793,7 +792,7 @@ export async function finishForgottenBrowserWipe({
   const pointer = found.pointer!
   const { failed, unverified } = await wipeClientResidue({
     clientDid,
-    accountSpaceId: pointer.spaceId,
+    accountSpaceId: spaceLocation({ spaceUrl: pointer.spaceUrl }).spaceId,
     unlockSpaceId: found.unlockSpaceId,
     idb,
     clearWriter: true

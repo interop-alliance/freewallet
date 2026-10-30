@@ -38,7 +38,7 @@ const state = vi.hoisted(() => ({
 
 vi.mock('@/app.config', async importOriginal => ({
   ...(await importOriginal<Record<string, unknown>>()),
-  WAS_BASE_URL: 'https://was.example'
+  WAS_BASE_SERVER_URL: 'https://was.example/'
 }))
 
 const STANDING_KAK = { id: 'did:key:z6LSStanding#z6LSStanding' }
@@ -55,7 +55,7 @@ vi.mock('@/session/accountCeremonyContext', async importOriginal => ({
     }
     return {
       kind: state.contextKind,
-      pointer: { did: ACCOUNT_DID, spaceId: 's-space', host: 'https://was' },
+      pointer: { did: ACCOUNT_DID, spaceUrl: 'https://was/space/s-space/' },
       rosterStore: { rosterStore: true },
       remoteStore: { remoteStore: true },
       collectionStore: () => ({ collectionStore: true }),
@@ -235,8 +235,7 @@ function makeSession({
       userKey: K1,
       accountPointer: {
         did: ACCOUNT_DID,
-        spaceId: 's-space',
-        host: 'https://was.example'
+        spaceUrl: 'https://was.example/space/s-space/'
       }
     },
     persistence: browserLocalSessionPersistence(),

@@ -112,7 +112,7 @@ vi.mock('@/session/userKeyAdoption', () => {
           run: () => body(options)
         }),
     adoptRotatedUserKey: vi.fn(),
-    rotationSpaceId: vi.fn(() => 'space-account')
+    rotationSpaceUrl: vi.fn(() => 'http://localhost/space/space-account/')
   }
 })
 vi.mock('@interop/wallet-core/webvh', async importOriginal => ({
@@ -135,7 +135,10 @@ const session = {
   persistence: { logPins: {}, passkeyNotices: { delete: deleteNotice } }
 } as unknown as Session
 const context = {
-  pointer: { did: 'did:webvh:acct', spaceId: 'space-account' },
+  pointer: {
+    did: 'did:webvh:acct',
+    spaceUrl: 'http://localhost/space/space-account/'
+  },
   rosterStore: { read: vi.fn(async () => null) }
 } as unknown as AccountCeremonyContext
 const credential = {

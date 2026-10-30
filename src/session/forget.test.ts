@@ -416,8 +416,7 @@ describe('assertClientStillEnrolled (the forgotten-browser detector)', () => {
   const clientSeed = new Uint8Array(32).fill(7)
   const pointer = {
     did: 'did:webvh:scid-x:example.com:space-1',
-    spaceId: 'space-1',
-    host: 'https://storage.example'
+    spaceUrl: 'https://storage.example/space/space-1/'
   }
 
   /**
@@ -544,8 +543,7 @@ describe('wipeStaleClientResidue', () => {
       unlockSpaceId: 'unlock-stale',
       pointer: {
         did: 'did:webvh:scid-new:example.com:space:new-space:id',
-        spaceId: 'new-space',
-        host: 'https://storage.example'
+        spaceUrl: 'https://storage.example/space/new-space/'
       },
       clientKeys: {
         clientSeed,
@@ -573,8 +571,7 @@ describe('wipeStaleClientResidue', () => {
 describe('forgetThisBrowser (the ceremony grades)', () => {
   const pointer = {
     did: 'did:webvh:scid-a:example.com:space-1',
-    spaceId: 'space-1',
-    host: 'https://storage.example'
+    spaceUrl: 'https://storage.example/space/space-1/'
   }
 
   /**
@@ -831,8 +828,8 @@ describe('forgetThisBrowser (the ceremony grades)', () => {
     expect(order).toEqual(['ceremony', 'stop-sync', 'wipe'])
     const options = vi.mocked(forgetLastEnrolledClient).mock.calls[0]![0]
     expect(options.annex).toMatchObject({
-      wasServerUrl: pointer.host,
-      accountSpaceId: pointer.spaceId
+      baseServerUrl: 'https://storage.example/',
+      accountSpaceId: 'space-1'
     })
     expect(typeof options.annex.storeFor).toBe('function')
     expect(typeof options.annex.revoke).toBe('function')
@@ -1150,7 +1147,7 @@ describe('forgetThisBrowser (the ceremony grades)', () => {
       vi.mocked(mintDelegatedClientsDelegation).mock.calls[0]![0]
     ).toMatchObject({
       zcapClient: LADDER_ZCAP_CLIENT,
-      wasServerUrl: pointer.host,
+      baseServerUrl: 'https://storage.example/',
       clientAnnexSpaceId: 'annex-space',
       controller: 'did:key:zStanding'
     })
@@ -1262,7 +1259,7 @@ describe('forgetThisBrowser (the ceremony grades)', () => {
     // does nothing else.
     expect(vi.mocked(adoptRotatedUserKeyInBand)).toHaveBeenCalledWith({
       session,
-      spaceId: pointer.spaceId,
+      spaceUrl: pointer.spaceUrl,
       accountDid: pointer.did,
       userKey,
       latestEpochId: 'epoch-2',

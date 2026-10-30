@@ -432,7 +432,7 @@ export function WalletGetPage() {
         return
       }
 
-      const space = loggedIn.storage.spaceLocation
+      const spaceUrl = loggedIn.storage.spaceUrl
 
       // App Connect: look up the stored app key for this app + origin, for
       // the first-run vs returning consent copy and the grants preview. The
@@ -465,7 +465,7 @@ export function WalletGetPage() {
         const existingDid = existing ? (appKeySubjectDid(existing) ?? '') : ''
         setAppKeyFirstRun(!existing)
         setPreviewedAppKeyDid(existingDid || null)
-        if (wantsGrants && space) {
+        if (wantsGrants && spaceUrl) {
           // The existing collections' public state, consulted by grant
           // resolution: a public grant that would convert an existing
           // collection resolves unsatisfiable, and a target naming an
@@ -489,7 +489,7 @@ export function WalletGetPage() {
               // approved path re-derives with the real subject DID.
               controller: existingDid
             }),
-            space,
+            spaceUrl,
             collections,
             allowMissingController: true,
             appUrl: profile.appConnect.app.appUrl,

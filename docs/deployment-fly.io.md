@@ -121,7 +121,7 @@ build context carries no `.git`, so pass the host's
 `git describe --tags --always --dirty` output. Without it the build fails.
 
 A same-origin deployment sets one:
-`VITE_WAS_SERVER_URL=https://wallet.example.com/spaces/`. The CORS proxy
+`VITE_WAS_SERVER_URL=https://wallet.example.com/`. The CORS proxy
 (`/api/cors`) and the KMS (`/kms`) default to that same server, so they are
 same-origin too.
 
@@ -147,7 +147,7 @@ SERVER_URL=http://localhost:8080 PORT=3002 pnpm start
 
 # Here:
 docker build -t freewallet \
-  --build-arg VITE_WAS_SERVER_URL=http://localhost:8080/spaces/ \
+  --build-arg VITE_WAS_SERVER_URL=http://localhost:8080/ \
   --build-arg APP_VERSION="$(git describe --tags --always --dirty)" .
 docker run --rm -p 8080:8080 \
   --add-host=host.docker.internal:host-gateway \
@@ -177,7 +177,7 @@ Set up the server app first (see the was-teaching-server repo's
 ```sh
 fly apps create <app>
 fly deploy --app <app> \
-  --build-arg VITE_WAS_SERVER_URL=https://<domain>/spaces/ \
+  --build-arg VITE_WAS_SERVER_URL=https://<domain>/ \
   --build-arg APP_VERSION="$(git describe --tags --always --dirty)" \
   --env WAS_UPSTREAM=<server-app>.flycast:80
 fly scale count 2 --app <app>
@@ -218,11 +218,11 @@ apps never share a token. To set up production:
    Store the token there as the `FLY_API_TOKEN` secret.
 3. On the same environment, add three variables:
 
-   | Variable              | Example                              |
-   | --------------------- | ------------------------------------ |
-   | `FLY_APP`             | `freewallet`                         |
-   | `VITE_WAS_SERVER_URL` | `https://wallet.example.com/spaces/` |
-   | `WAS_UPSTREAM`        | `was-teaching-server.flycast:80`     |
+   | Variable              | Example                          |
+   | --------------------- | -------------------------------- |
+   | `FLY_APP`             | `freewallet`                     |
+   | `VITE_WAS_SERVER_URL` | `https://wallet.example.com/`    |
+   | `WAS_UPSTREAM`        | `was-teaching-server.flycast:80` |
 
    The workflow fails before deploying if any of them is missing.
 
@@ -236,7 +236,7 @@ staging wallet's domain. Then:
 1. Create a deploy token scoped to the staging app.
 2. Create an environment named `staging`, with the token as its `FLY_API_TOKEN`
    secret. Add the same three variables, with the staging app's name, the
-   staging domain's `/spaces/` URL, and the staging server's Flycast address.
+   staging domain's base server URL, and the staging server's Flycast address.
 3. Limit the environment's deployment branches to `main`.
 
 Neither workflow runs on pull requests, so a pull request from a fork cannot

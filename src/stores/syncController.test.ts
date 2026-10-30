@@ -18,7 +18,7 @@ vi.mock('@/app.config', () => ({
     { key: 'privateCredentials', id: 'private-credentials' },
     { key: 'walletActivity', id: 'wallet-activity' }
   ],
-  WAS_BASE_URL: 'https://was.example',
+  WAS_BASE_SERVER_URL: 'http://localhost/',
   WAS_SYNC_BATCH_SIZE: 10,
   WAS_SYNC_RETRY_MS: 5000,
   WAS_SYNC_POLL_MS: 30_000
@@ -68,8 +68,7 @@ import { syncController } from './syncController'
 interface CoreOptions {
   port: {
     wasClient: unknown
-    spaceId: string
-    baseUrl: string
+    spaceUrl: string
     collections: Array<{ key: string; id: string }>
     rxCollection: (key: string) => unknown
     batchSize?: number
@@ -97,7 +96,7 @@ const localCollection = vi.fn((key: string) => ({ localKey: key }))
 
 /**
  * A session shaped just enough for the binding: not a guest, a remote WAS
- * client and space id present, a local replica behind `localCollection`, and
+ * client and Space URL present, a local replica behind `localCollection`, and
  * a persistence strategy answering the per-profile `writerId`.
  *
  * @returns {Session}
@@ -108,7 +107,7 @@ function fakeSession(): Session {
     persistence: { getWriterId: () => 'writer-profile-1' },
     storage: {
       wasClient: { fake: 'client' },
-      spaceId: 'space-1',
+      spaceUrl: 'http://localhost/space/space-1/',
       hasLocalReplica: true,
       localCollection
     }
@@ -134,8 +133,7 @@ describe('sync binding: the port handed to the core', () => {
     await syncController.restart({ session: fakeSession() })
 
     const { port, pollMs } = lastOptions()
-    expect(port.baseUrl).toBe('https://was.example')
-    expect(port.spaceId).toBe('space-1')
+    expect(port.spaceUrl).toBe('http://localhost/space/space-1/')
     expect(port.wasClient).toEqual({ fake: 'client' })
     expect(port.collections).toEqual([
       { key: 'privateCredentials', id: 'private-credentials' },

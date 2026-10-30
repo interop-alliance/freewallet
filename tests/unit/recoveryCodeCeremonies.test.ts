@@ -18,12 +18,12 @@ import { memoryResourceLogPinStore } from '@interop/vh-resource-log'
 import type { IZcap } from '@interop/data-integrity-core'
 
 const wasState = vi.hoisted(() => ({
-  url: 'https://was.example.test' as string | undefined
+  url: 'http://localhost/' as string | undefined
 }))
 
 vi.mock('@/app.config', async importOriginal => ({
   ...(await importOriginal<typeof import('@/app.config')>()),
-  get WAS_BASE_URL() {
+  get WAS_BASE_SERVER_URL() {
     return wasState.url
   }
 }))
@@ -279,9 +279,8 @@ import type { RecoveryCodeUnlockMethod } from '@/session/unlockMethods'
 import type { Session } from '@/types/auth'
 
 const POINTER = {
-  did: 'did:webvh:QmScidForTests:was.example.test:space:space-123:id',
-  spaceId: 'space-123',
-  host: 'https://was.example.test'
+  did: 'did:webvh:QmScidForTests:localhost:space:space-123:id',
+  spaceUrl: 'http://localhost/space/space-123/'
 }
 
 const GENERATION_DELEGATION = {
@@ -344,8 +343,7 @@ async function ceremonyContext(): Promise<AccountCeremonyContext> {
     projectionStore: didWebProjectionStore({
       serviceDescription: TEST_SERVICE_DESCRIPTION,
       pinStore: memoryResourceLogPinStore(),
-      host: POINTER.host,
-      spaceId: POINTER.spaceId,
+      spaceUrl: POINTER.spaceUrl,
       invoker: () => ({
         zcapClient: {} as never,
         capability: GENERATION_DELEGATION as never

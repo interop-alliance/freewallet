@@ -59,7 +59,7 @@ import type { WASRemoteStore } from '@/stores/wasRemoteStore'
 const POINTER = {
   did: 'did:webvh:QmScidForTests:was.example.test:space:space-123:id',
   spaceId: 'space-123',
-  host: 'https://was.example.test'
+  spaceUrl: 'https://was.example.test/space/space-123/'
 }
 const KEY_AGENT = { id: 'did:key:zAgent' } as never as Parameters<
   typeof sessionCollectionStores
@@ -110,6 +110,7 @@ function sessionFixture({ did }: { did?: string } = {}): Pick<
 function remoteStoreStub(): WASRemoteStore {
   return {
     spaceId: POINTER.spaceId,
+    spaceUrl: POINTER.spaceUrl,
     collectionHandle: vi.fn(({ collectionId }: { collectionId: string }) => ({
       spaceId: POINTER.spaceId,
       id: collectionId,
@@ -191,7 +192,7 @@ describe('sessionCollectionDescriptorSource', () => {
     })
 
     const options = vi.mocked(logGovernedDescriptorSource).mock.calls[0]![0]
-    expect(options.spaceId).toBe(POINTER.spaceId)
+    expect(options.spaceUrl).toBe(POINTER.spaceUrl)
     expect(options.pinStore).toBe(session.persistence.logPins)
   })
 

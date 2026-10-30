@@ -21,7 +21,7 @@ import type {
   UserKeyRosterReadResult
 } from '@interop/wallet-core/keys'
 import type { AccountPointer } from '@interop/wallet-core/keyring'
-import { WAS_BASE_URL } from '@/app.config'
+import { WAS_BASE_SERVER_URL } from '@/app.config'
 import type { Session } from '@/types/auth'
 import type { SessionPersistence } from '@/session/persistence'
 import { sessionCollectionStores } from '@/session/collectionLogStore'
@@ -93,7 +93,7 @@ async function convergeRosterToDocument({
 }> {
   const { keyAgent } = session.profile
   const descriptor = read.descriptor
-  if (!pointer || !WAS_BASE_URL || !keyAgent) {
+  if (!pointer || !WAS_BASE_SERVER_URL || !keyAgent) {
     return {
       userKey,
       rosterDescriptor: descriptor,
@@ -111,11 +111,7 @@ async function convergeRosterToDocument({
     staleRecipientIds,
     escrowedRecipientIds
   } = await convergeUserKeyRosterToAccount({
-    pointer: {
-      did: pointer.did,
-      spaceId: pointer.spaceId,
-      host: pointer.host
-    },
+    did: pointer.did,
     store,
     userKey,
     descriptor,
@@ -140,7 +136,7 @@ async function convergeRosterToDocument({
     }) =>
       await adoptRotatedUserKeyInBand({
         session,
-        spaceId: pointer.spaceId,
+        spaceUrl: pointer.spaceUrl,
         accountDid: pointer.did,
         userKey: adopted,
         latestEpochId,

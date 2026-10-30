@@ -5,6 +5,7 @@ import {
   EnrollmentPendingError,
   mintEnrollmentRequest
 } from '@interop/wallet-core/enrollment'
+import { didWebvhLogLocation } from '@interop/wallet-core/webvh'
 import {
   walletOnboardingRequestOf,
   type IVPRQuery
@@ -140,7 +141,8 @@ test.describe('wallet onboarding over rendezvous', () => {
     const exchangeUrl = exchangeUrlOf({ interactionUrl: secondInteractionUrl })
 
     // The scripted enrollee: begin the exchange (an empty JSON body) and read
-    // the account pointer out of the stored `WalletOnboardingQuery`. The
+    // the account DID out of the stored `WalletOnboardingQuery`; the DID
+    // locates the account Space. The
     // stored request arrives wrapped as a VC-API exchange reply
     // (`{ verifiablePresentationRequest }`).
     const beginResponse = await page.request.post(exchangeUrl, { data: {} })
@@ -154,8 +156,7 @@ test.describe('wallet onboarding over rendezvous', () => {
     expect(onboarding).not.toBeNull()
     const pointer = {
       did: onboarding!.did,
-      spaceId: onboarding!.spaceId,
-      host: onboarding!.host
+      spaceUrl: didWebvhLogLocation({ did: onboarding!.did }).spaceUrl
     }
 
     // Only public halves travel: the enrollee mints its whole key set locally

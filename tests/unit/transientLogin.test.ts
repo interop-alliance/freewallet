@@ -16,12 +16,12 @@ import { addSink, captureSink } from '@interop/logger'
 import { WasError } from '@interop/was-client'
 
 const state = vi.hoisted(() => ({
-  wasUrl: 'https://was.example.test' as string | undefined
+  wasUrl: 'https://was.example.test/' as string | undefined
 }))
 
 vi.mock('@/app.config', async importOriginal => ({
   ...(await importOriginal<typeof import('@/app.config')>()),
-  get WAS_BASE_URL() {
+  get WAS_BASE_SERVER_URL() {
     return state.wasUrl
   }
 }))
@@ -172,10 +172,11 @@ const CREDENTIAL = {
   standing: {}
 } as never
 
+const BASE_SERVER_URL = 'https://was.example.test/'
+const SPACE_ID = 'space-123'
 const POINTER = {
   did: 'did:webvh:QmScidForTests:was.example.test:space:space-123:id',
-  spaceId: 'space-123',
-  host: 'https://was.example.test'
+  spaceUrl: `${BASE_SERVER_URL}space/${SPACE_ID}/`
 }
 const CLIENT_ANNEX_DID =
   'did:webvh:QmClientAnnexScid:was.example.test:space:clientAnnex-space-1:gen-Ux3v0kQf9aPmB2hZ'
@@ -307,7 +308,7 @@ function primeHappyPath() {
 }
 
 beforeEach(() => {
-  state.wasUrl = 'https://was.example.test'
+  state.wasUrl = 'https://was.example.test/'
   vi.mocked(hasClientKeyRecord).mockResolvedValue(false)
   // The healthy account: the document lists this credential's inventory.
   vi.mocked(documentListsCredential).mockResolvedValue(true)
@@ -745,7 +746,7 @@ describe('transientSessionFromKeyringHit -- the composition wiring', () => {
     expect(enrollCall.transientKeyMultibase).toMatch(/^z6Mk/)
     enrollCall.storeForGenerationId('gen-Ux3v0kQf9aPmB2hZ')
     expect(delegatedWebvhLogStore).toHaveBeenCalledWith({
-      host: POINTER.host,
+      baseServerUrl: BASE_SERVER_URL,
       spaceId: 'clientAnnex-space-1',
       collectionId: 'gen-Ux3v0kQf9aPmB2hZ',
       delegation: SIBLING_DELEGATION,
@@ -757,8 +758,6 @@ describe('transientSessionFromKeyringHit -- the composition wiring', () => {
     // The account log was verified under the same in-memory pins.
     expect(verifyAccountLog).toHaveBeenCalledWith({
       did: POINTER.did,
-      spaceId: POINTER.spaceId,
-      host: POINTER.host,
       pinStore: persistence.logPins
     })
 
@@ -771,8 +770,8 @@ describe('transientSessionFromKeyringHit -- the composition wiring', () => {
     })
     expect(userKeyRosterDescriptorStore).toHaveBeenCalledWith(
       expect.objectContaining({
-        storageServerUrl: POINTER.host,
-        spaceId: POINTER.spaceId,
+        baseServerUrl: BASE_SERVER_URL,
+        spaceId: SPACE_ID,
         pinStore: persistence.logPins,
         capability: GENERATION_DELEGATION
       })
@@ -859,8 +858,8 @@ describe('transientSessionFromKeyringHit -- the did:web projection mend', () => 
     const { store } = vi.mocked(ensureDidWebProjection).mock.calls[0]![0]
     await store.getIdResourceRaw({ resourceId: 'did.json' })
     expect(delegatedWebvhLogStore).toHaveBeenCalledWith({
-      host: POINTER.host,
-      spaceId: POINTER.spaceId,
+      baseServerUrl: BASE_SERVER_URL,
+      spaceId: SPACE_ID,
       collectionId: ID_COLLECTION.id,
       delegation: GENERATION_DELEGATION,
       zcapClient: expect.objectContaining({ isClientAnnexZcapClient: true }),
@@ -902,8 +901,6 @@ describe('transientSessionFromKeyringHit -- the did:web projection mend', () => 
     expect(vi.mocked(verifyAccountLog).mock.calls).toHaveLength(callsBefore + 1)
     expect(vi.mocked(verifyAccountLog).mock.calls.at(-1)![0]).toEqual({
       did: POINTER.did,
-      spaceId: POINTER.spaceId,
-      host: POINTER.host,
       pinStore: persistence.logPins
     })
     expect(fresh).toEqual({ did: POINTER.did, doc: { id: POINTER.did } })
@@ -1144,7 +1141,7 @@ describe('transientSessionFromKeyringHit -- the client-annex generation-readines
         capture.menders().map(event => event.data)
       )
       expect(serialized).not.toContain(POINTER.did)
-      expect(serialized).not.toContain(POINTER.spaceId)
+      expect(serialized).not.toContain(SPACE_ID)
     } finally {
       capture.stop()
     }
@@ -1153,8 +1150,8 @@ describe('transientSessionFromKeyringHit -- the client-annex generation-readines
   it('runs the ensure on every visit, with the credential members', async () => {
     primeHappyPath()
     const { ensureCall, found } = await runComposition()
-    expect(ensureCall.wasServerUrl).toBe(POINTER.host)
-    expect(ensureCall.spaceId).toBe(POINTER.spaceId)
+    expect(ensureCall.baseServerUrl).toBe(BASE_SERVER_URL)
+    expect(ensureCall.spaceId).toBe(SPACE_ID)
     expect(ensureCall.ladderSeed).toBe(found.standing!.ladderSeed)
     expect(ensureCall.delegatedClients).toBe(SIBLING_DELEGATION)
     expect(ensureCall.standingClient).toEqual({
@@ -1313,7 +1310,7 @@ describe('transientSessionFromKeyringHit -- the client-annex generation-readines
     expect(delegatedWebvhLogStore).toHaveBeenCalledWith(
       expect.objectContaining({
         delegation: FRESH_BRIDGE,
-        spaceId: POINTER.spaceId,
+        spaceId: SPACE_ID,
         collectionId: ID_COLLECTION.id
       })
     )
@@ -1455,7 +1452,7 @@ describe('transientSessionFromKeyringHit -- the shared mend ceremony', () => {
     )
     expect(mendCall.beforePromotion).toBe(registryHook)
     expect(passphraseRegistryUpsertHook).toHaveBeenCalledWith({
-      spaceId: POINTER.spaceId,
+      spaceUrl: POINTER.spaceUrl,
       capability: GENERATION_DELEGATION
     })
     const healStoreCall = vi
@@ -1534,7 +1531,7 @@ describe('transientSessionFromKeyringHit -- the shared mend ceremony', () => {
     const persistence = transientSessionStores()
     const credential = CREDENTIAL
     const torn = makeFound({
-      pointer: { spaceId: POINTER.spaceId, host: POINTER.host } as never
+      pointer: { spaceUrl: POINTER.spaceUrl } as never
     })
     const refreshed = makeFound()
     vi.mocked(fetchTransientKeyring).mockResolvedValue(refreshed as never)
@@ -1574,7 +1571,7 @@ describe('transientSessionFromKeyringHit -- the shared mend ceremony', () => {
     // ceremony error escape the login.
     const boom = new Error('the establishment died mid-run')
     const torn = makeFound({
-      pointer: { spaceId: POINTER.spaceId, host: POINTER.host } as never
+      pointer: { spaceUrl: POINTER.spaceUrl } as never
     })
     vi.mocked(mendCredentialAnchoredAccount).mockResolvedValueOnce({
       reenter: false,
@@ -1603,7 +1600,7 @@ describe('transientSessionFromKeyringHit -- the shared mend ceremony', () => {
     // refusal whose copy says a retry finishes the setup.
     const offline = new WasError('the server could not be reached')
     const torn = makeFound({
-      pointer: { spaceId: POINTER.spaceId, host: POINTER.host } as never
+      pointer: { spaceUrl: POINTER.spaceUrl } as never
     })
     vi.mocked(mendCredentialAnchoredAccount).mockResolvedValueOnce({
       reenter: false,
@@ -1629,7 +1626,7 @@ describe('transientSessionFromKeyringHit -- the shared mend ceremony', () => {
 
   it('states that it holds no roster-epoch pin', async () => {
     const torn = makeFound({
-      pointer: { spaceId: POINTER.spaceId, host: POINTER.host } as never
+      pointer: { spaceUrl: POINTER.spaceUrl } as never
     })
     await transientSessionFromKeyringHit({
       found: torn,
@@ -1647,7 +1644,7 @@ describe('transientSessionFromKeyringHit -- the shared mend ceremony', () => {
     // arms under the visit's post-promotion authority.
     primeHappyPath()
     const torn = makeFound({
-      pointer: { spaceId: POINTER.spaceId, host: POINTER.host } as never
+      pointer: { spaceUrl: POINTER.spaceUrl } as never
     })
     vi.mocked(fetchTransientKeyring).mockResolvedValue(makeFound() as never)
     vi.mocked(mendCredentialAnchoredAccount)
@@ -1714,7 +1711,7 @@ describe('transientSessionFromKeyringHit -- the shared mend ceremony', () => {
 
   it('still refuses an unpromoted account with no credential in hand', async () => {
     const torn = makeFound({
-      pointer: { spaceId: POINTER.spaceId, host: POINTER.host } as never
+      pointer: { spaceUrl: POINTER.spaceUrl } as never
     })
     await expect(
       transientSessionFromKeyringHit({
@@ -1749,7 +1746,6 @@ describe("transientSessionFromKeyringHit -- the caller's account-log head", () =
     expect(vi.mocked(verifyAccountLog).mock.calls).toHaveLength(1)
     expect(vi.mocked(verifyAccountLog).mock.calls[0]![0]).toMatchObject({
       did: POINTER.did,
-      spaceId: POINTER.spaceId,
       published: SEEDED_LOG
     })
   })
@@ -1887,7 +1883,7 @@ describe('transientSessionFromKeyringHit -- the login-time registry chain', () =
     // started on.
     expect(refreshTransientManageCapability).toHaveBeenCalledWith(
       expect.objectContaining({
-        spaceId: POINTER.spaceId,
+        spaceUrl: POINTER.spaceUrl,
         unlockSpaceId: 'unlock-space-1',
         manageCapability: MANAGE_CAPABILITY,
         capability: LIVE_CAPABILITY

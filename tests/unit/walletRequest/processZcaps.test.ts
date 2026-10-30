@@ -33,7 +33,6 @@ const documentLoader = securityLoader({ fetchRemoteContexts: true }).build()
 
 // The Space resolution is handed, structurally, plus the URL that pair forms
 // (what every expected target below is written against).
-const SPACE = { serverUrl: 'https://was.example.com/', spaceId: 'L8qcqABC' }
 const SPACE_URL = 'https://was.example.com/space/L8qcqABC/'
 // A real Ed25519 did:key (the did:key spec's example): a provisioned private
 // collection escrows the grantee's X25519 twin, so the controller must derive.
@@ -290,7 +289,6 @@ beforeAll(async () => {
   const storage = {
     hasRemoteStorage: true,
     spaceUrl: SPACE_URL,
-    spaceLocation: SPACE,
     async listCollectionPublicStates() {
       return collectionListing
     },
@@ -383,7 +381,7 @@ describe('resolveInvocationTarget', () => {
   it('accepts a plain URL under an existing collection, verbatim', () => {
     const target = resolveInvocationTarget({
       descriptor: `${SPACE_URL}example-app-data/doc1`,
-      space: SPACE,
+      spaceUrl: SPACE_URL,
       collections: STANDING_COLLECTIONS,
       requester: {}
     })
@@ -403,7 +401,7 @@ describe('resolveInvocationTarget', () => {
     ]) {
       const target = resolveInvocationTarget({
         descriptor,
-        space: SPACE,
+        spaceUrl: SPACE_URL,
         collections: NO_COLLECTIONS,
         requester: {}
       })
@@ -416,7 +414,7 @@ describe('resolveInvocationTarget', () => {
     for (const descriptor of [SPACE_URL, SPACE_URL.slice(0, -1)]) {
       const target = resolveInvocationTarget({
         descriptor,
-        space: SPACE,
+        spaceUrl: SPACE_URL,
         collections: STANDING_COLLECTIONS,
         requester: {}
       })
@@ -431,7 +429,7 @@ describe('resolveInvocationTarget', () => {
     const target = resolveInvocationTarget({
       descriptor:
         'https://someone-else.example/space/L8qcqABC/example-app-data',
-      space: SPACE,
+      spaceUrl: SPACE_URL,
       collections: STANDING_COLLECTIONS,
       requester: {}
     })
@@ -454,7 +452,7 @@ describe('resolveInvocationTarget', () => {
     ]) {
       const target = resolveInvocationTarget({
         descriptor,
-        space: SPACE,
+        spaceUrl: SPACE_URL,
         collections: STANDING_COLLECTIONS,
         requester: {}
       })
@@ -473,7 +471,7 @@ describe('resolveInvocationTarget', () => {
     ]) {
       const target = resolveInvocationTarget({
         descriptor,
-        space: SPACE,
+        spaceUrl: SPACE_URL,
         collections: STANDING_COLLECTIONS,
         requester: {}
       })
@@ -497,7 +495,7 @@ describe('resolveInvocationTarget', () => {
     for (const segment of segments) {
       const target = resolveInvocationTarget({
         descriptor: `${SPACE_URL}${segment}/doc1`,
-        space: SPACE,
+        spaceUrl: SPACE_URL,
         collections,
         requester: {}
       })
@@ -520,7 +518,7 @@ describe('resolveInvocationTarget', () => {
       ]) {
         const target = resolveInvocationTarget({
           descriptor,
-          space: SPACE,
+          spaceUrl: SPACE_URL,
           collections: NO_COLLECTIONS,
           requester: {}
         })
@@ -543,7 +541,7 @@ describe('resolveInvocationTarget', () => {
           }
         }
       ],
-      space: SPACE,
+      spaceUrl: SPACE_URL,
       collections: NO_COLLECTIONS
     })
     expect(grants).toHaveLength(1)
@@ -560,7 +558,7 @@ describe('resolveInvocationTarget', () => {
     ]) {
       const target = resolveInvocationTarget({
         descriptor: `${origin}${space.pathname}/example-app-data`,
-        space: SPACE,
+        spaceUrl: SPACE_URL,
         // The path names a standing collection, so the origin is the only
         // reason to refuse.
         collections: STANDING_COLLECTIONS,
@@ -579,7 +577,7 @@ describe('resolveInvocationTarget', () => {
           type: 'https://w3id.org/byoe#private-collection',
           name: 'example-app-data'
         },
-        space: { serverUrl: 'https://host.example/was/', spaceId: 'L8qcqABC' },
+        spaceUrl: subPathSpace,
         collections: NO_COLLECTIONS,
         requester: {}
       })
@@ -592,13 +590,13 @@ describe('resolveInvocationTarget', () => {
   it('normalizes a collection URL onto the canonical container form', () => {
     const withSlash = resolveInvocationTarget({
       descriptor: `${SPACE_URL}example-app-data/`,
-      space: SPACE,
+      spaceUrl: SPACE_URL,
       collections: STANDING_COLLECTIONS,
       requester: {}
     })
     const without = resolveInvocationTarget({
       descriptor: `${SPACE_URL}example-app-data`,
-      space: SPACE,
+      spaceUrl: SPACE_URL,
       collections: STANDING_COLLECTIONS,
       requester: {}
     })
@@ -615,7 +613,7 @@ describe('resolveInvocationTarget', () => {
     expect(
       resolveInvocationTarget({
         descriptor: url,
-        space: SPACE,
+        spaceUrl: SPACE_URL,
         collections: STANDING_COLLECTIONS,
         requester: {}
       })
@@ -638,7 +636,7 @@ describe('resolveInvocationTarget', () => {
     ]) {
       const resolved = resolveInvocationTarget({
         descriptor: target,
-        space: SPACE,
+        spaceUrl: SPACE_URL,
         // Every collection named stands, so the depth is the only reason to
         // refuse.
         collections: STANDING_COLLECTIONS,
@@ -655,7 +653,7 @@ describe('resolveInvocationTarget', () => {
         type: 'https://w3id.org/byoe#private-collection',
         name: 'example-app-data'
       },
-      space: SPACE,
+      spaceUrl: SPACE_URL,
       collections: NO_COLLECTIONS,
       requester: {}
     })
@@ -674,7 +672,7 @@ describe('resolveInvocationTarget', () => {
         type: 'https://w3id.org/byoe#private-collection',
         name: 'public-credentials'
       },
-      space: SPACE,
+      spaceUrl: SPACE_URL,
       collections: NO_COLLECTIONS,
       requester: {}
     })
@@ -691,7 +689,7 @@ describe('resolveInvocationTarget', () => {
         type: 'https://w3id.org/byoe#private-collection',
         name: 'private-credentials'
       },
-      space: SPACE,
+      spaceUrl: SPACE_URL,
       collections: NO_COLLECTIONS,
       requester: {}
     })
@@ -709,7 +707,7 @@ describe('resolveInvocationTarget', () => {
           type: 'https://w3id.org/byoe#private-collection',
           name: 'id'
         },
-        space: SPACE,
+        spaceUrl: SPACE_URL,
         collections: NO_COLLECTIONS,
         requester: {}
       })
@@ -739,7 +737,7 @@ describe('resolveInvocationTarget', () => {
     for (const descriptor of descriptors) {
       const target = resolveInvocationTarget({
         descriptor,
-        space: SPACE,
+        spaceUrl: SPACE_URL,
         collections: STANDING_COLLECTIONS,
         requester: {}
       })
@@ -754,7 +752,7 @@ describe('resolveInvocationTarget', () => {
           type: 'https://w3id.org/byoe#private-collection',
           name: 'Bad_Name!'
         },
-        space: SPACE,
+        spaceUrl: SPACE_URL,
         collections: NO_COLLECTIONS,
         requester: {}
       }).targetClass
@@ -764,7 +762,7 @@ describe('resolveInvocationTarget', () => {
   it('refuses the reserved whole-Space descriptor type', () => {
     const target = resolveInvocationTarget({
       descriptor: { type: 'https://w3id.org/byoe#space' },
-      space: SPACE,
+      spaceUrl: SPACE_URL,
       collections: STANDING_COLLECTIONS,
       requester: {}
     })
@@ -775,7 +773,7 @@ describe('resolveInvocationTarget', () => {
   it('refuses an unknown descriptor type', () => {
     const target = resolveInvocationTarget({
       descriptor: { type: 'https://w3id.org/byoe#unknown' },
-      space: SPACE,
+      spaceUrl: SPACE_URL,
       collections: NO_COLLECTIONS,
       requester: {}
     })
@@ -789,7 +787,7 @@ describe('resolveInvocationTarget', () => {
         type: 'https://w3id.org/byoe#public-collection',
         name: 'example-app-public'
       },
-      space: SPACE,
+      spaceUrl: SPACE_URL,
       collections: NO_COLLECTIONS,
       requester: {}
     })
@@ -813,7 +811,7 @@ describe('resolveInvocationTarget', () => {
       expect(
         resolveInvocationTarget({
           descriptor,
-          space: SPACE,
+          spaceUrl: SPACE_URL,
           collections: NO_COLLECTIONS,
           requester: {}
         }).targetClass
@@ -823,7 +821,7 @@ describe('resolveInvocationTarget', () => {
     expect(
       resolveInvocationTarget({
         descriptor: `${SPACE_URL}example-app-data`,
-        space: SPACE,
+        spaceUrl: SPACE_URL,
         collections: STANDING_COLLECTIONS,
         requester: {}
       }).targetClass
@@ -842,7 +840,7 @@ describe('resolveInvocationTarget', () => {
       expect(
         resolveInvocationTarget({
           descriptor: { type: 'https://w3id.org/byoe#public-collection', name },
-          space: SPACE,
+          spaceUrl: SPACE_URL,
           collections: NO_COLLECTIONS,
           requester: {}
         }).targetClass
@@ -856,7 +854,7 @@ describe('resolveInvocationTarget', () => {
         type: 'https://w3id.org/byoe#shared-wallet-collection',
         name: 'private-credentials'
       },
-      space: SPACE,
+      spaceUrl: SPACE_URL,
       collections: NO_COLLECTIONS,
       requester: {}
     })
@@ -879,7 +877,7 @@ describe('resolveInvocationTarget', () => {
             type: 'https://w3id.org/byoe#shared-wallet-collection',
             name
           },
-          space: SPACE,
+          spaceUrl: SPACE_URL,
           collections: NO_COLLECTIONS,
           requester: {}
         })
@@ -910,7 +908,7 @@ describe('resolveInvocationTarget', () => {
             type: 'https://w3id.org/byoe#shared-wallet-collection',
             name
           },
-          space: SPACE,
+          spaceUrl: SPACE_URL,
           collections: NO_COLLECTIONS,
           requester: {}
         }).targetClass
@@ -941,7 +939,7 @@ describe('resolveInvocationTarget', () => {
     ]) {
       const target = resolveInvocationTarget({
         descriptor,
-        space: SPACE,
+        spaceUrl: SPACE_URL,
         // Listed, so a string target is refused for what it names.
         collections: existingCollectionsFrom([{ id: APP_KEYS_COLLECTION }]),
         requester: {}
@@ -965,7 +963,7 @@ describe('resolveInvocationTarget', () => {
       expect(
         resolveInvocationTarget({
           descriptor,
-          space: SPACE,
+          spaceUrl: SPACE_URL,
           collections: NO_COLLECTIONS,
           requester: {}
         }).targetClass
@@ -975,7 +973,7 @@ describe('resolveInvocationTarget', () => {
     expect(
       resolveInvocationTarget({
         descriptor: `${SPACE_URL}private-credentials`,
-        space: SPACE,
+        spaceUrl: SPACE_URL,
         collections: STANDING_COLLECTIONS,
         requester: {}
       }).targetClass
@@ -989,7 +987,7 @@ describe('resolveInvocationTarget', () => {
           type: 'https://w3id.org/byoe#public-collection',
           name: 'Bad_Name!'
         },
-        space: SPACE,
+        spaceUrl: SPACE_URL,
         collections: NO_COLLECTIONS,
         requester: {}
       }).targetClass
@@ -997,7 +995,7 @@ describe('resolveInvocationTarget', () => {
     expect(
       resolveInvocationTarget({
         descriptor: { type: 'https://w3id.org/byoe#public-collection' },
-        space: SPACE,
+        spaceUrl: SPACE_URL,
         collections: NO_COLLECTIONS,
         requester: {}
       }).targetClass
@@ -1023,7 +1021,7 @@ describe('existing-collection state (create-only public collections)', () => {
         type: 'https://w3id.org/byoe#public-collection',
         name: 'example-app-data'
       },
-      space: SPACE,
+      spaceUrl: SPACE_URL,
       collections: EXISTING,
       requester: {}
     })
@@ -1037,7 +1035,7 @@ describe('existing-collection state (create-only public collections)', () => {
         type: 'https://w3id.org/byoe#public-collection',
         name: 'example-app-public'
       },
-      space: SPACE,
+      spaceUrl: SPACE_URL,
       collections: EXISTING,
       requester: {}
     })
@@ -1064,7 +1062,7 @@ describe('existing-collection state (create-only public collections)', () => {
           allowedAction: ['GET', 'HEAD', 'POST', 'PUT', 'DELETE'],
           invocationTarget
         },
-        space: SPACE,
+        spaceUrl: SPACE_URL,
         collections: EXISTING
       })
       expect(grant.target.targetClass).toBe('public-collection')
@@ -1091,7 +1089,7 @@ describe('existing-collection state (create-only public collections)', () => {
           name: 'example-app-public'
         }
       },
-      space: SPACE,
+      spaceUrl: SPACE_URL,
       collections: EXISTING
     })
     expect(grant.target.targetClass).toBe('public-collection')
@@ -1119,7 +1117,7 @@ describe('existing-collection state (create-only public collections)', () => {
         allowedAction: ['GET', 'HEAD', 'POST', 'PUT', 'DELETE'],
         invocationTarget: `${SPACE_URL}example-app-data`
       },
-      space: SPACE,
+      spaceUrl: SPACE_URL,
       collections: EXISTING
     })
     expect(grant.target.targetClass).toBe('collection')
@@ -1143,7 +1141,7 @@ describe('resolveGrant action handling', () => {
           name: 'app-data'
         }
       },
-      space: SPACE,
+      spaceUrl: SPACE_URL,
       collections: NO_COLLECTIONS
     })
     expect(grant.allowedActions).toEqual(['GET', 'HEAD'])
@@ -1152,7 +1150,7 @@ describe('resolveGrant action handling', () => {
   it('refuses a whole-Space grant, whatever it asks for', () => {
     const grant = resolveGrant({
       descriptor: spaceDetail,
-      space: SPACE,
+      spaceUrl: SPACE_URL,
       collections: STANDING_COLLECTIONS
     })
     expect(grant.target.targetClass).toBeUndefined()
@@ -1162,7 +1160,7 @@ describe('resolveGrant action handling', () => {
   it('passes through explicit RP-collection actions and flags write', () => {
     const grant = resolveGrant({
       descriptor: collectionDetail,
-      space: SPACE,
+      spaceUrl: SPACE_URL,
       collections: NO_COLLECTIONS
     })
     // Emitted in ceiling order, not in the order the request asked in.
@@ -1179,7 +1177,7 @@ describe('resolveGrant action handling', () => {
   it('caps a standard-collection write to read-only (descriptor form)', () => {
     const grant = resolveGrant({
       descriptor: standardCollectionDetail,
-      space: SPACE,
+      spaceUrl: SPACE_URL,
       collections: NO_COLLECTIONS
     })
     expect(grant.allowedActions).toEqual(['GET', 'HEAD'])
@@ -1189,7 +1187,7 @@ describe('resolveGrant action handling', () => {
   it('caps a standard-collection write to read-only (string URL form)', () => {
     const grant = resolveGrant({
       descriptor: standardCollectionUrlDetail,
-      space: SPACE,
+      spaceUrl: SPACE_URL,
       collections: STANDING_COLLECTIONS
     })
     expect(grant.target.collectionId).toBe('private-credentials')
@@ -1200,7 +1198,7 @@ describe('resolveGrant action handling', () => {
   it('caps a write to a resource inside a standard collection (string URL)', () => {
     const grant = resolveGrant({
       descriptor: standardResourceUrlDetail,
-      space: SPACE,
+      spaceUrl: SPACE_URL,
       collections: STANDING_COLLECTIONS
     })
     expect(grant.target.collectionId).toBe('private-credentials')
@@ -1211,7 +1209,7 @@ describe('resolveGrant action handling', () => {
   it('caps an id-collection write to read-only (descriptor form)', () => {
     const grant = resolveGrant({
       descriptor: idCollectionDetail,
-      space: SPACE,
+      spaceUrl: SPACE_URL,
       collections: NO_COLLECTIONS
     })
     expect(grant.target.collectionId).toBe('id')
@@ -1229,7 +1227,7 @@ describe('resolveGrant action handling', () => {
     ]) {
       const grant = resolveGrant({
         descriptor,
-        space: SPACE,
+        spaceUrl: SPACE_URL,
         collections: STANDING_COLLECTIONS
       })
       expect(grant.target.targetClass, descriptor.referenceId).toBeUndefined()
@@ -1244,7 +1242,7 @@ describe('resolveGrant action handling', () => {
     // an empty `allowedAction` array means "every action" in the zcap model.
     const grant = resolveGrant({
       descriptor: didDocumentUrlDetail,
-      space: SPACE,
+      spaceUrl: SPACE_URL,
       collections: STANDING_COLLECTIONS
     })
     expect(grant.target.targetClass).toBeUndefined()
@@ -1255,7 +1253,7 @@ describe('resolveGrant action handling', () => {
   it('marks a read-only grant as not a write', () => {
     const grant = resolveGrant({
       descriptor: standardReadDetail,
-      space: SPACE,
+      spaceUrl: SPACE_URL,
       collections: NO_COLLECTIONS
     })
     expect(grant.write).toBe(false)
@@ -1267,7 +1265,7 @@ describe('resolveGrant action handling', () => {
     // on a private RP collection (the App Connect registry ceiling).
     const grant = resolveGrant({
       descriptor: publicCollectionDetail,
-      space: SPACE,
+      spaceUrl: SPACE_URL,
       collections: NO_COLLECTIONS
     })
     expect(grant.target.targetClass).toBe('public-collection')
@@ -1306,7 +1304,7 @@ describe('resolveGrant action vocabulary', () => {
   it('accepts a single (non-array) action string', () => {
     const grant = resolveGrant({
       descriptor: rpQuery('PUT'),
-      space: SPACE,
+      spaceUrl: SPACE_URL,
       collections: NO_COLLECTIONS
     })
     expect(grant.allowedActions).toEqual(['PUT'])
@@ -1327,7 +1325,7 @@ describe('resolveGrant action vocabulary', () => {
         { action: 'DELETE' },
         ['POST'] as unknown as string
       ]),
-      space: SPACE,
+      spaceUrl: SPACE_URL,
       collections: NO_COLLECTIONS
     })
     expect(grant.allowedActions).toEqual(['GET', 'PUT'])
@@ -1339,7 +1337,7 @@ describe('resolveGrant action vocabulary', () => {
     // a request that asks only for tokens outside the vocabulary is refused.
     const grant = resolveGrant({
       descriptor: rpQuery(['FROBNICATE', 'PATCH']),
-      space: SPACE,
+      spaceUrl: SPACE_URL,
       collections: NO_COLLECTIONS
     })
     expect(grant.target.targetClass).toBeUndefined()
@@ -1358,7 +1356,7 @@ describe('resolveGrant action vocabulary', () => {
           name: 'public-credentials'
         }
       },
-      space: SPACE,
+      spaceUrl: SPACE_URL,
       collections: NO_COLLECTIONS
     })
     expect(grant.target.targetClass).toBeUndefined()
@@ -1368,7 +1366,7 @@ describe('resolveGrant action vocabulary', () => {
   it('makes an empty action array unsatisfiable rather than grant-all', () => {
     const grant = resolveGrant({
       descriptor: rpQuery([]),
-      space: SPACE,
+      spaceUrl: SPACE_URL,
       collections: NO_COLLECTIONS
     })
     expect(grant.target.targetClass).toBeUndefined()
@@ -1387,7 +1385,7 @@ describe('resolveGrant action vocabulary', () => {
         rpQuery(['PATCH']),
         rpQuery([])
       ],
-      space: SPACE,
+      spaceUrl: SPACE_URL,
       collections: NO_COLLECTIONS
     })
     for (const grant of grants) {
@@ -1404,7 +1402,7 @@ describe('whole-Space targets', () => {
   it('refuses the reserved #space descriptor type', () => {
     const grant = resolveGrant({
       descriptor: spaceDetail,
-      space: SPACE,
+      spaceUrl: SPACE_URL,
       collections: STANDING_COLLECTIONS
     })
     expect(isSatisfiable(grant.target)).toBe(false)
@@ -1418,7 +1416,7 @@ describe('whole-Space targets', () => {
         allowedAction: ['GET'],
         invocationTarget: SPACE_URL
       },
-      space: SPACE,
+      spaceUrl: SPACE_URL,
       collections: STANDING_COLLECTIONS
     })
     expect(isSatisfiable(grant.target)).toBe(false)
@@ -1428,7 +1426,7 @@ describe('whole-Space targets', () => {
   it('keeps the generic refusal for a foreign target', () => {
     const grant = resolveGrant({
       descriptor: foreignDetail,
-      space: SPACE,
+      spaceUrl: SPACE_URL,
       collections: STANDING_COLLECTIONS
     })
     expect(grant.target.targetClass).toBeUndefined()
@@ -1754,7 +1752,7 @@ describe('processZcaps', () => {
     expect(
       resolveGrant({
         descriptor,
-        space: SPACE,
+        spaceUrl: SPACE_URL,
         collections: NO_COLLECTIONS
       }).target.targetClass
     ).toBeUndefined()
@@ -1774,7 +1772,7 @@ describe('processZcaps', () => {
           ...collectionDetail,
           controller: 'did:web:agent.example'
         },
-        space: SPACE,
+        spaceUrl: SPACE_URL,
         collections: NO_COLLECTIONS
       }).target.targetClass
     ).toBeUndefined()
@@ -1787,7 +1785,7 @@ describe('processZcaps', () => {
           ...publicCollectionDetail,
           controller: 'did:web:agent.example'
         },
-        space: SPACE,
+        spaceUrl: SPACE_URL,
         collections: NO_COLLECTIONS
       }).target.targetClass
     ).toBe('public-collection')
@@ -2186,7 +2184,7 @@ describe('processZcaps', () => {
     expect(
       resolveGrant({
         descriptor,
-        space: SPACE,
+        spaceUrl: SPACE_URL,
         collections: NO_COLLECTIONS
       }).target.targetClass
     ).toBeUndefined()
@@ -2203,7 +2201,7 @@ describe('processZcaps', () => {
     expect(
       resolveGrant({
         descriptor,
-        space: SPACE,
+        spaceUrl: SPACE_URL,
         collections: NO_COLLECTIONS
       }).target.targetClass
     ).toBeUndefined()
@@ -2219,7 +2217,7 @@ describe('processZcaps', () => {
         ...shareDetail,
         allowedAction: ['GET', 'HEAD', 'PUT', 'DELETE']
       },
-      space: SPACE,
+      spaceUrl: SPACE_URL,
       collections: NO_COLLECTIONS
     })
     expect(grant.allowedActions).toEqual(['GET', 'HEAD'])
@@ -2464,7 +2462,7 @@ describe('connection requests', () => {
         allowedAction: ['GET', 'HEAD', 'POST', 'PUT', 'DELETE'],
         invocationTarget: { type: INBOX_TYPE }
       },
-      space: SPACE,
+      spaceUrl: SPACE_URL,
       collections: existingCollectionsFrom([{ id: 'inbox' }]),
       requestKind: 'connection-request'
     })
@@ -2483,7 +2481,7 @@ describe('connection requests', () => {
     ] as const) {
       const target = resolveInvocationTarget({
         descriptor: { type: INBOX_TYPE },
-        space: SPACE,
+        spaceUrl: SPACE_URL,
         collections: NO_COLLECTIONS,
         requester: { controller: RP_DID },
         requestKind
@@ -2495,7 +2493,7 @@ describe('connection requests', () => {
   it('refuses a named inbox descriptor and a plain URL naming the inbox', () => {
     const named = resolveInvocationTarget({
       descriptor: { type: INBOX_TYPE, name: 'inbox' },
-      space: SPACE,
+      spaceUrl: SPACE_URL,
       collections: existingCollectionsFrom([{ id: 'inbox' }]),
       requester: { controller: RP_DID },
       requestKind: 'connection-request'
@@ -2503,7 +2501,7 @@ describe('connection requests', () => {
     expect(isSatisfiable(named)).toBe(false)
     const byUrl = resolveInvocationTarget({
       descriptor: `${SPACE_URL}inbox/`,
-      space: SPACE,
+      spaceUrl: SPACE_URL,
       collections: existingCollectionsFrom([{ id: 'inbox' }]),
       requester: { controller: RP_DID },
       requestKind: 'connection-request'

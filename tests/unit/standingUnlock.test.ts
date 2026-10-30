@@ -157,13 +157,11 @@ vi.mock('@/session/unlockMethods', async importOriginal => ({
 }))
 
 const POINTER = {
-  did: 'did:webvh:QmScid:was.example.test:space:space-123:id',
-  spaceId: 'space-123',
-  host: 'https://was.example.test'
+  did: 'did:webvh:QmScid:localhost:space:space-123:id',
+  spaceUrl: 'http://localhost/space/space-123/'
 }
 
-const ANNEX_DID =
-  'did:webvh:QmAnnexScid:was.example.test:space:space-annex:gen-1'
+const ANNEX_DID = 'did:webvh:QmAnnexScid:localhost:space:space-annex:gen-1'
 
 const CREDENTIAL = {
   unlock: {},
@@ -275,7 +273,7 @@ describe('establishClientAnnexGeneration', () => {
     expect(ensurePointedClientAnnexGeneration).toHaveBeenCalledWith(
       expect.objectContaining({
         account: expect.objectContaining({ did: POINTER.did }),
-        wasServerUrl: POINTER.host,
+        baseServerUrl: 'http://localhost/',
         mintController: 'did:key:zClient',
         signer: {
           kind: 'enrolled',

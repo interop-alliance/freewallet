@@ -271,12 +271,7 @@ async function decidePendingResume({
   // state, and in both cases nothing is decided, deleted, or wiped.
   let verified: Awaited<ReturnType<typeof verifyAccountLog>>
   try {
-    verified = await verifyAccountLog({
-      did: pointerDid,
-      spaceId: pointer.spaceId,
-      host: pointer.host,
-      pinStore
-    })
+    verified = await verifyAccountLog({ did: pointerDid, pinStore })
   } catch (err) {
     if (
       isStorageUnreachable(err) ||

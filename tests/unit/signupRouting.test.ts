@@ -13,12 +13,12 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
 const state = vi.hoisted(() => ({
-  wasUrl: 'https://was.example.test' as string | undefined
+  wasUrl: 'https://was.example.test/' as string | undefined
 }))
 
 vi.mock('@/app.config', async importOriginal => ({
   ...(await importOriginal<typeof import('@/app.config')>()),
-  get WAS_BASE_URL() {
+  get WAS_BASE_SERVER_URL() {
     return state.wasUrl
   }
 }))
@@ -96,7 +96,7 @@ import { signUpWithPassphrase } from '@/session/signup'
 
 afterEach(() => {
   vi.clearAllMocks()
-  state.wasUrl = 'https://was.example.test'
+  state.wasUrl = 'https://was.example.test/'
 })
 
 describe('signUpWithPassphrase -- login routing', () => {
@@ -121,7 +121,11 @@ describe('signUpWithPassphrase -- login routing', () => {
     const establishCall = vi.mocked(establishCredentialAnchoredAccount).mock
       .calls[0]![0]
     expect(establishCall.lowEntropy).toBe(true)
-    expect(establishCall.pointer.host).toBe('https://was.example.test')
+    // A fresh DID-less pointer: the minted Space on the configured server.
+    expect(establishCall.pointer.did).toBeUndefined()
+    expect(establishCall.pointer.spaceUrl).toMatch(
+      /^https:\/\/was\.example\.test\/space\/[^/]+\/$/
+    )
     expect(establishCall.ladderSeed).toHaveLength(32)
     // The establishment's own verified head rides into the composition, so
     // the entry half's first contact reads it instead of fetching the log

@@ -12,7 +12,7 @@ import type { Session } from '@/types/auth'
 
 vi.mock('@/app.config', async importOriginal => ({
   ...(await importOriginal<typeof import('@/app.config')>()),
-  WAS_BASE_URL: 'https://was.example.test'
+  WAS_BASE_SERVER_URL: 'https://was.example.test/'
 }))
 
 const logState = vi.hoisted(() => ({
@@ -85,8 +85,7 @@ import { browserLocalSessionPersistence } from '@/session/persistence'
 
 const POINTER = {
   did: 'did:webvh:QmScid:was.example.test:space:space-123:id',
-  spaceId: 'space-123',
-  host: 'https://was.example.test'
+  spaceUrl: 'https://was.example.test/space/space-123/'
 }
 
 /**

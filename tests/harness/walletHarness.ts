@@ -180,6 +180,7 @@ import {
   type RequestFaults,
   type RequestRecord
 } from 'was-teaching-server/testing'
+import { canonicalBaseServerUrl, spaceIdOfUrl } from '@interop/was-client/paths'
 import type { Session } from '@/types/auth'
 import type { PasskeyRegistration } from '@/lib/passkey'
 import { createFakeSessionIdb } from '../unit/fakeSessionIdb'
@@ -405,7 +406,7 @@ async function loadWalletModules() {
   const teardown = await import('@/stores/sessionTeardown')
   const recovery = await import('@/session/recovery')
   return {
-    WAS_SPACES_URL: config.WAS_SPACES_URL,
+    WAS_BASE_SERVER_URL: config.WAS_BASE_SERVER_URL,
     PASSKEY_KDF: config.PASSKEY_KDF,
     signUpWithPassphrase: signup.signUpWithPassphrase,
     loginWithPassphrase: initSession.loginWithPassphrase,
@@ -437,16 +438,16 @@ export async function startWalletHarness({
   const backend = await openTempBackend({ prefix: 'was-harness-' })
   const dataDir = backend.dataDir
   const { fastify, serverUrl, faults } = await startTestServer({ backend })
-  const spacesUrl = `${serverUrl}/spaces/`
-  vi.stubEnv('VITE_WAS_SERVER_URL', spacesUrl)
+  const baseServerUrl = canonicalBaseServerUrl(serverUrl)
+  vi.stubEnv('VITE_WAS_SERVER_URL', serverUrl)
   const attribution = installTabAttribution({ console: keepConsole })
   let wallet: WalletModules
   try {
     wallet = await loadWalletModules()
-    if (wallet.WAS_SPACES_URL !== spacesUrl) {
+    if (wallet.WAS_BASE_SERVER_URL !== baseServerUrl) {
       throw new Error(
         `@/app.config was evaluated before the harness booted: it names ` +
-          `"${wallet.WAS_SPACES_URL}", not "${spacesUrl}". Start the harness ` +
+          `"${wallet.WAS_BASE_SERVER_URL}", not "${baseServerUrl}". Start the harness ` +
           'before importing any module under src/.'
       )
     }
@@ -694,10 +695,11 @@ async function enterTab({
       work: async () => {
         const session = await enter()
         entry.session = session
-        const spaceId = session.profile.accountPointer?.spaceId
-        if (!spaceId) {
+        const spaceUrl = session.profile.accountPointer?.spaceUrl
+        if (!spaceUrl) {
           throw new Error('The session carries no account pointer.')
         }
+        const spaceId = spaceIdOfUrl(spaceUrl)
         await session.storageReady
         return {
           session,

@@ -51,7 +51,7 @@ async function setup() {
   const store = new WASRemoteStore({
     serviceDescription: TEST_SERVICE_DESCRIPTION,
     pinStore: memoryResourceLogPinStore(),
-    storageServerUrl: MEMORY_SERVER_URL,
+    baseServerUrl: MEMORY_SERVER_URL,
     zcapClient: {} as ZcapClient,
     spaceId: 's-space',
     controller: 'did:key:test'

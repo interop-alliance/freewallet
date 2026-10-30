@@ -8,7 +8,7 @@
  */
 import { deleteUnlockSpace } from '@interop/wallet-core/keyring'
 import type { UnlockIdentity } from '@interop/wallet-core/keyring'
-import { WAS_BASE_URL } from '@/app.config'
+import { WAS_BASE_SERVER_URL } from '@/app.config'
 import { deleteUnlockLocalState } from '@/lib/sessionKey'
 import { createLogger } from '@/lib/log'
 import { wasServiceDescription } from '@/lib/wasService'
@@ -37,11 +37,11 @@ export async function retireUnlockIdentity({
   idb?: IDBFactory
 }): Promise<boolean> {
   let unlockSpaceDeleted = true
-  if (WAS_BASE_URL) {
+  if (WAS_BASE_SERVER_URL) {
     try {
       await deleteUnlockSpace({
         serviceDescription: await wasServiceDescription(),
-        storageServerUrl: WAS_BASE_URL,
+        baseServerUrl: WAS_BASE_SERVER_URL,
         zcapClient: unlock.zcapClient,
         spaceId: unlock.spaceId
       })

@@ -30,7 +30,7 @@ const wasState = vi.hoisted(() => ({
 
 vi.mock('@/app.config', async importOriginal => ({
   ...(await importOriginal<typeof import('@/app.config')>()),
-  get WAS_BASE_URL() {
+  get WAS_BASE_SERVER_URL() {
     return wasState.url
   }
 }))
@@ -38,13 +38,13 @@ vi.mock('@/app.config', async importOriginal => ({
 vi.mock('@/stores/wasRemoteStore', () => ({
   putUnlockMethodsRecord: vi.fn(
     async ({
-      spaceId,
+      spaceUrl,
       record,
       ifMatch,
       ifNoneMatch,
       capability
     }: {
-      spaceId: string
+      spaceUrl: string
       record: unknown
       ifMatch?: string
       ifNoneMatch?: boolean
@@ -57,32 +57,32 @@ vi.mock('@/stores/wasRemoteStore', () => ({
         await hook()
       }
       const { PreconditionFailedError } = await import('@interop/was-client')
-      const exists = wasState.records.has(spaceId)
-      const version = wasState.versions.get(spaceId) ?? 0
+      const exists = wasState.records.has(spaceUrl)
+      const version = wasState.versions.get(spaceUrl) ?? 0
       if (ifNoneMatch && exists) {
         throw new PreconditionFailedError('A registry record already exists.')
       }
       if (ifMatch !== undefined && (!exists || ifMatch !== `v${version}`)) {
         throw new PreconditionFailedError('The registry record changed.')
       }
-      wasState.records.set(spaceId, record)
-      wasState.versions.set(spaceId, version + 1)
+      wasState.records.set(spaceUrl, record)
+      wasState.versions.set(spaceUrl, version + 1)
       return { etag: `v${version + 1}` }
     }
   ),
   getUnlockMethodsRecord: vi.fn(
     async ({
-      spaceId,
+      spaceUrl,
       capability
     }: {
-      spaceId: string
+      spaceUrl: string
       capability?: IZcap
     }) => {
       wasState.capabilities.read!.push(capability)
-      return wasState.records.has(spaceId)
+      return wasState.records.has(spaceUrl)
         ? {
-            record: wasState.records.get(spaceId),
-            etag: `v${wasState.versions.get(spaceId) ?? 0}`
+            record: wasState.records.get(spaceUrl),
+            etag: `v${wasState.versions.get(spaceUrl) ?? 0}`
           }
         : null
     }
@@ -106,7 +106,10 @@ async function transientSession(): Promise<Session> {
   const { keyAgreementKey, keyResolver } = userKeyVaultKeys({ userKey })
   return {
     user: { id: 'did:key:z6MkVisitKey' },
-    storage: { spaceId: 'space-123' },
+    storage: {
+      spaceId: 'space-123',
+      spaceUrl: 'https://was.example.test/space/space-123/'
+    },
     profile: {
       zcapClient: { isAnnexVmZcapClient: true },
       userKey,
@@ -155,7 +158,7 @@ describe('the registry write under a generation delegation', () => {
     })
     wasState.capabilities = { read: [], put: [] }
     wasState.beforePut = () => {
-      wasState.versions.set('space-123', 99)
+      wasState.versions.set('https://was.example.test/space/space-123/', 99)
     }
     const seen: Array<UnlockMethodsRecord | null> = []
     await updateUnlockMethods({

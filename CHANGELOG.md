@@ -55,6 +55,41 @@
 
 ### Changed
 
+- Breaking: `VITE_WAS_SERVER_URL` holds the WAS server's base server URL
+  (`https://host/`, the URL under which it serves `service`, `spaces/` and
+  `space/{id}/`), not its Spaces Repository URL. `WAS_BASE_SERVER_URL` in
+  `app.config.ts` carries it in was-client's canonical form (one trailing
+  slash); `WAS_SPACES_URL`, `WAS_BASE_URL`, and `withOneTrailingSlash` are
+  gone. The service description is read at `{base}service`, with no `HEAD`
+  probe, and refused when it names a `url` other than `{base}service` or a
+  Spaces Repository other than `{base}spaces/`. Every `WasClient` is built
+  by `wasClientAt({ baseServerUrl })`. Takes `@interop/was-client` 0.103.0
+  (decision 0003) and `@interop/wallet-core` 0.111.0.
+- The annex generation swap and the GC pass pass wallet-core's
+  `replicaServerDids`, read off the `connections` directory through
+  `restatedReplicaServerDids` (`src/session/replicaRestate.ts`). A
+  directory the session cannot list or verify refuses the swap before its
+  mint. The swap's dropped and missing replica pointers are logged.
+  `currentAccountSignerCheck` moved to `src/session/accountSignerCheck.ts`.
+- Breaking: the account pointer is wallet-core's `{ did?, spaceUrl }`.
+  Nothing stores a host or a base beside the DID: a call that needs the base
+  server URL and Space id reads them off the Space URL (`spaceLocation` in
+  `src/lib/spaceLocation.ts`) or the DID (`didWebvhLogLocation`). The account
+  Space is opened with `was.spaceAt(spaceUrl)`, an unlock Space with
+  `was.space(derivedId)` on the configured server (one idempotent `PUT`), and
+  every URL is built by was-client's `*Url` builders. `WASRemoteStore` names
+  its server `baseServerUrl` and its Space `spaceUrl`. The did:web projection
+  id is derived from the did:webvh (`didWebOfAccount`), so it carries a
+  sub-path mount's prefix segments. The onboarding invite follows
+  wallet-request 0.6.0's `WalletOnboardingQuery` (`did`, optional
+  `baseServerUrl`). The pws-link rename (`isPwsLinkPayload`) is adopted.
+  Greenfield: existing dev WAS data and test profiles are re-created.
+- `VITE_WAS_SERVER_URL` in `playwright.was.config.ts`, `fly.toml`, and the
+  deployment docs is the base server URL.
+- Grant resolution (`resolveGrants` and its siblings) and the unlock-methods
+  registry helpers take the account's `spaceUrl`; `SpaceLocation` and
+  `StorageManager.spaceLocation` are gone.
+
 - The verification checklist's expiration row follows what
   `proof.validity-period` judged: it is shown when the check's payload names
   an end date, and the credential's own version-specific dates are no longer
@@ -176,6 +211,14 @@
 
 ### Fixed
 
+- The storage browser reads a server listing's path-absolute item URLs on a
+  sub-path mount: a reference the Space URL does not resolve is read as a
+  path under the base server URL.
+- The account deletion walk admits a sibling delegation whose target sits
+  anywhere beneath the annex Space this server places its id at, rather
+  than only an exact Space URL.
+- The verified-log memo keys on the canonical Space URL, so a pointer
+  written without the trailing slash shares the memo.
 - The CHAPI and interaction-URL pages carry bottom padding to match the
   top, so an expanded request source block no longer ends flush with the
   bottom of the page, where it read as cut off.

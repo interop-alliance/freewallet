@@ -34,8 +34,7 @@ import { accountRosterStore } from '@/session/rosterStore'
 
 const POINTER = {
   did: 'did:webvh:QmScidForTests:was.example.test:space:space-123:id',
-  spaceId: 'space-123',
-  host: 'https://was.example.test'
+  spaceUrl: 'http://localhost/space/space-123/'
 }
 const PARTS = {
   zcapClient: { isZcapClient: true },
@@ -94,10 +93,13 @@ describe('accountRosterStore -- the controller view', () => {
     expect(vi.mocked(verifyAccountLog).mock.calls).toHaveLength(1)
     expect(vi.mocked(verifyAccountLog).mock.calls[0]![0]).toEqual({
       did: POINTER.did,
-      spaceId: POINTER.spaceId,
-      host: POINTER.host,
       pinStore
     })
+    // The roster store addresses the Space the pointer's URL names.
+    const storeOptions = vi.mocked(userKeyRosterDescriptorStore).mock
+      .calls[0]![0]
+    expect(storeOptions.baseServerUrl).toBe('http://localhost/')
+    expect(storeOptions.spaceId).toBe('space-123')
     expect(webvhResourceLogController).toHaveBeenCalledWith({
       did: POINTER.did,
       log: [{ entry: 'served' }]

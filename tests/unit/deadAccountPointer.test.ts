@@ -33,9 +33,7 @@ import {
 
 const UNLOCK = { spaceId: 'unlock-space-1' } as never
 const POINTER = {
-  did: 'did:webvh:QmScidForTests:was.example.test:space:space-123:id',
-  spaceId: 'space-123',
-  host: 'https://was.example.test'
+  did: 'did:webvh:QmScidForTests:was.example.test:space:space-123:id'
 }
 
 let capture: ReturnType<typeof captureCeremonyEvents>

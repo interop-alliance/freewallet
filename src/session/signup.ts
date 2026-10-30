@@ -17,8 +17,9 @@ import { KEYRING_KDF, type AccountPointer } from '@interop/wallet-core/keyring'
 import { mintAccountKeySet as mintSharedAccountKeySet } from '@interop/wallet-core/genesis'
 import { assertHostClaimsClientAnnexProfile } from '@interop/wallet-core/clientAnnex'
 import { generateLadderSeed } from '@interop/wallet-core/unlock'
+import { spaceUrlById } from '@interop/was-client/paths'
 import type { PublishedWebvhLog } from '@interop/wallet-core/webvh'
-import { DATE_FMT, PASSKEY_KDF, WAS_BASE_URL } from '@/app.config'
+import { DATE_FMT, PASSKEY_KDF, WAS_BASE_SERVER_URL } from '@/app.config'
 import { recordOwnWalletClientEntry } from '@/session/clients'
 import {
   initSessionFromSeed,
@@ -67,6 +68,31 @@ import { createLogger, stageMarker } from '@/lib/log'
 const log = createLogger('fw:session:signup')
 
 /**
+ * The account pointer of a Space on the configured server.
+ *
+ * @param options {object}
+ * @param options.spaceId {string}
+ * @returns {AccountPointer}
+ */
+function accountPointerFor({ spaceId }: { spaceId: string }): AccountPointer {
+  return {
+    spaceUrl: spaceUrlById({
+      baseServerUrl: WAS_BASE_SERVER_URL as string,
+      spaceId
+    })
+  }
+}
+
+/**
+ * The account pointer of a freshly minted Space id on the configured server.
+ *
+ * @returns {AccountPointer}
+ */
+function freshAccountPointer(): AccountPointer {
+  return accountPointerFor({ spaceId: mintSpaceId() })
+}
+
+/**
  * This client's freshly minted key set for a brand-new account: the client
  * seed (random, local, never derived from any secret and never leaving the
  * browser), the account's user key (its roster identity -- recipient zero of every
@@ -82,7 +108,7 @@ const log = createLogger('fw:session:signup')
  *
  * The mint itself is wallet-core's shared `mintAccountKeySet` (both wallet
  * apps mint the same set); this wrapper only maps it onto the local names and
- * folds the Space id into the account pointer.
+ * builds the account pointer's Space URL from the minted Space id.
  *
  * @returns {Promise<{ seed: Uint8Array, userKey: object, webvhUpdateKeys: object,
  *   pointer?: AccountPointer }>}
@@ -90,8 +116,8 @@ const log = createLogger('fw:session:signup')
 async function mintAccountKeySet() {
   const { spaceId, clientSeed, userKey, updateKeys } =
     await mintSharedAccountKeySet()
-  const pointer: AccountPointer | undefined = WAS_BASE_URL
-    ? { spaceId, host: WAS_BASE_URL }
+  const pointer: AccountPointer | undefined = WAS_BASE_SERVER_URL
+    ? accountPointerFor({ spaceId })
     : undefined
   return {
     seed: clientSeed,
@@ -179,8 +205,7 @@ async function establishPassphraseAnchoredAccount({
     return { userExists: true }
   }
 
-  const spaceId = mintSpaceId()
-  const pointer: AccountPointer = { spaceId, host: WAS_BASE_URL as string }
+  const pointer = freshAccountPointer()
   const ladderSeed = generateLadderSeed()
   const establishment = await establishCredentialAnchoredAccount({
     credential,
@@ -199,7 +224,9 @@ async function establishPassphraseAnchoredAccount({
     // leaves is exactly a re-bound, registry-carrying account whose
     // controller promotion never ran.
     beforePromotion: async context => {
-      await passphraseRegistryUpsertHook({ spaceId })(context)
+      await passphraseRegistryUpsertHook({ spaceUrl: pointer.spaceUrl })(
+        context
+      )
       if (forcedEstablishmentTearBeforePromotion()) {
         throw new Error('e2e: the signup tore before the controller promotion.')
       }
@@ -341,7 +368,7 @@ export async function signUpWithPassphrase({
   rememberBrowser?: boolean
   onStage?: StageNotifier
 }): Promise<{ session?: Session; userExists: boolean }> {
-  if (WAS_BASE_URL && rememberBrowser === true) {
+  if (WAS_BASE_SERVER_URL && rememberBrowser === true) {
     // The remembered signup: the establishment half only (never the
     // transient composition -- that would mint and abandon a per-visit
     // annex client). The remembered session's persistence is built here so
@@ -383,7 +410,7 @@ export async function signUpWithPassphrase({
     await finishRememberedSignup({ session })
     return { session, userExists: false }
   }
-  if (WAS_BASE_URL) {
+  if (WAS_BASE_SERVER_URL) {
     // The credential-anchored default: establishment, then the transient
     // entry, both over the visit's in-memory store family.
     const persistence = transientSessionStores()
@@ -546,8 +573,7 @@ async function signUpCredentialAnchoredWithPasskey({
   })
   mark('kdf')
 
-  const spaceId = mintSpaceId()
-  const pointer: AccountPointer = { spaceId, host: WAS_BASE_URL as string }
+  const pointer = freshAccountPointer()
   const ladderSeed = generateLadderSeed()
   // The remembered session's persistence, built here so the establishment's
   // reads and the login's run under one chain-head pin store.
@@ -583,7 +609,7 @@ async function signUpCredentialAnchoredWithPasskey({
       }
       await updateUnlockMethodsWithClient({
         zcapClient,
-        spaceId,
+        spaceUrl: pointer.spaceUrl,
         userKey,
         mutate: existing =>
           upsertPasskeyUnlockMethod({
@@ -668,7 +694,7 @@ export async function signUpWithPasskey({
   // The account's WebAuthn user id, minted once per account: every later
   // passkey registers under it, so authenticator pickers show one account.
   const userHandle = crypto.getRandomValues(new Uint8Array(16))
-  if (WAS_BASE_URL) {
+  if (WAS_BASE_SERVER_URL) {
     return signUpCredentialAnchoredWithPasskey({
       userHandle,
       email,

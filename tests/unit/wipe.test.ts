@@ -113,8 +113,7 @@ function sessionFixture({
         ? undefined
         : {
             did: ACCOUNT_DID,
-            spaceId: ACCOUNT_SPACE_ID,
-            host: 'https://was.example'
+            spaceUrl: `https://example.com/space/${ACCOUNT_SPACE_ID}/`
           }
     }
   } as unknown as Session

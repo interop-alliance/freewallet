@@ -1,6 +1,6 @@
 /**
  * WASRemoteStore: the remote WAS (Wallet Attached Storage) backend, attached
- * when VITE_WAS_SERVER_URL (the server's Spaces Repository URL) is set.
+ * when VITE_WAS_SERVER_URL (the server's base server URL) is set.
  * Since the local BrowserStore became the always-active replica, this class
  * no longer serves credential / history / public-link reads and writes for
  * the main app -- those replicate in the background through the sync
@@ -46,10 +46,10 @@ import {
   type SpaceMetadata
 } from '@interop/was-client'
 import {
-  collectionPath,
-  resourcePath,
-  spacePath,
-  toUrl
+  collectionUrl,
+  parseSpaceTarget,
+  resourceUrl,
+  spaceUrlById
 } from '@interop/was-client/paths'
 import { blobBytes, createEdvEncryption } from '@interop/was-client/edv'
 import { errorNameOf } from '@interop/wallet-core/menders'
@@ -91,6 +91,7 @@ import {
   type UserKey
 } from '@interop/wallet-core/keys'
 import { createLogger } from '@/lib/log'
+import { spaceLocation } from '@/lib/spaceLocation'
 import { wasClientAt, wasServiceDescription } from '@/lib/wasService'
 
 const log = createLogger('fw:storage:remote')
@@ -109,7 +110,7 @@ const SYNCED_LISTING_PAGE_SIZE = 100
 export type ICollectionsSet = Map<string, string>
 
 /**
- * @see https://digitalcredentials.github.io/wallet-attached-storage-spec/
+ * @see https://w3c-ccg.github.io/portable-web-spaces-spec/
  * @see https://github.com/interop-alliance/zcap-developer-guide
  */
 /**
@@ -144,7 +145,7 @@ function controllerDid(controller: string): IDID {
 }
 
 export class WASRemoteStore {
-  public storageServerUrl: string
+  public baseServerUrl: string
   // The server's service description, discovered once per page load by
   // `@/lib/wasService` and handed in: every client this store builds takes
   // it, so none discovers on its own. Absent only when the server could not
@@ -157,7 +158,7 @@ export class WASRemoteStore {
   public spaceId: string
   public controller: IDID
 
-  public spaceUrl: string
+  public readonly spaceUrl: string
   public collections?: ICollectionsSet
   // The invocation capability every request rides when one was supplied (a
   // delegated Space-subtree zcap -- the transient session's generation
@@ -188,7 +189,7 @@ export class WASRemoteStore {
   }
 
   constructor({
-    storageServerUrl,
+    baseServerUrl,
     serviceDescription,
     zcapClient,
     spaceId,
@@ -196,7 +197,7 @@ export class WASRemoteStore {
     capability,
     pinStore
   }: {
-    storageServerUrl: string
+    baseServerUrl: string
     serviceDescription?: ServiceDescription
     zcapClient: ZcapClient
     spaceId: string
@@ -204,7 +205,7 @@ export class WASRemoteStore {
     capability?: IZcap
     pinStore: ResourceLogPinStore
   }) {
-    this.storageServerUrl = storageServerUrl
+    this.baseServerUrl = baseServerUrl
     this.#discovered = serviceDescription
     this.#pinStore = pinStore
     this.was = this.#clientFor({ zcapClient })
@@ -213,12 +214,9 @@ export class WASRemoteStore {
     this.#capability = capability
     // Through the path builders rather than by hand: the Space URL is a zcap
     // `invocationTarget`, which the server matches by exact bytes, and the
-    // canonical container form (a trailing slash) and the sub-path join are
+    // canonical container form (a trailing slash) and the server layout are
     // was-client's rules to own.
-    this.spaceUrl = toUrl({
-      baseUrl: storageServerUrl,
-      path: spacePath(spaceId)
-    })
+    this.spaceUrl = spaceUrlById({ baseServerUrl, spaceId })
   }
 
   /**
@@ -238,15 +236,14 @@ export class WASRemoteStore {
 
   /**
    * The `Space` handle every navigational request in this store rides -- the
-   * one place `this.was.space(...)` is called, so no request path can miss
+   * one place this store's own Space is opened, so no request path can miss
    * the bound invocation capability. With no capability bound the handle
    * invokes the root capability, byte-identical to the direct call.
    *
-   * @param [spaceId] {string}   defaults to this store's Space
    * @returns {Space}
    */
-  #space(spaceId: string = this.spaceId): Space {
-    return this.was.space(spaceId, { capability: this.#capability })
+  #space(): Space {
+    return this.was.spaceAt(this.spaceUrl, { capability: this.#capability })
   }
 
   /**
@@ -267,25 +264,45 @@ export class WASRemoteStore {
   }
 
   /**
-   * Parses a WAS resource/collection URL (absolute or relative to the storage
-   * server) into its `spaceId` / `collectionId` / `resourceId` components.
+   * Classifies a WAS collection or resource URL beneath this store's own
+   * Space into its `collectionId` / `resourceId` components. The URL is
+   * absolute, or a path reference as a server listing serves one. A path
+   * reference is resolved against this store's Space URL first. A server
+   * lists its items as path-absolute references from its own root
+   * (`/space/{id}/...`), so on a sub-path mount that resolution drops the
+   * mount's prefix segments; such a reference is then read as a path under
+   * the base server URL instead. The storage browser reads this store's
+   * Space only, so a URL under any other Space is refused.
    *
    * @param url {string}
-   * @returns {{ spaceId: string, collectionId?: string, resourceId?: string }}
+   * @returns {{ collectionId?: string, resourceId?: string }}
+   * @throws {Error}   when `url` is not a Collection or Resource URL beneath
+   *   this store's Space
    */
   #parsePath(url: string): {
-    spaceId: string
     collectionId?: string
     resourceId?: string
   } {
-    const { pathname } = new URL(url, this.storageServerUrl)
-    const [root, spaceId, collectionId, resourceId] = pathname
-      .split('/')
-      .filter(Boolean)
-    if (root !== 'space' || !spaceId) {
-      throw new Error(`Not a WAS resource URL: "${url}".`)
+    let parsed = parseSpaceTarget({
+      spaceUrl: this.spaceUrl,
+      target: new URL(url, this.spaceUrl).href
+    })
+    if (parsed === null && url.startsWith('/')) {
+      parsed = parseSpaceTarget({
+        spaceUrl: this.spaceUrl,
+        target: new URL(url.slice(1), this.baseServerUrl).href
+      })
     }
-    return { spaceId, collectionId, resourceId }
+    if (parsed?.kind === 'collection') {
+      return { collectionId: parsed.collectionId }
+    }
+    if (parsed?.kind === 'resource') {
+      return {
+        collectionId: parsed.collectionId,
+        resourceId: parsed.resourceId
+      }
+    }
+    throw new Error(`Not a WAS resource URL: "${url}".`)
   }
 
   /**
@@ -297,11 +314,11 @@ export class WASRemoteStore {
    * @returns {Collection}
    */
   #collectionFromUrl(url: string): Collection {
-    const { spaceId, collectionId } = this.#parsePath(url)
+    const { collectionId } = this.#parsePath(url)
     if (!collectionId) {
       throw new Error(`Not a WAS collection URL: "${url}".`)
     }
-    return this.#space(spaceId).collection(collectionId)
+    return this.#space().collection(collectionId)
   }
 
   /**
@@ -321,11 +338,11 @@ export class WASRemoteStore {
    * @returns {Resource}
    */
   #resourceFromUrl(url: string): Resource {
-    const { spaceId, collectionId, resourceId } = this.#parsePath(url)
+    const { collectionId, resourceId } = this.#parsePath(url)
     if (!collectionId || !resourceId) {
       throw new Error(`Not a WAS resource URL: "${url}".`)
     }
-    return this.#space(spaceId)
+    return this.#space()
       .collection(collectionId)
       .resource(resourceId, { encryption: 'plaintext' })
   }
@@ -843,7 +860,7 @@ export class WASRemoteStore {
    */
   #clientFor({ zcapClient }: { zcapClient: ZcapClient }): WasClient {
     return wasClientAt({
-      baseUrl: this.storageServerUrl,
+      baseServerUrl: this.baseServerUrl,
       zcapClient,
       serviceDescription: this.#discovered,
       encryption: createEdvEncryption({ resolveKeys: async () => null })
@@ -899,14 +916,15 @@ export class WASRemoteStore {
 
   /**
    * The absolute, world-readable URL the published DID document resolves to
-   * (`https://<host>/space/<spaceId>/id/did.json`).
+   * (`{spaceUrl}id/did.json`).
    *
    * @returns {string}
    */
   didDocumentUrl(): string {
-    return toUrl({
-      baseUrl: this.storageServerUrl,
-      path: resourcePath(this.spaceId, ID_COLLECTION.id, DID_DOCUMENT_RESOURCE)
+    return resourceUrl({
+      spaceUrl: this.spaceUrl,
+      collectionId: ID_COLLECTION.id,
+      resourceId: DID_DOCUMENT_RESOURCE
     })
   }
 
@@ -1043,7 +1061,7 @@ export class WASRemoteStore {
   }): Promise<{ created: boolean }> {
     return await ensureSpaceAndCollection({
       was: this.was,
-      spaceId: this.spaceId,
+      spaceUrl: this.spaceUrl,
       controllerDid: this.controller,
       collectionId: id,
       collectionName: name ?? id,
@@ -1088,19 +1106,16 @@ export class WASRemoteStore {
    * @returns {string}
    */
   collectionTargetUrl(collectionId: string): string {
-    return toUrl({
-      baseUrl: this.storageServerUrl,
-      path: collectionPath(this.spaceId, collectionId)
-    })
+    return collectionUrl({ spaceUrl: this.spaceUrl, collectionId })
   }
 
   static async initClient({
-    storageServerUrl,
+    baseServerUrl,
     serviceDescription,
     user,
     session: { profile, persistence }
   }: {
-    storageServerUrl: string
+    baseServerUrl: string
     // The description this session discovered, threaded in rather than
     // re-probed here: `@/lib/wasService` is the app's one discoverer.
     // Absent when the server was unreachable at login.
@@ -1120,9 +1135,11 @@ export class WASRemoteStore {
     const clientDid = profile.keyAgent?.id || user.id
     const pointerDid = profile.accountPointer?.did
     const controller = isWebvhDid(pointerDid) ? pointerDid : clientDid
-    const spaceId = profile.accountPointer?.spaceId ?? deriveSpaceId(clientDid)
+    const spaceId = profile.accountPointer
+      ? spaceLocation({ spaceUrl: profile.accountPointer.spaceUrl }).spaceId
+      : deriveSpaceId(clientDid)
     const remoteStore = new WASRemoteStore({
-      storageServerUrl,
+      baseServerUrl,
       serviceDescription,
       zcapClient: profile.zcapClient,
       spaceId,
@@ -1328,7 +1345,7 @@ export class WASRemoteStore {
    */
   publicCredentialUrl(cid: string): string {
     return buildPublicCredentialUrl({
-      serverUrl: this.storageServerUrl,
+      baseServerUrl: this.baseServerUrl,
       spaceId: this.spaceId,
       cid
     })
@@ -1444,7 +1461,7 @@ export class WASRemoteStore {
     const collectionId = this.#collectionId(logicalKey)
     try {
       return await this.was.request({
-        path: resourcePath(this.spaceId, collectionId, resourceId),
+        url: resourceUrl({ spaceUrl: this.spaceUrl, collectionId, resourceId }),
         method: 'GET',
         capability: this.#capability
       })
@@ -1580,7 +1597,7 @@ export class WASRemoteStore {
     }
     try {
       await this.was.request({
-        path: resourcePath(this.spaceId, collectionId, resourceId),
+        url: resourceUrl({ spaceUrl: this.spaceUrl, collectionId, resourceId }),
         method: 'PUT',
         json: body as object,
         headers,
@@ -1623,7 +1640,7 @@ export class WASRemoteStore {
     const collectionId = this.#collectionId(logicalKey)
     try {
       await this.was.request({
-        path: resourcePath(this.spaceId, collectionId, resourceId),
+        url: resourceUrl({ spaceUrl: this.spaceUrl, collectionId, resourceId }),
         method: 'DELETE',
         ...(ifMatch !== undefined ? { headers: { 'if-match': ifMatch } } : {}),
         capability: this.#capability
@@ -1669,7 +1686,7 @@ export class WASRemoteStore {
     try {
       const was = zcapClient ? this.#clientFor({ zcapClient }) : this.was
       const space = capability
-        ? was.space(this.spaceId, { capability })
+        ? was.spaceAt(this.spaceUrl, { capability })
         : this.#space()
       const result = await space.deleteWithOutcome()
       log.info('Remote space deleted', { outcome: result.outcome })
@@ -1682,13 +1699,7 @@ export class WASRemoteStore {
 
   async getSpaceQuotas(): Promise<SpaceQuotaReport | null> {
     try {
-      const response = await this.was.request({
-        path: `/space/${this.spaceId}/quotas?include=collections`,
-        method: 'GET',
-        capability: this.#capability
-      })
-
-      return response.data as SpaceQuotaReport
+      return await this.#space().quotas({ includeCollections: true })
     } catch (err) {
       const status = errorStatus(err)
 
@@ -1738,15 +1749,19 @@ export class WASRemoteStore {
     signal?.throwIfAborted()
     let stream: ReadableStream<Uint8Array>
     try {
+      const spaceUrl = spaceUrlById({
+        baseServerUrl: this.baseServerUrl,
+        spaceId
+      })
       let space: Space
       if (zcapClient) {
-        space = this.#clientFor({ zcapClient }).space(spaceId, {
+        space = this.#clientFor({ zcapClient }).spaceAt(spaceUrl, {
           ...(capability ? { capability } : {})
         })
-      } else if (capability) {
-        space = this.was.space(spaceId, { capability })
       } else {
-        space = this.#space(spaceId)
+        space = this.was.spaceAt(spaceUrl, {
+          capability: capability ?? this.#capability
+        })
       }
       stream = await space.exportStream()
     } catch (err) {
@@ -1776,73 +1791,74 @@ export class WASRemoteStore {
 }
 
 /**
- * The keyring v2 unlock Space (`src/session/keyring.ts`) is a second, minimal
- * WAS Space controlled by the passphrase-derived unlock identity -- completely
- * separate from the wallet data Space, so these are standalone functions rather
- * than `WASRemoteStore` methods (the store is bound to the data identity). Each
- * builds its own `WasClient` over the unlock agent's `zcapClient`, whose
- * invocation signer is the unlock root key (root invocation, no capability
- * attached -- the same invocation shape the data Space uses). The one resource is a
- * plaintext JSON document (its keyring payload is
- * already ciphertext), so no encryption provider is wired in -- and the
- * read/write handles pass the explicit `{ encryption: 'plaintext' }` override.
+ * The unlock-methods registry Resource handle in a data Space, on a client
+ * built for that Space's server: the one place the registry read and write
+ * below derive the server from the Space URL and address the record.
+ *
+ * The registry sits apart from the store's own collections, so this is a
+ * standalone function rather than a `WASRemoteStore` method. Each call builds
+ * its own `WasClient` over the caller's `zcapClient`, whose invocation signer
+ * is the data identity's root key. The record is a plaintext JSON document
+ * (its payload is already ciphertext), so no encryption provider is wired in,
+ * and the handle passes the explicit `{ encryption: 'plaintext' }` override.
  * The override is load-bearing: without it, the client decides plaintext vs
- * encrypted by reading the collection description, and when the unlock Space
- * does not exist yet (every keyring lookup for a fresh passphrase) that read
- * 404s and the client refuses to guess, throwing an EncryptionError instead of
- * surfacing the miss as a 404-shaped `null`.
+ * encrypted by reading the collection description, and when the collection
+ * does not exist yet that read 404s and the client refuses to guess, throwing
+ * an EncryptionError instead of surfacing the miss as a 404-shaped `null`.
  *
  * @param options {object}
- * @param options.storageServerUrl {string}
- * @param options.zcapClient {ZcapClient}   built on the unlock agent's signer
- * @returns {Promise<WasClient>}
+ * @param options.zcapClient {ZcapClient}   the data identity's root client
+ * @param options.spaceUrl {string}   the data Space's URL
+ * @param [options.capability] {IZcap}   an invocation capability every request
+ *   rides; the root capability is invoked otherwise
+ * @returns {Promise<Resource>}
  */
-async function unlockSpaceClient({
-  storageServerUrl,
-  zcapClient
+async function unlockMethodsRegistryResource({
+  zcapClient,
+  spaceUrl,
+  capability
 }: {
-  storageServerUrl: string
   zcapClient: ZcapClient
-}): Promise<WasClient> {
-  return wasClientAt({
-    baseUrl: storageServerUrl,
+  spaceUrl: string
+  capability?: IZcap
+}): Promise<Resource> {
+  const was = await wasClientAt({
+    baseServerUrl: spaceLocation({ spaceUrl }).baseServerUrl,
     zcapClient,
     serviceDescription: await wasServiceDescription()
   })
+  return was
+    .spaceAt(spaceUrl, { capability })
+    .collection(UNLOCK_METHODS_COLLECTION.id, { encryption: 'plaintext' })
+    .resource(UNLOCK_METHODS_RESOURCE)
 }
 
 /**
  * Reads the unlock-methods registry record from the data Space, or returns
  * `null` when it does not exist yet. A network / unreachable error propagates.
  * The served ETag rides beside the record so a later conditional PUT can name
- * the read it was based on -- `unlockSpaceClient` builds a fresh client per
+ * the read it was based on -- `unlockMethodsRegistryResource` builds a fresh client per
  * call, so the validator must travel as a value, never as client state.
  *
  * @param options {object}
- * @param options.storageServerUrl {string}
  * @param options.zcapClient {ZcapClient}   the data identity's root client
- * @param options.spaceId {string}   the data Space id
+ * @param options.spaceUrl {string}   the data Space's URL
  * @param [options.capability] {IZcap}   an invocation capability every request
  *   rides; the root capability is invoked otherwise
  * @returns {Promise<{ record: unknown, etag?: string } | null>}
  */
 export async function getUnlockMethodsRecord({
-  storageServerUrl,
   zcapClient,
-  spaceId,
+  spaceUrl,
   capability
 }: {
-  storageServerUrl: string
   zcapClient: ZcapClient
-  spaceId: string
+  spaceUrl: string
   capability?: IZcap
 }): Promise<{ record: unknown; etag?: string } | null> {
-  const was = await unlockSpaceClient({ storageServerUrl, zcapClient })
-  const found = await was
-    .space(spaceId, { capability })
-    .collection(UNLOCK_METHODS_COLLECTION.id, { encryption: 'plaintext' })
-    .resource(UNLOCK_METHODS_RESOURCE)
-    .getWithEtag()
+  const found = await (
+    await unlockMethodsRegistryResource({ zcapClient, spaceUrl, capability })
+  ).getWithEtag()
   if (!found) {
     return null
   }
@@ -1856,9 +1872,8 @@ export async function getUnlockMethodsRecord({
  * failed precondition throws was-client's `PreconditionFailedError` (412).
  *
  * @param options {object}
- * @param options.storageServerUrl {string}
  * @param options.zcapClient {ZcapClient}   the data identity's root client
- * @param options.spaceId {string}   the data Space id
+ * @param options.spaceUrl {string}   the data Space's URL
  * @param options.record {object}   the wrapped registry record
  * @param [options.capability] {IZcap}   an invocation capability every request
  *   rides; the root capability is invoked otherwise
@@ -1867,31 +1882,26 @@ export async function getUnlockMethodsRecord({
  * @returns {Promise<{ etag?: string }>}   the stored record's new ETag
  */
 export async function putUnlockMethodsRecord({
-  storageServerUrl,
   zcapClient,
-  spaceId,
+  spaceUrl,
   record,
   capability,
   ifMatch,
   ifNoneMatch
 }: {
-  storageServerUrl: string
   zcapClient: ZcapClient
-  spaceId: string
+  spaceUrl: string
   record: object
   capability?: IZcap
   ifMatch?: string
   ifNoneMatch?: boolean
 }): Promise<{ etag?: string }> {
-  const was = await unlockSpaceClient({ storageServerUrl, zcapClient })
   const body = new TextEncoder().encode(JSON.stringify(record))
-  return await was
-    .space(spaceId, { capability })
-    .collection(UNLOCK_METHODS_COLLECTION.id, { encryption: 'plaintext' })
-    .resource(UNLOCK_METHODS_RESOURCE)
-    .put(body, {
-      contentType: 'application/json',
-      ...(ifMatch !== undefined ? { ifMatch } : {}),
-      ...(ifNoneMatch ? { ifNoneMatch } : {})
-    })
+  return await (
+    await unlockMethodsRegistryResource({ zcapClient, spaceUrl, capability })
+  ).put(body, {
+    contentType: 'application/json',
+    ...(ifMatch !== undefined ? { ifMatch } : {}),
+    ...(ifNoneMatch ? { ifNoneMatch } : {})
+  })
 }

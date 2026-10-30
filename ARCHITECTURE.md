@@ -33,6 +33,7 @@ src/lib/            Pure business logic (no React)
                     keystore controller promotion, and the one KMS-held key
                     the account document publishes (ensureKmsAuthentication)
   didWeb.ts         The did:web projection id of a promoted account
+  spaceLocation.ts  The base server URL and Space id read off a Space URL
   resolveWalletInput.ts  The one entry point for free-form text (paste box,
                     QR), over the shared wallet-input classifier
   sessionKey.ts     freewallet-session IndexedDB state (keyring cache,
@@ -462,8 +463,8 @@ that name, and a refused inbox counts as absent. A guest or no-WAS session
 has no inbox. The inbox pass that reads it is in "The agent connection" in
 docs/architecture/app-connect.md.
 
-When `VITE_WAS_SERVER_URL` (the server's Spaces Repository URL; the base URL is
-its parent) is set, and the session holds a local replica and is not a guest, a
+When `VITE_WAS_SERVER_URL` (the server's base server URL, under which it
+serves `service`, `spaces/` and `space/{id}/`) is set, and the session holds a local replica and is not a guest, a
 remote WAS Space is attached as a **sync target**. `SessionSyncController` in
 `src/stores/syncController.ts` replicates every synced local collection to its
 remote WAS Collection counterpart in the background, over `@interop/was-sync`'s
@@ -1048,7 +1049,7 @@ Containment hierarchy (remote mode): **Space > Collection > Resource**.
   "Storage model (local-first)". Avoid: removal, tombstone.
 - **WAS (Wallet Attached Storage)** -- an HTTP protocol for storing
   arbitrary resources in user-owned Spaces, authorized via ZCap. See [the
-  spec](https://w3c-ccg.github.io/wallet-attached-storage-spec/).
+  spec](https://w3c-ccg.github.io/portable-web-spaces-spec/).
 - **Space** -- a storage area on the WAS server, owned by one controller.
   The account Space's id is an independent random identifier carried in the
   account pointer; unlock Spaces are addressed by `spaceId =

@@ -461,7 +461,7 @@ async function keystoreListsKey({
  * @param options.remoteStore {object}   the `keys.json` probe and the
  *   `id`-collection store (`WASRemoteStore` satisfies it structurally)
  * @param options.did {string}   the did:web projection id, from
- *   {@link didWebFromSpace}
+ *   {@link didWebOfSpace}
  * @param options.spaceReady {Promise<unknown>}   resolves once the account
  *   Space exists; already resolved on every path that provisions no Space
  * @param [options.sleep] {Function}   `(ms: number) => Promise<void>` -- the

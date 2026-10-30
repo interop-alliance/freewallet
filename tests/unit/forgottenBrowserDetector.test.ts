@@ -41,8 +41,7 @@ import type { KeyringFetchResult } from '@/session/keyring'
 
 const POINTER = {
   did: 'did:webvh:QmScidForTests:was.example.test:space:space-123:id',
-  spaceId: 'space-123',
-  host: 'https://was.example.test'
+  spaceUrl: 'https://was.example.test/space/space-123/'
 }
 const CLIENT_SEED = new Uint8Array(32).fill(9)
 const USER_KEY = { id: 'did:key:zUserKey', secret: new Uint8Array(32) }

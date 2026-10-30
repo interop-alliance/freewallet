@@ -26,7 +26,7 @@ unlock secret (passphrase | passkey PRF output)
   -> deriveUnlockSeed(KDF), expanded twice:
        unlock identity           -> unlock Space -> unlock record
                                       { controller, email,
-                                        pointer { did, spaceId, host },
+                                        pointer { did, spaceUrl },
                                         bridge delegation, ladder seed
                                           (standing layout only) }
        standing client identity  -> { standing client seed,

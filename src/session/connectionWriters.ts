@@ -96,11 +96,7 @@ export async function registerOwnConnectionWriter({
     }
     const { pointer, keyAgent } = context
     const enrolledSigningKeys = await currentAccountSigningKeys({
-      pointer: {
-        did: pointer.did,
-        spaceId: pointer.spaceId,
-        host: pointer.host
-      },
+      did: pointer.did,
       verifiedLog: await verifiedAccountLog({ session, pointer })
     })
     const signingKey = signingKeyMultibaseOfDid({ did: keyAgent.id })

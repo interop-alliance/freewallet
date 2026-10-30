@@ -56,7 +56,7 @@ import {
   memoryResourceLogPinStore,
   type ResourceLogPinStore
 } from '@interop/vh-resource-log'
-import { WAS_BASE_URL } from '@/app.config'
+import { WAS_BASE_SERVER_URL } from '@/app.config'
 import { DID_DOCUMENT_RESOURCE } from '@interop/wallet-core/space'
 import {
   standingFieldsOfKeyringHit,
@@ -203,6 +203,7 @@ import { isStorageUnreachable } from '@/lib/storageErrors'
 import { mintSpaceId, WASRemoteStore } from '@/stores/wasRemoteStore'
 import { createLogger } from '@/lib/log'
 import { wasClientAt, wasServiceDescription } from '@/lib/wasService'
+import { spaceLocation } from '@/lib/spaceLocation'
 import { zcapExpires } from '@/lib/zcap'
 
 const log = createLogger('fw:session:recovery')
@@ -285,7 +286,7 @@ async function bindRecoveryRecord({
   const serviceDescription = await wasServiceDescription()
   await ensureUnlockSpace({
     serviceDescription,
-    storageServerUrl: WAS_BASE_URL as string,
+    baseServerUrl: WAS_BASE_SERVER_URL as string,
     zcapClient: unlock.zcapClient,
     spaceId: unlock.spaceId,
     controller: unlock.agent.id
@@ -303,7 +304,7 @@ async function bindRecoveryRecord({
   })
   await putUnlockKeyring({
     serviceDescription,
-    storageServerUrl: WAS_BASE_URL as string,
+    baseServerUrl: WAS_BASE_SERVER_URL as string,
     zcapClient: unlock.zcapClient,
     spaceId: unlock.spaceId,
     record
@@ -761,7 +762,7 @@ export class RecoveryRecordForgedError extends Error {
  *   stored record, its contents, and its proof state
  */
 async function readRecoveryRecord({ code }: { code: string }) {
-  if (!WAS_BASE_URL) {
+  if (!WAS_BASE_SERVER_URL) {
     throw new RecoveryUnavailableError()
   }
   const client = await recoveryClientFromCode({ code })
@@ -771,7 +772,7 @@ async function readRecoveryRecord({ code }: { code: string }) {
   })
   const record = await getUnlockKeyring({
     serviceDescription: await wasServiceDescription(),
-    storageServerUrl: WAS_BASE_URL,
+    baseServerUrl: WAS_BASE_SERVER_URL,
     zcapClient: unlock.zcapClient,
     spaceId: unlock.spaceId
   })
@@ -844,16 +845,11 @@ async function completeRecoveryRecordProof({
           'for its signer.'
       )
     }
-    const logPointer = {
-      did: pointer.did!,
-      spaceId: pointer.spaceId,
-      host: pointer.host
-    }
     // The allowlist is the record-signer set, not the enrolled-client set:
     // a code's record re-minted by the last-client forget is signed by the
     // ladder VM, the one key a ladder-anchored account's document still lists.
     const signingKeys = await currentAccountRecordSigners({
-      pointer: logPointer,
+      did: pointer.did,
       ...(verifiedLog ? { verifiedLog } : { accountLogPinStore: pinStore })
     })
     await verifyRecordProof({
@@ -913,8 +909,6 @@ export async function locateRecoveryAccount({
     did !== undefined && isWebvhDid(did)
       ? await verifyPointedAccountLog({
           did,
-          spaceId: pointer.spaceId,
-          host: pointer.host,
           pinStore,
           unlock
         })
@@ -1164,7 +1158,7 @@ async function deleteRetiredCredentialSpaces({
 }): Promise<void> {
   for (const entry of entries) {
     try {
-      if (WAS_BASE_URL) {
+      if (WAS_BASE_SERVER_URL) {
         const delegatee =
           controller ??
           (entry.manageCapability as { controller?: string } | undefined)
@@ -1392,6 +1386,8 @@ export async function recoverAccountWithCode({
   if (!rememberBrowser) {
     return recoverAccountTransient({ recovered, newPassphrase })
   }
+  const { baseServerUrl: accountBaseServerUrl, spaceId: accountSpaceId } =
+    spaceLocation({ spaceUrl: pointer.spaceUrl })
   // The ceremony's chain-head pins, one keyed store for every log read
   // below (the account log and the roster log). The recovering browser
   // holds no pin yet, so this first read is the pin's trust-on-first-use
@@ -1405,8 +1401,6 @@ export async function recoverAccountWithCode({
   // code's own retirement for the page to offer.
   const verifiedLog = await verifyPointedAccountLog({
     did: pointer.did,
-    spaceId: pointer.spaceId,
-    host: pointer.host,
     pinStore: logPins,
     unlock,
     ...(idb !== undefined ? { idb } : {})
@@ -1570,7 +1564,7 @@ export async function recoverAccountWithCode({
         try {
           sibling = await mintDelegatedClientsDelegation({
             zcapClient: newZcapClient,
-            wasServerUrl: pointer.host,
+            baseServerUrl: accountBaseServerUrl,
             clientAnnexSpaceId: clientAnnexDidParts({ did: clientAnnexDid })
               .spaceId,
             controller: newCredential.standing.clientDid
@@ -1693,9 +1687,9 @@ export async function recoverAccountWithCode({
   // rule: its `<did:webvh>#<multibase>` key signs everything.
   const remoteStore = new WASRemoteStore({
     serviceDescription,
-    storageServerUrl: pointer.host,
+    baseServerUrl: accountBaseServerUrl,
     zcapClient: newZcapClient,
-    spaceId: pointer.spaceId,
+    spaceId: accountSpaceId,
     controller: did,
     pinStore: logPins
   })
@@ -1726,7 +1720,7 @@ export async function recoverAccountWithCode({
     serviceDescription,
     zcapClient: newZcapClient,
     keyAgent: newClientAgents.keyAgent,
-    pointer: { did: pointer.did, spaceId: pointer.spaceId, host: pointer.host },
+    pointer: { did: pointer.did, spaceUrl: pointer.spaceUrl },
     pinStore: logPins
   })
   await addUserKeyRosterRecipient({
@@ -1811,8 +1805,6 @@ export async function recoverAccountWithCode({
   // resolves from the log's verified head, anchored in this same document.)
   const { doc } = await verifyAccountLog({
     did: pointer.did,
-    spaceId: pointer.spaceId,
-    host: pointer.host,
     pinStore: logPins
   })
   const preRotation = await readUserKeyRoster({
@@ -1859,9 +1851,8 @@ export async function recoverAccountWithCode({
   // login's re-seal repair mends from the roster escrow.
   if (oldUserKey.id !== newUserKey.id) {
     await rewrapUnlockRegistryToUserKey({
-      storageServerUrl: pointer.host,
       zcapClient: newZcapClient,
-      spaceId: pointer.spaceId,
+      spaceUrl: pointer.spaceUrl,
       from: oldUserKey,
       to: newUserKey
     })
@@ -1891,7 +1882,7 @@ export async function recoverAccountWithCode({
       stage,
       registry: {
         zcapClient: newZcapClient,
-        spaceId: pointer.spaceId,
+        spaceUrl: pointer.spaceUrl,
         userKey
       },
       did: accountDid,
@@ -1953,9 +1944,9 @@ export async function recoverAccountWithCode({
     remoteStore,
     storeFor: accountCollectionStores({
       serviceDescription,
-      storageServerUrl: pointer.host,
+      baseServerUrl: accountBaseServerUrl,
       zcapClient: newZcapClient,
-      spaceId: pointer.spaceId,
+      spaceId: accountSpaceId,
       did: pointer.did,
       pinStore: logPins,
       signer: userKeyRosterLogSigner({ keyAgent: newClientAgents.keyAgent })
@@ -1971,7 +1962,7 @@ export async function recoverAccountWithCode({
   try {
     await deleteUnlockSpace({
       serviceDescription,
-      storageServerUrl: WAS_BASE_URL as string,
+      baseServerUrl: WAS_BASE_SERVER_URL as string,
       zcapClient: unlock.zcapClient,
       spaceId: unlock.spaceId
     })
@@ -2213,11 +2204,9 @@ export async function resumeRecoverySpend({
     throw new Error('This keyring hit cannot resume a recovery spend.')
   }
   const did = pointer.did!
-  const logPointer = {
-    did,
-    spaceId: pointer.spaceId,
-    host: pointer.host
-  }
+  const logPointer = { did, spaceUrl: pointer.spaceUrl }
+  const { baseServerUrl: accountBaseServerUrl, spaceId: accountSpaceId } =
+    spaceLocation({ spaceUrl: pointer.spaceUrl })
   const agents = await agentsFromSeed({ seed: clientKeys.clientSeed })
   const newZcapClient = webvhZcapClient({ keyAgent: agents.keyAgent, did })
   const { publicKeyMultibase: kaMultibase } =
@@ -2244,10 +2233,7 @@ export async function resumeRecoverySpend({
   // standing backfill and the registry backfill below.
   let verifiedAccount: VerifiedAccountLog | undefined = verifiedLog
   async function accountLog(): Promise<VerifiedAccountLog> {
-    verifiedAccount ??= await verifyAccountLog({
-      ...logPointer,
-      pinStore
-    })
+    verifiedAccount ??= await verifyAccountLog({ did, pinStore })
     return verifiedAccount
   }
   async function accountDocument(): Promise<object> {
@@ -2426,9 +2412,9 @@ export async function resumeRecoverySpend({
         )
         const remoteStore = new WASRemoteStore({
           serviceDescription,
-          storageServerUrl: pointer.host,
+          baseServerUrl: accountBaseServerUrl,
           zcapClient: newZcapClient,
-          spaceId: pointer.spaceId,
+          spaceId: accountSpaceId,
           controller: did,
           pinStore
         })
@@ -2488,7 +2474,7 @@ export async function resumeRecoverySpend({
     try {
       const existing = await getUnlockMethodsWithClient({
         zcapClient: newZcapClient,
-        spaceId: pointer.spaceId,
+        spaceUrl: pointer.spaceUrl,
         userKey
       })
       retirement = await spendRetirement()
@@ -2600,7 +2586,7 @@ export async function resumeRecoverySpend({
           stage,
           registry: {
             zcapClient: newZcapClient,
-            spaceId: pointer.spaceId,
+            spaceUrl: pointer.spaceUrl,
             userKey: stepUserKey
           },
           did,
@@ -2796,8 +2782,9 @@ async function recoverAccountTransient({
     )
   }
   const did = pointer.did
-  const spaceId = pointer.spaceId
-  const host = pointer.host
+  const { baseServerUrl, spaceId } = spaceLocation({
+    spaceUrl: pointer.spaceUrl
+  })
 
   // The visit's in-memory store family: trust-on-first-use chain-head
   // pins for every log read here, gone with the tab.
@@ -2808,8 +2795,6 @@ async function recoverAccountTransient({
   // with the code's own retirement for the page to offer.
   const verifiedLog = await verifyPointedAccountLog({
     did,
-    spaceId,
-    host,
     pinStore: logPins,
     unlock
   })
@@ -2850,7 +2835,7 @@ async function recoverAccountTransient({
   const serviceDescription = await wasServiceDescription()
   const bootstrapWas = wasClientAt({
     serviceDescription,
-    baseUrl: host,
+    baseServerUrl,
     zcapClient: didKeyZcapClient({ keyAgent: bootstrapAgent })
   })
   const ladderZcap = await ladderVmZcapClient({ accountDid: did, ladderSeed })
@@ -2922,7 +2907,7 @@ async function recoverAccountTransient({
         clientAnnexSpaceId = mintSpaceId()
         const minted = await mintCredentialClientAnnexGeneration({
           was: bootstrapWas,
-          wasServerUrl: host,
+          baseServerUrl,
           spaceId: clientAnnexSpaceId,
           controller: bootstrapAgent.id,
           ladderSeed,
@@ -2939,7 +2924,7 @@ async function recoverAccountTransient({
           mintGenerationDelegation: async ({ clientAnnexDid: generationDid }) =>
             mintGenerationDelegation({
               zcapClient: ladderZcap,
-              wasServerUrl: host,
+              baseServerUrl,
               spaceId,
               clientAnnexDid: generationDid
             }),
@@ -2988,7 +2973,7 @@ async function recoverAccountTransient({
       })
       sibling = await mintDelegatedClientsDelegation({
         zcapClient: ladderZcap,
-        wasServerUrl: host,
+        baseServerUrl,
         clientAnnexSpaceId: clientAnnexSpaceId!,
         controller: standing.clientDid
       })
@@ -3074,7 +3059,7 @@ async function recoverAccountTransient({
   // annex VM under the generation delegation.
   const rosterStore = userKeyRosterDescriptorStore({
     serviceDescription,
-    storageServerUrl: host,
+    baseServerUrl,
     zcapClient: transientZcapClient,
     spaceId,
     resolveController: async () =>
@@ -3132,7 +3117,7 @@ async function recoverAccountTransient({
   // until the next login's collection fan-out, transient or remembered.
   const remoteStore = new WASRemoteStore({
     serviceDescription,
-    storageServerUrl: host,
+    baseServerUrl,
     zcapClient: transientZcapClient,
     spaceId,
     controller: did,
@@ -3146,7 +3131,7 @@ async function recoverAccountTransient({
     // delegation.
     storeFor: accountCollectionStores({
       serviceDescription,
-      storageServerUrl: host,
+      baseServerUrl,
       zcapClient: transientZcapClient,
       spaceId,
       did,
@@ -3176,7 +3161,7 @@ async function recoverAccountTransient({
       stage: 'transient-tail',
       registry: {
         zcapClient: transientZcapClient,
-        spaceId,
+        spaceUrl: pointer.spaceUrl,
         userKey: oldUserKey,
         writeUserKey: newUserKey,
         capability: generationDelegation
@@ -3238,7 +3223,7 @@ async function recoverAccountTransient({
   try {
     await deleteUnlockSpace({
       serviceDescription,
-      storageServerUrl: WAS_BASE_URL as string,
+      baseServerUrl: WAS_BASE_SERVER_URL as string,
       zcapClient: unlock.zcapClient,
       spaceId: unlock.spaceId
     })
@@ -3440,7 +3425,7 @@ async function revokeRecoveryCodeHeld({
       // backstops a partial run).
       await adoptRotatedUserKeyInBand({
         session,
-        spaceId: pointer.spaceId,
+        spaceUrl: pointer.spaceUrl,
         accountDid: pointer.did,
         userKey: read.userKey,
         latestEpochId: read.latestEpochId,
@@ -3467,7 +3452,7 @@ async function revokeRecoveryCodeHeld({
       // so this makes no second registry PUT.
       await adoptRotatedUserKey({
         session,
-        spaceId: pointer.spaceId,
+        spaceUrl: pointer.spaceUrl,
         userKey: read.userKey
       })
     } else {
@@ -3528,7 +3513,7 @@ async function deleteRevokedCodeSpace({
   context: AccountCeremonyContext
   entry: RecoveryCodeUnlockMethod
 }): Promise<void> {
-  if (!WAS_BASE_URL) {
+  if (!WAS_BASE_SERVER_URL) {
     return
   }
   const outcome = await deleteUnlockSpaceForEntry({

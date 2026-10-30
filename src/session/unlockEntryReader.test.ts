@@ -13,7 +13,7 @@ import type { ZcapClient } from '@interop/ezcap'
 
 vi.mock('@/app.config', async importOriginal => ({
   ...(await importOriginal<Record<string, unknown>>()),
-  WAS_BASE_URL: 'https://was.example'
+  WAS_BASE_SERVER_URL: 'https://was.example/'
 }))
 
 const { unlockEntryReaderFor } = await import('@/session/unlockMethods')

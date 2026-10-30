@@ -28,6 +28,11 @@ import type { ControllerProfile, User } from '../../src/types/auth'
 import type { SessionPersistence } from '../../src/session/persistence'
 
 /**
+ * The Space URL every store built here is bound to.
+ */
+const SPACE_URL = 'https://example.test/space/space-id/'
+
+/**
  * Builds a WASRemoteStore whose `was` client has been replaced with a stub, so
  * tests exercise the store's handle navigation without real network/ezcap I/O.
  */
@@ -35,7 +40,7 @@ function storeWithStubbedClient(was: unknown): WASRemoteStore {
   const store = new WASRemoteStore({
     serviceDescription: TEST_SERVICE_DESCRIPTION,
     pinStore: memoryResourceLogPinStore(),
-    storageServerUrl: 'https://example.test',
+    baseServerUrl: 'https://example.test/',
     zcapClient: { request: vi.fn() } as unknown as ZcapClient,
     spaceId: 'space-id',
     controller: 'did:key:test'
@@ -49,17 +54,17 @@ describe('WASRemoteStore.listCollections', () => {
     const items = [
       {
         id: 'private-credentials',
-        url: '/space/space-id/private-credentials',
+        url: 'https://example.test/space/space-id/private-credentials',
         public: false
       },
       {
         id: 'public-credentials',
-        url: '/space/space-id/public-credentials',
+        url: 'https://example.test/space/space-id/public-credentials',
         public: true
       }
     ]
     const collections = vi.fn().mockResolvedValue({
-      url: '/space/space-id/collections/',
+      url: 'https://example.test/space/space-id/collections/',
       totalItems: 2,
       items
     })
@@ -69,7 +74,7 @@ describe('WASRemoteStore.listCollections', () => {
       .fn()
       .mockReturnValue({ isPublic, describe: describeCollection })
     const store = storeWithStubbedClient({
-      space: vi.fn().mockReturnValue({ collections, collection })
+      spaceAt: vi.fn().mockReturnValue({ collections, collection })
     })
 
     await expect(store.listCollections()).resolves.toEqual([
@@ -82,10 +87,13 @@ describe('WASRemoteStore.listCollections', () => {
 
   it('falls back to probing isPublic() when the listing omits the flag', async () => {
     const items = [
-      { id: 'private-credentials', url: '/space/space-id/private-credentials' }
+      {
+        id: 'private-credentials',
+        url: 'https://example.test/space/space-id/private-credentials'
+      }
     ]
     const collections = vi.fn().mockResolvedValue({
-      url: '/space/space-id/collections/',
+      url: 'https://example.test/space/space-id/collections/',
       totalItems: 1,
       items
     })
@@ -95,7 +103,7 @@ describe('WASRemoteStore.listCollections', () => {
       .fn()
       .mockReturnValue({ isPublic, describe: describeCollection })
     const store = storeWithStubbedClient({
-      space: vi.fn().mockReturnValue({ collections, collection })
+      spaceAt: vi.fn().mockReturnValue({ collections, collection })
     })
 
     await expect(store.listCollections()).resolves.toEqual([
@@ -109,7 +117,7 @@ describe('WASRemoteStore.listCollections', () => {
 
   it('returns an empty array when the space is missing', async () => {
     const store = storeWithStubbedClient({
-      space: vi.fn().mockReturnValue({
+      spaceAt: vi.fn().mockReturnValue({
         collections: vi.fn().mockResolvedValue(null)
       })
     })
@@ -123,12 +131,12 @@ describe('WASRemoteStore.listCollectionPublicStates', () => {
     const items = [
       {
         id: 'private-credentials',
-        url: '/space/space-id/private-credentials',
+        url: 'https://example.test/space/space-id/private-credentials',
         public: false
       },
       {
         id: 'example-app-public',
-        url: '/space/space-id/example-app-public',
+        url: 'https://example.test/space/space-id/example-app-public',
         public: true
       }
     ]
@@ -139,7 +147,7 @@ describe('WASRemoteStore.listCollectionPublicStates', () => {
       .fn()
       .mockReturnValue({ isPublic, describe: describeCollection })
     const store = storeWithStubbedClient({
-      space: vi.fn().mockReturnValue({ collections, collection })
+      spaceAt: vi.fn().mockReturnValue({ collections, collection })
     })
 
     await expect(store.listCollectionPublicStates()).resolves.toEqual([
@@ -154,7 +162,10 @@ describe('WASRemoteStore.listCollectionPublicStates', () => {
 
   it('probes isPublic() only when the listing omits the flag', async () => {
     const items = [
-      { id: 'legacy-collection', url: '/space/space-id/legacy-collection' }
+      {
+        id: 'legacy-collection',
+        url: 'https://example.test/space/space-id/legacy-collection'
+      }
     ]
     const collections = vi.fn().mockResolvedValue({ totalItems: 1, items })
     const isPublic = vi.fn().mockResolvedValue(true)
@@ -163,7 +174,7 @@ describe('WASRemoteStore.listCollectionPublicStates', () => {
       .fn()
       .mockReturnValue({ isPublic, describe: describeCollection })
     const store = storeWithStubbedClient({
-      space: vi.fn().mockReturnValue({ collections, collection })
+      spaceAt: vi.fn().mockReturnValue({ collections, collection })
     })
 
     await expect(store.listCollectionPublicStates()).resolves.toEqual([
@@ -179,14 +190,14 @@ describe('WASRemoteStore.listCollectionResources', () => {
     const items = [
       {
         id: 'credential.json',
-        url: '/space/space-id/private-credentials/credential.json',
+        url: 'https://example.test/space/space-id/private-credentials/credential.json',
         contentType: 'application/json',
         modified: '2026-05-01T00:00:00.000Z'
       }
     ]
     const list = vi.fn().mockResolvedValue({
       id: 'private-credentials',
-      url: '/space/space-id/private-credentials',
+      url: 'https://example.test/space/space-id/private-credentials',
       totalItems: 1,
       items
     })
@@ -195,14 +206,14 @@ describe('WASRemoteStore.listCollectionResources', () => {
       .fn()
       .mockReturnValue({ list, isPublic: collectionIsPublic })
     const space = vi.fn().mockReturnValue({ collection })
-    const store = storeWithStubbedClient({ space })
+    const store = storeWithStubbedClient({ spaceAt: space })
 
     await expect(
       store.listCollectionResources({
-        collectionUrl: '/space/space-id/private-credentials'
+        collectionUrl: 'https://example.test/space/space-id/private-credentials'
       })
     ).resolves.toEqual(items)
-    expect(space).toHaveBeenCalledWith('space-id', { capability: undefined })
+    expect(space).toHaveBeenCalledWith(SPACE_URL, { capability: undefined })
     expect(collection).toHaveBeenCalledWith('private-credentials')
     expect(collectionIsPublic).toHaveBeenCalledOnce()
   })
@@ -211,7 +222,7 @@ describe('WASRemoteStore.listCollectionResources', () => {
     const items = [
       {
         id: 'shared.json',
-        url: '/space/space-id/public-credentials/shared.json'
+        url: 'https://example.test/space/space-id/public-credentials/shared.json'
       }
     ]
     const list = vi.fn().mockResolvedValue({ totalItems: 1, items })
@@ -220,11 +231,11 @@ describe('WASRemoteStore.listCollectionResources', () => {
       .fn()
       .mockReturnValue({ list, isPublic: collectionIsPublic })
     const space = vi.fn().mockReturnValue({ collection })
-    const store = storeWithStubbedClient({ space })
+    const store = storeWithStubbedClient({ spaceAt: space })
 
     await expect(
       store.listCollectionResources({
-        collectionUrl: '/space/space-id/public-credentials'
+        collectionUrl: 'https://example.test/space/space-id/public-credentials'
       })
     ).resolves.toEqual([{ ...items[0], isPublic: true }])
     expect(collectionIsPublic).toHaveBeenCalledOnce()
@@ -237,7 +248,23 @@ describe('WASRemoteStore.fetchCollectionResource', () => {
     const resource = vi.fn().mockReturnValue({ get })
     const collection = vi.fn().mockReturnValue({ resource })
     const store = storeWithStubbedClient({
-      space: vi.fn().mockReturnValue({ collection })
+      spaceAt: vi.fn().mockReturnValue({ collection })
+    })
+
+    await expect(
+      store.fetchCollectionResource({
+        id: 'doc',
+        url: 'https://example.test/space/space-id/notes/doc'
+      })
+    ).resolves.toEqual({ kind: 'json', data: { hello: 'world' } })
+  })
+
+  it('resolves a listing path reference against the Space URL', async () => {
+    const get = vi.fn().mockResolvedValue({ hello: 'world' })
+    const resource = vi.fn().mockReturnValue({ get })
+    const collection = vi.fn().mockReturnValue({ resource })
+    const store = storeWithStubbedClient({
+      spaceAt: vi.fn().mockReturnValue({ collection })
     })
 
     await expect(
@@ -246,6 +273,18 @@ describe('WASRemoteStore.fetchCollectionResource', () => {
         url: '/space/space-id/notes/doc'
       })
     ).resolves.toEqual({ kind: 'json', data: { hello: 'world' } })
+    expect(collection).toHaveBeenCalledWith('notes')
+  })
+
+  it('refuses a URL under another Space', async () => {
+    const store = storeWithStubbedClient({ spaceAt: vi.fn() })
+
+    await expect(
+      store.fetchCollectionResource({
+        id: 'doc',
+        url: 'https://example.test/space/other-space/notes/doc'
+      })
+    ).rejects.toThrow()
   })
 
   it('forces the plaintext override so a marked collection returns its raw envelope', async () => {
@@ -257,13 +296,13 @@ describe('WASRemoteStore.fetchCollectionResource', () => {
     const resource = vi.fn().mockReturnValue({ get })
     const collection = vi.fn().mockReturnValue({ resource })
     const store = storeWithStubbedClient({
-      space: vi.fn().mockReturnValue({ collection })
+      spaceAt: vi.fn().mockReturnValue({ collection })
     })
 
     await expect(
       store.fetchCollectionResource({
         id: 'z6Env1',
-        url: '/space/space-id/private-credentials/z6Env1'
+        url: 'https://example.test/space/space-id/private-credentials/z6Env1'
       })
     ).resolves.toEqual({ kind: 'json', data: envelope })
     expect(resource).toHaveBeenCalledWith('z6Env1', { encryption: 'plaintext' })
@@ -275,7 +314,7 @@ describe('WASRemoteStore.fetchCollectionResource', () => {
     })
     const get = vi.fn().mockResolvedValue(blob)
     const store = storeWithStubbedClient({
-      space: vi.fn().mockReturnValue({
+      spaceAt: vi.fn().mockReturnValue({
         collection: vi.fn().mockReturnValue({
           resource: vi.fn().mockReturnValue({ get })
         })
@@ -284,7 +323,7 @@ describe('WASRemoteStore.fetchCollectionResource', () => {
 
     const result = await store.fetchCollectionResource({
       id: 'logo.png',
-      url: '/space/space-id/files/logo.png'
+      url: 'https://example.test/space/space-id/files/logo.png'
     })
     expect(result.kind).toBe('binary')
     if (result.kind === 'binary') {
@@ -317,7 +356,7 @@ describe('WASRemoteStore.collectionMetadata', () => {
     const collection = vi.fn().mockReturnValue({ describe: describeFn })
     const space = vi.fn().mockReturnValue({ collection })
     return {
-      store: storeWithStubbedClient({ space }),
+      store: storeWithStubbedClient({ spaceAt: space }),
       collection
     }
   }
@@ -394,7 +433,7 @@ describe('WASRemoteStore.listSyncedDocuments', () => {
     const documents = vi.fn().mockResolvedValue(feed)
     const collection = vi.fn().mockReturnValue({ documents })
     const space = vi.fn().mockReturnValue({ collection })
-    const store = storeWithStubbedClient({ space })
+    const store = storeWithStubbedClient({ spaceAt: space })
     store.adoptInvocationCapability({ capability })
 
     await expect(
@@ -403,7 +442,7 @@ describe('WASRemoteStore.listSyncedDocuments', () => {
       { id: 'b', data: { n: 3 } },
       { id: 'c', data: { n: 4 } }
     ])
-    expect(space).toHaveBeenCalledWith('space-id', { capability })
+    expect(space).toHaveBeenCalledWith(SPACE_URL, { capability })
     expect(collection).toHaveBeenCalledWith('wallet-activity')
     expect(documents).toHaveBeenCalledWith({ limit: 2 })
   })
@@ -412,7 +451,7 @@ describe('WASRemoteStore.listSyncedDocuments', () => {
     const documents = vi.fn().mockResolvedValue(null)
     const collection = vi.fn().mockReturnValue({ documents })
     const store = storeWithStubbedClient({
-      space: vi.fn().mockReturnValue({ collection })
+      spaceAt: vi.fn().mockReturnValue({ collection })
     })
 
     await expect(
@@ -424,7 +463,7 @@ describe('WASRemoteStore.listSyncedDocuments', () => {
     const documents = vi.fn().mockRejectedValue(new Error('boom'))
     const collection = vi.fn().mockReturnValue({ documents })
     const store = storeWithStubbedClient({
-      space: vi.fn().mockReturnValue({ collection })
+      spaceAt: vi.fn().mockReturnValue({ collection })
     })
 
     await expect(
@@ -447,7 +486,7 @@ describe('WASRemoteStore.getSyncedResource', () => {
     ).resolves.toEqual(envelope)
     expect(request).toHaveBeenCalledWith({
       capability: undefined,
-      path: '/space/space-id/private-credentials/z6Env1',
+      url: 'https://example.test/space/space-id/private-credentials/z6Env1',
       method: 'GET'
     })
   })
@@ -480,7 +519,7 @@ describe('WASRemoteStore.putSyncedResource', () => {
     ).resolves.toEqual({ created: true })
     expect(request).toHaveBeenCalledWith({
       capability: undefined,
-      path: '/space/space-id/private-credentials/z6Env1',
+      url: 'https://example.test/space/space-id/private-credentials/z6Env1',
       method: 'PUT',
       json: envelope,
       headers: { 'if-none-match': '*' }
@@ -518,7 +557,7 @@ describe('WASRemoteStore.initClient', () => {
   it('uses signer DID as controller and space-id seed', async () => {
     const controller = 'did:key:z6MktestControllerDid'
     const { remoteStore } = await WASRemoteStore.initClient({
-      storageServerUrl: 'https://example.test',
+      baseServerUrl: 'https://example.test/',
       user: { id: 'user-id-that-is-not-controller' } as unknown as User,
       session: {
         profile: {
@@ -539,13 +578,15 @@ describe('WASRemoteStore.initClient', () => {
   it('binds to the pointer Space id and stays did:key-controlled pre-promotion', async () => {
     const clientDid = 'did:key:z6MktestControllerDid'
     const { remoteStore } = await WASRemoteStore.initClient({
-      storageServerUrl: 'https://example.test',
+      baseServerUrl: 'https://example.test/',
       user: { id: clientDid } as unknown as User,
       session: {
         profile: {
           keyAgent: { id: clientDid },
           zcapClient: { request: vi.fn() },
-          accountPointer: { spaceId: 'minted-space-id', host: 'https://h' }
+          accountPointer: {
+            spaceUrl: 'https://example.test/space/minted-space-id/'
+          }
         } as unknown as ControllerProfile,
         persistence: {
           logPins: memoryResourceLogPinStore()
@@ -561,7 +602,7 @@ describe('WASRemoteStore.initClient', () => {
     const clientDid = 'did:key:z6MktestControllerDid'
     const webvhDid = 'did:webvh:zQmScid:example.test:space:minted-space-id:id'
     const { remoteStore } = await WASRemoteStore.initClient({
-      storageServerUrl: 'https://example.test',
+      baseServerUrl: 'https://example.test/',
       user: { id: clientDid } as unknown as User,
       session: {
         profile: {
@@ -569,8 +610,7 @@ describe('WASRemoteStore.initClient', () => {
           zcapClient: { request: vi.fn() },
           accountPointer: {
             did: webvhDid,
-            spaceId: 'minted-space-id',
-            host: 'https://h'
+            spaceUrl: 'https://example.test/space/minted-space-id/'
           }
         } as unknown as ControllerProfile,
         persistence: {
@@ -611,7 +651,7 @@ describe('WASRemoteStore.ensureCollection', () => {
       .fn()
       .mockReturnValue({ describeWithEtag, replaceDescription, setPublic })
     const store = storeWithStubbedClient({
-      space: vi.fn().mockReturnValue({ collection })
+      spaceAt: vi.fn().mockReturnValue({ collection })
     })
 
     await expect(
@@ -634,7 +674,7 @@ describe('WASRemoteStore.ensureCollection', () => {
       .fn()
       .mockReturnValue({ describeWithEtag, replaceDescription })
     const store = storeWithStubbedClient({
-      space: vi.fn().mockReturnValue({ collection })
+      spaceAt: vi.fn().mockReturnValue({ collection })
     })
 
     await store.ensureCollection({
@@ -681,7 +721,7 @@ describe('WASRemoteStore.ensureCollection', () => {
       .fn()
       .mockReturnValue({ describeWithEtag, replaceDescription })
     const store = storeWithStubbedClient({
-      space: vi.fn().mockReturnValue({ collection })
+      spaceAt: vi.fn().mockReturnValue({ collection })
     })
 
     await expect(
@@ -700,7 +740,7 @@ describe('WASRemoteStore.ensureCollection', () => {
       .fn()
       .mockReturnValue({ describeWithEtag, replaceDescription, setPublic })
     const store = storeWithStubbedClient({
-      space: vi.fn().mockReturnValue({ collection })
+      spaceAt: vi.fn().mockReturnValue({ collection })
     })
 
     await store.ensureCollection({ id: 'example-app-public', isPublic: true })
@@ -719,7 +759,7 @@ describe('WASRemoteStore.ensureCollection', () => {
       .fn()
       .mockReturnValue({ describeWithEtag, replaceDescription, setPublic })
     const store = storeWithStubbedClient({
-      space: vi.fn().mockReturnValue({ collection })
+      spaceAt: vi.fn().mockReturnValue({ collection })
     })
 
     await expect(
@@ -753,7 +793,7 @@ describe('WASRemoteStore.ensureGovernedCollection', () => {
       .fn()
       .mockReturnValue({ describeWithEtag, replaceDescription })
     const store = storeWithStubbedClient({
-      space: vi.fn().mockReturnValue({ collection })
+      spaceAt: vi.fn().mockReturnValue({ collection })
     })
 
     await expect(
@@ -784,7 +824,7 @@ describe('WASRemoteStore.ensureGovernedCollection', () => {
       .fn()
       .mockReturnValue({ describeWithEtag, replaceDescription })
     const store = storeWithStubbedClient({
-      space: vi.fn().mockReturnValue({ collection })
+      spaceAt: vi.fn().mockReturnValue({ collection })
     })
 
     await expect(
@@ -806,7 +846,7 @@ describe('WASRemoteStore.ensureGovernedCollection', () => {
       .fn()
       .mockReturnValue({ describeWithEtag, replaceDescription })
     const store = storeWithStubbedClient({
-      space: vi.fn().mockReturnValue({ collection })
+      spaceAt: vi.fn().mockReturnValue({ collection })
     })
 
     await expect(
@@ -827,13 +867,13 @@ describe('WASRemoteStore.ensureGovernedCollection', () => {
     const store = new WASRemoteStore({
       serviceDescription: TEST_SERVICE_DESCRIPTION,
       pinStore: memoryResourceLogPinStore(),
-      storageServerUrl: 'https://example.test',
+      baseServerUrl: 'https://example.test/',
       zcapClient: { request: vi.fn() } as unknown as ZcapClient,
       spaceId: 'space-id',
       controller: 'did:key:test',
       capability
     })
-    store.was = { space } as unknown as WasClient
+    store.was = { spaceAt: space } as unknown as WasClient
 
     await expect(
       store.ensureGovernedCollection({ id: 'example-app-data' })
@@ -841,7 +881,7 @@ describe('WASRemoteStore.ensureGovernedCollection', () => {
     // A generation delegation cannot reach the bare Space URL: the Space is
     // neither described nor created, and every handle carries the capability.
     expect(describe).not.toHaveBeenCalled()
-    expect(space).toHaveBeenCalledWith('space-id', { capability })
+    expect(space).toHaveBeenCalledWith(SPACE_URL, { capability })
     expect(replaceDescription).toHaveBeenCalledWith(
       { name: 'example-app-data' },
       { ifNoneMatch: true }
@@ -872,7 +912,7 @@ describe('WASRemoteStore.ensureGovernedCollection', () => {
       .fn()
       .mockReturnValue({ describeWithEtag, replaceDescription })
     const store = storeWithStubbedClient({
-      space: vi.fn().mockReturnValue({ collection })
+      spaceAt: vi.fn().mockReturnValue({ collection })
     })
 
     await expect(
@@ -895,7 +935,7 @@ describe('WASRemoteStore.promoteSpaceController', () => {
     }
     const configure = vi.fn().mockResolvedValue(undefined)
     const store = storeWithStubbedClient({
-      space: vi.fn().mockReturnValue({ configure })
+      spaceAt: vi.fn().mockReturnValue({ configure })
     })
 
     await store.promoteSpaceController({
@@ -913,7 +953,7 @@ describe('WASRemoteStore.promoteSpaceController', () => {
   it('omits `current` when the caller holds no read', async () => {
     const configure = vi.fn().mockResolvedValue(undefined)
     const store = storeWithStubbedClient({
-      space: vi.fn().mockReturnValue({ configure })
+      spaceAt: vi.fn().mockReturnValue({ configure })
     })
 
     await store.promoteSpaceController({ controller: 'did:webvh:promoted' })
@@ -953,37 +993,43 @@ describe('WASRemoteStore.ensureUserCollections', () => {
     // create, plus its `ETag`, as both real handles do. The Space's return is
     // what `provisionWalletSpace` threads into every collection branch so the
     // Space is ensured once rather than once per collection.
-    const was = {
-      space: (spaceId: string) => ({
-        describe: async () => null,
-        replaceDescription: async (fields: {
-          name?: string
-          controller: string
-        }) => ({
-          description: { id: spaceId, type: ['Space'], ...fields },
-          etag: '"1"'
-        }),
-        collection: (id: string) => ({
-          describeWithEtag: async () => null,
-          replaceDescription: async (
-            fields: { name?: string; encryption?: { scheme: string } },
-            options: { ifMatch?: string; ifNoneMatch?: boolean } = {}
-          ) => {
-            if (fail(id)) {
-              throw new Error('boom')
-            }
-            creates.push({ id, fields, options })
-            return {
-              description: { id, type: ['Collection'], ...fields },
-              etag: '"1"'
-            }
-          },
-          isPublic: async () => false,
-          setPublic: async () => {
-            setPublics.push(id)
+    const spaceHandle = (spaceUrl: string) => ({
+      url: spaceUrl,
+      describe: async () => null,
+      replaceDescription: async (fields: {
+        name?: string
+        controller: string
+      }) => ({
+        description: { id: spaceUrl, type: ['Space'], ...fields },
+        etag: '"1"'
+      }),
+      collection: (id: string) => ({
+        describeWithEtag: async () => null,
+        replaceDescription: async (
+          fields: { name?: string; encryption?: { scheme: string } },
+          options: { ifMatch?: string; ifNoneMatch?: boolean } = {}
+        ) => {
+          if (fail(id)) {
+            throw new Error('boom')
           }
-        })
+          creates.push({ id, fields, options })
+          return {
+            description: { id, type: ['Collection'], ...fields },
+            etag: '"1"'
+          }
+        },
+        isPublic: async () => false,
+        setPublic: async () => {
+          setPublics.push(id)
+        }
       })
+    })
+    const was = {
+      // The shared provisioner reads the Space URL off an id-opened handle,
+      // then opens every handle by that URL.
+      space: (spaceId: string) =>
+        spaceHandle(`https://example.test/space/${spaceId}/`),
+      spaceAt: spaceHandle
     }
     return { was, creates, setPublics }
   }
@@ -1047,13 +1093,13 @@ describe('WASRemoteStore.keyedCollectionHandle', () => {
     const store = new WASRemoteStore({
       serviceDescription: TEST_SERVICE_DESCRIPTION,
       pinStore: memoryResourceLogPinStore(),
-      storageServerUrl: 'https://example.test',
+      baseServerUrl: 'https://example.test/',
       zcapClient: { request: vi.fn() } as unknown as ZcapClient,
       spaceId: 'space-id',
       controller: 'did:webvh:zQmScid:example.test:space:space-id:id',
       ...(capability ? { capability } : {})
     })
-    store.was = { space } as unknown as WasClient
+    store.was = { spaceAt: space } as unknown as WasClient
     return { store, space, collection }
   }
 
@@ -1086,13 +1132,13 @@ describe('WASRemoteStore.keyedCollectionHandle', () => {
     const capability = { id: 'urn:zcap:generation' } as unknown as IZcap
     const { store, space } = storeWithCapability(capability)
     await openHandle(store)
-    expect(space).toHaveBeenCalledWith('space-id', { capability })
+    expect(space).toHaveBeenCalledWith(SPACE_URL, { capability })
   })
 
   it('root-invokes with no capability bound', async () => {
     const { store, space } = storeWithCapability()
     await openHandle(store)
-    expect(space).toHaveBeenCalledWith('space-id', { capability: undefined })
+    expect(space).toHaveBeenCalledWith(SPACE_URL, { capability: undefined })
   })
 
   it('reads the capability at each build, so a renewal reaches the next one', async () => {
@@ -1103,10 +1149,10 @@ describe('WASRemoteStore.keyedCollectionHandle', () => {
     store.adoptInvocationCapability({ capability: renewed })
     await openHandle(store)
     expect(space).toHaveBeenCalledTimes(2)
-    expect(space).toHaveBeenNthCalledWith(1, 'space-id', {
+    expect(space).toHaveBeenNthCalledWith(1, SPACE_URL, {
       capability: original
     })
-    expect(space).toHaveBeenNthCalledWith(2, 'space-id', {
+    expect(space).toHaveBeenNthCalledWith(2, SPACE_URL, {
       capability: renewed
     })
   })
@@ -1181,10 +1227,10 @@ describe('WASRemoteStore.declareCollectionIndexes', () => {
     const store = new WASRemoteStore({
       serviceDescription: TEST_SERVICE_DESCRIPTION,
       pinStore: memoryResourceLogPinStore(),
-      // This store builds a real WasClient, which refuses a server URL that
-      // disagrees with the Spaces URL the service description advertises,
-      // so the host matches TEST_SERVICE_DESCRIPTION's.
-      storageServerUrl: 'http://localhost',
+      // This store builds a real WasClient, which refuses a base server URL
+      // the service description does not describe, so the base matches
+      // TEST_SERVICE_DESCRIPTION's.
+      baseServerUrl: 'http://localhost/',
       zcapClient: {
         request,
         invocationSigner: { id: 'did:key:test#key' }

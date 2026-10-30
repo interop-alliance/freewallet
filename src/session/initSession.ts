@@ -22,7 +22,7 @@ import type { ZcapClient } from '@interop/ezcap'
 import type { DIDLog } from '@interop/did-method-webvh'
 import { agentsFromSeed } from '@interop/was-client/identity'
 import type { ControllerProfile, Session, User } from '@/types/auth'
-import { KMS_SERVER_URL, PASSKEY_KDF, WAS_BASE_URL } from '@/app.config'
+import { KMS_SERVER_URL, PASSKEY_KDF, WAS_BASE_SERVER_URL } from '@/app.config'
 import { ensureKeystore } from '@/lib/kms'
 import { assertPasskeyPrf } from '@/lib/passkey'
 import {
@@ -41,10 +41,8 @@ import {
   type UserKeyRosterReadResult
 } from '@interop/wallet-core/keys'
 import { accountRosterStore } from '@/session/rosterStore'
-import {
-  accountUserKeyGenerationKids,
-  currentAccountSignerCheck
-} from '@/session/clients'
+import { accountUserKeyGenerationKids } from '@/session/clients'
+import { currentAccountSignerCheck } from '@/session/accountSignerCheck'
 import { checkUserKeyRosterAtLogin as sharedCheckUserKeyRosterAtLogin } from '@interop/wallet-core/clients'
 import {
   browserLocalSessionPersistence,
@@ -283,7 +281,7 @@ export async function initSessionFromSeed({
   // localStorage). With no WAS server the same store is the only record of
   // the locally minted key epochs, so dropping it would mint fresh ones and
   // orphan everything already encrypted.
-  const suppressPopupCaches = popup && !!WAS_BASE_URL
+  const suppressPopupCaches = popup && !!WAS_BASE_SERVER_URL
   const persistence =
     suppliedPersistence ??
     browserLocalSessionPersistence({
@@ -300,7 +298,7 @@ export async function initSessionFromSeed({
   // running off its local replica offline. A server that answers and refuses
   // still rejects the login.
   const discovery =
-    WAS_BASE_URL && !isGuest
+    WAS_BASE_SERVER_URL && !isGuest
       ? wasServiceDescriptionIfReachable()
       : Promise.resolve(undefined)
   const { keyAgent, zcapClient, keyAgreementKey, keyResolver } =
@@ -380,7 +378,7 @@ export async function initSessionFromSeed({
   if (
     userKey &&
     isRememberedSession({ persistence, isGuest }) &&
-    WAS_BASE_URL &&
+    WAS_BASE_SERVER_URL &&
     serviceDescription &&
     accountPointer &&
     isWebvhDid(accountPointer.did)
@@ -610,11 +608,7 @@ async function checkUserKeyRosterAtLogin({
     serviceDescription,
     zcapClient,
     keyAgent,
-    pointer: {
-      did: accountDid,
-      spaceId: pointer.spaceId,
-      host: pointer.host
-    },
+    pointer: { did: accountDid, spaceUrl: pointer.spaceUrl },
     pinStore: persistence.logPins,
     ...(accountLog ? { log: accountLog } : {})
   })
@@ -707,7 +701,7 @@ async function healUnpromotedRememberedAccount({
     ...(type === 'passphrase'
       ? {
           beforePromotion: passphraseRegistryUpsertHook({
-            spaceId: pointer.spaceId
+            spaceUrl: pointer.spaceUrl
           })
         }
       : {})
@@ -982,7 +976,7 @@ async function loginWithUnlockCredential({
       suppliedPersistence ??
       browserLocalSessionPersistence({
         idb,
-        persistCaches: !(popup && !!WAS_BASE_URL)
+        persistCaches: !(popup && !!WAS_BASE_SERVER_URL)
       })
     let found = await fetchKeyring({
       kdf,
@@ -1007,11 +1001,9 @@ async function loginWithUnlockCredential({
     // The verified head is handed on to the detector, which reads it in
     // place of fetching the same log again.
     const accountLog =
-      WAS_BASE_URL && found.pointer && isWebvhDid(found.pointer.did)
+      WAS_BASE_SERVER_URL && found.pointer && isWebvhDid(found.pointer.did)
         ? await verifyPointedAccountLog({
             did: found.pointer.did,
-            spaceId: found.pointer.spaceId,
-            host: found.pointer.host,
             pinStore: persistence.logPins,
             unlock: derived.unlock,
             ...(idb !== undefined ? { idb } : {})
@@ -1388,11 +1380,7 @@ async function sessionFromKeyringHit({
   if (detectorLog && found.pointer?.did) {
     primeVerifiedAccountLog({
       session,
-      pointer: {
-        did: found.pointer.did,
-        spaceId: found.pointer.spaceId,
-        host: found.pointer.host
-      },
+      did: found.pointer.did,
       verified: detectorLog
     })
   }

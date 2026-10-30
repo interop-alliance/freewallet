@@ -6,7 +6,7 @@ import type { Session } from '@/types/auth'
 import { attributeExistingCollections } from './attributeExistingCollections'
 import { existingCollectionsFrom, resolveGrants } from './processZcaps'
 
-const SPACE = { serverUrl: 'https://was.example/', spaceId: 'abc' }
+const SPACE_URL = 'https://was.example/space/abc/'
 const GRANTEE = 'did:key:z6MkqojacRDqmQgDi4ESKKhGDqnZx4C6cChAbQZXvnUFX7D7'
 const GRANTEE_KID = x25519RecipientFromDidKey({ did: GRANTEE }).id!
 
@@ -24,11 +24,11 @@ function stringTargetResolution(
       {
         referenceId: collectionId,
         allowedAction: ['GET'],
-        invocationTarget: `${SPACE.serverUrl}space/${SPACE.spaceId}/${collectionId}/`,
+        invocationTarget: `${SPACE_URL}${collectionId}/`,
         controller: GRANTEE
       }
     ],
-    space: SPACE,
+    spaceUrl: SPACE_URL,
     collections: existingCollectionsFrom([{ id: collectionId }])
   }
 }
@@ -56,7 +56,7 @@ function storageDouble({
   return {
     readConnectionsListing: vi.fn(async () => ({
       listing,
-      spaceUrl: `${SPACE.serverUrl}space/${SPACE.spaceId}/`
+      spaceUrl: `${SPACE_URL}`
     })),
     collectionAttribution: vi.fn(async () => ({ encrypted })),
     listCollectionShares: vi.fn(async () =>
@@ -177,7 +177,7 @@ describe("attributeExistingCollections on an agent's stamp", () => {
           controller
         }
       ],
-      space: SPACE,
+      spaceUrl: SPACE_URL,
       collections: existingCollectionsFrom([{ id: 'notes' }])
     }
   }
@@ -245,7 +245,7 @@ describe("attributeExistingCollections on an app's stamp", () => {
           controller: GRANTEE
         }
       ],
-      space: SPACE,
+      spaceUrl: SPACE_URL,
       collections: existingCollectionsFrom([{ id: 'notes' }]),
       appUrl: 'https://other.example/'
     }
@@ -291,7 +291,7 @@ describe("attributeExistingCollections on an app's stamp", () => {
             unreadable: [],
             unparseable: []
           },
-          spaceUrl: `${SPACE.serverUrl}space/${SPACE.spaceId}/`
+          spaceUrl: `${SPACE_URL}`
         }
       })
     }

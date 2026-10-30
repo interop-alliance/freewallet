@@ -34,7 +34,7 @@ import {
 /**
  * Shared mutable state for the two mocks: the configured WAS url (mutable so a
  * test can drop it to exercise the cache-only branch), the in-memory data
- * Spaces (spaceId to stored record), and an optional error the remote GET
+ * Spaces (Space URL to stored record), and an optional error the remote GET
  * should throw.
  */
 const wasState = vi.hoisted(() => ({
@@ -55,7 +55,7 @@ const wasState = vi.hoisted(() => ({
 
 vi.mock('@/app.config', async importOriginal => ({
   ...(await importOriginal<typeof import('@/app.config')>()),
-  get WAS_BASE_URL() {
+  get WAS_BASE_SERVER_URL() {
     return wasState.url
   }
 }))
@@ -63,12 +63,12 @@ vi.mock('@/app.config', async importOriginal => ({
 vi.mock('@/stores/wasRemoteStore', () => ({
   putUnlockMethodsRecord: vi.fn(
     async ({
-      spaceId,
+      spaceUrl,
       record,
       ifMatch,
       ifNoneMatch
     }: {
-      spaceId: string
+      spaceUrl: string
       record: unknown
       ifMatch?: string
       ifNoneMatch?: boolean
@@ -79,8 +79,8 @@ vi.mock('@/stores/wasRemoteStore', () => ({
         await hook()
       }
       const { PreconditionFailedError } = await import('@interop/was-client')
-      const exists = wasState.records.has(spaceId)
-      const version = wasState.versions.get(spaceId) ?? 0
+      const exists = wasState.records.has(spaceUrl)
+      const version = wasState.versions.get(spaceUrl) ?? 0
       if (ifNoneMatch && exists) {
         throw new PreconditionFailedError(
           'A registry record already exists (If-None-Match).'
@@ -96,19 +96,19 @@ vi.mock('@/stores/wasRemoteStore', () => ({
           'Unconditional registry write: every PUT must carry a precondition.'
         )
       }
-      wasState.records.set(spaceId, record)
-      wasState.versions.set(spaceId, version + 1)
+      wasState.records.set(spaceUrl, record)
+      wasState.versions.set(spaceUrl, version + 1)
       return { etag: `v${version + 1}` }
     }
   ),
-  getUnlockMethodsRecord: vi.fn(async ({ spaceId }: { spaceId: string }) => {
+  getUnlockMethodsRecord: vi.fn(async ({ spaceUrl }: { spaceUrl: string }) => {
     if (wasState.getError) {
       throw wasState.getError
     }
-    return wasState.records.has(spaceId)
+    return wasState.records.has(spaceUrl)
       ? {
-          record: wasState.records.get(spaceId),
-          etag: `v${wasState.versions.get(spaceId) ?? 0}`
+          record: wasState.records.get(spaceUrl),
+          etag: `v${wasState.versions.get(spaceUrl) ?? 0}`
         }
       : null
   })
@@ -209,7 +209,7 @@ import { rotateOffUnlockCredential } from '@/session/credentialRotation'
 import { reportCeremonyTail } from '@/session/menders/ceremonyTail'
 import { browserLocalSessionPersistence } from '@/session/persistence'
 import { UNLOCK_METHODS_COLLECTION } from '@/app.config'
-import { rootCapabilityId } from '@interop/was-client/paths'
+import { rootCapabilityId, spaceUrlById } from '@interop/was-client/paths'
 import { DELETION_ZCAP_TTL_MS } from '@interop/wallet-core/clientAnnex'
 import {
   mintUserKey,
@@ -224,6 +224,10 @@ import {
 
 const DATA_CONTROLLER = 'did:key:z6MkDataControllerForUnlockMethods'
 const DATA_SPACE_ID = 'PVkVUyJ24oyQh2BebkeUOygDfR5opfhJhG4KkMYTlzU'
+const DATA_SPACE_URL = spaceUrlById({
+  baseServerUrl: 'https://was.example.test',
+  spaceId: DATA_SPACE_ID
+})
 
 /**
  * A minimal in-memory `IDBFactory` sufficient for the session-store cache
@@ -334,7 +338,7 @@ async function makeSession(idb?: IDBFactory): Promise<Session> {
       zcapClient: zcapClientForSigner({ signer: agent.getSigner() })
     },
     persistence: browserLocalSessionPersistence({ idb }),
-    storage: { spaceId: DATA_SPACE_ID },
+    storage: { spaceId: DATA_SPACE_ID, spaceUrl: DATA_SPACE_URL },
     isGuest: false
   } as unknown as Session
 }
@@ -588,7 +592,7 @@ describe('put / get round-trip', () => {
     await seedRegistry({ session, record })
 
     // The remote body is the JWE-wrapped envelope, not the plaintext record.
-    const stored = wasState.records.get(DATA_SPACE_ID) as {
+    const stored = wasState.records.get(DATA_SPACE_URL) as {
       version: number
       wrapped: { jwe?: unknown }
       proof?: { proofValue?: string }
@@ -612,7 +616,7 @@ describe('put / get round-trip', () => {
 
   it('rejects a stored record whose outer version is not 2', async () => {
     const session = await makeSession()
-    wasState.records.set(DATA_SPACE_ID, { version: 3, wrapped: {} })
+    wasState.records.set(DATA_SPACE_URL, { version: 3, wrapped: {} })
 
     await expect(getUnlockMethods({ session })).rejects.toThrow(/version/)
   })
@@ -621,7 +625,7 @@ describe('put / get round-trip', () => {
     const session = await makeSession(createFakeIdb())
     await seedRegistry({ session, record: sampleRecord() })
     // The host kept the account's own proof and swapped the ciphertext.
-    const stored = wasState.records.get(DATA_SPACE_ID) as {
+    const stored = wasState.records.get(DATA_SPACE_URL) as {
       wrapped: { jwe: { ciphertext: string } }
     }
     stored.wrapped.jwe.ciphertext = 'dGFtcGVyZWQ'
@@ -639,7 +643,7 @@ describe('put / get round-trip', () => {
     // Sealed so this session's vault KAK opens it, signed by a key the
     // account never held.
     wasState.records.set(
-      DATA_SPACE_ID,
+      DATA_SPACE_URL,
       await wrapRecordEnvelope({
         data: sampleRecord() as never,
         version: 2,
@@ -649,7 +653,7 @@ describe('put / get round-trip', () => {
         signer: await userKeyRecordSigner({ userKey: await mintUserKey() })
       })
     )
-    wasState.versions.set(DATA_SPACE_ID, 1)
+    wasState.versions.set(DATA_SPACE_URL, 1)
 
     await expect(getUnlockMethods({ session })).rejects.toBeInstanceOf(
       UnlockRegistryStaleSealError
@@ -660,7 +664,7 @@ describe('put / get round-trip', () => {
     const session = await makeSession()
     // A well-formed version-1 frame: the shape this account's registry had
     // before the record carried a proof.
-    wasState.records.set(DATA_SPACE_ID, {
+    wasState.records.set(DATA_SPACE_URL, {
       version: 1,
       encryption: { epochs: [] },
       wrapped: { jwe: {} }
@@ -1256,7 +1260,7 @@ describe('refreshTransientManageCapability', () => {
   }): Promise<void> {
     await updateUnlockMethodsWithClient({
       zcapClient: {} as never,
-      spaceId: DATA_SPACE_ID,
+      spaceUrl: DATA_SPACE_URL,
       userKey,
       mutate: () => record
     })
@@ -1279,7 +1283,7 @@ describe('refreshTransientManageCapability', () => {
   }): Promise<'refreshed' | 'unchanged' | 'failed'> {
     return await refreshTransientManageCapability({
       zcapClient: {} as never,
-      spaceId: DATA_SPACE_ID,
+      spaceUrl: DATA_SPACE_URL,
       userKey,
       capability: FAKE_CAP,
       unlockSpaceId: 'unlock-space-abc',
@@ -1322,7 +1326,7 @@ describe('refreshTransientManageCapability', () => {
     expect(putUnlockMethodsRecord).toHaveBeenCalledOnce()
     const after = await getUnlockMethodsWithClient({
       zcapClient: {} as never,
-      spaceId: DATA_SPACE_ID,
+      spaceUrl: DATA_SPACE_URL,
       userKey
     })
     expect(after!.methods[0].manageCapability).toEqual(FAKE_CAP)
@@ -1385,7 +1389,7 @@ describe('refreshTransientManageCapability', () => {
     expect(putUnlockMethodsRecord).toHaveBeenCalledOnce()
     const after = await getUnlockMethodsWithClient({
       zcapClient: {} as never,
-      spaceId: DATA_SPACE_ID,
+      spaceUrl: DATA_SPACE_URL,
       userKey
     })
     expect(after!.methods[0].manageCapability).toEqual(FAKE_CAP)
@@ -1481,7 +1485,7 @@ describe('updateUnlockMethodsWithClient re-sealing to a write key', () => {
     const newUserKey = await mintUserKey()
     await updateUnlockMethodsWithClient({
       zcapClient: {} as never,
-      spaceId: DATA_SPACE_ID,
+      spaceUrl: DATA_SPACE_URL,
       userKey: newUserKey,
       mutate: () => seedRecord()
     })
@@ -1489,7 +1493,7 @@ describe('updateUnlockMethodsWithClient re-sealing to a write key', () => {
 
     const written = await updateUnlockMethodsWithClient({
       zcapClient: {} as never,
-      spaceId: DATA_SPACE_ID,
+      spaceUrl: DATA_SPACE_URL,
       userKey: oldUserKey,
       writeUserKey: newUserKey,
       mutate: existing => ({
@@ -1508,7 +1512,7 @@ describe('updateUnlockMethodsWithClient re-sealing to a write key', () => {
     expect(putUnlockMethodsRecord).toHaveBeenCalledOnce()
     const after = await getUnlockMethodsWithClient({
       zcapClient: {} as never,
-      spaceId: DATA_SPACE_ID,
+      spaceUrl: DATA_SPACE_URL,
       userKey: newUserKey
     })
     expect(after!.methods).toHaveLength(2)
@@ -1523,18 +1527,18 @@ describe('updateUnlockMethodsWithClient re-sealing to a write key', () => {
     // the rejection shows which one the fallback rethrows.
     await updateUnlockMethodsWithClient({
       zcapClient: {} as never,
-      spaceId: DATA_SPACE_ID,
+      spaceUrl: DATA_SPACE_URL,
       userKey: oldUserKey,
       mutate: () => seedRecord()
     })
-    const stored = wasState.records.get(DATA_SPACE_ID) as {
+    const stored = wasState.records.get(DATA_SPACE_URL) as {
       wrapped: { jwe: { ciphertext: string } }
     }
     stored.wrapped.jwe.ciphertext = 'dGFtcGVyZWQ'
     await expect(
       getUnlockMethodsWithClient({
         zcapClient: {} as never,
-        spaceId: DATA_SPACE_ID,
+        spaceUrl: DATA_SPACE_URL,
         userKey: newUserKey
       })
     ).rejects.toMatchObject({ name: 'RecordEnvelopeDecryptError' })
@@ -1543,7 +1547,7 @@ describe('updateUnlockMethodsWithClient re-sealing to a write key', () => {
     await expect(
       updateUnlockMethodsWithClient({
         zcapClient: {} as never,
-        spaceId: DATA_SPACE_ID,
+        spaceUrl: DATA_SPACE_URL,
         userKey: oldUserKey,
         writeUserKey: newUserKey,
         mutate: existing => existing
@@ -1556,7 +1560,7 @@ describe('updateUnlockMethodsWithClient re-sealing to a write key', () => {
     const userKey = await mintUserKey()
     await updateUnlockMethodsWithClient({
       zcapClient: {} as never,
-      spaceId: DATA_SPACE_ID,
+      spaceUrl: DATA_SPACE_URL,
       userKey: await mintUserKey(),
       mutate: () => seedRecord()
     })
@@ -1564,7 +1568,7 @@ describe('updateUnlockMethodsWithClient re-sealing to a write key', () => {
     await expect(
       updateUnlockMethodsWithClient({
         zcapClient: {} as never,
-        spaceId: DATA_SPACE_ID,
+        spaceUrl: DATA_SPACE_URL,
         userKey,
         mutate: existing => existing
       })
@@ -2783,9 +2787,8 @@ describe('rewrapUnlockMethodsRecord', () => {
     const from = session.profile.userKey!
     const to = await mintUserKey()
     await rewrapUnlockMethodsRecord({
-      storageServerUrl: 'https://was.example.test',
       zcapClient: {} as never,
-      spaceId: DATA_SPACE_ID,
+      spaceUrl: DATA_SPACE_URL,
       from,
       to
     })
@@ -2805,9 +2808,8 @@ describe('rewrapUnlockMethodsRecord', () => {
     const to = await mintUserKey()
     vi.mocked(putUnlockMethodsRecord).mockClear()
     await rewrapUnlockMethodsRecord({
-      storageServerUrl: 'https://was.example.test',
       zcapClient: {} as never,
-      spaceId: DATA_SPACE_ID,
+      spaceUrl: DATA_SPACE_URL,
       from,
       to
     })
@@ -2829,9 +2831,8 @@ describe('the registry compare-and-swap (FW-299)', () => {
     // B's rotation re-seal lands between A's read and A's first PUT.
     wasState.beforePut = async () => {
       await rewrapUnlockMethodsRecord({
-        storageServerUrl: 'https://was.example.test',
         zcapClient: {} as never,
-        spaceId: DATA_SPACE_ID,
+        spaceUrl: DATA_SPACE_URL,
         from,
         to: freshSeal
       })
@@ -2840,9 +2841,8 @@ describe('the registry compare-and-swap (FW-299)', () => {
 
     await expect(
       rewrapUnlockMethodsRecord({
-        storageServerUrl: 'https://was.example.test',
         zcapClient: {} as never,
-        spaceId: DATA_SPACE_ID,
+        spaceUrl: DATA_SPACE_URL,
         from,
         to: staleTarget
       })
@@ -2864,8 +2864,8 @@ describe('the registry compare-and-swap (FW-299)', () => {
     await seedRegistry({ session, record: sampleRecord() })
     // Bump the stored version behind every attempt, so each PUT is stale.
     const bump = () => {
-      const version = wasState.versions.get(DATA_SPACE_ID) ?? 0
-      wasState.versions.set(DATA_SPACE_ID, version + 1)
+      const version = wasState.versions.get(DATA_SPACE_URL) ?? 0
+      wasState.versions.set(DATA_SPACE_URL, version + 1)
       wasState.beforePut = bump
     }
     wasState.beforePut = bump

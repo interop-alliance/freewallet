@@ -4,35 +4,64 @@
  * its own, so there is nothing else in this module to test.
  */
 import { describe, it, expect } from 'vitest'
-import { didWebFromSpace } from './didWeb'
+import { didWebOfAccount, didWebOfSpace } from './didWeb'
 
-const SPACE_ID = 'space-abc'
+const SCID = 'QmZQHqm2a11FAhwmsVY5Sa9ZByNLWN1HQH68ze5WmtJqY7'
 
-describe('didWebFromSpace', () => {
-  it('builds a did:web from a plain host', () => {
+describe('didWebOfAccount', () => {
+  it('drops the method and SCID of a plain-host did:webvh', () => {
     expect(
-      didWebFromSpace({
-        wasServerUrl: 'https://example.com',
-        spaceId: SPACE_ID
+      didWebOfAccount({
+        did: `did:webvh:${SCID}:example.com:space:space-abc:id`
       })
     ).toBe('did:web:example.com:space:space-abc:id')
   })
 
-  it('percent-encodes a host with a port (dev)', () => {
+  it('keeps the percent-encoded port of a dev host', () => {
     expect(
-      didWebFromSpace({
-        wasServerUrl: 'http://localhost:8080',
-        spaceId: SPACE_ID
+      didWebOfAccount({
+        did: `did:webvh:${SCID}:localhost%3A8080:space:space-abc:id`
       })
     ).toBe('did:web:localhost%3A8080:space:space-abc:id')
   })
 
-  it('drops a default port', () => {
+  it('keeps the prefix segments of a sub-path mount', () => {
     expect(
-      didWebFromSpace({
-        wasServerUrl: 'https://example.com:443/kms',
-        spaceId: SPACE_ID
+      didWebOfAccount({
+        did: `did:webvh:${SCID}:example.com:was:space:space-abc:id`
       })
-    ).toBe('did:web:example.com:space:space-abc:id')
+    ).toBe('did:web:example.com:was:space:space-abc:id')
+  })
+
+  it('refuses a did that is not a did:webvh', () => {
+    expect(() =>
+      didWebOfAccount({
+        did: 'did:key:z6MkhaXgBZDvotDkL5257faiztiGiC2QtKLGpbnnEGta2doK'
+      })
+    ).toThrow()
+  })
+})
+
+describe('didWebOfSpace', () => {
+  it('names the id the published did:webvh will project to', () => {
+    expect(
+      didWebOfSpace({
+        baseServerUrl: 'http://localhost:8080/',
+        spaceId: 'space-abc'
+      })
+    ).toBe('did:web:localhost%3A8080:space:space-abc:id')
+  })
+
+  it('carries a sub-path mount as prefix segments', () => {
+    expect(
+      didWebOfSpace({
+        baseServerUrl: 'https://example.com/was/',
+        spaceId: 'space-abc'
+      })
+    ).toBe(
+      didWebOfAccount({
+        did: 'did:webvh:QmZQHqm2a11FAhwmsVY5Sa9ZByNLWN1HQH68ze5WmtJqY7:example.com:was:space:space-abc:id'
+      })
+    )
   })
 })

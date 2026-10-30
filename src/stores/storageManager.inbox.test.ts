@@ -71,7 +71,7 @@ function inboxStorage({
   const remoteStore = {
     spaceId: 's',
     spaceUrl: 'https://was.example/space/s/',
-    storageServerUrl: 'https://was.example',
+    baseServerUrl: 'https://was.example',
     collectionHandle: vi.fn(() => handle)
   } as unknown as WASRemoteStore
   const storage = new StorageManager({

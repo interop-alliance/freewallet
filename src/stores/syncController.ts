@@ -27,7 +27,6 @@
 import type { SyncController } from '@interop/was-sync/rxdb'
 import {
   SYNCED_COLLECTIONS,
-  WAS_BASE_URL,
   WAS_SYNC_BATCH_SIZE,
   WAS_SYNC_POLL_MS,
   WAS_SYNC_RETRY_MS
@@ -139,12 +138,11 @@ class SessionSyncController {
    */
   async #start({ session }: { session: Session }): Promise<void> {
     const wasClient = session.storage.wasClient
-    const spaceId = session.storage.spaceId
+    const spaceUrl = session.storage.spaceUrl
     if (
       session.isGuest ||
-      !WAS_BASE_URL ||
       !wasClient ||
-      !spaceId ||
+      !spaceUrl ||
       !session.storage.hasLocalReplica
     ) {
       return
@@ -160,8 +158,7 @@ class SessionSyncController {
       const core = createSyncController({
         port: {
           wasClient,
-          spaceId,
-          baseUrl: WAS_BASE_URL,
+          spaceUrl,
           collections: SYNCED_COLLECTIONS,
           // The local end of replication IS the page-facing active replica.
           rxCollection: key => session.storage.localCollection(key),

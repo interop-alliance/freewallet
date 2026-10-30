@@ -223,7 +223,7 @@ function makeFakeRemote({
   }): void
 } {
   const spaceId = 's-space'
-  const storageServerUrl = 'https://was.example'
+  const baseServerUrl = 'https://was.example'
   // The canonical container form, which the path builders emit.
   const spaceUrl = 'https://was.example/space/s-space/'
   const revoked: unknown[] = []
@@ -260,7 +260,7 @@ function makeFakeRemote({
   const remoteStore = {
     spaceId,
     spaceUrl,
-    storageServerUrl,
+    baseServerUrl,
     collectionTargetUrl: (collectionId: string) =>
       `${spaceUrl}${collectionId}/`,
     async collectionEncryption({ collectionId }: { collectionId: string }) {
@@ -460,7 +460,7 @@ async function mintCollectionMeta({
 }): Promise<{ custom: unknown }> {
   const provider = createEdvEncryption({ resolveKeys: async () => keys })
   const codec = await provider.codecFor({
-    spaceId: 'local',
+    spaceUrl: 'http://localhost/space/local/',
     collectionId,
     scheme: 'edv',
     encryption

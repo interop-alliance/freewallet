@@ -27,7 +27,7 @@
  */
 import type { IVerifiableCredential } from '@interop/data-integrity-core'
 import { isConnectCode } from '@interop/wallet-core/enrollment'
-import { isWasLinkPayload } from '@interop/wallet-core/space'
+import { isPwsLinkPayload } from '@interop/wallet-core/space'
 import { handleWalletInput } from '@interop/wallet-request'
 import { resolveCredentialsInput } from '@/lib/resolveCredentialsInput'
 
@@ -77,7 +77,7 @@ export async function resolveWalletInput(
   try {
     return await handleWalletInput<WalletInputOutcome>({
       text,
-      recognizers: { isWasLink: isWasLinkPayload, isConnectCode },
+      recognizers: { isWasLink: isPwsLinkPayload, isConnectCode },
       handlers: {
         credentials: async ({ text: raw }) => ({
           kind: 'credentials',

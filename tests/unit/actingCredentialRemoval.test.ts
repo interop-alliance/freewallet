@@ -88,7 +88,7 @@ import {
 import type { PasskeyUnlockMethod } from '@/session/unlockMethods'
 import type { Session } from '@/types/auth'
 
-const ACCOUNT_DID = 'did:webvh:QmScid:was.example.test:space:space-123'
+const ACCOUNT_DID = 'did:webvh:QmScid:localhost:space:space-123:id'
 
 /**
  * The removed passkey's own ladder VM key multibase: every record's bridge
@@ -118,7 +118,9 @@ function sessionStub(): Session {
     user: { id: 'did:key:z6MkVisitKey' },
     registryReady: Promise.resolve(),
     storage: { spaceId: 'space-123' },
-    profile: { accountPointer: { spaceId: 'space-123' } }
+    profile: {
+      accountPointer: { spaceUrl: 'http://localhost/space/space-123/' }
+    }
   } as unknown as Session
 }
 

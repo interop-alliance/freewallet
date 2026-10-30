@@ -19,7 +19,6 @@ import {
 } from './processZcaps'
 import type { ICapabilityQueryDetail, IZcap } from './types'
 
-const SPACE = { serverUrl: 'https://was.example/', spaceId: 'abc' }
 const SPACE_URL = 'https://was.example/space/abc/'
 const NOW = Date.parse('2026-08-22T12:00:00Z')
 const DAY_MS = 24 * 60 * 60 * 1000
@@ -159,7 +158,6 @@ function fakeSession({
     storage: {
       hasRemoteStorage: true,
       spaceUrl: SPACE_URL,
-      spaceLocation: SPACE,
       listCollectionPublicStates,
       ensureCollection: vi.fn(async () => {}),
       provisionEncryptedCollection: vi.fn(async () => {})
@@ -169,7 +167,7 @@ function fakeSession({
       invocationCapability,
       ...(verifiedLog
         ? {
-            accountPointer: { did: ACCOUNT_DID, spaceId: 'abc' },
+            accountPointer: { did: ACCOUNT_DID, spaceUrl: SPACE_URL },
             verifiedLog
           }
         : {})
@@ -531,7 +529,7 @@ describe('processZcaps string target on a collection the request provisions', ()
   it('previews the string row as unsatisfiable', () => {
     const [first, second] = resolveGrants({
       zcapRequests: REQUESTS,
-      space: SPACE,
+      spaceUrl: SPACE_URL,
       collections: existingCollectionsFrom([])
     })
     expect(isSatisfiable(first!.target)).toBe(true)
@@ -581,7 +579,7 @@ describe('processZcaps string target on an existing collection a descriptor re-p
   it('previews both rows as satisfiable', () => {
     const [first, second] = resolveGrants({
       zcapRequests: REQUESTS,
-      space: SPACE,
+      spaceUrl: SPACE_URL,
       collections: existingCollectionsFrom([{ id: 'notes' }])
     })
     expect(first!.target.needsProvisioning).toBe(true)
@@ -634,7 +632,7 @@ describe('processZcaps one new collection named public, then private', () => {
   it('previews the private row as the public collection, provisioning nothing', () => {
     const [first, second] = resolveGrants({
       zcapRequests: REQUESTS,
-      space: SPACE,
+      spaceUrl: SPACE_URL,
       collections: existingCollectionsFrom([])
     })
     expect(first!.target).toMatchObject({
@@ -663,7 +661,7 @@ describe('processZcaps one new collection named public, then private', () => {
     const reversed = [REQUESTS[1]!, REQUESTS[0]!]
     const [first, second] = resolveGrants({
       zcapRequests: reversed,
-      space: SPACE,
+      spaceUrl: SPACE_URL,
       collections: existingCollectionsFrom([])
     })
     expect(first!.target.targetClass).toBe('collection')
@@ -751,7 +749,7 @@ describe('processZcaps string target on a reserved Space segment', () => {
       it(`previews ${segment} as unsatisfiable on the ${label} path`, () => {
         const [grant] = resolveGrants({
           zcapRequests: requestsFor(segment),
-          space: SPACE,
+          spaceUrl: SPACE_URL,
           collections: existingCollectionsFrom(collections),
           ...(app && { appUrl: app.appUrl })
         })

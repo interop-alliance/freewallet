@@ -41,6 +41,7 @@ import { deleteLocalCacheFamilies } from '@/session/persistence'
 import type { UnlockMethodsRecord } from '@/session/unlockMethods'
 import type { Session } from '@/types/auth'
 import { createLogger } from '@/lib/log'
+import { spaceLocation } from '@/lib/spaceLocation'
 
 const log = createLogger('fw:session:wipe')
 
@@ -161,9 +162,11 @@ export function snapshotWipeTargets({
   enrolledClientDids?: string[]
 }): WipeTargets {
   const clientDid = session.user.id
-  const accountSpaceId = session.profile.accountPointer?.spaceId
   const { unlockMethod, standingUnlock, accountController, accountPointer } =
     session.profile
+  const accountSpaceId = accountPointer
+    ? spaceLocation({ spaceUrl: accountPointer.spaceUrl }).spaceId
+    : undefined
   const unlockSpaceIds = new Set<string>([
     ...(unlockMethod ? [unlockMethod.unlockSpaceId] : []),
     ...(standingUnlock ? [standingUnlock.unlockSpaceId] : []),

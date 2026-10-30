@@ -20,7 +20,7 @@ const state = vi.hoisted(() => ({
 
 vi.mock('@/app.config', async importOriginal => ({
   ...(await importOriginal<typeof import('@/app.config')>()),
-  WAS_BASE_URL: 'https://was.example.test'
+  WAS_BASE_SERVER_URL: 'https://was.example.test/'
 }))
 
 vi.mock('@interop/wallet-core/keyring', async importOriginal => ({
@@ -59,20 +59,18 @@ import { createFakeSessionIdb } from './fakeSessionIdb'
 
 const POINTER = {
   did: 'did:webvh:QmScidForTests:was.example.test:space:space-123:id',
-  spaceId: 'space-123',
-  host: 'https://was.example.test'
+  spaceUrl: 'https://was.example.test/space/space-123/'
 }
 const OTHER_POINTER = {
   did: 'did:webvh:QmOther:was.example.test:space:space-999:id',
-  spaceId: 'space-999',
-  host: 'https://was.example.test'
+  spaceUrl: 'https://was.example.test/space/space-999/'
 }
 const CONTROLLER = 'did:key:z6MkAccountController'
 const PASSPHRASE = 'the chosen new passphrase for the spend bind'
 const DELEGATION = {
   id: 'urn:zcap:delegated:test',
   controller: 'did:key:z6MkGrantee',
-  invocationTarget: `${POINTER.host}/space/${POINTER.spaceId}/id/did.jsonl`,
+  invocationTarget: `${POINTER.spaceUrl}id/did.jsonl`,
   parentCapability: 'urn:zcap:root:test',
   proof: { verificationMethod: `${POINTER.did}#z6MkIssuingClient` }
 } as unknown as IZcap

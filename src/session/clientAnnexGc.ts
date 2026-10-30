@@ -21,8 +21,10 @@
 import { isWebvhDid } from '@interop/wallet-core/webvh'
 import { runClientAnnexGc } from '@interop/wallet-core/clientAnnex'
 import type { ClientAnnexGcReport } from '@interop/wallet-core/clientAnnex'
+import { spaceLocation } from '@/lib/spaceLocation'
 import { pointedClientAnnexReach } from '@/session/annexReach'
 import { enrolledCeremonyContext } from '@/session/accountCeremonyContext'
+import { restatedReplicaServers } from '@/session/replicaRestate'
 import { isBrowserLocalSession } from '@/session/persistence'
 import {
   invalidateVerifiedLog,
@@ -93,17 +95,25 @@ export async function sweepClientAnnexGenerations({
     return { skipped: 'no-annex-inventory' }
   }
   const { doc, log, was } = reach
+  const { baseServerUrl, spaceId } = spaceLocation({
+    spaceUrl: pointer.spaceUrl
+  })
+  // Read before the pass, so a directory this session cannot list or verify
+  // refuses the whole pass ahead of its mint rather than swapping with an
+  // empty list.
+  const replicaServerDids = await restatedReplicaServers({ session })
 
   let report: ClientAnnexGcReport
   try {
     report = await runClientAnnexGc({
       was,
-      wasServerUrl: pointer.host,
-      accountSpaceId: pointer.spaceId,
+      baseServerUrl,
+      accountSpaceId: spaceId,
       account: { did: pointer.did, doc, log },
       idStore: remoteStore.webvhIdStore(),
       updateKeys: clientWebvhKeys,
       zcapClient: session.profile.zcapClient,
+      replicaServerDids,
       ...(ladderSeed !== undefined ? { ladderSeed } : {}),
       recordDigest: async digest => {
         await session.storage.addHistoryGenerationCollected({

@@ -418,7 +418,7 @@ async function revokeEnrolledClientHeld({
       // death during the collection fan-out below cannot strand it.
       await adoptRotatedUserKeyInBand({
         session,
-        spaceId: pointer.spaceId,
+        spaceUrl: pointer.spaceUrl,
         accountDid: pointer.did,
         userKey,
         latestEpochId,
@@ -451,7 +451,7 @@ async function revokeEnrolledClientHeld({
     onRotationAdopted: async ({ userKey }) =>
       await adoptRotatedUserKey({
         session,
-        spaceId: pointer.spaceId,
+        spaceUrl: pointer.spaceUrl,
         userKey
       })
   }).finally(() => invalidateVerifiedLog({ profile: session.profile }))

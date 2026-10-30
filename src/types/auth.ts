@@ -116,9 +116,10 @@ export interface ControllerProfile {
   // the keyring hit at login; flows that mint further unlock records (a
   // recovery-code issuance) carry it forward so any client can issue.
   accountController?: string
-  // The account pointer { did, spaceId, host } this client holds as local
-  // state (recovered from the keyring record at login, or stamped at
-  // provisioning). Discovery only; absent for guests and no-WAS sessions.
+  // The account pointer { did, spaceUrl } this client holds as local state
+  // (recovered from the keyring record at login, or stamped at provisioning).
+  // The DID locates its own log and server, so nothing beside it is stored.
+  // Discovery only; absent for guests and no-WAS sessions.
   accountPointer?: AccountPointer
   // The per-user key (user key) recovered from the local client-key record (or
   // freshly minted at provisioning), held in memory so bind flows can carry

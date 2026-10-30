@@ -26,6 +26,7 @@ import {
   delegationProofKeyId,
   zcapExpiring
 } from '@interop/wallet-core/recovery'
+import { spaceLocation } from '@/lib/spaceLocation'
 import { zcapExpires } from '@/lib/zcap'
 import type { Session } from '@/types/auth'
 import {
@@ -167,7 +168,8 @@ export async function remintStandingDelegations({
     if (clientAnnexSpaceId) {
       delegatedClients = await mintDelegatedClientsDelegation({
         zcapClient,
-        wasServerUrl: pointer.host,
+        baseServerUrl: spaceLocation({ spaceUrl: pointer.spaceUrl })
+          .baseServerUrl,
         clientAnnexSpaceId,
         controller: standingClientDid
       })

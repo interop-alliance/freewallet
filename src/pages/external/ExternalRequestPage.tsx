@@ -193,8 +193,8 @@ export function ExternalRequestPage() {
     setPageState('preparing')
     await loggedIn.storage.ready()
     await loggedIn.storageReady
-    const space = loggedIn.storage.spaceLocation
-    if (!hasZcapStorage(loggedIn) || !space) {
+    const spaceUrl = loggedIn.storage.spaceUrl
+    if (!hasZcapStorage(loggedIn) || !spaceUrl) {
       block('zcapUnavailable')
       return
     }
@@ -207,7 +207,7 @@ export function ExternalRequestPage() {
     // own, and one another party created names that party.
     const resolution = {
       zcapRequests: requestProfile.zcapRequests,
-      space,
+      spaceUrl,
       collections: existingCollectionsFrom(
         await loggedIn.storage.listCollectionPublicStates()
       ),

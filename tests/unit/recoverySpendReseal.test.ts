@@ -13,6 +13,7 @@
  * into the mocked unlock Space exactly as issuance writes it).
  */
 import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { resourceUrl, spaceUrlById } from '@interop/was-client/paths'
 
 import type { IKeyAgreementKey, IZcap } from '@interop/data-integrity-core'
 
@@ -32,7 +33,7 @@ const state = vi.hoisted(() => ({
 
 vi.mock('@/app.config', async importOriginal => ({
   ...(await importOriginal<typeof import('@/app.config')>()),
-  WAS_BASE_URL: 'https://was.example.test'
+  WAS_BASE_SERVER_URL: 'http://localhost/'
 }))
 
 vi.mock('@interop/wallet-core/keyring', async importOriginal => ({
@@ -76,11 +77,11 @@ vi.mock('@interop/wallet-core/recovery', async importOriginal => ({
         builtOnHead: { scid: 'QmScidForTests', versionId: '1-head' }
       })
       return {
-        did: 'did:webvh:QmScidForTests:was.example.test:space:space-123:id',
+        did: 'did:webvh:QmScidForTests:localhost:space:space-123:id',
         committed: true,
         // The add-and-retire entry struck the passkey below, verbatim form.
         retiredCredentialVmIds: [
-          `did:webvh:QmScidForTests:was.example.test:space:space-123:id#${RETIRED_KEY_AGREEMENT_MULTIBASE}`
+          `did:webvh:QmScidForTests:localhost:space:space-123:id#${RETIRED_KEY_AGREEMENT_MULTIBASE}`
         ],
         struckRungHashes: [],
         unclaimedCredentialVmIds: []
@@ -197,14 +198,17 @@ import { recoverAccountWithCode } from '@/session/recovery'
 import { createFakeSessionIdb } from './fakeSessionIdb'
 
 const POINTER: AccountPointer = {
-  did: 'did:webvh:QmScidForTests:was.example.test:space:space-123:id',
-  spaceId: 'space-123',
-  host: 'https://was.example.test'
+  did: 'did:webvh:QmScidForTests:localhost:space:space-123:id',
+  spaceUrl: 'http://localhost/space/space-123/'
 }
 const DELEGATION = {
   id: 'urn:zcap:delegated:test',
   controller: 'did:key:z6MkRecoveryClient',
-  invocationTarget: `${POINTER.host}/space/${POINTER.spaceId}/id/did.jsonl`,
+  invocationTarget: resourceUrl({
+    spaceUrl: POINTER.spaceUrl,
+    collectionId: 'id',
+    resourceId: 'did.jsonl'
+  }),
   parentCapability: 'urn:zcap:root:test',
   proof: { verificationMethod: `${POINTER.did}#z6MkIssuingClient` }
 } as unknown as IZcap
@@ -299,7 +303,10 @@ describe('the recovery spend, torn in the collection fan-out', () => {
           manageCapability: {
             id: 'urn:zcap:delegated:manage',
             controller: POINTER.did,
-            invocationTarget: `${POINTER.host}/space/unlock-retired-passkey`,
+            invocationTarget: spaceUrlById({
+              baseServerUrl: 'http://localhost/',
+              spaceId: 'unlock-retired-passkey'
+            }),
             allowedAction: ['GET', 'PUT', 'DELETE']
           }
         }

@@ -6,10 +6,8 @@
  * access. The page renders and confirms; the reads, the best-effort
  * degradation, and the revocation calls live here.
  */
-import {
-  currentAccountSignerCheck,
-  readDirectoryListing
-} from '@/session/clients'
+import { readDirectoryListing } from '@/session/clients'
+import { currentAccountSignerCheck } from '@/session/accountSignerCheck'
 import {
   listConnectedAgents,
   listConnectedApps,

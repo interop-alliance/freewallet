@@ -46,7 +46,7 @@ MAC'd at issuance under a code-derived key the host never holds. The tag
 rides the frame in the clear, and recovery verifies it BEFORE trusting the
 pointer. That closes the host-forgery redirect, where a malicious host seals
 a record of its own naming an account it controls and every signature-side
-check passes on it. The tag covers the pointer's host, so codes need
+check passes on it. The tag covers the pointer's Space URL, so codes need
 re-issuing when the account migrates hosts. The shell is the plaintext frame
 (controller, pointer, timestamp) plus the sealed `bridge` member under the
 frame proof, signed with the code-derived unlock key and verified before

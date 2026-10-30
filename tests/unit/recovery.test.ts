@@ -15,18 +15,19 @@
  * unlock identity, the EDV record cipher) runs for real.
  */
 import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { resourceUrl } from '@interop/was-client/paths'
 
 import type { IKeyAgreementKey, IZcap } from '@interop/data-integrity-core'
 
 const wasState = vi.hoisted(() => ({
-  url: 'https://was.example.test' as string | undefined,
+  url: 'http://localhost/' as string | undefined,
   records: new Map<string, unknown>(),
   getError: undefined as unknown
 }))
 
 vi.mock('@/app.config', async importOriginal => ({
   ...(await importOriginal<typeof import('@/app.config')>()),
-  get WAS_BASE_URL() {
+  get WAS_BASE_SERVER_URL() {
     return wasState.url
   }
 }))
@@ -154,14 +155,17 @@ import type { RecoveryCodeUnlockMethod } from '@/session/unlockMethods'
 import type { Session } from '@/types/auth'
 
 const POINTER: AccountPointer = {
-  did: 'did:webvh:QmScidForTests:was.example.test:space:space-123:id',
-  spaceId: 'space-123',
-  host: 'https://was.example.test'
+  did: 'did:webvh:QmScidForTests:localhost:space:space-123:id',
+  spaceUrl: 'http://localhost/space/space-123/'
 }
 const DELEGATION = {
   id: 'urn:zcap:delegated:test',
   controller: 'did:key:z6MkRecoveryClient',
-  invocationTarget: `${POINTER.host}/space/${POINTER.spaceId}/id/did.jsonl`,
+  invocationTarget: resourceUrl({
+    spaceUrl: POINTER.spaceUrl,
+    collectionId: 'id',
+    resourceId: 'did.jsonl'
+  }),
   parentCapability: 'urn:zcap:root:test',
   proof: { verificationMethod: `${POINTER.did}#z6MkIssuingClient` }
 } as unknown as IZcap
@@ -252,7 +256,7 @@ function entryFor({
 }
 
 beforeEach(() => {
-  wasState.url = 'https://was.example.test'
+  wasState.url = 'http://localhost/'
   wasState.records.clear()
   wasState.getError = undefined
   registryState.record = null
@@ -355,8 +359,7 @@ describe('recovery record proof (the mixed-signer policy)', () => {
       signer,
       pointer: {
         did: 'did:webvh:QmAttackerScid:evil.example.test:space:stolen:id',
-        spaceId: 'stolen',
-        host: 'https://evil.example.test'
+        spaceUrl: 'https://evil.example.test/space/stolen/'
       },
       bindingMacKey: attackerCode.bindingMacKey
     })
@@ -409,8 +412,7 @@ describe('canIssueRecoveryCode', () => {
       profile: {
         accountPointer: {
           did: overrides.pointerDid ?? POINTER.did,
-          spaceId: POINTER.spaceId,
-          host: POINTER.host
+          spaceUrl: POINTER.spaceUrl
         },
         clientWebvhKeys:
           'clientWebvhKeys' in overrides

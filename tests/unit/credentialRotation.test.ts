@@ -10,7 +10,6 @@
  * pins, the adoption callback's paired persistence, the error discipline, and
  * the verified-log memo invalidation on both sides of the call.
  */
-import { spacesUrl } from '@interop/was-client/paths'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { TEST_SERVICE_DESCRIPTION } from '../shared/wasServiceFixture'
 
@@ -18,7 +17,7 @@ import { memoryResourceLogPinStore } from '@interop/vh-resource-log'
 import { addSink, captureSink } from '@interop/logger'
 
 const state = vi.hoisted(() => ({
-  wasUrl: 'https://was.example.test' as string | undefined,
+  wasUrl: 'http://localhost/' as string | undefined,
   calls: [] as string[],
   // The annex strike-or-swap stage's seams: what the strike reports, and
   // whether either half throws.
@@ -65,7 +64,7 @@ const POST_STRIKE_WEB_DOC = vi.hoisted(() => ({
 
 vi.mock('@/app.config', async importOriginal => ({
   ...(await importOriginal<typeof import('@/app.config')>()),
-  get WAS_BASE_URL() {
+  get WAS_BASE_SERVER_URL() {
     return state.wasUrl
   }
 }))
@@ -94,7 +93,9 @@ vi.mock('@interop/wallet-core/clientAnnex', async importOriginal => ({
     }
     return {
       clientAnnexDid: 'did:webvh:fresh-generation',
-      revoke: 'revoked' as const
+      revoke: 'revoked' as const,
+      replicaPointersDropped: [],
+      replicaPointersMissing: []
     }
   })
 }))
@@ -106,16 +107,16 @@ vi.mock('@interop/was-client', async importOriginal => ({
   // handed to.
   WasClient: class {
     isWasClient = true
-    serverUrl: string
+    baseServerUrl: string
     zcapClient: unknown
     constructor({
-      serverUrl,
+      baseServerUrl,
       zcapClient
     }: {
-      serverUrl: string
+      baseServerUrl: string
       zcapClient: unknown
     }) {
-      this.serverUrl = serverUrl
+      this.baseServerUrl = baseServerUrl
       this.zcapClient = zcapClient
     }
   }
@@ -153,6 +154,9 @@ vi.mock('@/session/annexReach', async importOriginal => ({
   })
 }))
 
+vi.mock('@/session/replicaRestate', () => ({
+  restatedReplicaServers: vi.fn(async () => [])
+}))
 vi.mock('@/session/verifiedLog', () => ({
   invalidateVerifiedLog: vi.fn(() => {
     state.calls.push('invalidateVerifiedLog')
@@ -176,6 +180,7 @@ import {
   retireClientAnnexRung,
   swapClientAnnexGeneration
 } from '@interop/wallet-core/clientAnnex'
+import { restatedReplicaServers } from '@/session/replicaRestate'
 import { didWebProjectionStore } from '@/session/annexReach'
 import { browserLocalSessionPersistence } from '@/session/persistence'
 import { sessionRosterStore } from '@/session/rosterStore'
@@ -194,9 +199,8 @@ import type { AccountCeremonyContext } from '@/session/accountCeremonyContext'
 import type { Session } from '@/types/auth'
 
 const POINTER = {
-  did: 'did:webvh:QmScidForTests:was.example.test:space:space-123:id',
-  spaceId: 'space-123',
-  host: 'https://was.example.test'
+  did: 'did:webvh:QmScidForTests:localhost:space:space-123:id',
+  spaceUrl: 'http://localhost/space/space-123/'
 }
 
 const OLD_USER_KEY = {
@@ -417,7 +421,7 @@ function sessionWith(
 }
 
 beforeEach(() => {
-  state.wasUrl = 'https://was.example.test'
+  state.wasUrl = 'http://localhost/'
   state.calls = []
   state.projectionStoreArgs = null
   state.projectionPuts = []
@@ -456,7 +460,7 @@ describe('the skip conditions', () => {
       })
     ).toBeNull()
 
-    state.wasUrl = 'https://was.example.test'
+    state.wasUrl = 'http://localhost/'
     for (const override of [
       { pointerDid: 'did:key:z6MkNotPromoted' },
       { clientWebvhKeys: undefined },
@@ -676,7 +680,7 @@ describe('the annex strike-or-swap stage', () => {
   const CLIENT_ANNEX_SPACE_ID = 'clientAnnex-space-1'
   const GENERATION_ID = 'gen-Ux3v0kQf9aPmB2hZ'
   const CLIENT_ANNEX_DID =
-    'did:webvh:QmClientAnnexScid:was.example.test:space:' +
+    'did:webvh:QmClientAnnexScid:localhost:space:' +
     `${CLIENT_ANNEX_SPACE_ID}:${GENERATION_ID}`
 
   /**
@@ -799,14 +803,61 @@ describe('the annex strike-or-swap stage', () => {
     expect(state.calls).toContain('retireClientAnnexRung')
     expect(vi.mocked(swapClientAnnexGeneration)).toHaveBeenCalledWith(
       expect.objectContaining({
-        accountSpaceId: POINTER.spaceId,
-        wasServerUrl: POINTER.host,
+        accountSpaceId: 'space-123',
+        baseServerUrl: 'http://localhost/',
         ladderSeed: SURVIVING_SEED,
         idStore: expect.objectContaining({ isWebvhIdStore: true }),
         // The restating swap leaves the retired rung out.
-        retiredLadderSeeds: [RETIRED_SEED]
+        retiredLadderSeeds: [RETIRED_SEED],
+        // An account with no replica-server entry restates an empty list.
+        replicaServerDids: []
       })
     )
+  })
+
+  it('hands the restated replica servers to the swap', async () => {
+    const uncommitted = new Error('rung 0 is not committed')
+    uncommitted.name = 'ClientAnnexRungUncommittedError'
+    state.strikeError = uncommitted
+    vi.mocked(restatedReplicaServers).mockResolvedValueOnce([
+      'did:key:z6MkReplicaServer'
+    ])
+
+    await retire({
+      retiredLadderSeed: RETIRED_SEED,
+      survivingLadderSeed: SURVIVING_SEED
+    })
+
+    expect(vi.mocked(swapClientAnnexGeneration)).toHaveBeenCalledWith(
+      expect.objectContaining({
+        replicaServerDids: ['did:key:z6MkReplicaServer']
+      })
+    )
+  })
+
+  it('skips the swap, with the error named, when the replica list cannot be read', async () => {
+    const uncommitted = new Error('rung 0 is not committed')
+    uncommitted.name = 'ClientAnnexRungUncommittedError'
+    state.strikeError = uncommitted
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
+    const unreadable = new Error('directory unreadable')
+    unreadable.name = 'DirectoryUnreadableError'
+    vi.mocked(restatedReplicaServers).mockRejectedValueOnce(unreadable)
+
+    const outcome = await retire({
+      retiredLadderSeed: RETIRED_SEED,
+      survivingLadderSeed: SURVIVING_SEED
+    })
+
+    expect(vi.mocked(swapClientAnnexGeneration)).not.toHaveBeenCalled()
+    expect(outcome?.mended).toEqual(
+      annexMend({
+        outcome: 'failed',
+        detail: { action: 'skipped' },
+        errorName: 'DirectoryUnreadableError'
+      })
+    )
+    warn.mockRestore()
   })
 
   it("prefers the surviving seed but takes the session's when there is none", async () => {
@@ -952,8 +1003,7 @@ describe('the annex strike-or-swap stage', () => {
           return (projection ??= didWebProjectionStore({
             serviceDescription: TEST_SERVICE_DESCRIPTION,
             pinStore: memoryResourceLogPinStore(),
-            host: POINTER.host,
-            spaceId: POINTER.spaceId,
+            spaceUrl: POINTER.spaceUrl,
             invoker: (() => invoker) as never
           }))
         },
@@ -1047,7 +1097,7 @@ describe('the annex strike-or-swap stage', () => {
           generationId: GENERATION_ID,
           capability: SURVIVING_SIBLING,
           was: expect.objectContaining({
-            serverUrl: spacesUrl({ baseUrl: POINTER.host }),
+            baseServerUrl: 'http://localhost/',
             zcapClient: SURVIVING_ZCAP_CLIENT
           })
         })
@@ -1073,8 +1123,7 @@ describe('the annex strike-or-swap stage', () => {
       // store built on a snapshot would invoke a struck signer's delegation.
       expect(vi.mocked(didWebProjectionStore)).toHaveBeenCalledWith(
         expect.objectContaining({
-          host: POINTER.host,
-          spaceId: POINTER.spaceId,
+          spaceUrl: POINTER.spaceUrl,
           invoker: expect.any(Function)
         })
       )
@@ -1210,7 +1259,7 @@ describe('the ladder-seed settlement (the login seed with no retired seed in han
   const OTHER_SEED = new Uint8Array(32).fill(8)
   const GENERATION_ID = 'gen-Ux3v0kQf9aPmB2hZ'
   const CLIENT_ANNEX_DID =
-    'did:webvh:QmClientAnnexScid:was.example.test:space:' +
+    'did:webvh:QmClientAnnexScid:localhost:space:' +
     `clientAnnex-space-1:${GENERATION_ID}`
   const POINTED_DOCUMENT = {
     id: POINTER.did,

@@ -154,9 +154,8 @@ export function deadAccountPointerError({
  * before, since there is nothing to offer removing with.
  *
  * @param options {object}
- * @param options.did {string}
- * @param options.spaceId {string}
- * @param options.host {string}
+ * @param options.did {string}   the account's did:webvh; the log's location
+ *   derives from it
  * @param [options.pinStore] {ResourceLogPinStore}
  * @param [options.published] {PublishedWebvhLog}
  * @param [options.unlock] {UnlockIdentity}
@@ -165,16 +164,12 @@ export function deadAccountPointerError({
  */
 export async function verifyPointedAccountLog({
   did,
-  spaceId,
-  host,
   pinStore,
   published,
   unlock,
   idb
 }: {
   did: string
-  spaceId: string
-  host: string
   pinStore?: ResourceLogPinStore
   published?: PublishedWebvhLog
   unlock?: UnlockIdentity
@@ -183,8 +178,6 @@ export async function verifyPointedAccountLog({
   try {
     return await verifyAccountLog({
       did,
-      spaceId,
-      host,
       ...(pinStore !== undefined ? { pinStore } : {}),
       ...(published !== undefined ? { published } : {})
     })

@@ -61,11 +61,12 @@ import {
   type PublishedWebvhLog
 } from '@interop/wallet-core/webvh'
 import { webvhResourceLogController } from '@interop/wallet-core/resourceLog'
-import { WAS_BASE_URL } from '@/app.config'
+import { WAS_BASE_SERVER_URL } from '@/app.config'
 import { hasClientKeyRecord } from '@/lib/sessionKey'
 import { isStorageUnreachable } from '@/lib/storageErrors'
 import { createLogger } from '@/lib/log'
 import { wasClientAt, wasServiceDescription } from '@/lib/wasService'
+import { spaceLocation } from '@/lib/spaceLocation'
 import {
   ladderMendAuthority,
   mendCredentialAnchoredAccount,
@@ -265,7 +266,7 @@ export async function routeUnlockLogin({
       persistence: TransientSessionStores
     }
 > {
-  if (!WAS_BASE_URL) {
+  if (!WAS_BASE_SERVER_URL) {
     if (rememberBrowser === false) {
       throw new TransientLoginUnavailableError({ reason: 'no-was-server' })
     }
@@ -395,17 +396,20 @@ export async function ensureClientAnnexGenerationReady({
   // Discovered once for every client this readiness stage builds, the ones
   // wallet-core builds from the closures below included.
   const serviceDescription = await wasServiceDescription()
+  const { baseServerUrl, spaceId } = spaceLocation({
+    spaceUrl: pointer.spaceUrl
+  })
   try {
     const outcome = await ensureCredentialClientAnnexGeneration({
-      wasServerUrl: pointer.host,
-      spaceId: pointer.spaceId,
+      baseServerUrl,
+      spaceId,
       account,
       ladderSeed: standing.ladderSeed,
       standingClient: { did: found.standingClient.clientDid, zcapClient },
       serviceDescription,
       bootstrapWasFor: ({ keyAgent }) =>
         wasClientAt({
-          baseUrl: pointer.host,
+          baseServerUrl,
           zcapClient: didKeyZcapClient({ keyAgent }),
           serviceDescription
         }),
@@ -589,7 +593,7 @@ export async function transientSessionFromKeyringHit({
         ...(type === 'passphrase'
           ? {
               beforePromotion: passphraseRegistryUpsertHook({
-                spaceId: pointer.spaceId
+                spaceUrl: pointer.spaceUrl
               })
             }
           : {})
@@ -637,8 +641,9 @@ export async function transientSessionFromKeyringHit({
   const accountDid = pointer.did
   // Aliased for the hoisted `readAccountDocument` closure below, where the
   // guard's narrowing of `pointer` does not reach.
-  const accountSpaceId = pointer.spaceId
-  const accountHost = pointer.host
+  const accountSpaceUrl = pointer.spaceUrl
+  const { baseServerUrl: accountBaseServerUrl, spaceId: accountSpaceId } =
+    spaceLocation({ spaceUrl: accountSpaceUrl })
   const ladderSeed = standing.ladderSeed
   const accountPointer = pointer
 
@@ -665,8 +670,6 @@ export async function transientSessionFromKeyringHit({
   // continuity refusal rethrow unchanged.
   let verified = await verifyPointedAccountLog({
     did: accountDid,
-    spaceId: pointer.spaceId,
-    host: pointer.host,
     pinStore: persistence.logPins,
     ...(seededLog !== undefined ? { published: seededLog } : {}),
     ...(credential !== undefined ? { unlock: credential.unlock } : {}),
@@ -814,8 +817,6 @@ export async function transientSessionFromKeyringHit({
       // no longer the live one, so the enrollment must read the fresh log.
       verified = await verifyAccountLog({
         did: accountDid,
-        spaceId: accountSpaceId,
-        host: accountHost,
         pinStore: persistence.logPins
       })
     }
@@ -882,8 +883,6 @@ export async function transientSessionFromKeyringHit({
     // see a head this visit has not seen.
     verified = await verifyAccountLog({
       did: accountDid,
-      spaceId: accountSpaceId,
-      host: accountHost,
       pinStore: persistence.logPins
     })
     return verified.doc
@@ -893,7 +892,7 @@ export async function transientSessionFromKeyringHit({
     storeForGenerationId: generationId =>
       refuseMissingGeneration(
         delegatedWebvhLogStore({
-          host: pointer.host,
+          baseServerUrl: accountBaseServerUrl,
           spaceId: annexSpaceId,
           collectionId: generationId,
           delegation: siblingDelegation,
@@ -946,9 +945,9 @@ export async function transientSessionFromKeyringHit({
     signingAgent: ICapabilityAgent
   ): SealableEncryptionDescriptorStore =>
     userKeyRosterDescriptorStore({
-      storageServerUrl: pointer.host,
+      baseServerUrl: accountBaseServerUrl,
       zcapClient: transientZcapClient,
-      spaceId: pointer.spaceId,
+      spaceId: accountSpaceId,
       serviceDescription,
       resolveController: async () =>
         webvhResourceLogController({ did: accountDid, log: verified.log }),
@@ -1015,11 +1014,7 @@ export async function transientSessionFromKeyringHit({
       // fresh rather than from the head this visit stood on, since an arm
       // may have moved it.
       ...(await ladderMendAuthority({
-        pointer: {
-          did: accountDid,
-          spaceId: accountSpaceId,
-          host: accountHost
-        },
+        pointer: { did: accountDid, spaceUrl: accountSpaceUrl },
         ladderSeed,
         zcapClient: transientZcapClient,
         capability: generationDelegation,
@@ -1045,7 +1040,7 @@ export async function transientSessionFromKeyringHit({
       ...(type === 'passphrase'
         ? {
             beforePromotion: passphraseRegistryUpsertHook({
-              spaceId: accountSpaceId,
+              spaceUrl: accountSpaceUrl,
               capability: generationDelegation
             })
           }
@@ -1198,11 +1193,7 @@ export async function transientSessionFromKeyringHit({
   // the block may settle before it.
   let projectionReported: Promise<void> | undefined
   if (mendReport === undefined) {
-    primeVerifiedAccountLog({
-      session,
-      pointer: { did: accountDid, spaceId: accountSpaceId, host: accountHost },
-      verified
-    })
+    primeVerifiedAccountLog({ session, did: accountDid, verified })
     // The did:web projection mend, over that same head. It sits after the
     // enrollment because its PUT invokes as the visit's annex verification
     // method under the generation delegation, and that method must stand in
@@ -1222,8 +1213,7 @@ export async function transientSessionFromKeyringHit({
     // mend's own republication. The next visit, which mends nothing, is that
     // account's mender.
     projectionReported = refreshDidWebProjection({
-      host: accountHost,
-      spaceId: accountSpaceId,
+      spaceUrl: accountSpaceUrl,
       did: accountDid,
       doc: verified.doc,
       pinStore: persistence.logPins,

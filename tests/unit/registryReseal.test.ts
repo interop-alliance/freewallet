@@ -25,7 +25,7 @@ const wasState = vi.hoisted(() => ({
 
 vi.mock('@/app.config', async importOriginal => ({
   ...(await importOriginal<typeof import('@/app.config')>()),
-  get WAS_BASE_URL() {
+  get WAS_BASE_SERVER_URL() {
     return wasState.url
   }
 }))
@@ -33,12 +33,12 @@ vi.mock('@/app.config', async importOriginal => ({
 vi.mock('@/stores/wasRemoteStore', () => ({
   putUnlockMethodsRecord: vi.fn(
     async ({
-      spaceId,
+      spaceUrl,
       record,
       ifMatch,
       ifNoneMatch
     }: {
-      spaceId: string
+      spaceUrl: string
       record: unknown
       ifMatch?: string
       ifNoneMatch?: boolean
@@ -47,8 +47,8 @@ vi.mock('@/stores/wasRemoteStore', () => ({
         throw wasState.putError
       }
       const { PreconditionFailedError } = await import('@interop/was-client')
-      const exists = wasState.records.has(spaceId)
-      const version = wasState.versions.get(spaceId) ?? 0
+      const exists = wasState.records.has(spaceUrl)
+      const version = wasState.versions.get(spaceUrl) ?? 0
       if (ifNoneMatch && exists) {
         throw new PreconditionFailedError(
           'A registry record already exists (If-None-Match).'
@@ -64,16 +64,16 @@ vi.mock('@/stores/wasRemoteStore', () => ({
           'Unconditional registry write: every PUT must carry a precondition.'
         )
       }
-      wasState.records.set(spaceId, record)
-      wasState.versions.set(spaceId, version + 1)
+      wasState.records.set(spaceUrl, record)
+      wasState.versions.set(spaceUrl, version + 1)
       return { etag: `v${version + 1}` }
     }
   ),
-  getUnlockMethodsRecord: vi.fn(async ({ spaceId }: { spaceId: string }) =>
-    wasState.records.has(spaceId)
+  getUnlockMethodsRecord: vi.fn(async ({ spaceUrl }: { spaceUrl: string }) =>
+    wasState.records.has(spaceUrl)
       ? {
-          record: wasState.records.get(spaceId),
-          etag: `v${wasState.versions.get(spaceId) ?? 0}`
+          record: wasState.records.get(spaceUrl),
+          etag: `v${wasState.versions.get(spaceUrl) ?? 0}`
         }
       : null
   )
@@ -106,6 +106,7 @@ import { adoptRotatedUserKeyInBand } from '@/session/userKeyAdoption'
 import { createFakeSessionIdb } from './fakeSessionIdb'
 
 const SPACE_ID = 'PVkVUyJ24oyQh2BebkeUOygDfR5opfhJhG4KkMYTlzU'
+const SPACE_URL = `https://was.example.test/space/${SPACE_ID}/`
 const ACCOUNT_DID = `did:webvh:QmScid:was.example.test:space:${SPACE_ID}`
 
 /**
@@ -134,8 +135,7 @@ function makeSession({ userKey }: { userKey: UserKey }): Session {
       zcapClient: {},
       accountPointer: {
         did: ACCOUNT_DID,
-        spaceId: SPACE_ID,
-        host: 'https://was.example.test'
+        spaceUrl: SPACE_URL
       }
     },
     persistence: browserLocalSessionPersistence({
@@ -143,6 +143,7 @@ function makeSession({ userKey }: { userKey: UserKey }): Session {
     }),
     storage: {
       spaceId: SPACE_ID,
+      spaceUrl: SPACE_URL,
       adoptRotatedVaultKeys: async () => {}
     },
     isGuest: false
@@ -280,7 +281,7 @@ describe('the stale-seal detector', () => {
     await seedRegistry({ session, record: sampleRecord() })
     // A frame stamped by a future client: refused before any decrypt is
     // attempted, so it is not a seal problem.
-    ;(wasState.records.get(SPACE_ID) as { version: number }).version = 3
+    ;(wasState.records.get(SPACE_URL) as { version: number }).version = 3
 
     await expect(getUnlockMethods({ session })).rejects.not.toBeInstanceOf(
       UnlockRegistryStaleSealError
@@ -327,7 +328,7 @@ describe('the login-time re-seal repair', () => {
     await seedRegistry({ session, record: sampleRecord() })
     swapVaultKeys({ session, userKey: olderKey })
     wasState.generations = [olderKey, newerKey]
-    const sealed = wasState.records.get(SPACE_ID)
+    const sealed = wasState.records.get(SPACE_URL)
 
     const outcome = await repairStaleUnlockRegistrySeal({
       session,
@@ -336,14 +337,14 @@ describe('the login-time re-seal repair', () => {
     })
 
     expect(outcome).toBe('unrepaired')
-    expect(wasState.records.get(SPACE_ID)).toBe(sealed)
+    expect(wasState.records.get(SPACE_URL)).toBe(sealed)
   })
 
   it('is a no-op read on a registry the current key already opens', async () => {
     const userKey = await mintUserKey()
     const session = makeSession({ userKey })
     await seedRegistry({ session, record: sampleRecord() })
-    const sealed = wasState.records.get(SPACE_ID)
+    const sealed = wasState.records.get(SPACE_URL)
 
     const outcome = await repairStaleUnlockRegistrySeal({
       session,
@@ -352,7 +353,7 @@ describe('the login-time re-seal repair', () => {
     })
 
     expect(outcome).toBe('ok')
-    expect(wasState.records.get(SPACE_ID)).toBe(sealed)
+    expect(wasState.records.get(SPACE_URL)).toBe(sealed)
   })
 
   it('reports an unrepaired seal when no escrowed generation opens it', async () => {
@@ -409,13 +410,13 @@ describe('the re-seal repair and the record proof', () => {
     // Sealed so an escrowed generation's KAK opens it, signed by nobody the
     // account knows.
     wasState.records.set(
-      SPACE_ID,
+      SPACE_URL,
       await forgedRecord({
         userKey: oldKey,
         signerSeed: new Uint8Array(32).fill(9)
       })
     )
-    wasState.versions.set(SPACE_ID, 1)
+    wasState.versions.set(SPACE_URL, 1)
     wasState.generations = [oldKey, currentKey]
 
     const outcome = await repairStaleUnlockRegistrySeal({
@@ -443,7 +444,7 @@ describe('the re-seal repair and the record proof', () => {
       context: enrolledContext()
     })
 
-    const stored = wasState.records.get(SPACE_ID) as {
+    const stored = wasState.records.get(SPACE_URL) as {
       proof: { verificationMethod: string }
     }
     const multibase = await userKeySigningKeyMultibase({ userKey: currentKey })
@@ -458,7 +459,7 @@ describe('the re-seal repair and the record proof', () => {
     const session = makeSession({ userKey: oldKey })
     await seedRegistry({ session, record: sampleRecord() })
     // The host kept the account's own proof and swapped the ciphertext.
-    const stored = wasState.records.get(SPACE_ID) as {
+    const stored = wasState.records.get(SPACE_URL) as {
       wrapped: { jwe: { ciphertext?: string } }
     }
     stored.wrapped.jwe.ciphertext = 'dGFtcGVyZWQ'
@@ -494,7 +495,7 @@ describe('the in-band adoption when its re-seal fails', () => {
 
     await adoptRotatedUserKeyInBand({
       session,
-      spaceId: SPACE_ID,
+      spaceUrl: SPACE_URL,
       accountDid: ACCOUNT_DID,
       userKey: await mintUserKey(),
       latestEpochId: 'epoch-2',

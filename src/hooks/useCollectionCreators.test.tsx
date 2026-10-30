@@ -156,7 +156,7 @@ describe('a disconnected creator across the attribution surfaces', () => {
           controller: 'did:key:z6MkhaXgBZDvotDkL5257faiztiGiC2QtKLGpbnnEGta2doK'
         }
       ],
-      space: { serverUrl: 'https://was.example/', spaceId: 's' },
+      spaceUrl: SPACE_URL,
       collections: existingCollectionsFrom([{ id: 'notes' }]),
       appUrl: 'https://other.example/'
     }

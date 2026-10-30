@@ -18,7 +18,7 @@ import { captureCeremonyEvents } from '../../tests/unit/ceremonyEventCapture'
 
 vi.mock('@/app.config', async importOriginal => ({
   ...(await importOriginal<Record<string, unknown>>()),
-  WAS_BASE_URL: 'https://was.example'
+  WAS_BASE_SERVER_URL: 'https://was.example/'
 }))
 
 vi.mock('@/session/backupCredential', () => {
@@ -227,8 +227,7 @@ function ladderContext({ remoteStore }: { remoteStore: unknown }) {
     remoteStore,
     pointer: {
       did: 'did:webvh:example:account',
-      spaceId: ACCOUNT_SPACE,
-      host: 'https://was.example'
+      spaceUrl: `https://was.example/space/${ACCOUNT_SPACE}/`
     },
     sibling: {
       id: 'delegated-clients',
@@ -255,8 +254,7 @@ function enrolledContext({ remoteStore }: { remoteStore: unknown }) {
     remoteStore,
     pointer: {
       did: 'did:webvh:example:account',
-      spaceId: ACCOUNT_SPACE,
-      host: 'https://was.example'
+      spaceUrl: `https://was.example/space/${ACCOUNT_SPACE}/`
     }
   }
 }

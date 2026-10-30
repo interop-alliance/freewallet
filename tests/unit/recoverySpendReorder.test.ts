@@ -30,6 +30,7 @@
  * identities, and the stored records are real.
  */
 import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { resourceUrl, spaceUrlById } from '@interop/was-client/paths'
 
 import { memoryResourceLogPinStore } from '@interop/vh-resource-log'
 import { addSink, captureSink } from '@interop/logger'
@@ -68,7 +69,7 @@ const state = vi.hoisted(() => ({
 
 vi.mock('@/app.config', async importOriginal => ({
   ...(await importOriginal<typeof import('@/app.config')>()),
-  WAS_BASE_URL: 'https://was.example.test'
+  WAS_BASE_SERVER_URL: 'http://localhost/'
 }))
 
 vi.mock('@interop/wallet-core/keyring', async importOriginal => ({
@@ -123,7 +124,7 @@ vi.mock('@interop/wallet-core/recovery', async importOriginal => ({
       }
       state.calls.push('add-entry')
       return {
-        did: 'did:webvh:QmScidForTests:was.example.test:space:space-123:id',
+        did: 'did:webvh:QmScidForTests:localhost:space:space-123:id',
         ...(state.omitCommitted ? {} : { committed: true }),
         ...state.retirement
       }
@@ -295,15 +296,18 @@ import { getUnlockMethodsWithClient } from '@/session/unlockMethods'
 import { createFakeSessionIdb } from './fakeSessionIdb'
 
 const POINTER: AccountPointer = {
-  did: 'did:webvh:QmScidForTests:was.example.test:space:space-123:id',
-  spaceId: 'space-123',
-  host: 'https://was.example.test'
+  did: 'did:webvh:QmScidForTests:localhost:space:space-123:id',
+  spaceUrl: 'http://localhost/space/space-123/'
 }
 const CONTROLLER = 'did:key:z6MkAccountController'
 const DELEGATION = {
   id: 'urn:zcap:delegated:test',
   controller: 'did:key:z6MkRecoveryClient',
-  invocationTarget: `${POINTER.host}/space/${POINTER.spaceId}/id/did.jsonl`,
+  invocationTarget: resourceUrl({
+    spaceUrl: POINTER.spaceUrl,
+    collectionId: 'id',
+    resourceId: 'did.jsonl'
+  }),
   parentCapability: 'urn:zcap:root:test',
   proof: { verificationMethod: `${POINTER.did}#z6MkIssuingClient` }
 } as unknown as IZcap
@@ -416,7 +420,10 @@ async function retiredPassphraseEntry(): Promise<Record<string, unknown>> {
     manageCapability: {
       id: 'urn:zcap:delegated:manage-retired',
       controller: 'did:key:z6MkRetiredUnlockIdentity',
-      invocationTarget: `${POINTER.host}/space/unlock-retired-passphrase`,
+      invocationTarget: spaceUrlById({
+        baseServerUrl: 'http://localhost/',
+        spaceId: 'unlock-retired-passphrase'
+      }),
       allowedAction: ['GET', 'PUT', 'DELETE']
     }
   }
@@ -447,7 +454,10 @@ async function unspentCodeEntry(): Promise<{
       manageCapability: {
         id: 'urn:zcap:delegated:manage-other-code',
         controller: 'did:key:z6MkOtherCodeUnlockIdentity',
-        invocationTarget: `${POINTER.host}/space/unlock-other-code`,
+        invocationTarget: spaceUrlById({
+          baseServerUrl: 'http://localhost/',
+          spaceId: 'unlock-other-code'
+        }),
         allowedAction: ['GET', 'PUT', 'DELETE']
       }
     }
@@ -773,9 +783,8 @@ describe('the remembered spend reorder -- the colliding-passphrase pre-flight', 
     const foreignRecord = await wrapUnlockRecord({
       controller: 'did:key:z6MkSomeoneElse',
       pointer: {
-        did: 'did:webvh:QmOther:was.example.test:space:space-999:id',
-        spaceId: 'space-999',
-        host: POINTER.host
+        did: 'did:webvh:QmOther:localhost:space:space-999:id',
+        spaceUrl: 'http://localhost/space/space-999/'
       },
       delegation: DELEGATION,
       ladderSeed: generateLadderSeed(),

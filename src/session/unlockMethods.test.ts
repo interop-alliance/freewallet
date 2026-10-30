@@ -26,7 +26,7 @@ type UnlockMethod = import('@/session/unlockMethods').UnlockMethod
  * A minimal session shaped as `backfillPassphraseUnlockMethod` reads it: the
  * storage tier under test, plus just enough of `profile` and `persistence`
  * for the browser-local path to reach its first registry read (a local-cache
- * load, since no `VITE_WAS_SERVER_URL` -- the Spaces Repository URL -- is
+ * load, since no `VITE_WAS_SERVER_URL` -- the base server URL -- is
  * set in tests) without throwing.
  *
  * @param options {object}

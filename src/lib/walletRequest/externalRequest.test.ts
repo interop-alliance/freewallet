@@ -468,10 +468,10 @@ describe('barredGrants', () => {
 })
 
 describe('unreadableGrants', () => {
-  const SPACE = { serverUrl: 'https://was.example/', spaceId: 'abc' }
+  const SPACE_URL = 'https://was.example/space/abc/'
   const AGENT = 'did:key:z6MkqojacRDqmQgDi4ESKKhGDqnZx4C6cChAbQZXvnUFX7D7'
   const AGENT_KID = x25519RecipientFromDidKey({ did: AGENT }).id!
-  const NOTES_URL = `${SPACE.serverUrl}space/${SPACE.spaceId}/notes/`
+  const NOTES_URL = `${SPACE_URL}notes/`
 
   /**
    * Resolves one agent grant against a Space snapshot, as the page does
@@ -498,7 +498,7 @@ describe('unreadableGrants', () => {
           controller: AGENT
         }
       ],
-      space: SPACE,
+      spaceUrl: SPACE_URL,
       collections
     })
   }
@@ -916,9 +916,9 @@ describe('refuseUnattributedServer', () => {
 })
 
 describe('the inbox grant class', () => {
-  const SPACE = { serverUrl: 'https://was.example/', spaceId: 'abc' }
+  const SPACE_URL = 'https://was.example/space/abc/'
   const AGENT = 'did:key:z6MkqojacRDqmQgDi4ESKKhGDqnZx4C6cChAbQZXvnUFX7D7'
-  const INBOX_URL = `${SPACE.serverUrl}space/${SPACE.spaceId}/inbox/`
+  const INBOX_URL = `${SPACE_URL}inbox/`
 
   /**
    * Resolves one inbox request of the given form and kind.
@@ -947,7 +947,7 @@ describe('the inbox grant class', () => {
           controller: AGENT
         }
       ],
-      space: SPACE,
+      spaceUrl: SPACE_URL,
       collections: existingCollectionsFrom([{ id: 'inbox' }]),
       requestKind
     })

@@ -32,9 +32,8 @@ import {
 import type { KeyringFetchResult } from '@/session/keyring'
 
 const POINTER = {
-  did: 'did:webvh:QmScidForTests:was.example.test:space:space-123:id',
-  spaceId: 'space-123',
-  host: 'https://was.example.test'
+  did: 'did:webvh:QmScidForTests:localhost:space:space-123:id',
+  spaceUrl: 'http://localhost/space/space-123/'
 }
 const BUILT_ON_HEAD = { scid: 'QmScidForTests', versionId: '2-head' }
 

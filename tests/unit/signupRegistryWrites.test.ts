@@ -29,7 +29,7 @@ const state = vi.hoisted(() => ({
 
 vi.mock('@/app.config', async importOriginal => ({
   ...(await importOriginal<typeof import('@/app.config')>()),
-  WAS_BASE_URL: 'https://was.example.test'
+  WAS_BASE_SERVER_URL: 'https://was.example.test/'
 }))
 
 vi.mock('@/session/keyring', () => ({

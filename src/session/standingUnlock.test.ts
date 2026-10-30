@@ -20,7 +20,7 @@ import type { Session } from '@/types/auth'
 
 vi.mock('@/app.config', async importOriginal => ({
   ...(await importOriginal<typeof import('@/app.config')>()),
-  WAS_BASE_URL: 'https://was.example'
+  WAS_BASE_SERVER_URL: 'http://localhost/'
 }))
 
 vi.mock('@interop/wallet-core/clientAnnex', async importOriginal => {
@@ -80,7 +80,7 @@ const CORE_RESULT = {
   clientSeed: new Uint8Array(32).fill(9),
   webvhUpdateKeys: { updateSeed: new Uint8Array(32).fill(4) },
   clientDid: 'did:key:zFreshClient',
-  did: 'did:webvh:scid-a:example.com:space-1',
+  did: 'did:webvh:scid-a:localhost:space:space-1:id',
   userKey: { id: 'did:key:zUserKey' }
 }
 
@@ -110,9 +110,8 @@ function hit(): KeyringFetchResult {
     controller: 'did:key:zController',
     unlockSpaceId: 'unlock-1',
     pointer: {
-      did: 'did:webvh:scid-a:example.com:space-1',
-      spaceId: 'space-1',
-      host: 'https://storage.example'
+      did: 'did:webvh:scid-a:localhost:space:space-1:id',
+      spaceUrl: 'http://localhost/space/space-1/'
     },
     standing: {
       delegation: {},
@@ -217,7 +216,7 @@ describe('selfEnrollStandingClient', () => {
  * The account the enrolled branch binds against, and a seed a prior run
  * sealed into that account's record (distinct from a fresh mint).
  */
-const ACCOUNT_DID = 'did:webvh:scid-a:example.com:space-1'
+const ACCOUNT_DID = 'did:webvh:scid-a:localhost:space:space-1:id'
 const SEALED_SEED = new Uint8Array(32).fill(7)
 
 /**
@@ -252,8 +251,7 @@ function enrolledContext(): AccountCeremonyContext {
     kind: 'enrolled',
     pointer: {
       did: ACCOUNT_DID,
-      spaceId: 'space-1',
-      host: 'https://storage.example'
+      spaceUrl: 'http://localhost/space/space-1/'
     },
     controller: ACCOUNT_DID,
     signer: { kind: 'enrolled', updateKeys: {} },
@@ -395,7 +393,10 @@ describe('establishStandingUnlock (the enrolled branch)', () => {
 
   it('ignores a standing record that names a different account', async () => {
     vi.mocked(fetchTransientKeyring).mockResolvedValue({
-      pointer: { did: 'did:webvh:scid-b:example.com:space-2' },
+      pointer: {
+        did: 'did:webvh:scid-b:localhost:space:space-2:id',
+        spaceUrl: 'http://localhost/space/space-2/'
+      },
       standing: { ladderSeed: SEALED_SEED }
     } as never)
 

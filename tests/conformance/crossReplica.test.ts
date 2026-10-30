@@ -134,19 +134,19 @@ async function startTeachingServer(): Promise<{
  * codec-bypassing client: a no-op keystore, envelopes move verbatim.
  *
  * @param options {object}
- * @param options.baseUrl {string}   the storage server's base URL
+ * @param options.baseServerUrl {string}   the storage server's base URL
  * @param options.zcapClient {object}
  * @returns {WasClient}
  */
 function wasClientFor({
-  baseUrl,
+  baseServerUrl,
   zcapClient
 }: {
-  baseUrl: string
+  baseServerUrl: string
   zcapClient: ConstructorParameters<typeof WasClient>[0]['zcapClient']
 }): WasClient {
   return wasClientAt({
-    baseUrl,
+    baseServerUrl,
     zcapClient,
     encryption: createEdvEncryption({ resolveKeys: async () => null })
   })
@@ -867,11 +867,11 @@ describe('cross-replica round-trip conformance', () => {
     spaceId = deriveSpaceId(dcwAgents.controllerDid)
 
     const dcwWas = wasClientFor({
-      baseUrl: serverUrl,
+      baseServerUrl: serverUrl,
       zcapClient: dcwAgents.zcapClient
     })
     const fwWas = wasClientFor({
-      baseUrl: serverUrl,
+      baseServerUrl: serverUrl,
       zcapClient: fwAgents.zcapClient
     })
 
@@ -884,7 +884,7 @@ describe('cross-replica round-trip conformance', () => {
     for (const collectionId of COLLECTIONS) {
       await ensureSpaceAndCollection({
         was: fwWas,
-        spaceId,
+        spaceUrl: fwWas.space(spaceId).url,
         controllerDid: fwAgents.controllerDid,
         collectionId,
         encryption: 'edv'
@@ -922,12 +922,12 @@ describe('cross-replica round-trip conformance', () => {
       })
       dcwPorts[collectionId] = createWasSyncPort({
         was: dcwWas,
-        spaceId,
+        spaceUrl: dcwWas.space(spaceId).url,
         collectionId
       })
       fwPorts[collectionId] = createWasSyncPort({
         was: fwWas,
-        spaceId,
+        spaceUrl: fwWas.space(spaceId).url,
         collectionId
       })
     }
@@ -1457,17 +1457,17 @@ describe('cross-replica writer attribution', () => {
     const fwAgents = await agentsFromSeed({ seed })
     spaceId = deriveSpaceId(dcwAgents.controllerDid)
     const dcwWas = wasClientFor({
-      baseUrl: serverUrl,
+      baseServerUrl: serverUrl,
       zcapClient: dcwAgents.zcapClient
     })
     const fwWas = wasClientFor({
-      baseUrl: serverUrl,
+      baseServerUrl: serverUrl,
       zcapClient: fwAgents.zcapClient
     })
 
     await ensureSpaceAndCollection({
       was: fwWas,
-      spaceId,
+      spaceUrl: fwWas.space(spaceId).url,
       controllerDid: fwAgents.controllerDid,
       collectionId,
       encryption: 'edv'
@@ -1492,11 +1492,23 @@ describe('cross-replica writer attribution', () => {
       idDerivation: 'content',
       encryption: descriptor
     })
-    const dcwPort = createWasSyncPort({ was: dcwWas, spaceId, collectionId })
-    fwPort = createWasSyncPort({ was: fwWas, spaceId, collectionId })
+    const dcwPort = createWasSyncPort({
+      was: dcwWas,
+      spaceUrl: dcwWas.space(spaceId).url,
+      collectionId
+    })
+    fwPort = createWasSyncPort({
+      was: fwWas,
+      spaceUrl: fwWas.space(spaceId).url,
+      collectionId
+    })
     // The third writer is told apart by its label alone, so it can share
     // dcw's client.
-    thirdPort = createWasSyncPort({ was: dcwWas, spaceId, collectionId })
+    thirdPort = createWasSyncPort({
+      was: dcwWas,
+      spaceUrl: dcwWas.space(spaceId).url,
+      collectionId
+    })
 
     fwStore = await openFwStore({
       controllerDid: fwAgents.controllerDid,

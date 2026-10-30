@@ -78,9 +78,8 @@ import {
   ENCRYPTED_WALLET_COLLECTION_IDS,
   KEY_MAP_COLLECTION,
   KMS_SERVER_URL,
-  WAS_BASE_URL
+  WAS_BASE_SERVER_URL
 } from '@/app.config'
-import { didWebFromSpace } from '@/lib/didWeb'
 import {
   ensureKeystore,
   ensureKmsAuthentication,
@@ -99,6 +98,8 @@ import {
   type PassphraseUnlockMethod
 } from '@/session/unlockMethods'
 import { createLogger, stageMarker, stageSpan, stageTimer } from '@/lib/log'
+import { didWebOfSpace } from '@/lib/didWeb'
+import { spaceLocation } from '@/lib/spaceLocation'
 import { wasClientAt, wasServiceDescription } from '@/lib/wasService'
 import type { StageLabel } from '@/lib/log'
 
@@ -220,8 +221,9 @@ async function establishmentHooks({
   ceremony: StageLabel
   mark: (stage: string) => void
 }) {
-  const host = pointer.host
-  const spaceId = pointer.spaceId
+  const { baseServerUrl, spaceId } = spaceLocation({
+    spaceUrl: pointer.spaceUrl
+  })
   const { standing } = credential
   const bootstrapAgent = await ladderVmAgent({ ladderSeed })
   const bootstrapZcap = didKeyZcapClient({ keyAgent: bootstrapAgent })
@@ -237,12 +239,12 @@ async function establishmentHooks({
     keyAgent: Parameters<typeof didKeyZcapClient>[0]['keyAgent']
   }) =>
     wasClientAt({
-      baseUrl: host,
+      baseServerUrl,
       zcapClient: didKeyZcapClient({ keyAgent }),
       serviceDescription
     })
   const bootstrapWas = wasClientAt({
-    baseUrl: host,
+    baseServerUrl,
     zcapClient: bootstrapZcap,
     serviceDescription
   })
@@ -321,7 +323,7 @@ async function establishmentHooks({
               },
               webvhIdStore: () => idStore
             },
-            did: didWebFromSpace({ wasServerUrl: host, spaceId }),
+            did: didWebOfSpace({ baseServerUrl, spaceId }),
             spaceReady
           })
           // Keep a late rejection handled once the timeout has won the race,
@@ -393,7 +395,7 @@ async function establishmentHooks({
       accountRosterStore({
         zcapClient: bootstrapZcap,
         keyAgent: bootstrapAgent,
-        pointer: { did, spaceId, host },
+        pointer: { did, spaceUrl: pointer.spaceUrl },
         pinStore: logPins,
         serviceDescription,
         log
@@ -403,7 +405,7 @@ async function establishmentHooks({
     // signed by the ladder VM and invoked as the bootstrap did:key.
     collectionStoreFor: ({ did, log }: { did: string; log: DIDLog }) =>
       accountCollectionStores({
-        storageServerUrl: host,
+        baseServerUrl,
         zcapClient: bootstrapZcap,
         spaceId,
         did,
@@ -439,8 +441,8 @@ async function establishmentHooks({
  *   credential (one KDF run for the whole signup)
  * @param options.ladderSeed {Uint8Array}   the credential's ladder seed --
  *   freshly minted on a signup, recovered from the record on a heal re-run
- * @param options.pointer {AccountPointer}   the account pointer (`spaceId` +
- *   `host`; `did` present only on a heal whose record already names one)
+ * @param options.pointer {AccountPointer}   the account pointer (`spaceUrl`;
+ *   `did` present only on a heal whose record already names one)
  * @param options.lowEntropy {boolean}   whether the credential is
  *   low-entropy (a passphrase publishes its `keyAgreement` key as a hash
  *   commitment; a passkey PRF output publishes verbatim)
@@ -492,7 +494,7 @@ export async function establishCredentialAnchoredAccount({
     establishment: CredentialAnchoredEstablishment
   }) => Promise<void>
 }): Promise<CredentialAnchoredEstablishment> {
-  if (!WAS_BASE_URL) {
+  if (!WAS_BASE_SERVER_URL) {
     throw new TypeError(
       'The credential-anchored establishment requires a configured WAS server.'
     )
@@ -517,8 +519,7 @@ export async function establishCredentialAnchoredAccount({
   })
   mark('bootstrap-wiring')
   const establishment = await runEstablishment({
-    wasServerUrl: pointer.host,
-    spaceId: pointer.spaceId,
+    ...spaceLocation({ spaceUrl: pointer.spaceUrl }),
     ladderSeed,
     ...hooks,
     ...(pointer.did !== undefined ? { expectedDid: pointer.did } : {}),
@@ -572,18 +573,18 @@ export async function establishCredentialAnchoredAccount({
  * hook and the entry stays that ceremony's own write.
  *
  * @param options {object}
- * @param options.spaceId {string}   the account Space id the registry lives
- *   in
+ * @param options.spaceUrl {string}   the account Space URL the registry
+ *   lives in
  * @param [options.capability] {IZcap}   an invocation capability the
  *   registry requests ride (the mend's post-promotion arms); the root
  *   capability is invoked otherwise (the signup's bootstrap window)
  * @returns {Function}   the `beforePromotion` hook
  */
 export function passphraseRegistryUpsertHook({
-  spaceId,
+  spaceUrl,
   capability
 }: {
-  spaceId: string
+  spaceUrl: string
   capability?: IZcap
 }): (context: {
   zcapClient: ZcapClient
@@ -594,7 +595,7 @@ export function passphraseRegistryUpsertHook({
     try {
       await updateUnlockMethodsWithClient({
         zcapClient,
-        spaceId,
+        spaceUrl,
         userKey,
         ...(capability ? { capability } : {}),
         mutate: existing => {
@@ -677,10 +678,13 @@ export async function ladderMendAuthority({
 }> {
   const keyAgent = await ladderVmAgent({ ladderSeed })
   const serviceDescription = await wasServiceDescription()
+  const { baseServerUrl, spaceId } = spaceLocation({
+    spaceUrl: pointer.spaceUrl
+  })
   return {
     invocation: {
       was: wasClientAt({
-        baseUrl: pointer.host,
+        baseServerUrl,
         zcapClient,
         serviceDescription
       }),
@@ -701,9 +705,9 @@ export async function ladderMendAuthority({
     // The controller view is verified fresh here rather than seeded: a mend
     // arm may have moved the head this visit stood on.
     collectionStore: accountCollectionStores({
-      storageServerUrl: pointer.host,
+      baseServerUrl,
       zcapClient,
-      spaceId: pointer.spaceId,
+      spaceId,
       did: pointer.did,
       pinStore,
       signer: userKeyRosterLogSigner({ keyAgent }),
@@ -813,7 +817,7 @@ export async function mendCredentialAnchoredAccount({
   repairShaped?: boolean
   collectionIds?: string[]
 }): Promise<CredentialAnchoredMendReport> {
-  if (!WAS_BASE_URL) {
+  if (!WAS_BASE_SERVER_URL) {
     throw new TypeError(
       'The credential-anchored mend requires a configured WAS server.'
     )

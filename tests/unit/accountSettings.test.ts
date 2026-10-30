@@ -6,7 +6,6 @@
  * passphrase change adopting the rebind into the live session. Every durable
  * seam is mocked; only the ordering is under test.
  */
-import { spacesUrl } from '@interop/was-client/paths'
 import { readFileSync } from 'node:fs'
 import path from 'node:path'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
@@ -34,7 +33,9 @@ const state = vi.hoisted(() => ({
   registryFails: false,
   // The visit's authority stamp at each registry read, in order.
   registryCapabilities: [] as unknown[],
-  accountDoc: { id: 'did:webvh:account' } as unknown,
+  accountDoc: {
+    id: 'did:webvh:QmScidForTestsabcdefghijkmnopqrstuvwxyzABCDEFG:was.example.test:space:space-123:id'
+  } as unknown,
   accountLogFails: false,
   clientAnnexCollections: [] as string[],
   clientAnnexDeleteFails: false,
@@ -88,7 +89,7 @@ const state = vi.hoisted(() => ({
   coverageReadFails: false,
   // Whether the unrecorded-credential detector throws.
   unrecordedThrows: false,
-  annexHistory: [] as { did: string; host: string; spaceId: string }[],
+  annexHistory: [] as { did: string; baseServerUrl: string; spaceId: string }[],
   siblingTarget: undefined as string | undefined,
   // Per-Space discovery and DELETE behaviour, keyed by Space id.
   probe: {} as Record<string, 'present' | 'absent'>,
@@ -220,7 +221,9 @@ function gateRefusal(): Error {
   )
   err.name = 'UnclaimedLadderVmRetirementError'
   Object.assign(err, {
-    unclaimedLadderVmIds: ['did:webvh:account#z6MkStandingLadderVm'],
+    unclaimedLadderVmIds: [
+      'did:webvh:QmScidForTestsabcdefghijkmnopqrstuvwxyzABCDEFG:was.example.test:space:space-123:id#z6MkStandingLadderVm'
+    ],
     retryableWithLadderSeed: true
   })
   return err
@@ -228,11 +231,8 @@ function gateRefusal(): Error {
 
 vi.mock('@/app.config', async importOriginal => ({
   ...(await importOriginal<typeof import('@/app.config')>()),
-  get WAS_BASE_URL() {
+  get WAS_BASE_SERVER_URL() {
     return state.wasUrl
-  },
-  get WAS_SPACES_URL() {
-    return state.wasUrl && spacesUrl({ baseUrl: state.wasUrl })
   }
 }))
 
@@ -312,11 +312,11 @@ vi.mock('@/session/userKeyAdoption', () => {
       state.calls.push('adoptFollowerUserKey')
       return { adopted: true, position: 'current' }
     }),
-    // The real helper: the account pointer's Space id, else the storage's,
+    // The real helper: the account pointer's Space URL, else the storage's,
     // which is what the adoption assertions below name.
-    rotationSpaceId: vi.fn(
+    rotationSpaceUrl: vi.fn(
       ({ session }: { session: Session }) =>
-        session.profile.accountPointer?.spaceId ?? session.storage.spaceId
+        session.profile.accountPointer?.spaceUrl ?? session.storage.spaceUrl
     )
   }
 })
@@ -798,7 +798,9 @@ vi.mock('@interop/wallet-core/webvh', async importOriginal => ({
     state.ladderVmAnchored ? [`${ACCOUNT_DID}#z6MkLadderVm`] : []
   ),
   ladderVmKeyMultibase: vi.fn(async () => 'z6MkLadderVm'),
-  relationIds: vi.fn(() => ['did:webvh:account#z6MkClientOne'])
+  relationIds: vi.fn(() => [
+    'did:webvh:QmScidForTestsabcdefghijkmnopqrstuvwxyzABCDEFG:was.example.test:space:space-123:id#z6MkClientOne'
+  ])
 }))
 
 vi.mock('@/session/verifiedLog', async importOriginal => ({
@@ -975,7 +977,7 @@ vi.mock('@/session/credentialCoverage', () => ({
           id: 'urn:zcap:manage',
           spaceId: 'unlock-space-x',
           controller: ACCOUNT_DID,
-          invocationTarget: `${state.wasUrl}/space/unlock-space-x/`,
+          invocationTarget: `${state.wasUrl}space/unlock-space-x/`,
           allowedAction: ['GET', 'PUT', 'DELETE']
         },
         unlockSpaceId: 'unlock-space-x'
@@ -1043,9 +1045,8 @@ vi.mock('@/session/accountCeremonyContext', async importOriginal => ({
       ? {
           controller: 'did:key:zAccount',
           pointer: {
-            did: 'did:webvh:account',
-            spaceId: 'space-123',
-            host: 'https://was.example.test'
+            did: 'did:webvh:QmScidForTestsabcdefghijkmnopqrstuvwxyzABCDEFG:was.example.test:space:space-123:id',
+            spaceUrl: 'https://was.example.test/space/space-123/'
           }
         }
       : null
@@ -1066,9 +1067,8 @@ vi.mock('@/session/accountCeremonyContext', async importOriginal => ({
           kind: 'ladder',
           controller: 'did:key:zAccount',
           pointer: {
-            did: 'did:webvh:account',
-            spaceId: 'space-123',
-            host: 'https://was.example.test'
+            did: 'did:webvh:QmScidForTestsabcdefghijkmnopqrstuvwxyzABCDEFG:was.example.test:space:space-123:id',
+            spaceUrl: 'https://was.example.test/space/space-123/'
           },
           remoteStore: {
             webvhIdStore: vi.fn(() => ({ isWebvhIdStore: true }))
@@ -1098,9 +1098,8 @@ vi.mock('@/session/accountCeremonyContext', async importOriginal => ({
             kind: 'enrolled',
             controller: 'did:key:zAccount',
             pointer: {
-              did: 'did:webvh:account',
-              spaceId: 'space-123',
-              host: 'https://was.example.test'
+              did: 'did:webvh:QmScidForTestsabcdefghijkmnopqrstuvwxyzABCDEFG:was.example.test:space:space-123:id',
+              spaceUrl: 'https://was.example.test/space/space-123/'
             },
             remoteStore: {
               webvhIdStore: vi.fn(() => ({ isWebvhIdStore: true }))
@@ -1219,7 +1218,8 @@ const {
   transientSessionStores
 } = await import('@/session/persistence')
 
-const ACCOUNT_DID = 'did:webvh:QmScid:was.example.test:space:space-123:id'
+const ACCOUNT_DID =
+  'did:webvh:QmScidForTestsabcdefghijkmnopqrstuvwxyzABCDEFG:was.example.test:space:space-123:id'
 /** The confirm passphrase every deletion test types; short, since the mocked
  * `deriveUnlockCredential` builds the unlock Space id out of it. */
 const PASSPHRASE = 'pw'
@@ -1345,12 +1345,14 @@ function makeSession({
       },
       accountPointer: {
         ...(unpromoted ? {} : { did: ACCOUNT_DID }),
-        spaceId: 'space-123',
-        host: 'https://was.example.test'
+        spaceUrl: 'https://was.example.test/space/space-123/'
       }
     },
     storage: {
       spaceId: noSpace ? undefined : 'space-123',
+      spaceUrl: noSpace
+        ? undefined
+        : 'https://was.example.test/space/space-123/',
       wipeRemoteStorage: vi.fn(
         async (options: { capability?: { id: string } } = {}) => {
           state.calls.push('wipeRemoteStorage')
@@ -1494,7 +1496,11 @@ function deletionRegistry(): object {
  * @returns {object}
  */
 function annexHistoryEntry(spaceId: string, host = 'was.example.test') {
-  return { did: `did:webvh:QmA:${host}:space:${spaceId}:gen-1`, host, spaceId }
+  return {
+    did: `did:webvh:QmA:${host}:space:${spaceId}:gen-1`,
+    baseServerUrl: `https://${host}/`,
+    spaceId
+  }
 }
 
 /**
@@ -1518,7 +1524,7 @@ function capabilityDeletes(): Array<{
 
 describe('deleteAccount (the transient walk)', () => {
   beforeEach(() => {
-    state.wasUrl = 'https://was.example.test'
+    state.wasUrl = 'https://was.example.test/'
     state.registry = deletionRegistry()
     state.annexHistory = [annexHistoryEntry(ANNEX_SPACE_A)]
   })
@@ -1798,7 +1804,7 @@ describe('deleteAccount (the transient walk)', () => {
 
 describe('deleteAccount (the (a2) refusals)', () => {
   beforeEach(() => {
-    state.wasUrl = 'https://was.example.test'
+    state.wasUrl = 'https://was.example.test/'
     state.registry = deletionRegistry()
     state.annexHistory = [annexHistoryEntry(ANNEX_SPACE_A)]
   })
@@ -2074,14 +2080,16 @@ describe('deleteAccount (the (a2) refusals)', () => {
 
 describe('deleteAccount (coverage residues and the scoped confirm)', () => {
   beforeEach(() => {
-    state.wasUrl = 'https://was.example.test'
+    state.wasUrl = 'https://was.example.test/'
     state.registry = deletionRegistry()
     state.annexHistory = [annexHistoryEntry(ANNEX_SPACE_A)]
   })
 
   it('reports a pending-shaped entry and an unrecorded credential, and carries on', async () => {
     state.pendingEntries = ['passphrase']
-    state.unrecorded = ['did:webvh:account#z6LSUnrecordedKak']
+    state.unrecorded = [
+      'did:webvh:QmScidForTestsabcdefghijkmnopqrstuvwxyzABCDEFG:was.example.test:space:space-123:id#z6LSUnrecordedKak'
+    ]
     const outcome = await deleteAccount({
       session: makeSession({ transient: true }),
       passphrase: PASSPHRASE
@@ -2130,7 +2138,7 @@ describe('deleteAccount (coverage residues and the scoped confirm)', () => {
 
 describe('deleteAccount (the visit authority and the enumeration)', () => {
   beforeEach(() => {
-    state.wasUrl = 'https://was.example.test'
+    state.wasUrl = 'https://was.example.test/'
     state.registry = deletionRegistry()
   })
 
@@ -2194,7 +2202,7 @@ describe('deleteAccount (the visit authority and the enumeration)', () => {
 
 describe('deleteAccount (the masked-404 registry read)', () => {
   beforeEach(() => {
-    state.wasUrl = 'https://was.example.test'
+    state.wasUrl = 'https://was.example.test/'
     state.annexHistory = []
   })
 
@@ -2259,7 +2267,7 @@ describe('deleteAccount (the masked-404 registry read)', () => {
 
 describe('deleteAccount (the pre-pivot local state)', () => {
   beforeEach(() => {
-    state.wasUrl = 'https://was.example.test'
+    state.wasUrl = 'https://was.example.test/'
     state.registry = deletionRegistry()
     state.annexHistory = [annexHistoryEntry(ANNEX_SPACE_A)]
   })
@@ -2283,7 +2291,7 @@ describe('deleteAccount (the pre-pivot local state)', () => {
 
 describe('deleteAccount (the discovery probe and the coverage checks)', () => {
   beforeEach(() => {
-    state.wasUrl = 'https://was.example.test'
+    state.wasUrl = 'https://was.example.test/'
     state.registry = deletionRegistry()
     state.annexHistory = [annexHistoryEntry(ANNEX_SPACE_A)]
   })
@@ -2318,7 +2326,7 @@ describe('deleteAccount (the discovery probe and the coverage checks)', () => {
 
 describe('deleteAccount (an unpromoted account 404 corroborator)', () => {
   beforeEach(() => {
-    state.wasUrl = 'https://was.example.test'
+    state.wasUrl = 'https://was.example.test/'
     state.registry = deletionRegistry()
     state.annexHistory = []
   })
@@ -2357,7 +2365,7 @@ describe('deleteAccount (an unpromoted account 404 corroborator)', () => {
 
 describe('deleteAccount (the enrolled clients local wipe)', () => {
   beforeEach(() => {
-    state.wasUrl = 'https://was.example.test'
+    state.wasUrl = 'https://was.example.test/'
     state.registry = deletionRegistry()
     state.annexHistory = []
   })
@@ -2379,7 +2387,7 @@ describe('deleteAccount (the enrolled clients local wipe)', () => {
 
 describe('deleteAccount (an unpromoted account)', () => {
   beforeEach(() => {
-    state.wasUrl = 'https://was.example.test'
+    state.wasUrl = 'https://was.example.test/'
     state.registry = deletionRegistry()
   })
 
@@ -2427,7 +2435,7 @@ describe('deleteAccount (an unpromoted account)', () => {
 
 describe('deleteAccount (the 404 rule)', () => {
   beforeEach(() => {
-    state.wasUrl = 'https://was.example.test'
+    state.wasUrl = 'https://was.example.test/'
     state.registry = deletionRegistry()
     state.annexHistory = [annexHistoryEntry(ANNEX_SPACE_A)]
   })
@@ -2499,7 +2507,7 @@ describe('deleteAccount (the 404 rule)', () => {
 
 describe('deleteAccount (failure policy)', () => {
   beforeEach(() => {
-    state.wasUrl = 'https://was.example.test'
+    state.wasUrl = 'https://was.example.test/'
     state.registry = deletionRegistry()
     state.annexHistory = [annexHistoryEntry(ANNEX_SPACE_A)]
   })
@@ -2679,7 +2687,7 @@ describe('deleteAccount (failure policy)', () => {
 
 describe('deleteAccount (the remembered and scope-skipped sessions)', () => {
   beforeEach(() => {
-    state.wasUrl = 'https://was.example.test'
+    state.wasUrl = 'https://was.example.test/'
   })
 
   it('root-invokes every delete and mints no DELETE-only capability', async () => {
@@ -2845,7 +2853,7 @@ describe('changeAccountPassphrase', () => {
     ])
     expect(vi.mocked(adoptRotatedUserKey)).toHaveBeenCalledWith(
       expect.objectContaining({
-        spaceId: 'space-123',
+        spaceUrl: 'https://was.example.test/space/space-123/',
         userKey: FRESH_USER_KEY
       })
     )
@@ -3234,7 +3242,9 @@ describe('changeAccountPassphrase', () => {
     // the dialog, which reads them to decide what to offer (FW-404).
     expect(thrown).toMatchObject({
       name: 'UnclaimedLadderVmRetirementError',
-      unclaimedLadderVmIds: ['did:webvh:account#z6MkStandingLadderVm'],
+      unclaimedLadderVmIds: [
+        'did:webvh:QmScidForTestsabcdefghijkmnopqrstuvwxyzABCDEFG:was.example.test:space:space-123:id#z6MkStandingLadderVm'
+      ],
       retryableWithLadderSeed: true
     })
     // Nothing was written: the old passphrase was only verified, and the
@@ -3725,7 +3735,8 @@ describe("changeAccountPassphrase (the ladder branch's unlock-Space stage)", () 
       ladderSeed: NEW_LADDER_SEED
     })
     expect(vi.mocked(ladderVmZcapClient)).toHaveBeenCalledWith({
-      accountDid: 'did:webvh:account',
+      accountDid:
+        'did:webvh:QmScidForTestsabcdefghijkmnopqrstuvwxyzABCDEFG:was.example.test:space:space-123:id',
       ladderSeed: NEW_LADDER_SEED
     })
     expect(vi.mocked(deleteUnlockSpaceForEntry)).toHaveBeenCalledWith(
@@ -3827,7 +3838,7 @@ describe('removeAccountPasskey', () => {
     )
     expect(vi.mocked(adoptRotatedUserKey)).toHaveBeenCalledWith(
       expect.objectContaining({
-        spaceId: 'space-123',
+        spaceUrl: 'https://was.example.test/space/space-123/',
         userKey: FRESH_USER_KEY
       })
     )
@@ -4299,7 +4310,7 @@ describe('deleteAccount (the ceremony events)', () => {
   let capture: ReturnType<typeof captureCeremonyEvents>
 
   beforeEach(() => {
-    state.wasUrl = 'https://was.example.test'
+    state.wasUrl = 'https://was.example.test/'
     state.registry = deletionRegistry()
     state.annexHistory = [annexHistoryEntry(ANNEX_SPACE_A)]
     capture = captureCeremonyEvents()

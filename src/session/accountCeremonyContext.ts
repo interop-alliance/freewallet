@@ -50,7 +50,7 @@ import type {
   CollectionStoreFor,
   SealableEncryptionDescriptorStore
 } from '@interop/wallet-core/keys'
-import { WAS_BASE_URL } from '@/app.config'
+import { WAS_BASE_SERVER_URL } from '@/app.config'
 import type { ControllerProfile, ICapabilityAgent, Session } from '@/types/auth'
 import type { WASRemoteStore } from '@/stores/wasRemoteStore'
 import { sessionRosterStore } from '@/session/rosterStore'
@@ -234,7 +234,7 @@ function resolveAccountReach({ session }: { session: Session }):
     }
   | { missing: MissingPrecondition } {
   const remoteStore = session.storage.remoteStore
-  if (!WAS_BASE_URL || !remoteStore || session.isGuest) {
+  if (!WAS_BASE_SERVER_URL || !remoteStore || session.isGuest) {
     return { missing: 'storage' }
   }
   const pointer = session.profile.accountPointer
@@ -335,6 +335,34 @@ function resolveEnrolledContext({
       ...material
     }
   }
+}
+
+/**
+ * Either account-ceremony context, or a throw naming what the caller needs.
+ * Callers gate on `canRunAccountCeremonies` first, so a throw here is a
+ * programming error.
+ *
+ * @param options {object}
+ * @param options.session {Session}
+ * @param options.action {string}   the caller's action, as the error message
+ *   opens ("Listing enrolled clients requires ...")
+ * @returns {Promise<AccountCeremonyContext>}
+ */
+export async function requireAccountCeremonyContext({
+  session,
+  action
+}: {
+  session: Session
+  action: string
+}): Promise<AccountCeremonyContext> {
+  const context = await accountCeremonyContext({ session })
+  if (!context) {
+    throw new Error(
+      `${action} requires an account on a storage server, reached either ` +
+        'from a connected browser or with a standing passphrase or passkey.'
+    )
+  }
+  return context
 }
 
 /**
@@ -643,8 +671,7 @@ export async function accountCeremonyContext({
     // so it never holds a delegation the ceremony's pivot has struck.
     get projectionStore() {
       return (ladderProjectionStore ??= didWebProjectionStore({
-        host: reach.pointer.host,
-        spaceId: reach.pointer.spaceId,
+        spaceUrl: reach.pointer.spaceUrl,
         invoker: invokerNow,
         pinStore: session.persistence.logPins,
         serviceDescription: reach.remoteStore.serviceDescription

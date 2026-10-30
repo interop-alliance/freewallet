@@ -33,7 +33,7 @@ import type { IZcap } from '@interop/data-integrity-core'
 import type { ZcapClient } from '@interop/ezcap'
 import { userKeyVaultKeys, type UserKey } from '@interop/wallet-core/keys'
 import type { CollectionEncryption } from '@interop/was-client'
-import { WAS_BASE_URL } from '@/app.config'
+import { WAS_BASE_SERVER_URL } from '@/app.config'
 import type { Session } from '@/types/auth'
 import { rewrapUnlockMethodsRecord } from '@/session/unlockMethods'
 import { isSessionDisposed } from '@/session/sessionLifecycle'
@@ -51,9 +51,8 @@ const log = createLogger('fw:session:userkey')
  * and counts as success.
  *
  * @param options {object}
- * @param options.storageServerUrl {string}
  * @param options.zcapClient {ZcapClient}   an enrolled client's signing client
- * @param options.spaceId {string}   the data Space id
+ * @param options.spaceUrl {string}   the data Space's URL
  * @param options.from {UserKey}   the pre-rotation user key
  * @param options.to {UserKey}   the post-rotation user key
  * @param [options.capability] {IZcap}   an invocation capability every request
@@ -62,25 +61,22 @@ const log = createLogger('fw:session:userkey')
  * @returns {Promise<boolean>}   whether the registry is now sealed to `to`
  */
 export async function rewrapUnlockRegistryToUserKey({
-  storageServerUrl,
   zcapClient,
-  spaceId,
+  spaceUrl,
   from,
   to,
   capability
 }: {
-  storageServerUrl: string
   zcapClient: ZcapClient
-  spaceId: string
+  spaceUrl: string
   from: UserKey
   to: UserKey
   capability?: IZcap
 }): Promise<boolean> {
   try {
     await rewrapUnlockMethodsRecord({
-      storageServerUrl,
       zcapClient,
-      spaceId,
+      spaceUrl,
       from,
       to,
       ...(capability ? { capability } : {})
@@ -114,22 +110,22 @@ export async function rewrapUnlockRegistryToUserKey({
  *
  * @param options {object}
  * @param options.session {Session}
- * @param options.spaceId {string}   the data Space id
+ * @param options.spaceUrl {string}   the data Space's URL
  * @param options.userKey {UserKey}   the freshly rotated per-user key
  * @returns {Promise<boolean>}   whether the registry is now sealed to the
  *   rotated key
  */
 export async function resealUnlockRegistryForRotation({
   session,
-  spaceId,
+  spaceUrl,
   userKey
 }: {
   session: Session
-  spaceId: string
+  spaceUrl: string
   userKey: UserKey
 }): Promise<boolean> {
   const from = session.profile.userKey
-  if (!from || !WAS_BASE_URL) {
+  if (!from || !WAS_BASE_SERVER_URL) {
     return true
   }
   // The visit's own authority, read here rather than threaded by every
@@ -138,9 +134,8 @@ export async function resealUnlockRegistryForRotation({
   // root-invokes.
   const capability = session.profile.invocationCapability
   return await rewrapUnlockRegistryToUserKey({
-    storageServerUrl: WAS_BASE_URL,
     zcapClient: session.profile.zcapClient,
-    spaceId,
+    spaceUrl,
     from,
     to: userKey,
     ...(capability ? { capability } : {})
@@ -148,15 +143,15 @@ export async function resealUnlockRegistryForRotation({
 }
 
 /**
- * The data Space id a rotated user key is adopted against -- the account
+ * The data Space URL a rotated user key is adopted against -- the account
  * pointer's, falling back to the session storage's.
  *
  * @param options {object}
  * @param options.session {Session}
  * @returns {string}
  */
-export function rotationSpaceId({ session }: { session: Session }): string {
-  return session.profile.accountPointer?.spaceId ?? session.storage.spaceId!
+export function rotationSpaceUrl({ session }: { session: Session }): string {
+  return session.profile.accountPointer?.spaceUrl ?? session.storage.spaceUrl!
 }
 
 /**
@@ -190,7 +185,7 @@ export function rotationSpaceId({ session }: { session: Session }): string {
  *
  * @param options {object}
  * @param options.session {Session}
- * @param options.spaceId {string}   the data Space id
+ * @param options.spaceUrl {string}   the data Space's URL
  * @param options.accountDid {string}   the account did:webvh, the visit's
  *   epoch pin key
  * @param options.userKey {UserKey}   the freshly rotated per-user key
@@ -201,14 +196,14 @@ export function rotationSpaceId({ session }: { session: Session }): string {
  */
 export async function adoptRotatedUserKeyInBand({
   session,
-  spaceId,
+  spaceUrl,
   accountDid,
   userKey,
   latestEpochId,
   descriptor
 }: {
   session: Session
-  spaceId: string
+  spaceUrl: string
   accountDid: string
   userKey: UserKey
   latestEpochId: string
@@ -216,7 +211,7 @@ export async function adoptRotatedUserKeyInBand({
 }): Promise<void> {
   const resealed = await resealUnlockRegistryForRotation({
     session,
-    spaceId,
+    spaceUrl,
     userKey
   })
   await session.persistence.epochPins.saveFromDescriptor({
@@ -315,23 +310,23 @@ export async function swapSessionVaultKeys({
  *
  * @param options {object}
  * @param options.session {Session}
- * @param options.spaceId {string}
+ * @param options.spaceUrl {string}   the data Space's URL
  * @param options.userKey {UserKey}   the freshly rotated per-user key
  * @returns {Promise<void>}
  */
 export async function adoptRotatedUserKey({
   session,
-  spaceId,
+  spaceUrl,
   userKey
 }: {
   session: Session
-  spaceId: string
+  spaceUrl: string
   userKey: UserKey
 }): Promise<void> {
   if (session.profile.userKey?.id !== userKey.id) {
     await resealUnlockRegistryForRotation({
       session,
-      spaceId,
+      spaceUrl,
       userKey
     })
   }

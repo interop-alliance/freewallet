@@ -48,13 +48,14 @@ import {
   verifyAccountLog,
   type ICapabilityAgent
 } from '@interop/wallet-core/webvh'
-import type { AccountLogPointer } from '@interop/wallet-core/clients'
+import type { AccountPointer } from '@interop/wallet-core/keyring'
 import {
   memoryResourceLogPinStore,
   type ResourceLogPinStore
 } from '@interop/vh-resource-log'
 import type { SessionCore } from '@/types/auth'
 import { verifiedAccountLog } from '@/session/verifiedLog'
+import { spaceLocation } from '@/lib/spaceLocation'
 
 /**
  * Builds the roster store from bare parts, for callers with no session
@@ -75,7 +76,7 @@ import { verifiedAccountLog } from '@/session/verifiedLog'
  *   requests (promoted where the account is)
  * @param options.keyAgent {ICapabilityAgent}   this client's signing key
  *   agent -- its enrolled key signs the log appends
- * @param options.pointer {AccountLogPointer}   the account pointer; its `did`
+ * @param options.pointer {AccountPointer}   the account pointer; its `did`
  *   must name the did:webvh the roster log's entry proofs anchor to
  * @param [options.pinStore] {ResourceLogPinStore}   the chain-head pin store,
  *   overriding the fresh in-memory default -- pass the session's own log-pin
@@ -100,7 +101,7 @@ export function accountRosterStore({
 }: {
   zcapClient: ZcapClient
   keyAgent: ICapabilityAgent
-  pointer: AccountLogPointer
+  pointer: AccountPointer & { did: string }
   pinStore?: ResourceLogPinStore
   log?: DIDLog
   capability?: IZcap
@@ -113,20 +114,20 @@ export function accountRosterStore({
   // on the first operation rather than here, so a store handed to a run that
   // never reads or appends resolves nothing.
   let pending: Promise<WebvhResourceLogController> | undefined
+  const { baseServerUrl, spaceId } = spaceLocation({
+    spaceUrl: pointer.spaceUrl
+  })
   return userKeyRosterDescriptorStore({
-    storageServerUrl: pointer.host,
+    baseServerUrl,
     zcapClient,
-    spaceId: pointer.spaceId,
+    spaceId,
     resolveController: async () => {
       pending ??= (
         log
           ? Promise.resolve(log)
-          : verifyAccountLog({
-              did: pointer.did,
-              spaceId: pointer.spaceId,
-              host: pointer.host,
-              pinStore: pins
-            }).then(({ log: served }) => served)
+          : verifyAccountLog({ did: pointer.did, pinStore: pins }).then(
+              ({ log: served }) => served
+            )
       ).then(
         served => webvhResourceLogController({ did: pointer.did, log: served }),
         err => {
@@ -186,9 +187,11 @@ export function sessionRosterStore({
         'this client key agent; this session holds none.'
     )
   }
-  const spaceId = pointer.spaceId
+  const { baseServerUrl, spaceId } = spaceLocation({
+    spaceUrl: pointer.spaceUrl
+  })
   return userKeyRosterDescriptorStore({
-    storageServerUrl: pointer.host,
+    baseServerUrl,
     zcapClient: profile.zcapClient,
     spaceId,
     resolveController: async () => {

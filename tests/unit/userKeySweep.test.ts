@@ -19,7 +19,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { agentsFromSeed } from '@interop/was-client/identity'
 
 const state = vi.hoisted(() => ({
-  wasUrl: 'https://was.example.test' as string | undefined
+  wasUrl: 'https://was.example.test/' as string | undefined
 }))
 
 // The visit's in-memory roster-epoch pin, stubbed on the browser-local
@@ -39,7 +39,7 @@ const epochPins = vi.hoisted(() => ({
 
 vi.mock('@/app.config', async importOriginal => ({
   ...(await importOriginal<typeof import('@/app.config')>()),
-  get WAS_BASE_URL() {
+  get WAS_BASE_SERVER_URL() {
     return state.wasUrl
   },
   get KMS_SERVER_URL() {
@@ -193,8 +193,7 @@ const ROSTER_DESCRIPTOR = { rosterDescriptor: true }
 const CONVERGED_DESCRIPTOR = { rosterDescriptor: 'converged' }
 const POINTER = {
   did: 'did:webvh:QmScidForTests:was.example.test:space:space-123:id',
-  spaceId: 'space-123',
-  host: 'https://was.example.test'
+  spaceUrl: 'https://was.example.test/space/space-123/'
 }
 
 /**
@@ -295,7 +294,7 @@ async function didFromSeed(seed: Uint8Array): Promise<string> {
  */
 async function arrangeRememberedLogin({
   withRemote = true,
-  pointer = POINTER as { did?: string; spaceId: string; host: string }
+  pointer = POINTER as { did?: string; spaceUrl: string }
 } = {}) {
   const clientSeed = randomSeed()
   const controller = await didFromSeed(clientSeed)
@@ -377,7 +376,7 @@ function convergenceRotatesToFreshKey(overrides: object = {}) {
 
 beforeEach(() => {
   vi.clearAllMocks()
-  state.wasUrl = 'https://was.example.test'
+  state.wasUrl = 'https://was.example.test/'
   vi.mocked(checkUserKeyRosterAtLogin).mockResolvedValue(null)
   vi.mocked(cascadeCollectionsToUserKey).mockResolvedValue({
     outcomes: {},
@@ -886,11 +885,7 @@ describe('the roster stage of the sweep', () => {
       vi.mocked(convergeUserKeyRosterToAccount)
     ).toHaveBeenCalledExactlyOnceWith(
       expect.objectContaining({
-        pointer: {
-          did: POINTER.did,
-          spaceId: POINTER.spaceId,
-          host: POINTER.host
-        },
+        did: POINTER.did,
         descriptor: ROSTER_DESCRIPTOR,
         userKey: OLD_USER_KEY
       })

@@ -17,7 +17,7 @@ import type { Session } from '@/types/auth'
 
 vi.mock('@/app.config', async importOriginal => ({
   ...(await importOriginal<Record<string, unknown>>()),
-  WAS_BASE_URL: 'https://was.example'
+  WAS_BASE_SERVER_URL: 'https://was.example/'
 }))
 
 vi.mock('@/session/unlockMethods', () => ({
@@ -86,7 +86,7 @@ describe('adoptRotatedUserKeyInBand', () => {
     try {
       await adoptRotatedUserKeyInBand({
         session,
-        spaceId: 's-space',
+        spaceUrl: 'http://localhost:8080/space/s-space/',
         accountDid: 'did:webvh:example:account',
         userKey,
         latestEpochId: 'epoch-2',
@@ -117,7 +117,7 @@ describe('adoptRotatedUserKey', () => {
     const { session, storage } = makeSession({ userKey })
     vi.mocked(rewrapUnlockMethodsRecord).mockClear()
 
-    await adoptRotatedUserKey({ session, spaceId: 's-space', userKey })
+    await adoptRotatedUserKey({ session, spaceUrl: 'http://localhost:8080/space/s-space/', userKey })
 
     // The id guard is over the re-seal alone: the swap that rebuilds the
     // ciphers on the rotated descriptors runs either way.
@@ -130,7 +130,7 @@ describe('adoptRotatedUserKey', () => {
     const { session, storage } = makeSession()
     vi.mocked(rewrapUnlockMethodsRecord).mockClear()
 
-    await adoptRotatedUserKey({ session, spaceId: 's-space', userKey })
+    await adoptRotatedUserKey({ session, spaceUrl: 'http://localhost:8080/space/s-space/', userKey })
 
     expect(vi.mocked(rewrapUnlockMethodsRecord)).toHaveBeenCalledTimes(1)
     expect(session.profile.userKey).toBe(userKey)

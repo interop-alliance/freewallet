@@ -24,7 +24,7 @@ const state = vi.hoisted(() => ({
 // and still assert the re-mint's whole sequence.
 vi.mock('@/app.config', async importOriginal => ({
   ...(await importOriginal<typeof import('@/app.config')>()),
-  get WAS_BASE_URL() {
+  get WAS_BASE_SERVER_URL() {
     return undefined
   }
 }))
@@ -66,9 +66,8 @@ import {
 } from '@/session/standingDelegationRefresh'
 
 const POINTER = {
-  did: 'did:webvh:QmScid:was.example.test:space:space-123:id',
-  spaceId: 'space-123',
-  host: 'https://was.example.test'
+  did: 'did:webvh:QmScid:localhost:space:space-123:id',
+  spaceUrl: 'http://localhost/space/space-123/'
 }
 
 const STANDING_CLIENT_DID = 'did:key:z6MkStandingCredential'
@@ -162,7 +161,7 @@ describe('the standing-delegation self-refresh', () => {
     })
     expect(mintDelegatedClientsDelegation).toHaveBeenCalledWith({
       zcapClient: session.profile.zcapClient,
-      wasServerUrl: POINTER.host,
+      baseServerUrl: 'http://localhost/',
       clientAnnexSpaceId: 'annex-space-1',
       controller: STANDING_CLIENT_DID
     })

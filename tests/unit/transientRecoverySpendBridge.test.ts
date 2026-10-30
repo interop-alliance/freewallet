@@ -21,6 +21,7 @@
  * real.
  */
 import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { resourceUrl } from '@interop/was-client/paths'
 
 import type { IKeyAgreementKey, IZcap } from '@interop/data-integrity-core'
 
@@ -45,7 +46,7 @@ const state = vi.hoisted(() => ({
 
 vi.mock('@/app.config', async importOriginal => ({
   ...(await importOriginal<typeof import('@/app.config')>()),
-  WAS_BASE_URL: 'https://was.example.test'
+  WAS_BASE_SERVER_URL: 'http://localhost/'
 }))
 
 vi.mock('@interop/wallet-core/keyring', async importOriginal => ({
@@ -129,7 +130,7 @@ vi.mock('@interop/wallet-core/clientAnnex', async importOriginal => ({
     }
   ),
   mintCredentialClientAnnexGeneration: vi.fn(async () => ({
-    did: 'did:webvh:QmAnnexScid:was.example.test:space:annex-space:gen-1',
+    did: 'did:webvh:QmAnnexScid:localhost:space:annex-space:gen-1',
     generationId: 'gen-1',
     log: [],
     doc: { verificationMethod: [] },
@@ -138,7 +139,7 @@ vi.mock('@interop/wallet-core/clientAnnex', async importOriginal => ({
   ensureGenerationDelegationCurrent: vi.fn(async () => ({ minted: false })),
   clientAnnexLogStore: vi.fn(() => ({})),
   enrollClientAnnexTransientClient: vi.fn(async () => ({
-    did: 'did:webvh:QmAnnexScid:was.example.test:space:annex-space:gen-1',
+    did: 'did:webvh:QmAnnexScid:localhost:space:annex-space:gen-1',
     doc: { verificationMethod: [] },
     log: []
   })),
@@ -219,15 +220,18 @@ import { recoverWebvhLadderAnchored } from '@interop/wallet-core/clientAnnex'
 import { recoverAccountWithCode } from '@/session/recovery'
 
 const POINTER: AccountPointer = {
-  did: 'did:webvh:QmScidForTests:was.example.test:space:space-123:id',
-  spaceId: 'space-123',
-  host: 'https://was.example.test'
+  did: 'did:webvh:QmScidForTests:localhost:space:space-123:id',
+  spaceUrl: 'http://localhost/space/space-123/'
 }
 const CONTROLLER = 'did:key:z6MkAccountController'
 const DELEGATION = {
   id: 'urn:zcap:delegated:test',
   controller: 'did:key:z6MkRecoveryClient',
-  invocationTarget: `${POINTER.host}/space/${POINTER.spaceId}/id/did.jsonl`,
+  invocationTarget: resourceUrl({
+    spaceUrl: POINTER.spaceUrl,
+    collectionId: 'id',
+    resourceId: 'did.jsonl'
+  }),
   parentCapability: 'urn:zcap:root:test',
   proof: { verificationMethod: `${POINTER.did}#z6MkIssuingClient` }
 } as unknown as IZcap

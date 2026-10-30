@@ -78,7 +78,10 @@ import {
   rotateOffUnlockCredential
 } from '@/session/credentialRotation'
 import { reportCeremonyTail } from '@/session/menders/ceremonyTail'
-import { adoptRotatedUserKey, rotationSpaceId } from '@/session/userKeyAdoption'
+import {
+  adoptRotatedUserKey,
+  rotationSpaceUrl
+} from '@/session/userKeyAdoption'
 import {
   establishStandingUnlock,
   standingFieldsOfKeyringHit
@@ -322,7 +325,7 @@ export async function repairTornPassphraseRetirement({
       // keys.
       await adoptRotatedUserKey({
         session,
-        spaceId: rotationSpaceId({ session }),
+        spaceUrl: rotationSpaceUrl({ session }),
         userKey: outcome.userKey
       })
     }

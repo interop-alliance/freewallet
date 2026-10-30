@@ -141,7 +141,7 @@ function remoteSession({
   const remoteStore = new WASRemoteStore({
     serviceDescription: TEST_SERVICE_DESCRIPTION,
     pinStore: memoryResourceLogPinStore(),
-    storageServerUrl: MEMORY_SERVER_URL,
+    baseServerUrl: MEMORY_SERVER_URL,
     zcapClient: {} as ZcapClient,
     spaceId: SPACE_ID,
     controller: 'did:key:z6MkTestController',
@@ -230,7 +230,7 @@ describe('the directory binding', () => {
     const storage = remoteSession({ owner, stores, server: memoryWasServer() })
 
     const { store, hmacKey, spaceUrl } = await storage.connectionsDirectory()
-    expect(spaceUrl).toBe(`${MEMORY_SERVER_URL}/space/${SPACE_ID}/`)
+    expect(spaceUrl).toBe(`${MEMORY_SERVER_URL}space/${SPACE_ID}/`)
     await recordGrants({
       store,
       hmacKey,
@@ -607,7 +607,7 @@ describe('a transient session', () => {
     const capability = {
       id: 'urn:zcap:generation-delegation',
       controller: 'did:webvh:example:annex',
-      invocationTarget: `${MEMORY_SERVER_URL}/space/${SPACE_ID}/`
+      invocationTarget: `${MEMORY_SERVER_URL}space/${SPACE_ID}/`
     } as unknown as IZcap
     const storage = remoteSession({ owner, stores, server, capability })
 

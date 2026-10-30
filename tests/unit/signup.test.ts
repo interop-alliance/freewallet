@@ -14,12 +14,12 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 const state = vi.hoisted(() => ({
-  wasUrl: 'https://was.example.test' as string | undefined
+  wasUrl: 'https://was.example.test/' as string | undefined
 }))
 
 vi.mock('@/app.config', async importOriginal => ({
   ...(await importOriginal<typeof import('@/app.config')>()),
-  get WAS_BASE_URL() {
+  get WAS_BASE_SERVER_URL() {
     return state.wasUrl
   }
 }))
@@ -124,7 +124,7 @@ beforeEach(() => {
 
 afterEach(() => {
   vi.clearAllMocks()
-  state.wasUrl = 'https://was.example.test'
+  state.wasUrl = 'https://was.example.test/'
 })
 
 describe('signUpWithPassphrase on a WAS deployment', () => {

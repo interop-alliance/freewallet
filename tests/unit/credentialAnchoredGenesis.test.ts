@@ -9,20 +9,19 @@
  * roster store, the keystore promotion), and the warn-only handling of the
  * ceremony's collected best-effort failures.
  */
-import { spacesUrl } from '@interop/was-client/paths'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { TEST_SERVICE_DESCRIPTION } from '../shared/wasServiceFixture'
 
 import { addSink, captureSink } from '@interop/logger'
 
 const state = vi.hoisted(() => ({
-  wasUrl: 'https://was.example.test' as string | undefined,
+  wasUrl: 'http://localhost/' as string | undefined,
   kmsUrl: undefined as string | undefined
 }))
 
 vi.mock('@/app.config', async importOriginal => ({
   ...(await importOriginal<typeof import('@/app.config')>()),
-  get WAS_BASE_URL() {
+  get WAS_BASE_SERVER_URL() {
     return state.wasUrl
   },
   get KMS_SERVER_URL() {
@@ -56,10 +55,6 @@ vi.mock('@interop/wallet-core/webvh', async importOriginal => ({
   ...(await importOriginal<typeof import('@interop/wallet-core/webvh')>()),
   didKeyZcapClient: vi.fn(() => ({ isBootstrapZcapClient: true })),
   wasWebvhIdStore: vi.fn(() => ({ isIdStore: true }))
-}))
-
-vi.mock('@/lib/didWeb', () => ({
-  didWebFromSpace: vi.fn(() => 'did:web:was.example.test:space:space-123')
 }))
 
 vi.mock('@/lib/kms', () => ({
@@ -114,11 +109,10 @@ import {
 import { transientSessionStores } from '@/session/persistence'
 import { ENCRYPTED_WALLET_COLLECTION_IDS } from '@/app.config'
 
-const ACCOUNT_DID =
-  'did:webvh:QmScidForTests:was.example.test:space:space-123:id'
+const ACCOUNT_DID = 'did:webvh:QmScidForTests:localhost:space:space-123:id'
+const BASE_SERVER_URL = 'http://localhost/'
 const POINTER = {
-  spaceId: 'space-123',
-  host: 'https://was.example.test'
+  spaceUrl: 'http://localhost/space/space-123/'
 }
 
 const CREDENTIAL = {
@@ -173,7 +167,7 @@ async function establish(overrides: Record<string, unknown> = {}): Promise<{
 }
 
 beforeEach(() => {
-  state.wasUrl = 'https://was.example.test'
+  state.wasUrl = BASE_SERVER_URL
   state.kmsUrl = undefined
   vi.mocked(coreEstablish).mockResolvedValue(establishmentResult() as never)
 })
@@ -188,8 +182,8 @@ describe('establishCredentialAnchoredAccount -- the orchestrator binding', () =>
     const { establishment, options } = await establish({ persistence })
 
     expect(establishment.did).toBe(ACCOUNT_DID)
-    expect(options.wasServerUrl).toBe(POINTER.host)
-    expect(options.spaceId).toBe(POINTER.spaceId)
+    expect(options.baseServerUrl).toBe(BASE_SERVER_URL)
+    expect(options.spaceId).toBe('space-123')
     expect(options.standing).toEqual({
       clientDid: CREDENTIAL.standing.clientDid,
       keyAgreementKeyMultibase: CREDENTIAL.standing.keyAgreementKeyMultibase,
@@ -203,12 +197,10 @@ describe('establishCredentialAnchoredAccount -- the orchestrator binding', () =>
     // VM's bare did:key.
     const bootstrapWas = (
       options.bootstrapWasFor as (context: object) => {
-        options: { serverUrl: string; zcapClient: unknown }
+        options: { baseServerUrl: string; zcapClient: unknown }
       }
     )({})
-    expect(bootstrapWas.options.serverUrl).toBe(
-      spacesUrl({ baseUrl: POINTER.host })
-    )
+    expect(bootstrapWas.options.baseServerUrl).toBe(BASE_SERVER_URL)
     expect(bootstrapWas.options.zcapClient).toEqual({
       isBootstrapZcapClient: true
     })
@@ -306,8 +298,7 @@ describe('establishCredentialAnchoredAccount -- the orchestrator binding', () =>
       keyAgent: { id: 'did:key:zLadder' },
       pointer: {
         did: ACCOUNT_DID,
-        spaceId: POINTER.spaceId,
-        host: POINTER.host
+        spaceUrl: POINTER.spaceUrl
       },
       pinStore: persistence.logPins,
       serviceDescription: TEST_SERVICE_DESCRIPTION,
@@ -476,7 +467,7 @@ describe('passphraseRegistryUpsertHook -- the shared registry hook', () => {
   it('threads the invocation capability into the registry write', async () => {
     const capability = { id: 'urn:zcap:generation' }
     const hook = passphraseRegistryUpsertHook({
-      spaceId: 'space-123',
+      spaceUrl: POINTER.spaceUrl,
       capability
     } as never)
     const context = {
@@ -494,7 +485,7 @@ describe('passphraseRegistryUpsertHook -- the shared registry hook', () => {
     expect(updateUnlockMethodsWithClient).toHaveBeenCalledWith(
       expect.objectContaining({
         zcapClient: context.zcapClient,
-        spaceId: 'space-123',
+        spaceUrl: POINTER.spaceUrl,
         userKey: context.userKey,
         capability
       })
@@ -515,7 +506,7 @@ describe('passphraseRegistryUpsertHook -- the shared registry hook', () => {
         return null
       }
     )
-    const hook = passphraseRegistryUpsertHook({ spaceId: 'space-123' })
+    const hook = passphraseRegistryUpsertHook({ spaceUrl: POINTER.spaceUrl })
 
     await hook({
       zcapClient: {},
@@ -553,7 +544,7 @@ describe('passphraseRegistryUpsertHook -- the shared registry hook', () => {
         return null
       }
     )
-    const hook = passphraseRegistryUpsertHook({ spaceId: 'space-123' })
+    const hook = passphraseRegistryUpsertHook({ spaceUrl: POINTER.spaceUrl })
 
     await hook({
       zcapClient: {},
@@ -585,7 +576,7 @@ describe('passphraseRegistryUpsertHook -- the shared registry hook', () => {
     )
     const capture = captureSink()
     const removeSink = addSink(capture.sink)
-    const hook = passphraseRegistryUpsertHook({ spaceId: 'space-123' })
+    const hook = passphraseRegistryUpsertHook({ spaceUrl: POINTER.spaceUrl })
 
     await expect(
       hook({

@@ -50,7 +50,7 @@ import {
   DATE_FMT,
   PASSKEY_KDF,
   UNLOCK_METHODS_COLLECTION,
-  WAS_BASE_URL
+  WAS_BASE_SERVER_URL
 } from '@/app.config'
 import type { Session } from '@/types/auth'
 import type { AccountCeremonyContext } from '@/session/accountCeremonyContext'
@@ -94,7 +94,7 @@ import {
   unwrapRecordEnvelope,
   wrapRecordEnvelope
 } from '@/session/recordEnvelope'
-import { spacePath, toUrl } from '@interop/was-client/paths'
+import { spaceUrlById } from '@interop/was-client/paths'
 import { deleteUnlockLocalState } from '@/lib/sessionKey'
 import { createLogger } from '@/lib/log'
 import { wasServiceDescription } from '@/lib/wasService'
@@ -566,7 +566,7 @@ export async function getUnlockMethods({
   const { unlockMethodsCache } = session.persistence
   const userKey = requireUserKey(session)
 
-  if (!WAS_BASE_URL) {
+  if (!WAS_BASE_SERVER_URL) {
     const cached = await unlockMethodsCache.load({ controller })
     if (!cached) {
       return null
@@ -581,9 +581,8 @@ export async function getUnlockMethods({
   }
 
   const stored = await getUnlockMethodsRecord({
-    storageServerUrl: WAS_BASE_URL,
     zcapClient: session.profile.zcapClient,
-    spaceId: requireSpaceId(session),
+    spaceUrl: requireSpaceUrl(session),
     ...registryRides({ session, capability })
   })
   if (!stored) {
@@ -770,7 +769,7 @@ export async function updateUnlockMethods({
   const { unlockMethodsCache } = session.persistence
   const userKey = requireUserKey(session)
 
-  if (!WAS_BASE_URL) {
+  if (!WAS_BASE_SERVER_URL) {
     const cached = await unlockMethodsCache.load({ controller })
     let current: UnlockMethodsRecord | null = null
     if (cached) {
@@ -792,15 +791,13 @@ export async function updateUnlockMethods({
     return next
   }
 
-  const storageServerUrl = WAS_BASE_URL
   const zcapClient = session.profile.zcapClient
-  const spaceId = requireSpaceId(session)
+  const spaceUrl = requireSpaceUrl(session)
   return await casUpdateRegistryRecord({
     read: () =>
       getUnlockMethodsRecord({
-        storageServerUrl,
         zcapClient,
-        spaceId,
+        spaceUrl,
         ...registryRides({ session, capability })
       }),
     unwrap: async stored => {
@@ -816,9 +813,8 @@ export async function updateUnlockMethods({
     wrap: record => wrapRecord({ record, userKey }),
     write: async (record, precondition) => {
       await putUnlockMethodsRecord({
-        storageServerUrl,
         zcapClient,
-        spaceId,
+        spaceUrl,
         record,
         ...registryRides({ session, capability }),
         ...precondition
@@ -853,7 +849,7 @@ export async function updateUnlockMethods({
  * @param options {object}
  * @param options.zcapClient {ZcapClient}   the client the record GET and the
  *   record PUT invoke with
- * @param options.spaceId {string}   the data Space id
+ * @param options.spaceUrl {string}   the data Space's URL
  * @param options.userKey {UserKey}   the user key whose vault KAK the stored
  *   record is sealed to
  * @param [options.writeUserKey] {UserKey}   the user key the written record
@@ -868,14 +864,14 @@ export async function updateUnlockMethods({
  */
 export async function updateUnlockMethodsWithClient({
   zcapClient,
-  spaceId,
+  spaceUrl,
   userKey,
   writeUserKey,
   mutate,
   capability
 }: {
   zcapClient: ZcapClient
-  spaceId: string
+  spaceUrl: string
   userKey: UserKey
   writeUserKey?: UserKey
   mutate: (
@@ -883,19 +879,17 @@ export async function updateUnlockMethodsWithClient({
   ) => UnlockMethodsRecord | null | Promise<UnlockMethodsRecord | null>
   capability?: IZcap
 }): Promise<UnlockMethodsRecord | null> {
-  if (!WAS_BASE_URL) {
+  if (!WAS_BASE_SERVER_URL) {
     throw new TypeError(
       'The direct registry write requires a configured WAS server.'
     )
   }
-  const storageServerUrl = WAS_BASE_URL
   const writeKey = writeUserKey ?? userKey
   return await casUpdateRegistryRecord({
     read: () =>
       getUnlockMethodsRecord({
-        storageServerUrl,
         zcapClient,
-        spaceId,
+        spaceUrl,
         ...(capability ? { capability } : {})
       }),
     unwrap: async stored => {
@@ -924,9 +918,8 @@ export async function updateUnlockMethodsWithClient({
     wrap: record => wrapRecord({ record, userKey: writeKey }),
     write: async (record, precondition) => {
       await putUnlockMethodsRecord({
-        storageServerUrl,
         zcapClient,
-        spaceId,
+        spaceUrl,
         record,
         ...(capability ? { capability } : {}),
         ...precondition
@@ -947,7 +940,7 @@ export async function updateUnlockMethodsWithClient({
  * @param options {object}
  * @param options.zcapClient {ZcapClient}   the client the record GET invokes
  *   with
- * @param options.spaceId {string}   the data Space id
+ * @param options.spaceUrl {string}   the data Space's URL
  * @param options.userKey {UserKey}   the user key whose vault KAK the stored
  *   record is sealed to
  * @param [options.capability] {IZcap}   an invocation capability the request
@@ -956,24 +949,23 @@ export async function updateUnlockMethodsWithClient({
  */
 export async function getUnlockMethodsWithClient({
   zcapClient,
-  spaceId,
+  spaceUrl,
   userKey,
   capability
 }: {
   zcapClient: ZcapClient
-  spaceId: string
+  spaceUrl: string
   userKey: UserKey
   capability?: IZcap
 }): Promise<UnlockMethodsRecord | null> {
-  if (!WAS_BASE_URL) {
+  if (!WAS_BASE_SERVER_URL) {
     throw new TypeError(
       'The direct registry read requires a configured WAS server.'
     )
   }
   const stored = await getUnlockMethodsRecord({
-    storageServerUrl: WAS_BASE_URL,
     zcapClient,
-    spaceId,
+    spaceUrl,
     ...(capability ? { capability } : {})
   })
   if (!stored) {
@@ -999,9 +991,8 @@ export async function getUnlockMethodsWithClient({
  * the remote copy is read first and refreshes the cache on the next hit.
  *
  * @param options {object}
- * @param options.storageServerUrl {string}
  * @param options.zcapClient {ZcapClient}   an enrolled client's root client
- * @param options.spaceId {string}   the data Space id
+ * @param options.spaceUrl {string}   the data Space's URL
  * @param options.from {UserKey}   the pre-rotation user key
  * @param options.to {UserKey}   the post-rotation user key
  * @param [options.capability] {IZcap}   an invocation capability every request
@@ -1010,16 +1001,14 @@ export async function getUnlockMethodsWithClient({
  * @returns {Promise<void>}
  */
 export async function rewrapUnlockMethodsRecord({
-  storageServerUrl,
   zcapClient,
-  spaceId,
+  spaceUrl,
   from,
   to,
   capability
 }: {
-  storageServerUrl: string
   zcapClient: ZcapClient
-  spaceId: string
+  spaceUrl: string
   from: UserKey
   to: UserKey
   capability?: IZcap
@@ -1028,9 +1017,8 @@ export async function rewrapUnlockMethodsRecord({
     action: 're-seal',
     read: () =>
       getUnlockMethodsRecord({
-        storageServerUrl,
         zcapClient,
-        spaceId,
+        spaceUrl,
         ...(capability ? { capability } : {})
       }),
     // The decrypt refusal a base no longer sealed to `from` raises stays
@@ -1044,9 +1032,8 @@ export async function rewrapUnlockMethodsRecord({
     mutate: current => current,
     write: async (record, precondition) => {
       await putUnlockMethodsRecord({
-        storageServerUrl,
         zcapClient,
-        spaceId,
+        spaceUrl,
         record,
         ...(capability ? { capability } : {}),
         ...precondition
@@ -1056,19 +1043,19 @@ export async function rewrapUnlockMethodsRecord({
 }
 
 /**
- * Resolves the data Space id from the session's storage, throwing when absent
+ * Resolves the data Space URL from the session's storage, throwing when absent
  * (a WAS server is configured but the session has no remote store -- e.g. a
  * guest, which never reaches this registry).
  *
  * @param session {Session}
  * @returns {string}
  */
-function requireSpaceId(session: Session): string {
-  const spaceId = session.storage.spaceId
-  if (!spaceId) {
+function requireSpaceUrl(session: Session): string {
+  const spaceUrl = session.storage.spaceUrl
+  if (!spaceUrl) {
     throw new Error('No remote data Space is available for unlock methods.')
   }
-  return spaceId
+  return spaceUrl
 }
 
 /**
@@ -1218,7 +1205,7 @@ export async function dropRegistryEntry({
  * @returns {boolean}
  */
 export function canRevokeWithoutCeremony(entry: UnlockMethod): boolean {
-  return !WAS_BASE_URL || !!entry.manageCapability
+  return !WAS_BASE_SERVER_URL || !!entry.manageCapability
 }
 
 /**
@@ -1382,9 +1369,9 @@ export function unlockSpaceCapabilityRefusal({
   ) {
     return 'foreign-controller'
   }
-  const target = toUrl({
-    baseUrl: WAS_BASE_URL as string,
-    path: spacePath(entry.unlockSpaceId)
+  const target = spaceUrlById({
+    baseServerUrl: WAS_BASE_SERVER_URL as string,
+    spaceId: entry.unlockSpaceId
   })
   if (parent.invocationTarget !== target) {
     return 'stale-target'
@@ -1626,7 +1613,7 @@ export async function deleteUnlockSpaceForEntry({
   entry: UnlockMethod
   signer?: { zcapClient: ZcapClient; invoker?: ZcapClient; controller: string }
 }): Promise<UnlockSpaceDeletionOutcome> {
-  if (!WAS_BASE_URL) {
+  if (!WAS_BASE_SERVER_URL) {
     return 'no-server'
   }
   const invocation = await unlockSpaceVerbInvocation({
@@ -1640,7 +1627,7 @@ export async function deleteUnlockSpaceForEntry({
   }
   const { outcome } = await deleteUnlockSpace({
     serviceDescription: await wasServiceDescription(),
-    storageServerUrl: WAS_BASE_URL,
+    baseServerUrl: WAS_BASE_SERVER_URL,
     spaceId: entry.unlockSpaceId,
     ...invocation
   })
@@ -1707,7 +1694,7 @@ export async function revokeUnlockMethod({
   // removed" fallback the copy names is still available and a retry still
   // finds a removable entry. Refusing after the retirement would leave an
   // entry nothing can remove.
-  if (WAS_BASE_URL) {
+  if (WAS_BASE_SERVER_URL) {
     const refusal = unlockSpaceCapabilityRefusal({ session, entry, ...deleter })
     if (refusal) {
       throw new Error(
@@ -1741,7 +1728,7 @@ export async function revokeUnlockMethod({
       mended: rotation.mended
     })
   }
-  if (WAS_BASE_URL) {
+  if (WAS_BASE_SERVER_URL) {
     const outcome = await deleteUnlockSpaceForEntry({
       session,
       entry,
@@ -2472,7 +2459,7 @@ export async function backfillPassphraseUnlockMethodReport({
  *
  * @param options {object}
  * @param options.zcapClient {ZcapClient}   the visit's annex-VM client
- * @param options.spaceId {string}   the data Space id
+ * @param options.spaceUrl {string}   the data Space's URL
  * @param options.userKey {UserKey}   the user key the stored record is sealed
  *   to
  * @param options.capability {IZcap}   the generation delegation every request
@@ -2488,7 +2475,7 @@ export async function backfillPassphraseUnlockMethodReport({
  */
 export async function refreshTransientManageCapability({
   zcapClient,
-  spaceId,
+  spaceUrl,
   userKey,
   capability,
   unlockSpaceId,
@@ -2496,7 +2483,7 @@ export async function refreshTransientManageCapability({
   keyAgreementKeyMultibase
 }: {
   zcapClient: ZcapClient
-  spaceId: string
+  spaceUrl: string
   userKey: UserKey
   capability: IZcap
   unlockSpaceId: string
@@ -2546,7 +2533,7 @@ export async function refreshTransientManageCapability({
   try {
     await updateUnlockMethodsWithClient({
       zcapClient,
-      spaceId,
+      spaceUrl,
       userKey,
       capability,
       mutate: current => {

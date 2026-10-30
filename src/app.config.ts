@@ -3,7 +3,7 @@
  * constants.
  */
 import type { EntityIdentityRegistry } from '@interop/verifier-core'
-import { baseUrlOfSpacesUrl } from '@interop/was-client/paths'
+import { canonicalBaseServerUrl } from '@interop/was-client/paths'
 import {
   CONTACTS_COLLECTION,
   CONTACTS_HISTORY_COLLECTION
@@ -22,60 +22,41 @@ import { AGENT_GRANT_RENEWAL_WINDOW_MS as WALLET_CORE_AGENT_GRANT_RENEWAL_WINDOW
 
 const env = import.meta.env
 
-// The remote WAS server's Spaces Repository URL (`https://host/spaces/`, or
-// `https://host/was/spaces/` on a sub-path mount). When set, a remote WAS
-// Space is available as a sync target: the sync controller replicates the
-// local RxDB collections to it in the background. (Guest sessions never
-// sync.) Service discovery starts from this URL rather than from the base:
-// the server answers every request under its mount, but the base URL itself
-// is often a landing page something else serves, with no `service` link and
-// no CORS headers.
-export const WAS_SPACES_URL: string | undefined = env.VITE_WAS_SERVER_URL
-  ? withOneTrailingSlash(env.VITE_WAS_SERVER_URL)
-  : undefined
-// The WAS server base URL, the parent of the Spaces Repository URL: the base
-// every Space path, the KMS facet, and the CORS proxy facet hang off, and
-// the `host` an account pointer records. Written without a trailing slash.
-// A value was-client's `baseUrlOfSpacesUrl` refuses (a scheme-less
-// `localhost:3002/spaces/`, say) is refused by name here, rather than
-// leaving the app a white screen at module evaluation.
-export const WAS_BASE_URL: string | undefined = WAS_SPACES_URL
-  ? deriveWasBaseUrl(WAS_SPACES_URL)
+// The remote WAS server's base server URL: the URL under which the server
+// serves `service`, `spaces/` and `space/{id}/` (`https://host/`, or
+// `https://host/was/` on a sub-path mount). Held in was-client's canonical
+// form, with one trailing slash, so every URL derived from it (the KMS
+// facet, the CORS proxy facet) appends a bare segment. When set, a remote
+// WAS Space is available as a sync target: the sync controller replicates
+// the local RxDB collections to it in the background. (Guest sessions never
+// sync.) A value was-client refuses (a scheme-less `localhost:3002`, a URL
+// with a query or fragment) is refused by name here, rather than leaving the
+// app a white screen at module evaluation.
+export const WAS_BASE_SERVER_URL: string | undefined = env.VITE_WAS_SERVER_URL
+  ? canonicalWasBaseServerUrl(env.VITE_WAS_SERVER_URL)
   : undefined
 
 /**
- * A container URL in its canonical form: its trailing run of slashes
- * collapsed to exactly one, so `https://host/spaces`, `https://host/spaces/`
- * and `https://host/spaces//` all read `https://host/spaces/`.
+ * The configured base server URL in was-client's canonical form, the one
+ * rule every `WasClient` applies, so the value survives the constructor byte
+ * for byte.
  *
- * @param url {string}
- * @returns {string}
- */
-export function withOneTrailingSlash(url: string): string {
-  return `${url.replace(/\/+$/, '')}/`
-}
-
-/**
- * The WAS server base URL derived from a configured Spaces Repository URL,
- * by was-client's one rule for a well-formed base URL, so the base survives
- * `spacesUrl` and the `WasClient` constructor byte for byte.
- *
- * @param spacesUrl {string}   the configured `VITE_WAS_SERVER_URL`, in its
- *   canonical trailing-slash form
- * @returns {string}   the parent URL, without a trailing slash
- * @throws {Error}   when was-client's `baseUrlOfSpacesUrl` refuses the
+ * @param configured {string}   the configured `VITE_WAS_SERVER_URL`
+ * @returns {string}   the canonical base server URL, with one trailing slash
+ * @throws {Error}   when was-client's `canonicalBaseServerUrl` refuses the
  *   configured value
  */
-function deriveWasBaseUrl(spacesUrl: string): string {
-  const baseUrl = baseUrlOfSpacesUrl(spacesUrl)
-  if (baseUrl === null) {
+function canonicalWasBaseServerUrl(configured: string): string {
+  try {
+    return canonicalBaseServerUrl(configured)
+  } catch (err) {
     throw new Error(
-      `VITE_WAS_SERVER_URL "${spacesUrl}" is not a Spaces Repository URL. ` +
-        "Configure it as the WAS server's Spaces Repository URL, for " +
-        'example "https://host/spaces/".'
+      `VITE_WAS_SERVER_URL "${configured}" is not a base server URL. ` +
+        "Configure it as the WAS server's base server URL, an absolute " +
+        'http(s) URL with no query or fragment, for example "https://host/".',
+      { cause: err }
     )
   }
-  return baseUrl
 }
 // WebKMS server URL. Defaults to the WAS server's in-process `/kms` facet;
 // set VITE_KMS_SERVER_URL only when the KMS is hosted separately. When
@@ -83,7 +64,8 @@ function deriveWasBaseUrl(spacesUrl: string): string {
 // key is minted, the account document publishes none, and DIDAuth is
 // answered with the client did:key.
 export const KMS_SERVER_URL =
-  env.VITE_KMS_SERVER_URL || (WAS_BASE_URL ? `${WAS_BASE_URL}/kms` : undefined)
+  env.VITE_KMS_SERVER_URL ||
+  (WAS_BASE_SERVER_URL ? `${WAS_BASE_SERVER_URL}kms` : undefined)
 // Lifetime of the capabilities delegated to a relying party when a user
 // approves a "Login with Wallet" zcap request (`src/lib/walletRequest/
 // processZcaps.ts`). Default 30 days: expiry bounds every RP grant. The WAS
@@ -409,7 +391,9 @@ export const MAX_CREDENTIAL_JSON_FILE_BYTES = 10 * 1024 * 1024
 // configured, its built-in proxy facet at `/api/cors` is the default.
 export const CORS_PROXY_URL =
   env.VITE_CORS_PROXY_URL ||
-  (WAS_BASE_URL ? `${WAS_BASE_URL}/api/cors` : 'https://corsproxy.io')
+  (WAS_BASE_SERVER_URL
+    ? `${WAS_BASE_SERVER_URL}api/cors`
+    : 'https://corsproxy.io')
 
 export const PASSWORD_RULES = {
   minlength: 16,

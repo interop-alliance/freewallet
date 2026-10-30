@@ -27,7 +27,7 @@
 import { isWebvhDid } from '@interop/wallet-core/webvh'
 import { selfContact } from '@interop/social-core'
 import { recordOwnWalletClientEntry } from '@/session/clients'
-import { didWebFromSpace } from '@/lib/didWeb'
+import { didWebOfAccount } from '@/lib/didWeb'
 import type { ControllerProfile, Session } from '@/types/auth'
 import { welcomeCredential } from '@/fixtures/welcomeCredential'
 import { interopAllianceTeamContact } from '@/fixtures/defaultContacts'
@@ -52,18 +52,11 @@ function accountSelfDids({
 }: {
   profile: ControllerProfile
 }): string[] {
-  const pointer = profile.accountPointer
-  const accountDid = profile.didWebvh?.did ?? pointer?.did
-  if (!pointer?.host || !pointer.spaceId || !isWebvhDid(accountDid)) {
+  const accountDid = profile.didWebvh?.did ?? profile.accountPointer?.did
+  if (!isWebvhDid(accountDid)) {
     return []
   }
-  return [
-    didWebFromSpace({
-      wasServerUrl: pointer.host,
-      spaceId: pointer.spaceId
-    }),
-    accountDid
-  ]
+  return [didWebOfAccount({ did: accountDid }), accountDid]
 }
 
 /**

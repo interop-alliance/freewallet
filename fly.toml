@@ -10,7 +10,7 @@ primary_region = "iad"
 [build]
   [build.args]
     # Same origin as this app: the server's routes are proxied.
-    VITE_WAS_SERVER_URL = "https://wallet.example.com/spaces/"
+    VITE_WAS_SERVER_URL = "https://wallet.example.com/"
 
 [env]
   # The WAS server app's Flycast address. nginx resolves it once at startup.

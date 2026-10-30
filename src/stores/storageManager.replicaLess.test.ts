@@ -77,7 +77,7 @@ import { WASRemoteStore } from './wasRemoteStore'
 
 vi.mock('@/app.config', async importOriginal => ({
   ...(await importOriginal<Record<string, unknown>>()),
-  WAS_BASE_URL: 'https://was.example'
+  WAS_BASE_SERVER_URL: 'https://was.example/'
 }))
 
 /**
@@ -100,24 +100,24 @@ const DELEGATED_ZCAP = {
   id: 'urn:uuid:generation-delegation',
   '@context': 'https://w3id.org/zcap/v1',
   controller: 'did:key:z6MkClientAnnex',
-  invocationTarget: 'https://was.example/space/s-space',
+  invocationTarget: 'https://was.example/space/s-space/',
   parentCapability: 'urn:zcap:root:...'
 } as unknown as IZcap
 
 /**
- * A recording fake `WasClient`: every `space()` handle records the options it
- * was created with, every raw `request()` records its input, and the handles
+ * A recording fake `WasClient`: every `spaceAt()` handle records the options
+ * it was created with, every raw `request()` records its input, and the handles
  * serve just enough structure (describe / list / resource.get) for the store
  * methods under test to complete.
  */
 function recordingWas(): {
   was: WasClient
-  spaceCalls: Array<{ spaceId: string; capability?: unknown }>
-  requestCalls: Array<{ path?: string; method?: string; capability?: unknown }>
+  spaceCalls: Array<{ spaceUrl: string; capability?: unknown }>
+  requestCalls: Array<{ url?: string; method?: string; capability?: unknown }>
 } {
-  const spaceCalls: Array<{ spaceId: string; capability?: unknown }> = []
+  const spaceCalls: Array<{ spaceUrl: string; capability?: unknown }> = []
   const requestCalls: Array<{
-    path?: string
+    url?: string
     method?: string
     capability?: unknown
   }> = []
@@ -149,11 +149,14 @@ function recordingWas(): {
     }
   })
   const was = {
-    space(spaceId: string, options: { capability?: unknown } = {}) {
-      spaceCalls.push({ spaceId, capability: options.capability })
+    spaceAt(spaceUrl: string, options: { capability?: unknown } = {}) {
+      spaceCalls.push({ spaceUrl, capability: options.capability })
       return {
         async describe() {
-          return { id: spaceId, controller: 'did:key:z6MkTestController' }
+          return { id: spaceUrl, controller: 'did:key:z6MkTestController' }
+        },
+        async quotas() {
+          return null
         },
         collection(collectionId: string) {
           return collectionHandle(collectionId)
@@ -161,7 +164,7 @@ function recordingWas(): {
       }
     },
     async request(input: {
-      path?: string
+      url?: string
       method?: string
       capability?: unknown
     }) {
@@ -178,13 +181,13 @@ function recordingWas(): {
  */
 function makeRecordedStore({ capability }: { capability?: IZcap }): {
   store: WASRemoteStore
-  spaceCalls: Array<{ spaceId: string; capability?: unknown }>
-  requestCalls: Array<{ path?: string; method?: string; capability?: unknown }>
+  spaceCalls: Array<{ spaceUrl: string; capability?: unknown }>
+  requestCalls: Array<{ url?: string; method?: string; capability?: unknown }>
 } {
   const store = new WASRemoteStore({
     serviceDescription: TEST_SERVICE_DESCRIPTION,
     pinStore: memoryResourceLogPinStore(),
-    storageServerUrl: 'https://was.example',
+    baseServerUrl: 'https://was.example/',
     zcapClient: {
       invocationSigner: { id: 'did:key:z6MkTest#z6MkTest' }
     } as unknown as ZcapClient,
@@ -199,8 +202,8 @@ function makeRecordedStore({ capability }: { capability?: IZcap }): {
 
 /**
  * Drives one representative operation per request shape: the Space handle
- * (describe), a collection handle (describe, documents), and every raw
- * `was.request()` site the remote-direct backend and the quota read use.
+ * (describe, the quota read), a collection handle (describe, documents), and
+ * every raw `was.request()` site the remote-direct backend uses.
  */
 async function driveStore(store: WASRemoteStore): Promise<void> {
   await store.userExists()
@@ -230,7 +233,7 @@ describe('WASRemoteStore invocation capability', () => {
     })
     await driveStore(store)
     expect(spaceCalls.length).toBeGreaterThan(0)
-    expect(requestCalls.length).toBe(4)
+    expect(requestCalls.length).toBe(3)
     for (const call of spaceCalls) {
       expect(call.capability).toBe(DELEGATED_ZCAP)
     }
@@ -320,7 +323,7 @@ function makeFakeRemote(): {
   }
   const remoteStore = {
     spaceId,
-    spaceUrl: `https://was.example/space/${spaceId}`,
+    spaceUrl: `https://was.example/space/${spaceId}/`,
     // The replica-less init arm binds the collection map on construction;
     // this fake resolves collections by logical key, so the bind is a no-op.
     bindCollectionMap() {},
@@ -917,8 +920,7 @@ describe('replica-less remote-direct StorageManager', () => {
       userKey: k1,
       accountPointer: {
         did: 'did:webvh:QmScid:was.example:space:s-space',
-        spaceId: 's-space',
-        host: 'https://was.example'
+        spaceUrl: 'https://was.example/space/s-space/'
       }
     } as ControllerProfile
 

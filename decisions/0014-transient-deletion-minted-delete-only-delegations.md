@@ -8,7 +8,7 @@
 - Affects: freewallet (`deleteAccount` and the deletion walk),
   `@interop/wallet-core` (`/clientAnnex` capability mints, `/keyring`),
   was-teaching-server (the client-annex clause's admission predicate),
-  wallet-attached-storage-spec (the container rule's exceptions),
+  portable-web-spaces-spec (the container rule's exceptions),
   app-connect-spec (`decisions/0002` and `decisions/0003`).
 
 ## Context

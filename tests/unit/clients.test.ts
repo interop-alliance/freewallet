@@ -94,8 +94,7 @@ vi.mock('@/session/accountCeremonyContext', () => ({
       ? {
           pointer: {
             did: 'did:webvh:QmScid:was.example:space:s:id',
-            spaceId: 's',
-            host: 'https://was.example'
+            spaceUrl: 'https://was.example/space/s/'
           },
           rosterStore: { read: () => state.rosterRead() }
         }
@@ -103,6 +102,20 @@ vi.mock('@/session/accountCeremonyContext', () => ({
   ),
   canRunAccountCeremonies: vi.fn(() => true),
   enrolledCeremonyContext: vi.fn(() => null),
+  requireAccountCeremonyContext: vi.fn(
+    async ({ action }: { action: string }) => {
+      if (!state.contextResolves) {
+        throw new Error(`${action} requires an account on a storage server.`)
+      }
+      return {
+        pointer: {
+          did: 'did:webvh:QmScid:was.example:space:s:id',
+          spaceUrl: 'https://was.example/space/s/'
+        },
+        rosterStore: { read: () => state.rosterRead() }
+      }
+    }
+  ),
   // The session under test holds neither authority kind, so the encounter
   // runner behind the directory listing read admits its `none` entries only.
   sessionAuthorityKind: vi.fn(() => undefined),
@@ -159,11 +172,11 @@ import {
 import { readClientAnnexLogOrAbsent } from '@interop/wallet-core/clientAnnex'
 import {
   accountUserKeyGenerationKids,
-  currentAccountSignerCheck,
   disconnectAccountClient,
   listAccountClients,
   renameAccountClient
 } from '@/session/clients'
+import { currentAccountSignerCheck } from '@/session/accountSignerCheck'
 import { HMAC_KEY, memoryConnectionsStore } from './memoryConnections'
 import { namedAnnexReachUnder } from '@/session/annexReach'
 import { revokeEnrolledClient } from '@/session/revocation'

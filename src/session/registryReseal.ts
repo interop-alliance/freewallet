@@ -26,7 +26,7 @@ import {
   type UserKeyRosterReadResult
 } from '@interop/wallet-core/keys'
 import { isWebvhDid } from '@interop/wallet-core/webvh'
-import { WAS_BASE_URL } from '@/app.config'
+import { WAS_BASE_SERVER_URL } from '@/app.config'
 import type { Session } from '@/types/auth'
 import { RecordEnvelopeDecryptError } from '@/session/recordEnvelope'
 import {
@@ -98,18 +98,18 @@ export async function repairStaleUnlockRegistrySeal({
   readRegistry?: () => Promise<UnlockMethodsRecord | null>
 }): Promise<'ok' | 'repaired' | 'unrepaired' | 'reseal-failed'> {
   const pointer = session.profile.accountPointer
-  const spaceId = session.storage.spaceId
+  const spaceUrl = session.storage.spaceUrl
   const { userKey } = session.profile
   // The key the escrowed generations are wrapped to: an enrolled client's own
   // identity key-agreement key, or the credential's standing key on the
   // ladder branch (escrowed into every epoch, so it opens every generation).
   const unwrapKey = rosterUnwrapKey({ session })
   if (
-    !WAS_BASE_URL ||
+    !WAS_BASE_SERVER_URL ||
     !context ||
     !pointer ||
     !isWebvhDid(pointer.did) ||
-    !spaceId ||
+    !spaceUrl ||
     !unwrapKey ||
     !userKey
   ) {
@@ -130,7 +130,7 @@ export async function repairStaleUnlockRegistrySeal({
   const capability = session.profile.invocationCapability
   const repaired = await resealRegistryFromEscrow({
     zcapClient: session.profile.zcapClient,
-    spaceId,
+    spaceUrl,
     userKey,
     descriptor: rosterRead.descriptor,
     unwrapKey,
@@ -171,7 +171,7 @@ export async function repairStaleUnlockRegistrySeal({
  * @param options {object}
  * @param options.zcapClient {ZcapClient}   the client the reads and the PUT
  *   invoke with
- * @param options.spaceId {string}   the data Space id
+ * @param options.spaceUrl {string}   the data Space's URL
  * @param options.userKey {UserKey}   the account's CURRENT user key, whose
  *   vault keys the record is re-sealed to
  * @param options.descriptor {CollectionEncryption}   the verified roster read's
@@ -184,20 +184,20 @@ export async function repairStaleUnlockRegistrySeal({
  */
 export async function resealRegistryFromEscrow({
   zcapClient,
-  spaceId,
+  spaceUrl,
   userKey,
   descriptor,
   unwrapKey,
   capability
 }: {
   zcapClient: ZcapClient
-  spaceId: string
+  spaceUrl: string
   userKey: UserKey
   descriptor: UserKeyRosterReadResult['descriptor']
   unwrapKey: IKeyAgreementKey
   capability?: IZcap
 }): Promise<'repaired' | 'unrepaired' | 'reseal-failed'> {
-  if (!WAS_BASE_URL) {
+  if (!WAS_BASE_SERVER_URL) {
     return 'unrepaired'
   }
   const generations = await unwrapUserKeyGenerations({
@@ -220,9 +220,8 @@ export async function resealRegistryFromEscrow({
   for (const generation of superseded) {
     try {
       await rewrapUnlockMethodsRecord({
-        storageServerUrl: WAS_BASE_URL,
         zcapClient,
-        spaceId,
+        spaceUrl,
         from: generation,
         to: userKey,
         ...(capability ? { capability } : {})

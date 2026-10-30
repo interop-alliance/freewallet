@@ -14,6 +14,7 @@ import type { DIDLog } from '@interop/did-method-webvh'
 import {
   clientKeyAgreementController,
   didKeyZcapClient,
+  didWebvhLogLocation,
   isWebvhDid,
   ladderRung,
   ladderVmIds,
@@ -40,14 +41,8 @@ import type {
   CeremonyEmitter,
   CeremonyOutcome
 } from '@interop/wallet-core'
-import { resourcePath, toUrl } from '@interop/was-client/paths'
-import {
-  DATE_FMT,
-  DID_LOG_RESOURCE,
-  ID_COLLECTION,
-  PASSKEY_KDF,
-  WAS_BASE_URL
-} from '@/app.config'
+import { parseSpaceTarget, spaceUrlById } from '@interop/was-client/paths'
+import { DATE_FMT, PASSKEY_KDF, WAS_BASE_SERVER_URL } from '@/app.config'
 import { assertPasskeyPrf, registerPasskey } from '@/lib/passkey'
 import { establishStandingUnlock } from '@/session/standingUnlock'
 import type { StandingUnlockFields } from '@/session/unlockMethods'
@@ -121,7 +116,7 @@ import { reportCeremonyTail } from '@/session/menders/ceremonyTail'
 import {
   adoptFollowerUserKey,
   adoptRotatedUserKey,
-  rotationSpaceId,
+  rotationSpaceUrl,
   userKeyRosterPosition,
   withOwnUserKeyRotation
 } from '@/session/userKeyAdoption'
@@ -722,7 +717,7 @@ export async function changeAccountPassphrase({
         // session on the pre-rotation keys.
         await adoptRotatedUserKey({
           session,
-          spaceId: rotationSpaceId({ session }),
+          spaceUrl: rotationSpaceUrl({ session }),
           userKey: outcome.userKey
         })
       }
@@ -1418,7 +1413,7 @@ export async function removeStandingCredential({
   if (outcome?.rotated && outcome.userKey) {
     await adoptRotatedUserKey({
       session,
-      spaceId: rotationSpaceId({ session }),
+      spaceUrl: rotationSpaceUrl({ session }),
       userKey: outcome.userKey
     })
   }
@@ -1817,7 +1812,7 @@ async function probeSpace({
   try {
     await zcapClient.read({
       url: spaceVerbTarget({
-        storageServerUrl: WAS_BASE_URL as string,
+        baseServerUrl: WAS_BASE_SERVER_URL as string,
         spaceId,
         verb: 'GET'
       }),
@@ -1845,20 +1840,11 @@ async function probeSpace({
  * the walk must never read an unreachable host as corroborated absence.
  *
  * @param options {object}
- * @param options.pointer {object}
- * @param options.pointer.spaceId {string}
- * @param options.pointer.host {string}
+ * @param options.did {string}   the account's did:webvh
  * @returns {Promise<boolean>}
  */
-async function accountLogAnswers({
-  pointer
-}: {
-  pointer: { spaceId: string; host: string }
-}): Promise<boolean> {
-  const url = toUrl({
-    baseUrl: pointer.host,
-    path: resourcePath(pointer.spaceId, ID_COLLECTION.id, DID_LOG_RESOURCE)
-  })
+async function accountLogAnswers({ did }: { did: string }): Promise<boolean> {
+  const { logUrl: url } = didWebvhLogLocation({ did })
   try {
     // A HEAD: only the status matters, and the log grows by one entry per
     // visit, so a GET would download a body the check never reads.
@@ -2087,7 +2073,7 @@ async function runAccountDeletion({
   // The WAS-scoped arms. A guest and a no-WAS deployment skip them BY SCOPE
   // rather than reaching them and catching: neither owns a Space, so neither
   // may be made undeletable by a refusal about one.
-  const remote = !isGuest && !!WAS_BASE_URL && !!accountSpaceId
+  const remote = !isGuest && !!WAS_BASE_SERVER_URL && !!accountSpaceId
   // Whether the account pointer names a did:webvh. The ladder-signed arms --
   // the (a2) ladder-VM gate, (b3), and the transient shapes of (b1) and (b5)
   // -- all verify against that document, so they need a promoted account; an
@@ -2404,7 +2390,6 @@ async function runAccountDeletion({
     // its next login and is offered the removal there. A record the detector
     // could NOT settle is a different matter and refuses the run, since a
     // walk that cannot tell a pending entry from a healthy one names neither.
-    const deploymentHost = new URL(WAS_BASE_URL as string).host
     const annexIds = new Set<string>()
     if (doc && accountDid && pointer) {
       try {
@@ -2451,9 +2436,9 @@ async function runAccountDeletion({
       for (const space of delegatedClientsSpaceHistory({
         log: logEntries ?? []
       })) {
-        if (space.host !== deploymentHost) {
-          // An account that has migrated hosts leaves entries this deployment
-          // cannot address; deleting that id here would address a different
+        if (space.baseServerUrl !== WAS_BASE_SERVER_URL) {
+          // An account that has migrated servers leaves entries this
+          // deployment cannot address; deleting that id here would address a different
           // Space, and its 404 would read as a clean deletion.
           spaces.push({
             kind: 'annex',
@@ -2470,14 +2455,15 @@ async function runAccountDeletion({
       const siblingSpaceId = sibling
         ? delegatedClientsDelegationSpaceId({ delegation: sibling })
         : undefined
-      // Host-filtered like the pointer history above: a sibling delegation
-      // carried over from another deployment names a Space id this host would
-      // resolve to something else entirely.
+      // Server-filtered like the pointer history above: a sibling delegation
+      // carried over from another deployment names a Space id this server
+      // would resolve to something else entirely.
       if (
         siblingSpaceId &&
-        targetHost({
-          target: (sibling as { invocationTarget?: string })?.invocationTarget
-        }) === deploymentHost
+        targetsSpaceOnThisServer({
+          target: (sibling as { invocationTarget?: string })?.invocationTarget,
+          spaceId: siblingSpaceId
+        })
       ) {
         annexIds.add(siblingSpaceId)
       }
@@ -2493,7 +2479,7 @@ async function runAccountDeletion({
               spaceId,
               capability: await mintSpaceRootVerbCapability({
                 zcapClient: deleter.zcapClient,
-                storageServerUrl: WAS_BASE_URL as string,
+                baseServerUrl: WAS_BASE_SERVER_URL as string,
                 spaceId,
                 verb: 'GET',
                 controller: deleter.controller,
@@ -2579,7 +2565,7 @@ async function runAccountDeletion({
       if (deleter) {
         const capability = await mintSpaceRootVerbCapability({
           zcapClient: deleter.zcapClient,
-          storageServerUrl: WAS_BASE_URL as string,
+          baseServerUrl: WAS_BASE_SERVER_URL as string,
           spaceId,
           verb: 'DELETE',
           controller: deleter.controller,
@@ -2587,14 +2573,14 @@ async function runAccountDeletion({
         })
         ;({ outcome } = await deleteSpaceWithCapability({
           serviceDescription: await wasServiceDescription(),
-          storageServerUrl: WAS_BASE_URL as string,
+          baseServerUrl: WAS_BASE_SERVER_URL as string,
           zcapClient: deleter.invoker,
           spaceId,
           capability
         }))
       } else {
         ;({ outcome } = await wasClientAt({
-          baseUrl: WAS_BASE_URL as string,
+          baseServerUrl: WAS_BASE_SERVER_URL as string,
           zcapClient: profile.zcapClient,
           serviceDescription: await wasServiceDescription()
         })
@@ -2720,10 +2706,8 @@ async function runAccountDeletion({
     let logGone: boolean | undefined
     const accountLogIsGone = async (): Promise<boolean> => {
       if (logGone === undefined) {
-        if (promoted && pointer) {
-          logGone = !(await accountLogAnswers({
-            pointer: { spaceId: pointer.spaceId, host: pointer.host }
-          }))
+        if (promoted && pointer?.did) {
+          logGone = !(await accountLogAnswers({ did: pointer.did }))
         } else {
           // An unpromoted account publishes no log, so its corroborator is
           // the root invocation itself: the Space's controller is this
@@ -2754,7 +2738,7 @@ async function runAccountDeletion({
       if (deleter) {
         const capability = await mintSpaceRootVerbCapability({
           zcapClient: deleter.zcapClient,
-          storageServerUrl: WAS_BASE_URL as string,
+          baseServerUrl: WAS_BASE_SERVER_URL as string,
           spaceId: accountSpaceId,
           verb: 'DELETE',
           controller: deleter.controller,
@@ -2784,7 +2768,7 @@ async function runAccountDeletion({
               spaceId: accountSpaceId,
               capability: await mintSpaceRootVerbCapability({
                 zcapClient: deleter.zcapClient,
-                storageServerUrl: WAS_BASE_URL as string,
+                baseServerUrl: WAS_BASE_SERVER_URL as string,
                 spaceId: accountSpaceId,
                 verb: 'GET',
                 controller: deleter.controller,
@@ -2873,7 +2857,7 @@ async function runAccountDeletion({
       for (let attempt = 0; attempt < 2 && outcome === undefined; attempt++) {
         try {
           ;({ outcome } = await wasClientAt({
-            baseUrl: WAS_BASE_URL as string,
+            baseServerUrl: WAS_BASE_SERVER_URL as string,
             zcapClient,
             serviceDescription: await wasServiceDescription()
           })
@@ -2951,25 +2935,36 @@ async function runAccountDeletion({
 }
 
 /**
- * The host a capability's `invocationTarget` addresses, or `undefined` when
- * the target is absent or not a URL. The deletion walk compares it against
- * the deployment's own host, so a delegation carried over from another
- * deployment contributes no Space id: the same id under this host names a
- * different Space, and its DELETE's 404 would read as a clean deletion.
+ * Whether a capability's `invocationTarget` sits at or beneath the Space
+ * this deployment's server places `spaceId` at. The deletion walk asks it
+ * before deleting a sibling delegation's annex Space, so a delegation carried
+ * over from another deployment contributes no Space id: the same id under
+ * this server names a different Space, and its DELETE's 404 would read as a
+ * clean deletion. A target naming the Space itself or anything under it (a
+ * Collection, a Resource) passes; the check is the layout's prefix match
+ * rather than a strict Space-URL parse.
  *
  * @param options {object}
  * @param [options.target] {string}
- * @returns {string | undefined}
+ * @param options.spaceId {string}
+ * @returns {boolean}
  */
-function targetHost({ target }: { target?: string }): string | undefined {
-  if (!target) {
-    return undefined
+function targetsSpaceOnThisServer({
+  target,
+  spaceId
+}: {
+  target?: string
+  spaceId: string
+}): boolean {
+  if (!target || !WAS_BASE_SERVER_URL) {
+    return false
   }
-  try {
-    return new URL(target).host
-  } catch {
-    return undefined
-  }
+  return (
+    parseSpaceTarget({
+      spaceUrl: spaceUrlById({ baseServerUrl: WAS_BASE_SERVER_URL, spaceId }),
+      target
+    }) !== null
+  )
 }
 
 /**
@@ -2999,10 +2994,10 @@ async function repairRegistrySealForDeletion({
   // The visit's own authority, read here rather than threaded in: a renewal
   // earlier in the walk replaced it in place on the profile.
   const capability = profile.invocationCapability
-  const spaceId = session.storage.spaceId
+  const spaceUrl = session.storage.spaceUrl
   const unwrapKey = rosterUnwrapKey({ session })
   const accountDid = profile.accountPointer?.did
-  if (!spaceId || !profile.userKey || !unwrapKey || !accountDid) {
+  if (!spaceUrl || !profile.userKey || !unwrapKey || !accountDid) {
     return 'unrepaired'
   }
   // The roster store resolves its controller from the verified-log memo, and
@@ -3059,7 +3054,7 @@ async function repairRegistrySealForDeletion({
   }
   return await resealRegistryFromEscrow({
     zcapClient: profile.zcapClient,
-    spaceId,
+    spaceUrl,
     userKey,
     descriptor: rosterRead.descriptor,
     unwrapKey,

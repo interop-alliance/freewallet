@@ -1,11 +1,11 @@
 /**
  * Unit tests for the one service discovery: the memo that makes every
- * `WasClient` this app builds share one `HEAD` of the Spaces Repository URL,
- * the retry a failed discovery leaves open, the refusal when no WAS server is
- * configured, and the refusal when the discovered Spaces URL is not the
- * configured one. The `app.config` derivation of the server base URL from
- * that Spaces URL is covered beside them, since the discovery starts from one
- * and every Space path hangs off the other.
+ * `WasClient` this app builds share one read of the service description at
+ * `{base}service`, the retry a failed discovery leaves open, the refusal
+ * when no WAS server is configured, and the refusal of a description that
+ * describes a server other than the configured base. The `app.config` canonicalization of the
+ * configured base server URL is covered beside them, since the discovery
+ * starts from it and every Space URL hangs off it.
  */
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 
@@ -15,18 +15,19 @@ import { TEST_SERVICE_DESCRIPTION } from '../../tests/shared/wasServiceFixture'
 // registered in `tests/shared/setup.wasService.ts`.
 vi.unmock('@/lib/wasService')
 
-const discoverService = vi.fn()
-let spacesUrl: string | undefined = 'http://localhost/spaces/'
+const readServiceDescription = vi.fn()
+let baseServerUrl: string | undefined = 'http://localhost/'
 
 vi.mock('@interop/was-client', async importOriginal => ({
   ...(await importOriginal<typeof import('@interop/was-client')>()),
-  discoverService: (options: { url: string }) => discoverService(options)
+  readServiceDescription: (options: { serviceUrl: string }) =>
+    readServiceDescription(options)
 }))
 
 vi.mock('@/app.config', async importOriginal => ({
   ...(await importOriginal<typeof import('@/app.config')>()),
-  get WAS_SPACES_URL() {
-    return spacesUrl
+  get WAS_BASE_SERVER_URL() {
+    return baseServerUrl
   }
 }))
 
@@ -42,16 +43,15 @@ async function loadModule() {
 
 describe('wasServiceDescription', () => {
   beforeEach(() => {
-    discoverService.mockReset()
-    spacesUrl = 'http://localhost/spaces/'
+    readServiceDescription.mockReset()
+    baseServerUrl = 'http://localhost/'
   })
 
-  it('discovers once and memoizes the description', async () => {
-    discoverService.mockResolvedValue({
+  it('reads {base}service once and memoizes the description', async () => {
+    readServiceDescription.mockResolvedValue({
       description: TEST_SERVICE_DESCRIPTION,
       version: '0.5',
-      features: [],
-      spacesUrl: 'http://localhost/spaces/'
+      features: []
     })
     const { wasServiceDescription } = await loadModule()
 
@@ -60,14 +60,14 @@ describe('wasServiceDescription', () => {
 
     expect(first).toBe(TEST_SERVICE_DESCRIPTION)
     expect(second).toBe(TEST_SERVICE_DESCRIPTION)
-    expect(discoverService).toHaveBeenCalledTimes(1)
-    expect(discoverService).toHaveBeenCalledWith({
-      url: 'http://localhost/spaces/'
+    expect(readServiceDescription).toHaveBeenCalledTimes(1)
+    expect(readServiceDescription).toHaveBeenCalledWith({
+      serviceUrl: 'http://localhost/service'
     })
   })
 
   it('does not memoize a failure, so the next call retries', async () => {
-    discoverService
+    readServiceDescription
       .mockRejectedValueOnce(new Error('offline'))
       .mockResolvedValueOnce({
         description: TEST_SERVICE_DESCRIPTION,
@@ -80,29 +80,29 @@ describe('wasServiceDescription', () => {
     await expect(wasServiceDescription()).resolves.toBe(
       TEST_SERVICE_DESCRIPTION
     )
-    expect(discoverService).toHaveBeenCalledTimes(2)
+    expect(readServiceDescription).toHaveBeenCalledTimes(2)
   })
 
-  it('rejects when no WAS server is configured', async () => {
-    spacesUrl = undefined
+  it('refuses a description whose url is not {base}service', async () => {
+    readServiceDescription.mockResolvedValue({
+      description: {
+        ...TEST_SERVICE_DESCRIPTION,
+        url: 'http://elsewhere/service'
+      },
+      version: '0.5',
+      features: [],
+      spacesUrl: 'http://localhost/spaces/'
+    })
     const { wasServiceDescription } = await loadModule()
 
-    await expect(wasServiceDescription()).rejects.toThrow(
-      'No WAS server is configured.'
-    )
-    expect(discoverService).not.toHaveBeenCalled()
+    await expect(wasServiceDescription()).rejects.toMatchObject({
+      name: 'IncompatibleServerError'
+    })
   })
 
-  it('refuses a description whose Spaces URL is not the configured one', async () => {
-    discoverService.mockResolvedValue({
-      description: {
-        url: 'http://localhost/service',
-        specs: {
-          'https://w3id.org/pws': [
-            { version: '0.5', spaces: 'http://elsewhere/spaces/' }
-          ]
-        }
-      },
+  it('refuses a description whose Spaces Repository URL is not {base}spaces/', async () => {
+    readServiceDescription.mockResolvedValue({
+      description: TEST_SERVICE_DESCRIPTION,
       version: '0.5',
       features: [],
       spacesUrl: 'http://elsewhere/spaces/'
@@ -112,10 +112,25 @@ describe('wasServiceDescription', () => {
     await expect(wasServiceDescription()).rejects.toMatchObject({
       name: 'IncompatibleServerError'
     })
+    // Not memoized: the next call reads again.
+    await expect(wasServiceDescription()).rejects.toMatchObject({
+      name: 'IncompatibleServerError'
+    })
+    expect(readServiceDescription).toHaveBeenCalledTimes(2)
+  })
+
+  it('rejects when no WAS server is configured', async () => {
+    baseServerUrl = undefined
+    const { wasServiceDescription } = await loadModule()
+
+    await expect(wasServiceDescription()).rejects.toThrow(
+      'No WAS server is configured.'
+    )
+    expect(readServiceDescription).not.toHaveBeenCalled()
   })
 })
 
-describe('the WAS server base URL derived in app.config', () => {
+describe('the WAS base server URL canonicalized in app.config', () => {
   afterEach(() => {
     vi.unstubAllEnvs()
     vi.resetModules()
@@ -124,35 +139,35 @@ describe('the WAS server base URL derived in app.config', () => {
   /**
    * Loads `app.config` with one `VITE_WAS_SERVER_URL` value in place.
    *
-   * @param value {string}   the configured Spaces Repository URL
-   * @returns {Promise<{ spaces?: string, base?: string }>}
+   * @param value {string}   the configured base server URL
+   * @returns {Promise<string | undefined>}   the canonical base server URL
    */
-  async function derive(value: string) {
+  async function canonical(value: string) {
     vi.stubEnv('VITE_WAS_SERVER_URL', value)
     vi.resetModules()
     const config =
       await vi.importActual<typeof import('@/app.config')>('@/app.config')
-    return { spaces: config.WAS_SPACES_URL, base: config.WAS_BASE_URL }
+    return config.WAS_BASE_SERVER_URL
   }
 
-  it('takes the parent of a root-mounted Spaces URL', async () => {
-    expect(await derive('https://host/spaces/')).toEqual({
-      spaces: 'https://host/spaces/',
-      base: 'https://host'
-    })
+  it('supplies the trailing slash of a root-mounted base', async () => {
+    expect(await canonical('https://host')).toBe('https://host/')
   })
 
-  it('takes the parent of a sub-path-mounted Spaces URL', async () => {
-    expect(await derive('https://host/was/spaces/')).toEqual({
-      spaces: 'https://host/was/spaces/',
-      base: 'https://host/was'
-    })
+  it('keeps a sub-path mount, with one trailing slash', async () => {
+    expect(await canonical('https://host/was')).toBe('https://host/was/')
+    expect(await canonical('https://host/was/')).toBe('https://host/was/')
   })
 
-  it('canonicalizes a value written without the trailing slash', async () => {
-    expect(await derive('https://host/was/spaces')).toEqual({
-      spaces: 'https://host/was/spaces/',
-      base: 'https://host/was'
-    })
+  it('refuses a scheme-less value by name at module evaluation', async () => {
+    await expect(canonical('localhost:3002')).rejects.toThrow(
+      'VITE_WAS_SERVER_URL "localhost:3002" is not a base server URL.'
+    )
+  })
+
+  it('refuses a value carrying a query by name at module evaluation', async () => {
+    await expect(canonical('https://host/?mount=was')).rejects.toThrow(
+      'VITE_WAS_SERVER_URL "https://host/?mount=was" is not a base server URL.'
+    )
   })
 })

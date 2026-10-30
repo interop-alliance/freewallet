@@ -17,7 +17,7 @@ import {
 } from './processZcaps'
 import type { ICapabilityQueryDetail } from './types'
 
-const SPACE = { serverUrl: 'https://was.example/', spaceId: 'abc' }
+const SPACE_URL = 'https://was.example/space/abc/'
 const DESCRIPTOR: ICapabilityQueryDetail = {
   referenceId: 'docs',
   allowedAction: ['GET'],
@@ -32,7 +32,7 @@ describe('resolveGrant recipient presence', () => {
   it('resolves satisfiable with a controller present', () => {
     const { target } = resolveGrant({
       descriptor: DESCRIPTOR,
-      space: SPACE,
+      spaceUrl: SPACE_URL,
       collections: existingCollectionsFrom([])
     })
     expect(isSatisfiable(target)).toBe(true)
@@ -45,7 +45,7 @@ describe('resolveGrant recipient presence', () => {
     const { controller: _controller, ...omitted } = DESCRIPTOR
     const { target } = resolveGrant({
       descriptor: omitted as ICapabilityQueryDetail,
-      space: SPACE,
+      spaceUrl: SPACE_URL,
       collections: existingCollectionsFrom([])
     })
     expect(target.targetClass).toBeUndefined()
@@ -57,7 +57,7 @@ describe('resolveGrant recipient presence', () => {
     // DID before resolving again (without the opt-out).
     const { target } = resolveGrant({
       descriptor: { ...DESCRIPTOR, controller: '' },
-      space: SPACE,
+      spaceUrl: SPACE_URL,
       collections: existingCollectionsFrom([]),
       allowMissingController: true
     })
@@ -73,7 +73,7 @@ describe('resolveGrant provisioning', () => {
     ]) {
       const { target } = resolveGrant({
         descriptor: DESCRIPTOR,
-        space: SPACE,
+        spaceUrl: SPACE_URL,
         collections
       })
       expect(isSatisfiable(target)).toBe(true)
@@ -84,14 +84,14 @@ describe('resolveGrant provisioning', () => {
 
 describe('resolveInvocationTarget string targets', () => {
   const requester = { controller: DESCRIPTOR.controller }
-  const collectionUrl = `${SPACE.serverUrl}space/${SPACE.spaceId}/notes/`
-  const resourceUrl = `${SPACE.serverUrl}space/${SPACE.spaceId}/notes/n1`
+  const collectionUrl = `${SPACE_URL}notes/`
+  const resourceUrl = `${SPACE_URL}notes/n1`
 
   it('refuses a collection that does not exist, and a Resource inside one', () => {
     for (const descriptor of [collectionUrl, resourceUrl]) {
       const target = resolveInvocationTarget({
         descriptor,
-        space: SPACE,
+        spaceUrl: SPACE_URL,
         collections: existingCollectionsFrom([]),
         requester
       })
@@ -103,7 +103,7 @@ describe('resolveInvocationTarget string targets', () => {
     const collections = existingCollectionsFrom([{ id: 'notes' }])
     const collection = resolveInvocationTarget({
       descriptor: collectionUrl,
-      space: SPACE,
+      spaceUrl: SPACE_URL,
       collections,
       requester
     })
@@ -112,7 +112,7 @@ describe('resolveInvocationTarget string targets', () => {
     expect(collection.needsProvisioning).toBe(false)
     const resource = resolveInvocationTarget({
       descriptor: resourceUrl,
-      space: SPACE,
+      spaceUrl: SPACE_URL,
       collections,
       requester
     })
@@ -123,8 +123,8 @@ describe('resolveInvocationTarget string targets', () => {
 
   it('does not flag a standard or an already-public collection', () => {
     const standard = resolveInvocationTarget({
-      descriptor: `${SPACE.serverUrl}space/${SPACE.spaceId}/private-credentials/`,
-      space: SPACE,
+      descriptor: `${SPACE_URL}private-credentials/`,
+      spaceUrl: SPACE_URL,
       collections: existingCollectionsFrom([{ id: 'private-credentials' }]),
       requester
     })
@@ -132,7 +132,7 @@ describe('resolveInvocationTarget string targets', () => {
     expect(standard.needsProvisioning).toBe(false)
     const publicOne = resolveInvocationTarget({
       descriptor: collectionUrl,
-      space: SPACE,
+      spaceUrl: SPACE_URL,
       collections: existingCollectionsFrom([{ id: 'notes', isPublic: true }]),
       requester
     })
@@ -147,7 +147,7 @@ describe('resolveInvocationTarget string targets', () => {
         invocationTarget: collectionUrl,
         allowedAction: ['GET', 'PUT']
       },
-      space: SPACE,
+      spaceUrl: SPACE_URL,
       collections: existingCollectionsFrom([{ id: 'notes' }])
     })
     expect(isSatisfiable(target)).toBe(true)
@@ -160,14 +160,14 @@ describe('resolveInvocationTarget string targets', () => {
     // collection's own metadata, which the attribution pass reads.
     const encrypted = resolveInvocationTarget({
       descriptor: collectionUrl,
-      space: SPACE,
+      spaceUrl: SPACE_URL,
       collections: existingCollectionsFrom([{ id: 'notes', encrypted: true }]),
       requester
     })
     expect(encrypted.encrypted).toBe(true)
     const plaintext = resolveInvocationTarget({
       descriptor: collectionUrl,
-      space: SPACE,
+      spaceUrl: SPACE_URL,
       collections: existingCollectionsFrom([{ id: 'notes', encrypted: false }]),
       requester
     })
@@ -178,7 +178,7 @@ describe('resolveInvocationTarget string targets', () => {
         type: 'https://w3id.org/byoe#private-collection',
         name: 'notes'
       },
-      space: SPACE,
+      spaceUrl: SPACE_URL,
       collections: existingCollectionsFrom([{ id: 'notes', encrypted: true }]),
       requester
     })
@@ -192,7 +192,7 @@ describe('resolveInvocationTarget string targets', () => {
     }).id!
     const listed = resolveInvocationTarget({
       descriptor: collectionUrl,
-      space: SPACE,
+      spaceUrl: SPACE_URL,
       collections: existingCollectionsFrom([
         { id: 'notes', encrypted: true, recipientIds: new Set([granteeKid]) }
       ]),
@@ -202,7 +202,7 @@ describe('resolveInvocationTarget string targets', () => {
     expect(listed.outsideKeyEpoch).toBe(false)
     const unlisted = resolveInvocationTarget({
       descriptor: collectionUrl,
-      space: SPACE,
+      spaceUrl: SPACE_URL,
       collections: existingCollectionsFrom([
         { id: 'notes', encrypted: true, recipientIds: new Set(['#other']) }
       ]),
@@ -213,7 +213,7 @@ describe('resolveInvocationTarget string targets', () => {
     // An epoch left unread reaches no verdict, whatever `encrypted` says.
     const unread = resolveInvocationTarget({
       descriptor: collectionUrl,
-      space: SPACE,
+      spaceUrl: SPACE_URL,
       collections: existingCollectionsFrom([{ id: 'notes', encrypted: true }]),
       requester
     })
@@ -222,8 +222,8 @@ describe('resolveInvocationTarget string targets', () => {
     // A standard encrypted collection a share already escrowed the grantee
     // into reads the same way.
     const standard = resolveInvocationTarget({
-      descriptor: `${SPACE.serverUrl}space/${SPACE.spaceId}/private-credentials/`,
-      space: SPACE,
+      descriptor: `${SPACE_URL}private-credentials/`,
+      spaceUrl: SPACE_URL,
       collections: existingCollectionsFrom([
         { id: 'private-credentials', recipientIds: new Set([granteeKid]) }
       ]),
@@ -243,7 +243,7 @@ describe('resolveInvocationTarget string targets', () => {
     }
     const target = resolveInvocationTarget({
       descriptor: collectionUrl,
-      space: SPACE,
+      spaceUrl: SPACE_URL,
       collections: existingCollectionsFrom([
         { id: 'notes', encrypted: true, recipientIds: new Set(['#other']) }
       ]),
@@ -254,13 +254,10 @@ describe('resolveInvocationTarget string targets', () => {
   })
 
   it('refuses the Space itself, with or without a trailing slash', () => {
-    for (const descriptor of [
-      `${SPACE.serverUrl}space/${SPACE.spaceId}`,
-      `${SPACE.serverUrl}space/${SPACE.spaceId}/`
-    ]) {
+    for (const descriptor of [SPACE_URL.slice(0, -1), `${SPACE_URL}`]) {
       const target = resolveInvocationTarget({
         descriptor,
-        space: SPACE,
+        spaceUrl: SPACE_URL,
         collections: existingCollectionsFrom([{ id: 'notes' }]),
         requester
       })
@@ -276,7 +273,7 @@ describe('whole-Space targets', () => {
         ...DESCRIPTOR,
         invocationTarget: { type: 'https://w3id.org/byoe#space' }
       },
-      space: SPACE,
+      spaceUrl: SPACE_URL,
       collections: existingCollectionsFrom([])
     })
     expect(isSatisfiable(target)).toBe(false)
@@ -308,7 +305,7 @@ describe('never-grantable system collections', () => {
       for (const type of DESCRIPTOR_TYPES) {
         const { target } = resolveGrant({
           descriptor: { ...DESCRIPTOR, invocationTarget: { type, name } },
-          space: SPACE,
+          spaceUrl: SPACE_URL,
           collections
         })
         expect(isSatisfiable(target), `${type} ${name}`).toBe(false)
@@ -319,13 +316,13 @@ describe('never-grantable system collections', () => {
   it('refuses a string target at them or at a Resource inside them', () => {
     for (const name of NEVER) {
       for (const url of [
-        `${SPACE.serverUrl}space/${SPACE.spaceId}/${name}`,
-        `${SPACE.serverUrl}space/${SPACE.spaceId}/${name}/`,
-        `${SPACE.serverUrl}space/${SPACE.spaceId}/${name}/user-key.jsonl`
+        `${SPACE_URL}${name}`,
+        `${SPACE_URL}${name}/`,
+        `${SPACE_URL}${name}/user-key.jsonl`
       ]) {
         const { target } = resolveGrant({
           descriptor: { ...DESCRIPTOR, invocationTarget: url },
-          space: SPACE,
+          spaceUrl: SPACE_URL,
           collections
         })
         expect(isSatisfiable(target), url).toBe(false)
@@ -341,9 +338,9 @@ describe('never-grantable system collections', () => {
       const { target } = resolveGrant({
         descriptor: {
           ...DESCRIPTOR,
-          invocationTarget: `${SPACE.serverUrl}space/${SPACE.spaceId}/${name}/`
+          invocationTarget: `${SPACE_URL}${name}/`
         },
-        space: SPACE,
+        spaceUrl: SPACE_URL,
         collections: existingCollectionsFrom(rosterIds.map(id => ({ id })))
       })
       return !isSatisfiable(target)
@@ -366,7 +363,7 @@ describe('never-grantable system collections', () => {
           name: 'private-credentials'
         }
       },
-      space: SPACE,
+      spaceUrl: SPACE_URL,
       collections: existingCollectionsFrom([{ id: 'private-credentials' }])
     })
     expect(isSatisfiable(target)).toBe(true)
@@ -377,9 +374,9 @@ describe('never-grantable system collections', () => {
     const { target, allowedActions } = resolveGrant({
       descriptor: {
         ...DESCRIPTOR,
-        invocationTarget: `${SPACE.serverUrl}space/${SPACE.spaceId}/id/did.jsonl`
+        invocationTarget: `${SPACE_URL}id/did.jsonl`
       },
-      space: SPACE,
+      spaceUrl: SPACE_URL,
       collections: existingCollectionsFrom([{ id: 'id' }])
     })
     expect(target.targetClass).toBe('protected-collection')
@@ -448,7 +445,7 @@ describe('resolveInvocationTarget existing-collection reading', () => {
   it('reports nothing for a collection that does not exist yet', () => {
     const target = resolveInvocationTarget({
       descriptor: DOCS,
-      space: SPACE,
+      spaceUrl: SPACE_URL,
       collections: existingCollectionsFrom([]),
       requester: { controller: APP_DID }
     })
@@ -461,7 +458,7 @@ describe('resolveInvocationTarget existing-collection reading', () => {
     // note until the second pass has read the collection's metadata.
     const target = resolveInvocationTarget({
       descriptor: DOCS,
-      space: SPACE,
+      spaceUrl: SPACE_URL,
       collections: existingCollectionsFrom([{ id: 'docs' }]),
       requester: { controller: OTHER_DID }
     })
@@ -472,7 +469,7 @@ describe('resolveInvocationTarget existing-collection reading', () => {
   it("reads the requester's own collection as this-app", () => {
     const target = resolveInvocationTarget({
       descriptor: DOCS,
-      space: SPACE,
+      spaceUrl: SPACE_URL,
       collections: createdByApp,
       requester: { controller: APP_DID }
     })
@@ -487,7 +484,7 @@ describe('resolveInvocationTarget existing-collection reading', () => {
     // of the creator at all: the collection's own `generator.url` vouches.
     const target = resolveInvocationTarget({
       descriptor: DOCS,
-      space: SPACE,
+      spaceUrl: SPACE_URL,
       collections: stampedWithUrl({ url: APP_URL }),
       requester: { controller: OTHER_DID, appUrl: APP_URL }
     })
@@ -499,7 +496,7 @@ describe('resolveInvocationTarget existing-collection reading', () => {
     // the requester's app URL does not override it.
     const target = resolveInvocationTarget({
       descriptor: DOCS,
-      space: SPACE,
+      spaceUrl: SPACE_URL,
       collections: stampedWithUrl({
         url: 'https://app.example/notes',
         creatorApp: { name: 'Notes', appUrl: APP_URL }
@@ -512,7 +509,7 @@ describe('resolveInvocationTarget existing-collection reading', () => {
   it('names the creator by generator.name ahead of the join', () => {
     const target = resolveInvocationTarget({
       descriptor: DOCS,
-      space: SPACE,
+      spaceUrl: SPACE_URL,
       collections: stampedWithUrl({
         url: APP_URL,
         name: 'Stamped Editor',
@@ -526,7 +523,7 @@ describe('resolveInvocationTarget existing-collection reading', () => {
   it('names the creator through the join when generator.name is absent', () => {
     const target = resolveInvocationTarget({
       descriptor: DOCS,
-      space: SPACE,
+      spaceUrl: SPACE_URL,
       collections: stampedWithUrl({
         url: APP_URL,
         creatorApp: { name: 'Editor', appUrl: APP_URL }
@@ -541,7 +538,7 @@ describe('resolveInvocationTarget existing-collection reading', () => {
     // did:key, the same attested origin, the same canonical app URL.
     const target = resolveInvocationTarget({
       descriptor: DOCS,
-      space: SPACE,
+      spaceUrl: SPACE_URL,
       collections: createdByApp,
       requester: { controller: OTHER_DID, appUrl: APP_URL }
     })
@@ -553,7 +550,7 @@ describe('resolveInvocationTarget existing-collection reading', () => {
     // wallet tells them apart by appUrl, and so does the reading.
     const target = resolveInvocationTarget({
       descriptor: DOCS,
-      space: SPACE,
+      spaceUrl: SPACE_URL,
       collections: createdByApp,
       requester: {
         controller: OTHER_DID,
@@ -568,7 +565,7 @@ describe('resolveInvocationTarget existing-collection reading', () => {
     // activity), so an origin match alone does not vouch for the same app.
     const target = resolveInvocationTarget({
       descriptor: DOCS,
-      space: SPACE,
+      spaceUrl: SPACE_URL,
       collections: existingCollectionsFrom([
         {
           id: 'docs',
@@ -585,7 +582,7 @@ describe('resolveInvocationTarget existing-collection reading', () => {
     // collection's creating application.
     const target = resolveInvocationTarget({
       descriptor: DOCS,
-      space: SPACE,
+      spaceUrl: SPACE_URL,
       collections: createdByApp,
       requester: { controller: OTHER_DID }
     })
@@ -599,7 +596,7 @@ describe('resolveInvocationTarget existing-collection reading', () => {
     // keeps that admission from being silent.
     const target = resolveInvocationTarget({
       descriptor: DOCS,
-      space: SPACE,
+      spaceUrl: SPACE_URL,
       collections: createdByApp,
       requester: { controller: OTHER_DID }
     })
@@ -615,7 +612,7 @@ describe('resolveInvocationTarget existing-collection reading', () => {
   it('reads other on a first-run preview, where no requester DID exists yet', () => {
     const target = resolveInvocationTarget({
       descriptor: DOCS,
-      space: SPACE,
+      spaceUrl: SPACE_URL,
       collections: createdByApp,
       requester: { controller: '' }
     })
@@ -625,7 +622,7 @@ describe('resolveInvocationTarget existing-collection reading', () => {
   it('reads a collection with no attribution as unattributed', () => {
     const target = resolveInvocationTarget({
       descriptor: DOCS,
-      space: SPACE,
+      spaceUrl: SPACE_URL,
       collections: existingCollectionsFrom([{ id: 'docs', attribution: {} }]),
       requester: { controller: OTHER_DID }
     })
@@ -648,7 +645,7 @@ describe('resolveInvocationTarget existing-collection reading', () => {
     expect(
       resolveInvocationTarget({
         descriptor: DOCS,
-        space: SPACE,
+        spaceUrl: SPACE_URL,
         collections,
         requester
       }).existing
@@ -656,7 +653,7 @@ describe('resolveInvocationTarget existing-collection reading', () => {
     expect(
       resolveInvocationTarget({
         descriptor: { ...DOCS, name: 'private-credentials' },
-        space: SPACE,
+        spaceUrl: SPACE_URL,
         collections,
         requester
       }).existing
@@ -665,8 +662,8 @@ describe('resolveInvocationTarget existing-collection reading', () => {
 
   it('reads the same collection named as a plain URL the same way', () => {
     const target = resolveInvocationTarget({
-      descriptor: `${SPACE.serverUrl}space/${SPACE.spaceId}/docs/`,
-      space: SPACE,
+      descriptor: `${SPACE_URL}docs/`,
+      spaceUrl: SPACE_URL,
       collections: createdByApp,
       requester: { controller: OTHER_DID }
     })
@@ -676,7 +673,7 @@ describe('resolveInvocationTarget existing-collection reading', () => {
   it('carries the reading through resolveGrant with the descriptor controller', () => {
     const { target } = resolveGrant({
       descriptor: { ...DESCRIPTOR, controller: OTHER_DID },
-      space: SPACE,
+      spaceUrl: SPACE_URL,
       collections: createdByApp
     })
     expect(target.existing?.creator).toBe('other')
@@ -685,7 +682,7 @@ describe('resolveInvocationTarget existing-collection reading', () => {
   it('carries the app URL through resolveGrant', () => {
     const { target } = resolveGrant({
       descriptor: { ...DESCRIPTOR, controller: OTHER_DID },
-      space: SPACE,
+      spaceUrl: SPACE_URL,
       collections: createdByApp,
       appUrl: APP_URL
     })

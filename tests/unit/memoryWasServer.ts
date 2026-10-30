@@ -20,10 +20,9 @@ import {
   type ResourceChangeDocument
 } from '@interop/was-client'
 import { createEdvEncryption } from '@interop/was-client/edv'
-import { spacesUrl } from '@interop/was-client/paths'
 import { TEST_SERVICE_DESCRIPTION } from '../shared/wasServiceFixture'
 
-export const MEMORY_SERVER_URL = 'http://localhost'
+export const MEMORY_SERVER_URL = 'http://localhost/'
 
 /**
  * The subset of `ZcapClient.request()` arguments the server reads.
@@ -169,7 +168,7 @@ export function memoryWasServer(): {
     chunkSize: number
   }): WasClient =>
     new WasClient({
-      serverUrl: spacesUrl({ baseUrl: MEMORY_SERVER_URL }),
+      baseServerUrl: MEMORY_SERVER_URL,
       serviceDescription: TEST_SERVICE_DESCRIPTION,
       zcapClient: {
         invocationSigner: { id: 'did:example:alice#key-1' },

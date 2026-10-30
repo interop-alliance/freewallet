@@ -62,7 +62,10 @@ function depsFor({
 }): LoginMenderDeps {
   const session = {
     profile: {
-      accountPointer: { spaceId: 'space-123', host: 'was.example.test', did }
+      accountPointer: {
+        spaceUrl: 'https://was.example.test/space/space-123/',
+        did
+      }
     }
   } as unknown as Session
   return {

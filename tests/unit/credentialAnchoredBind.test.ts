@@ -22,7 +22,7 @@ const state = vi.hoisted(() => ({
 
 vi.mock('@/app.config', async importOriginal => ({
   ...(await importOriginal<typeof import('@/app.config')>()),
-  WAS_BASE_URL: 'https://was.example.test'
+  WAS_BASE_SERVER_URL: 'http://localhost/'
 }))
 
 vi.mock('@interop/wallet-core/keyring', async importOriginal => ({
@@ -63,16 +63,15 @@ import {
 } from '@/session/keyring'
 
 const POINTER = {
-  did: 'did:webvh:QmScidForTests:was.example.test:space:space-123:id',
-  spaceId: 'space-123',
-  host: 'https://was.example.test'
+  did: 'did:webvh:QmScidForTests:localhost:space:space-123:id',
+  spaceUrl: 'http://localhost/space/space-123/'
 }
 const CONTROLLER = 'did:key:z6MkLadderVmBootstrapIdentity'
 const PASSPHRASE = 'the chosen passphrase for the credential-anchored bind'
 const DELEGATION = {
   id: 'urn:zcap:delegated:test',
   controller: 'did:key:z6MkGrantee',
-  invocationTarget: `${POINTER.host}/space/${POINTER.spaceId}/id/did.jsonl`,
+  invocationTarget: `${POINTER.spaceUrl}id/did.jsonl`,
   parentCapability: 'urn:zcap:root:test',
   proof: { verificationMethod: `${POINTER.did}#z6MkLadderVm` }
 } as unknown as IZcap
@@ -94,7 +93,7 @@ describe('the credential-anchored bind', () => {
   it('provisions the Space on the first bind (no prior stamp)', async () => {
     const bound = await bindCredentialAnchoredUnlockSecret({
       controller: CONTROLLER,
-      pointer: { spaceId: POINTER.spaceId, host: POINTER.host },
+      pointer: { spaceUrl: POINTER.spaceUrl },
       delegation: DELEGATION,
       ladderSeed: generateLadderSeed(),
       credential
@@ -115,7 +114,7 @@ describe('the credential-anchored bind', () => {
   it('skips the ensure on a re-bind carrying the first bind stamp', async () => {
     const first = await bindCredentialAnchoredUnlockSecret({
       controller: CONTROLLER,
-      pointer: { spaceId: POINTER.spaceId, host: POINTER.host },
+      pointer: { spaceUrl: POINTER.spaceUrl },
       delegation: DELEGATION,
       ladderSeed: generateLadderSeed(),
       credential

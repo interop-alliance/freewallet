@@ -12,7 +12,7 @@ import {
   AgentDouble,
   outcomeOf,
   startRelay,
-  WAS_SPACES_URL,
+  WAS_URL,
   type ConnectionResponse
 } from './agentDouble'
 import { listStoredResourceIds } from '../shared/storedLogs'
@@ -565,7 +565,7 @@ test.describe.serial('agent connection over the interaction URL', () => {
     expect(child.proof?.capabilityChain).toHaveLength(3)
 
     const reader = WasClient.fromSigner({
-      serverUrl: WAS_SPACES_URL,
+      baseServerUrl: WAS_URL,
       signer: subscriber.getSigner()
     }).fromCapability(child as never) as Collection
     const listing = await reader.list()

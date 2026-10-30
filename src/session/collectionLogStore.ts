@@ -124,7 +124,7 @@ export function sessionCollectionDescriptorSource({
       return webvhResourceLogController({ did, log })
     },
     pinStore: persistence.logPins,
-    spaceId: remoteStore.spaceId
+    spaceUrl: remoteStore.spaceUrl
   })
 }
 
