@@ -1,7 +1,7 @@
 /**
  * Unit tests for the KMS-authentication stage: the idempotent provisioning of
  * the account's one KMS-held `authentication` key and the `keys.json` binding
- * that records it (driven by fakes -- no KMS, no WAS server).
+ * that records it (driven by fakes -- no KMS, no PWS server).
  */
 import { describe, it, expect, vi } from 'vitest'
 import type { KeystoreAgent } from '@interop/webkms-client'

@@ -1,5 +1,5 @@
 /**
- * The ordinary forget ceremony, end to end (WAS mode), and the transient
+ * The ordinary forget ceremony, end to end (PWS mode), and the transient
  * login that seals the collection descriptor logs behind it.
  *
  * The walk: a remembered signup (browser A, an enrolled client), a second
@@ -17,7 +17,7 @@
  *
  * The collection logs are capability-gated, so the assertions read the
  * teaching server's FileSystem backend off disk (`tests/shared/storedLogs.ts`). Every
- * stage pays the deliberately slow unlock KDF on top of several WAS
+ * stage pays the deliberately slow unlock KDF on top of several PWS
  * ceremonies, hence the generous timeouts.
  */
 import type { Page } from '@playwright/test'

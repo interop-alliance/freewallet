@@ -23,7 +23,7 @@ with this client's did:webvh update keys, appends the roster with its
 key agent, and root-invokes. The ladder kind signs with a rung of the
 credential's ladder through the record's bridge delegation, appends with
 the ladder VM, and invokes as the per-visit annex VM under the
-generation delegation. A guest, a no-WAS session, and a transient
+generation delegation. A guest, a no-PWS session, and a transient
 session whose record carries no standing members resolve to neither.
 
 An earlier draft of the registry added a second computation beside that
@@ -32,7 +32,7 @@ constrain it. Twelve of the twenty-eight entries fire at login-routing
 sites that run before a `Session` object exists. The identity repairs
 are circular under a filter, because the context resolves nothing until
 the account pointer names the did:webvh, and those entries are what make
-it name it. On a no-WAS session a filter would remove four passes that
+it name it. On a no-PWS session a filter would remove four passes that
 run today.
 
 ## Decision
@@ -44,7 +44,7 @@ The held set derives from that one resolution. It is `{ none }`, plus
 `{ account, context.kind }` when a context resolves. A remembered
 session holds `{ none, account, enrolled }`. A transient session on a
 standing credential holds `{ none, account, ladder }`. A guest or a
-no-WAS session holds `{ none }`.
+no-PWS session holds `{ none }`.
 
 `held` and `dueAt` apply to the two chain triggers alone. At every other
 entry a declaration's `authority` is a claim made at declaration time,
@@ -73,7 +73,7 @@ the resolver, reads the same profile members it reads, and prefers the same
 kind, so wherever a context resolves the two agree.
 
 The decision as first written could not be implemented as it stands. It says
-a no-WAS session holds `{ none }`, and it also says a filter that removes
+a no-PWS session holds `{ none }`, and it also says a filter that removes
 the four shared registry passes on such a session is wrong -- but those four
 are chain-triggered, which is exactly where the filter applies. The same
 contradiction covers the pointer heal: it is chain-triggered, and the
@@ -102,7 +102,7 @@ registration behind it reads the post-heal resolution.
   already fixed.
 - **Filtering every entry through the held set, login-routing entries
   included.** There is no session at those sites to resolve from. It is
-  also circular for the identity repairs, and on a no-WAS session it
+  also circular for the identity repairs, and on a no-PWS session it
   would remove four passes that run correctly today.
 - **Widening the seam so a remembered session on a standing credential
   reports both kinds.** Nothing needs it. The seam is widened on the day

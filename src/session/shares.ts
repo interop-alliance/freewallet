@@ -24,7 +24,7 @@ export interface CollectionShare {
 
 /**
  * Fetches every encrypted wallet collection's current reader roster, keyed
- * by WAS collection id, each reader named from the `connections` directory's
+ * by PWS collection id, each reader named from the `connections` directory's
  * entries when the caller hands them in. The listing covers every collection
  * with a key-epoch roster, not only the ones a new share may name (the
  * roster's `shareable` flag), so a reader escrowed into a collection that is

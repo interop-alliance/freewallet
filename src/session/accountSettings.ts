@@ -162,7 +162,7 @@ export async function readLoginHandle({
  * Both session kinds take the same path. A transient session's requests ride
  * the visit's generation delegation (`profile.invocationCapability`), since
  * its annex-signed root invocation would be refused under the current-key-set
- * rule. With no WAS server there is no capability and no remote record, and
+ * rule. With no PWS server there is no capability and no remote record, and
  * the read serves the local cache.
  *
  * @param options {object}
@@ -189,7 +189,7 @@ export async function loadUnlockRegistry({
  * Changes the account passphrase and adopts the new unlock identity into the
  * live session.
  *
- * Ordering, establish-first: on a WAS account the NEW passphrase is made a
+ * Ordering, establish-first: on a PWS account the NEW passphrase is made a
  * standing credential BEFORE anything about the old one is touched. The old
  * passphrase is verified read-only (capturing its record's ladder seed for
  * the retirement's attribution), then `establishStandingUnlock` runs as the
@@ -207,7 +207,7 @@ export async function loadUnlockRegistry({
  * entry names (see below). A change torn between the establishment and the
  * old credential's teardown leaves BOTH passphrases live and standing; the
  * next new-passphrase login's torn-retirement repair (or a retry of the
- * same change) retires the old one. A no-WAS (or guest, or unpromoted)
+ * same change) retires the old one. A no-PWS (or guest, or unpromoted)
  * session keeps the plain rebind-then-delete order instead: nothing can be
  * standing there, so there is nothing to establish first.
  *
@@ -320,7 +320,7 @@ export async function changeAccountPassphrase({
   // The OLD credential's standing configuration, captured before the change
   // replaces the registry entry with the new passphrase's -- the retirement
   // must hold the old multibases before the upsert destroys them. A session
-  // that cannot run a retirement at all (no WAS, a guest, an unpromoted
+  // that cannot run a retirement at all (no PWS, a guest, an unpromoted
   // account) has nothing to read; otherwise an unreadable registry refuses
   // the change up front, while nothing has been written yet.
   const {
@@ -380,10 +380,10 @@ export async function changeAccountPassphrase({
           credential: oldCredential
         })
       : 'absent'
-  // The two arms. On a WAS account (an enrolled context) the NEW passphrase
+  // The two arms. On a PWS account (an enrolled context) the NEW passphrase
   // is established standing FIRST, before the old unlock identity is
   // touched; the plain rebind-then-delete order survives only where nothing
-  // can be standing (no WAS, a guest, an unpromoted account -- the same
+  // can be standing (no PWS, a guest, an unpromoted account -- the same
   // states with no retirement to run).
   const controller = profile.accountController ?? session.user.id
   // The unlock method this session acts through, put back if the ladder
@@ -1588,7 +1588,7 @@ export async function rotateAccountUpdateKey({
  *   with nothing deleted. The reason rides on the outcome and carries its own
  *   copy key.
  * - `failed` -- a phase before the pivot failed. The account is still there,
- *   the caller stays put, and a retry re-runs the walk. A guest and a no-WAS
+ *   the caller stays put, and a retry re-runs the walk. A guest and a no-PWS
  *   run, which have no pivot, also report a surviving local replica this
  *   way: there the replica IS the account.
  * - `deleted` -- the account Space is gone and the caller should clear the
@@ -2070,7 +2070,7 @@ async function runAccountDeletion({
 
   const pointer = profile.accountPointer
   const accountSpaceId = session.storage.spaceId
-  // The WAS-scoped arms. A guest and a no-WAS deployment skip them BY SCOPE
+  // The PWS-scoped arms. A guest and a no-PWS deployment skip them BY SCOPE
   // rather than reaching them and catching: neither owns a Space, so neither
   // may be made undeletable by a refusal about one.
   const remote = !isGuest && !!WAS_BASE_SERVER_URL && !!accountSpaceId
@@ -2130,7 +2130,7 @@ async function runAccountDeletion({
     // still succeed, and every sibling unlock Space would be stranded behind
     // a dead account while the run reported a clean deletion. A genuinely
     // registry-less account is only established where no registry can be
-    // demanded: an unpromoted account, or a no-WAS deployment.
+    // demanded: an unpromoted account, or a no-PWS deployment.
     if (registry === null && remote && promoted) {
       throw new Error(
         "The account's unlock-methods registry read came back empty on a " +
@@ -2899,7 +2899,7 @@ async function runAccountDeletion({
   // tell the user it survived -- and send a retry into a re-derivation whose
   // record fetch finds nothing at the deleted unlock Space, which reads as a
   // wrong passphrase on the account they just destroyed. A run that never
-  // reached the pivot (a guest, a no-WAS deployment) keeps the fatal reading,
+  // reached the pivot (a guest, a no-PWS deployment) keeps the fatal reading,
   // since there the local replica IS the account.
   onPhase?.({ phase: 'local-wipe' })
   const targets = snapshotWipeTargets({

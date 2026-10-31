@@ -1,5 +1,5 @@
 /**
- * The torn remembered signup e2e (WAS mode): the signup is killed between
+ * The torn remembered signup e2e (PWS mode): the signup is killed between
  * the credential-anchored establishment and the remembered-login half (the
  * `__E2E_TEAR_SIGNUP_AFTER_ESTABLISHMENT__` seam), leaving a fully standing
  * unlock record but no client-key record and no enrolled client. Both later

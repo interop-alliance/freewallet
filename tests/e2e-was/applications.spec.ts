@@ -13,7 +13,7 @@ import { WAS_E2E_DATA_DIR } from './wasDataDir'
 import { test, expect } from '../shared/consoleCapture'
 
 /**
- * The Applications revocation surface e2e (WAS mode), modeled on
+ * The Applications revocation surface e2e (PWS mode), modeled on
  * `clients.spec.ts`. An app connected through App Connect lists on
  * `/applications` from its `connections` directory entry, with the grants
  * that entry records; revoking it retires the grant
@@ -237,7 +237,7 @@ test.describe('The Applications revocation surface', () => {
 
     // The delegated grant works server-side: the app (its seed-derived key,
     // re-derived here in the runner) reads its collection. The invocation
-    // action is the HTTP verb -- WAS's closed action vocabulary -- not
+    // action is the HTTP verb -- PWS's closed action vocabulary -- not
     // ezcap's `read` alias.
     const zcapClient = await appZcapClient(credential.credentialSubject.seed)
     const before = await zcapClient.request({

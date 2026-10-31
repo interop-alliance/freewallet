@@ -9,8 +9,8 @@ import {
 import { test, expect } from '../shared/consoleCapture'
 
 /**
- * WAS-backed E2E for the CHAPI "store" flow end-to-end: a credential accepted
- * through the `/wallet/store` popup must land in the remote WAS Space through
+ * PWS-backed E2E for the CHAPI "store" flow end-to-end: a credential accepted
+ * through the `/wallet/store` popup must land in the remote PWS Space through
  * the remote-direct popup storage path (the popup's own IndexedDB is a
  * third-party partitioned bucket no sync controller drives), and then appear in
  * the main app's wallet once background replication pulls it. This is the exact
@@ -75,7 +75,7 @@ function readResponse(page: Page): Promise<InjectedResponse> {
 test('a credential stored via the CHAPI popup lands in the wallet and history', async ({
   page
 }, testInfo) => {
-  // 1. A top-level signup provisions the remote WAS Space and its collections.
+  // 1. A top-level signup provisions the remote PWS Space and its collections.
   const { passphrase } = await signupViaWizard(page, testInfo)
 
   // 2. Enter the store popup with an injected inline offer. The reload lets the
@@ -92,7 +92,7 @@ test('a credential stored via the CHAPI popup lands in the wallet and history', 
     timeout: 30_000
   })
 
-  // Store writes remote-direct to the WAS `private-credentials` collection.
+  // Store writes remote-direct to the PWS `private-credentials` collection.
   await page.getByRole('button', { name: 'Store', exact: true }).click()
   await expect(page.getByText(/stored successfully/i)).toBeVisible({
     timeout: 30_000

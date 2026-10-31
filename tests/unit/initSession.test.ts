@@ -5,7 +5,7 @@
  * key-material wiring on the profile, guest vs regular sessions,
  * `userExists` reporting, and KMS keystore provisioning (wired
  * when configured, non-fatal on failure). The network-touching boundaries --
- * `StorageManager.initStorageClients` (IndexedDB + WAS) and `ensureKeystore`
+ * `StorageManager.initStorageClients` (IndexedDB + PWS) and `ensureKeystore`
  * (WebKMS) -- are stubbed; the CapabilityAgent / ZcapClient / key-agreement
  * derivation runs for real, since it is pure and deterministic in node.
  */

@@ -2,7 +2,7 @@
 /**
  * Unit tests for the local adapter of the `connections` directory
  * (`localConnectionsStore` in `src/stores/connectionsStore.ts`), the store a
- * guest or no-WAS session keeps its directory in: every body sealed as an
+ * guest or no-PWS session keeps its directory in: every body sealed as an
  * EDV envelope at its derived id and opened under the id it was read at,
  * conditional writes under the RxDB revision as the ETag, a create race
  * surfacing as `PreconditionFailedError`, and the directory logic in

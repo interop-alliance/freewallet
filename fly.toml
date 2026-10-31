@@ -1,4 +1,4 @@
-# Example Fly.io configuration. nginx serves the wallet and proxies the WAS
+# Example Fly.io configuration. nginx serves the wallet and proxies the PWS
 # server's routes to the server's own Fly app over Flycast, so both share one
 # origin. The app name, domain and upstream below are placeholders: each deploy
 # workflow replaces them with the FLY_APP, VITE_WAS_SERVER_URL and
@@ -13,7 +13,7 @@ primary_region = "iad"
     VITE_WAS_SERVER_URL = "https://wallet.example.com/"
 
 [env]
-  # The WAS server app's Flycast address. nginx resolves it once at startup.
+  # The PWS server app's Flycast address. nginx resolves it once at startup.
   WAS_UPSTREAM = "was-teaching-server.flycast:80"
 
 [http_service]

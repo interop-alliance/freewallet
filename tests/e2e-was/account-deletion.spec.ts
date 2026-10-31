@@ -1,5 +1,5 @@
 /**
- * Account deletion from a transient session, end to end (WAS mode): the
+ * Account deletion from a transient session, end to end (PWS mode): the
  * public-terminal case the default session type exists to serve. The
  * deletion runs with no enrolled client acting, so every Space DELETE it
  * sends rides a ladder-signed, DELETE-only capability minted from the typed
@@ -19,7 +19,7 @@
  * account Space is deleted every survivor controlled by the account
  * did:webvh answers 404 whether it was deleted or merely stranded.
  *
- * Every stage pays the deliberately slow unlock KDF on top of several WAS
+ * Every stage pays the deliberately slow unlock KDF on top of several PWS
  * ceremonies, hence the generous timeouts.
  */
 import type { Browser, Page, TestInfo } from '@playwright/test'

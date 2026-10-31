@@ -1,9 +1,9 @@
 # Hosted did:webvh DID log
 
-Every WAS account publishes a
+Every PWS account publishes a
 [`did:webvh`](https://identity.foundation/didwebvh/) DID: a hash-chained,
 self-certifying history log stored as one world-readable Resource in the
-user's Wallet Attached Storage (WAS) Space. Hosting it needs no server
+user's Portable Web Spaces (PWS) Space. Hosting it needs no server
 changes. A [`did:web`](https://w3c-ccg.github.io/did-method-web/) DID comes
 free with it, as the log's own projection.
 

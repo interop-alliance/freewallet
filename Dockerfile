@@ -1,7 +1,7 @@
 # syntax=docker/dockerfile:1
 
 # Production image for Freewallet: the static build served by nginx, which
-# also proxies the WAS server's routes on the same origin.
+# also proxies the PWS server's routes on the same origin.
 # docs/deployment-fly.io.md covers running it.
 
 # Build stage: compile the SPA into dist/.

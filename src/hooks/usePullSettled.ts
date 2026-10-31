@@ -12,7 +12,7 @@ import { useSyncStatusStore, type SyncStatus } from '@/stores/syncStatusStore'
 
 /**
  * @param options {object}
- * @param options.collectionIds {string[]}   the WAS collection ids whose pulls
+ * @param options.collectionIds {string[]}   the PWS collection ids whose pulls
  *   the page's view depends on
  * @param options.onSettled {() => void}   invoked once per settled pull;
  *   callers pass a stable callback (the page's own reload)

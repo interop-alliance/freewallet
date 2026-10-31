@@ -54,7 +54,7 @@ import {
   transientSessionStores
 } from '@/session/persistence'
 import type { ControllerProfile, Session } from '@/types/auth'
-import type { WASRemoteStore } from '@/stores/wasRemoteStore'
+import type { PWSRemoteStore } from '@/stores/pwsRemoteStore'
 
 const POINTER = {
   did: 'did:webvh:QmScidForTests:was.example.test:space:space-123:id',
@@ -105,9 +105,9 @@ function sessionFixture({ did }: { did?: string } = {}): Pick<
  * The remote store stand-in: the collection handles the session builders
  * reach each collection through.
  *
- * @returns {WASRemoteStore}
+ * @returns {PWSRemoteStore}
  */
-function remoteStoreStub(): WASRemoteStore {
+function remoteStoreStub(): PWSRemoteStore {
   return {
     spaceId: POINTER.spaceId,
     spaceUrl: POINTER.spaceUrl,
@@ -116,7 +116,7 @@ function remoteStoreStub(): WASRemoteStore {
       id: collectionId,
       isRemoteHandle: true
     }))
-  } as never as WASRemoteStore
+  } as never as PWSRemoteStore
 }
 
 afterEach(() => {

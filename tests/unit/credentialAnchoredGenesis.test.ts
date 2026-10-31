@@ -306,7 +306,7 @@ describe('establishCredentialAnchoredAccount -- the orchestrator binding', () =>
     })
   })
 
-  it('refuses with no WAS server before wallet-core is ever called', async () => {
+  it('refuses with no PWS server before wallet-core is ever called', async () => {
     state.wasUrl = undefined
 
     await expect(
@@ -446,7 +446,7 @@ describe('mendCredentialAnchoredAccount -- the mend binding', () => {
     expect(options.collectionIds).toContain('connections')
   })
 
-  it('refuses with no WAS server before wallet-core is ever called', async () => {
+  it('refuses with no PWS server before wallet-core is ever called', async () => {
     state.wasUrl = undefined
 
     await expect(

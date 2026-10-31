@@ -5,13 +5,13 @@
  * round-trip and its validation, the local client-key record (this client's
  * key set + cached user key under the unlock layer), record authenticity
  * (the frame proof and its refusal), and the `fetchKeyring` / `bindPassphrase`
- * / `changePassphrase` public contract across the WAS-configured and
+ * / `changePassphrase` public contract across the PWS-configured and
  * cache-only branches. The module is method-agnostic -- unlock derivation
  * runs off a generic `{ secret, kdf }` pair (a string passphrase under
  * Argon2id, or uniform byte material such as a passkey PRF output under HKDF)
  * via the exported `deriveUnlockIdentity` / `bindUnlockSecret` seam, and the
  * passphrase functions are thin wrappers over it; the frozen-vector block
- * pins the production salts. The unlock-Space WAS helpers are replaced by an
+ * pins the production salts. The unlock-Space PWS helpers are replaced by an
  * in-memory fake keyed by unlock Space id; the `freewallet-session`
  * IndexedDB is backed by a minimal in-memory `IDBFactory` (node has no
  * IndexedDB). Most tests derive under a minimal Argon2id set (64 KiB, one
@@ -37,7 +37,7 @@ import {
 } from '@/app.config'
 
 /**
- * Shared mutable state for the two mocks: the configured WAS url (mutable so a
+ * Shared mutable state for the two mocks: the configured PWS url (mutable so a
  * test can drop it to exercise the cache-only branch), the in-memory unlock
  * Spaces (spaceId to keyring record), and an optional error the remote GET
  * should throw.
@@ -1338,7 +1338,7 @@ describe('fetchKeyring', () => {
     ).rejects.toBe(networkError)
   })
 
-  it('is cache-only (no remote call) when no WAS server is configured', async () => {
+  it('is cache-only (no remote call) when no PWS server is configured', async () => {
     wasState.url = undefined
     const found = await fetchKeyring({
       accountLogPinStore: logPins,
@@ -1350,7 +1350,7 @@ describe('fetchKeyring', () => {
     expect(getUnlockKeyring).not.toHaveBeenCalled()
   })
 
-  it('serves the cache with no TTL when no WAS server is configured', async () => {
+  it('serves the cache with no TTL when no PWS server is configured', async () => {
     wasState.url = undefined
     const idb = createFakeIdb()
     const clientSeed = randomSeed()
@@ -1361,7 +1361,7 @@ describe('fetchKeyring', () => {
       idb,
       kdf: KDF
     })
-    // Far past the WAS-mode TTL: with no remote copy the cache is the
+    // Far past the PWS-mode TTL: with no remote copy the cache is the
     // keyring's only copy and stays authoritative regardless of age.
     vi.useFakeTimers({ toFake: ['Date'] })
     vi.setSystemTime(Date.now() + KEYRING_CACHE_TTL_MS * 10)
@@ -1381,7 +1381,7 @@ describe('fetchKeyring', () => {
 })
 
 describe('bindPassphrase', () => {
-  it('writes the remote record, the cache, and the client-key record when WAS is configured', async () => {
+  it('writes the remote record, the cache, and the client-key record when PWS is configured', async () => {
     const idb = createFakeIdb()
     await bindPassphrase({
       clientSeed: randomSeed(),
@@ -1398,7 +1398,7 @@ describe('bindPassphrase', () => {
     await expect(loadClientKeyRecord({ spaceId, idb })).resolves.not.toBeNull()
   })
 
-  it('is cache-only when no WAS server is configured', async () => {
+  it('is cache-only when no PWS server is configured', async () => {
     wasState.url = undefined
     const idb = createFakeIdb()
     await bindPassphrase({
@@ -2130,7 +2130,7 @@ describe('deleteKeyring', () => {
     await expect(loadClientKeyRecord({ spaceId, idb })).resolves.toBeNull()
   })
 
-  it('clears the local records with no remote call when no WAS server is configured', async () => {
+  it('clears the local records with no remote call when no PWS server is configured', async () => {
     wasState.url = undefined
     const idb = createFakeIdb()
     await bindPassphrase({
@@ -2335,7 +2335,7 @@ describe('deriveUnlockIdentity (method-agnostic derivation)', () => {
 describe('management zcap delegation', () => {
   /**
    * The unlock Space URL a management zcap targets, built exactly as the module
-   * builds it from the mocked WAS url.
+   * builds it from the mocked PWS url.
    */
   function unlockSpaceUrl(spaceId: string): string {
     // The canonical container form: a trailing slash, which is the target
@@ -2400,7 +2400,7 @@ describe('management zcap delegation', () => {
       expect(manageCapability).toBeUndefined()
     })
 
-    it('returns no capability when no WAS server is configured', async () => {
+    it('returns no capability when no PWS server is configured', async () => {
       wasState.url = undefined
       const idb = createFakeIdb()
       const { manageCapability } = await bindUnlockSecret({
@@ -2801,7 +2801,7 @@ describe('fetchTransientKeyring (FW-215)', () => {
     expect(await idb.databases()).toEqual([])
   })
 
-  it('requires a configured WAS server (remote-only, no cache to serve)', async () => {
+  it('requires a configured PWS server (remote-only, no cache to serve)', async () => {
     wasState.url = undefined
     await expect(
       fetchTransientKeyring({

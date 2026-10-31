@@ -14,7 +14,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { agentsFromSeed } from '@interop/pws-client/identity'
 
-// The deployment axis: a WAS server or the local-only build. It decides
+// The deployment axis: a PWS server or the local-only build. It decides
 // whether a popup's descriptor cache is a cache at all, so the popup tests
 // below drive it directly. The default is the local-only build, which is
 // what this file's other tests have always run under.
@@ -45,7 +45,7 @@ vi.mock('@/session/transientLogin', () => ({
   transientSessionFromKeyringHit: vi.fn()
 }))
 vi.mock('@/lib/kms', () => ({ ensureKeystore: vi.fn() }))
-// The remembered login's first-contact account-log read, with the WAS
+// The remembered login's first-contact account-log read, with the PWS
 // server configured: resolved by default, and rejected with the 404 class
 // by the dead-pointer test.
 vi.mock('@interop/wallet-core/webvh', async importOriginal => ({
@@ -1106,7 +1106,7 @@ describe('loginWithPassphrase -- the popup session (FW-203)', () => {
     expect(StorageManager.initStorageClients).not.toHaveBeenCalled()
   })
 
-  it('keeps the popup caches persistent with no WAS server (local mode)', async () => {
+  it('keeps the popup caches persistent with no PWS server (local mode)', async () => {
     // With no server to serve descriptors, the same localStorage pair is the
     // only record of the locally minted key epochs. Suppressing it would
     // mint fresh ones and orphan everything the main app already encrypted.
@@ -1163,7 +1163,7 @@ describe('loginWithPassphrase -- the popup session (FW-203)', () => {
     )
     // The localStorage-backed cache: in this Node environment it has no
     // store to write to, so the read-back is empty -- the discriminator
-    // against the in-memory pair the WAS-backed popup gets.
+    // against the in-memory pair the PWS-backed popup gets.
     const cache = session!.persistence.descriptorCache({
       scope: 'space'
     })

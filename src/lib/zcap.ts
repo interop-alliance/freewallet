@@ -21,7 +21,7 @@ export function zcapExpires(zcap?: IZcap): string | undefined {
 }
 
 /**
- * The WAS collection id a grant zcap targets, when its `invocationTarget`
+ * The PWS collection id a grant zcap targets, when its `invocationTarget`
  * addresses a Collection of the given Space, classified by pws-client's path
  * grammar. Returns undefined for anything else -- a resource or reserved
  * sub-endpoint, another Space, or a foreign URL.

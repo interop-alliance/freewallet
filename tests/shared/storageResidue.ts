@@ -14,7 +14,7 @@
  * rather than the page's own `indexedDB.databases()`, so the assertion
  * inspects the browser's storage from outside the page under test.
  *
- * Shared by the WAS transient-login spec and, verbatim, by the login-form
+ * Shared by the PWS transient-login spec and, verbatim, by the login-form
  * rerun. The CHAPI popup variant uses the frame-scoped twin below: the popup
  * is a third-party iframe, so what has to come back empty is its PARTITIONED
  * bucket, not the origin's first-party one (a remembered browser's own

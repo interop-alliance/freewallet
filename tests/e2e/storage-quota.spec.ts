@@ -2,7 +2,7 @@ import { loginAsGuest } from './helpers/auth'
 import { test, expect } from '../shared/consoleCapture'
 
 /**
- * Storage quota UI in local (non-WAS) mode — no remote space, so the quota
+ * Storage quota UI in local (non-PWS) mode — no remote space, so the quota
  * card should not appear. See playwright.config.ts (VITE_WAS_SERVER_URL unset).
  */
 test.describe('Storage quota (local mode)', () => {

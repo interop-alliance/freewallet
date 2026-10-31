@@ -17,7 +17,7 @@ import type { DocCipher } from '@interop/pws-client/edv'
 import type { Json } from '@interop/pws-sync'
 import { RemoteDirectStore } from './remoteDirectStore'
 import type { WalletActivity } from './storageManager'
-import type { WASRemoteStore } from './wasRemoteStore'
+import type { PWSRemoteStore } from './pwsRemoteStore'
 
 /**
  * A cipher that seals plaintext into a well-formed envelope under a fresh id
@@ -50,12 +50,12 @@ function fakeCipher(): DocCipher {
 }
 
 /**
- * An in-memory WAS remote: one resource map per logical collection.
+ * An in-memory PWS remote: one resource map per logical collection.
  *
- * @returns {{ remote: WASRemoteStore; resources: Map<string, Map<string, Json>> }}
+ * @returns {{ remote: PWSRemoteStore; resources: Map<string, Map<string, Json>> }}
  */
 function fakeRemote(): {
-  remote: WASRemoteStore
+  remote: PWSRemoteStore
   resources: Map<string, Map<string, Json>>
 } {
   const resources = new Map<string, Map<string, Json>>()
@@ -98,7 +98,7 @@ function fakeRemote(): {
     }) {
       collection(logicalKey).delete(resourceId)
     }
-  } as unknown as WASRemoteStore
+  } as unknown as PWSRemoteStore
   return { remote, resources }
 }
 

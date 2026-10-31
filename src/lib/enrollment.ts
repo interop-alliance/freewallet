@@ -212,7 +212,7 @@ export async function completeEnrollment({
   idb?: IDBFactory
 }): Promise<Session> {
   if (!WAS_BASE_SERVER_URL) {
-    throw new Error('Enrollment requires a configured WAS server.')
+    throw new Error('Enrollment requires a configured PWS server.')
   }
   const credential = await deriveUnlockCredential({
     secret: passphrase,

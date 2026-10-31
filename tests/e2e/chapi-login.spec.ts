@@ -3,7 +3,7 @@ import { test, expect } from '../shared/consoleCapture'
 
 /**
  * E2E coverage for the CHAPI "Login with Wallet" flow (`/wallet/get`) in local
- * (no-WAS) mode: a login VPR that requests DID Authentication plus a
+ * (no-PWS) mode: a login VPR that requests DID Authentication plus a
  * self-issued Login Credential (username).
  *
  * Like the DID-Auth specs, these drive the non-production injected-event seam

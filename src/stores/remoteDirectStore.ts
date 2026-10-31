@@ -13,8 +13,8 @@
  *   third-party partitioned iframe whose local IndexedDB no sync controller
  *   drives, so a credential stored locally would be stranded and a list would
  *   always come back empty. This backend reads and writes the standard synced
- *   collections straight over the remote WAS collections
- *   (`WASRemoteStore.listSyncedDocuments`, which pages the collection's
+ *   collections straight over the remote PWS collections
+ *   (`PWSRemoteStore.listSyncedDocuments`, which pages the collection's
  *   `changes` feed, plus `getSyncedResource` / `putSyncedResource` /
  *   `deleteSyncedResource`). A listing costs one request per feed page
  *   rather than one per resource.
@@ -56,7 +56,7 @@ import { uuidv7 } from 'uuidv7'
 import type { StoredAppKey, StoredCredential } from '@/types/credential'
 import type { StoredContact } from '@/types/contact'
 import type { WalletActivity } from '@/stores/storageManager'
-import type { WASRemoteStore } from '@/stores/wasRemoteStore'
+import type { PWSRemoteStore } from '@/stores/pwsRemoteStore'
 import { createLogger } from '@/lib/log'
 
 const log = createLogger('fw:storage:direct')
@@ -160,11 +160,11 @@ export interface SyncedCollectionStore {
 
 /**
  * The remote-direct backend: serves the standard synced collections straight
- * over a session's `WASRemoteStore`, encrypting/decrypting with the same
+ * over a session's `PWSRemoteStore`, encrypting/decrypting with the same
  * per-collection ciphers the local store uses.
  */
 export class RemoteDirectStore implements SyncedCollectionStore {
-  #remote: WASRemoteStore
+  #remote: PWSRemoteStore
   #ciphers: Record<string, DocCipher>
   // Counts from the most recent list read, mirroring BrowserStore's surface so
   // the facade's shared epoch-refresh path drives both backends identically.
@@ -221,7 +221,7 @@ export class RemoteDirectStore implements SyncedCollectionStore {
     remoteStore,
     ciphers
   }: {
-    remoteStore: WASRemoteStore
+    remoteStore: PWSRemoteStore
     ciphers: Record<string, DocCipher>
   }) {
     this.#remote = remoteStore

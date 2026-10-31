@@ -82,7 +82,7 @@ interposed factory: the defect class was silence, not memory-backing.
 ## Amendment (2026-08-25)
 
 The strategy's in-memory variant now carries the session's
-client-annex identity -- the annex DID every WAS request signs under and
+client-annex identity -- the annex DID every PWS request signs under and
 the generation delegation every request rides -- as a required member,
 not a separate option beside it. A transient session's strategy
 therefore cannot be constructed half-declared, and session assembly

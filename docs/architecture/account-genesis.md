@@ -11,16 +11,16 @@ notifier. The lobby renders that as a step feed and routes from the settled
 outcome: the dashboard, `/login` when the credential already had a wallet,
 or back to the wizard with the error copy.
 
-Every WAS signup runs the credential-anchored establishment below, whose
+Every PWS signup runs the credential-anchored establishment below, whose
 genesis order promotes the Space controller inline. It mints no enrolled
 client, so the account lands ladder-anchored and is reachable by the
 credential alone from any browser. The plain genesis
-(`ensureAccountGenesis`) is the other path. It needs a WAS Space, so it
+(`ensureAccountGenesis`) is the other path. It needs a PWS Space, so it
 runs only as the heal in every remembered login's storage provisioning on a
-WAS deployment, a no-op on a healthy account. A no-WAS signup mints the key
+PWS deployment, a no-op on a healthy account. A no-PWS signup mints the key
 set and binds the local keyring, and runs no genesis.
 
-**The host gate.** Before anything else, a WAS signup reads the configured
+**The host gate.** Before anything else, a PWS signup reads the configured
 server's service description and refuses a server that does not claim the
 client annex profile (`https://w3id.org/pws/client-annex`, checked by
 wallet-core's `assertHostClaimsClientAnnexProfile`). The establishment
@@ -39,7 +39,7 @@ existing ladder VMs stay standing and more can be added. The claim is
 self-reported, so the check catches a server whose software does not
 enforce the clause, not one that lies about it.
 
-**The credential-anchored establishment.** Every WAS signup, passphrase or
+**The credential-anchored establishment.** Every PWS signup, passphrase or
 passkey and remembered or not, runs this establishment first, through
 wallet-core's `establishCredentialAnchoredAccount`
 (`@interop/wallet-core/clientAnnex`). The stage order is canonical in
@@ -137,7 +137,7 @@ dropping the verified-log memo unless it already holds a settled document
 for that DID), and maps per-stage failures onto warns.
 
 There is no opt-out (`decisions/0017-did-webvh-always-provisioned.md`).
-Every WAS account provisions did:webvh, and the reduced path is reached only
+Every PWS account provisions did:webvh, and the reduced path is reached only
 by a session that structurally cannot produce a log: one with no keystore
 agent, or no client update keys or user key. It runs Space provisioning, key
 epochs, and the KMS binding alone, publishes no `did.json`, and so presents
@@ -146,6 +146,6 @@ did:key. A Space that never came up is the one fatal stage:
 
 The plain path keeps the keyring bind before any data Space exists, is
 called with `promoteController: false`, and leaves promotion and healing to
-`ensurePromotedController`. The no-WAS plain signup keeps its own
-`userExists` probe; on a WAS deployment the establishment's create-nothing
+`ensurePromotedController`. The no-PWS plain signup keeps its own
+`userExists` probe; on a PWS deployment the establishment's create-nothing
 probe (`fetchTransientKeyring`) is the one signup-time existence check.

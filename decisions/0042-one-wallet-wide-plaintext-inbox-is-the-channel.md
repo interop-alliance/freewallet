@@ -10,7 +10,7 @@
   login-time drain, the `#inbox` target class on the interaction-URL
   page, the renewal push), wallet-core (the envelope codec on `/space`,
   the `grantsReceived` channel record), app-connect-spec (the `#inbox`
-  descriptor type and the envelope), was-teaching-server and the WAS
+  descriptor type and the envelope), was-teaching-server and the PWS
   spec (`createdBy` on every Resource, WASS-58's exact target), the
   agent (its own Space with an inbox).
 
@@ -21,12 +21,12 @@ renewed grant for the agent and has to hand it over. The agent holds a
 capability on its own inbox and has to hand that to the wallet. Neither
 side has a standing endpoint the other can call: the wallet is a browser
 tab, and a direct call to the agent's URL would be a second contract
-with its own reachability and CORS. Both sides do have WAS Spaces, and a
-WAS server authenticates every writer and records the invoking DID as
+with its own reachability and CORS. Both sides do have PWS Spaces, and a
+PWS server authenticates every writer and records the invoking DID as
 `createdBy` on the Resource it creates.
 
 DIDComm needs per-connection mediation because it has no
-server-authenticated writer. WAS has one, so the minimum here is
+server-authenticated writer. PWS has one, so the minimum here is
 smaller.
 
 ## Decision
@@ -65,8 +65,8 @@ stamp, is refused and counts as absent.
   (see Revisit Criteria), unlike the rest of this list.
 - **Direct HTTP to the agent's URL as the channel.** A second contract,
   agent reachability, and a browser's CORS to an arbitrary host, for
-  what the WAS channel already carries. The renewal push is itself a
-  request to the agent's host, but it rides the WAS capability the
+  what the PWS channel already carries. The renewal push is itself a
+  request to the agent's host, but it rides the PWS capability the
   agent delegated, which is the one contract.
 - **A mailbox Resource in the owner's Space**, in three variants.
   Inside the audience collection: every subscriber reads it and every
@@ -111,7 +111,7 @@ Reopen this decision when one or more of the following holds:
    that the Space quota, the per-pass byte cap, and the per-sender
    budget do not keep another party's invitation readable. Per-connection
    inboxes are then the candidate.
-2. The WAS spec drops or makes optional the `createdBy` the drain
+2. The PWS spec drops or makes optional the `createdBy` the drain
    attributes by, in which case message signing returns as the
    alternative.
 3. A message kind arrives that must be read by a party other than the

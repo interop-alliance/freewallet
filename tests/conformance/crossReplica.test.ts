@@ -1,5 +1,5 @@
 /**
- * Cross-replica round-trip conformance: the two WAS sync engines against a
+ * Cross-replica round-trip conformance: the two PWS sync engines against a
  * real server.
  *
  * DCW (the mobile wallet) replicates with `@interop/wallet-core/sync`'s
@@ -109,7 +109,7 @@ import {
 } from '@interop/social-core'
 
 // --------------------------------------------------------------------------
-// The real WAS server, in process (the server's shared test boot)
+// The real PWS server, in process (the server's shared test boot)
 // --------------------------------------------------------------------------
 
 type TestFastify = Awaited<ReturnType<typeof startTestServer>>['fastify']
@@ -130,7 +130,7 @@ async function startTeachingServer(): Promise<{
 }
 
 /**
- * A PwsClient over one replica's agents, mirroring wasRemoteStore's
+ * A PwsClient over one replica's agents, mirroring pwsRemoteStore's
  * codec-bypassing client: a no-op keystore, envelopes move verbatim.
  *
  * @param options {object}
@@ -256,7 +256,7 @@ async function openFwStore({
 }
 
 /**
- * The logical key `BrowserStore` keeps a WAS collection under.
+ * The logical key `BrowserStore` keeps a PWS collection under.
  *
  * @param collectionId {string}
  * @returns {string}

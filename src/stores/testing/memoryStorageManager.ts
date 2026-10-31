@@ -25,7 +25,7 @@ import { StorageManager } from '@/stores/storageManager'
 import { generateVaultKeys } from '@/stores/testing/vaultKeys'
 
 /**
- * A logical cipher key paired with the WAS collection id it seals for.
+ * A logical cipher key paired with the PWS collection id it seals for.
  */
 export type CollectionPair = readonly [logicalKey: string, collectionId: string]
 

@@ -9,7 +9,7 @@
  *   The handle and the cipher are rebuilt from the descriptor the call
  *   resolves, so a user key cascade's descriptor refresh reaches the next
  *   call and no entry is sealed under an epoch the cascade retired.
- * - On a guest or a no-WAS session, which have no Space, the adapter is
+ * - On a guest or a no-PWS session, which have no Space, the adapter is
  *   {@link localConnectionsStore}, over the BrowserStore's local
  *   `connections` collection and the same EDV cipher. That collection is
  *   never replicated, and the local copy is the only copy.

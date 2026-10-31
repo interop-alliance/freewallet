@@ -113,7 +113,7 @@ local replica.
 **The wallet writes the log alone.** The server derives the Collection
 Metadata object's `encryption` member from the log head. No ceremony writes
 that member, and no `configure` call carries it forward. Provisioning creates an
-encrypted collection bare (`WASRemoteStore.ensureGovernedCollection`, a
+encrypted collection bare (`PWSRemoteStore.ensureGovernedCollection`, a
 guarded create), and the epoch[0] install through the collection's own store
 is the genesis that declares it governed (`ensureIndexedFirstEpoch`). A
 re-run adopts the standing log, and a lost create race resolves on the

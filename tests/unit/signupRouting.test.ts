@@ -1,7 +1,7 @@
 // @vitest-environment node
 /**
  * Unit tests for the signup login routing (`src/session/signup.ts`): a
- * WAS-configured signup ALWAYS runs the credential-anchored establishment --
+ * PWS-configured signup ALWAYS runs the credential-anchored establishment --
  * the non-remembered default then enters transiently, while an explicit
  * `rememberBrowser: true` follows the establishment with the ordinary
  * remembered login, not the transient composition, and reports
@@ -216,7 +216,7 @@ describe('signUpWithPassphrase -- login routing', () => {
     expect(loginWithPassphrase).not.toHaveBeenCalled()
   })
 
-  it('runs the remembered flow with no WAS server configured', async () => {
+  it('runs the remembered flow with no PWS server configured', async () => {
     state.wasUrl = undefined
     vi.mocked(loginWithPassphrase).mockResolvedValue({
       session: null,

@@ -1,7 +1,7 @@
 /**
- * WAS storage type definitions used by the Settings UI.
+ * PWS storage type definitions used by the Settings UI.
  * StorageCollection and StorageResource mirror the JSON shapes returned by the
- * WAS server's list endpoints; see the WAS spec for the authoritative schema.
+ * PWS server's list endpoints; see the PWS spec for the authoritative schema.
  */
 import type { CollectionGenerator } from '@interop/pws-client'
 

@@ -60,7 +60,7 @@ placing browser storage inside "durable writes" by definition.
 
 Storage has three tiers, and prose names the tier it means:
 
-- durable -- persisted on the WAS host. Survives a cleared browser, an
+- durable -- persisted on the PWS host. Survives a cleared browser, an
   evicted origin, and a lost machine.
 - browser-local -- IndexedDB or localStorage. Semi-durable: survives a
   reload, not an eviction or a clear.

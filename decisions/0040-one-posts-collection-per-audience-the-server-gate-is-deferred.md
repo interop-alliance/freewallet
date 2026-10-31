@@ -10,7 +10,7 @@
   (`/audiences`), was-react (one reader per audience collection),
   app-connect-spec (a connection request names each audience by its
   container URL), every social app built on the profile (the stable
-  post id), and was-teaching-server and the WAS spec on a pivot only.
+  post id), and was-teaching-server and the PWS spec on a pivot only.
 
 ## Context
 
@@ -24,7 +24,7 @@ for that caller exists in the audience's collection, with listings, the
 `changes` feed, and the blinded-index query filtered the same way.
 
 The gate layers an identity-keyed access check over a valid capability.
-Nowhere in the WAS spec today does a valid capability reach less
+Nowhere in the PWS spec today does a valid capability reach less
 depending on who invokes it. Its one concrete gain is a stable URL when
 a post changes audience, and how often users do that is unknown. The
 design is speculative enough that the quicker path to user feedback
@@ -93,7 +93,7 @@ Reopen this decision when one or more of the following holds:
 
 1. A deployment observes that posts change audience often enough that
    the moving URL, or the double-read window, is a reported problem.
-2. The WAS spec adopts a per-caller filter under its authorization
+2. The PWS spec adopts a per-caller filter under its authorization
    profile for some other reason, so the gate's novel element is no
    longer novel.
 

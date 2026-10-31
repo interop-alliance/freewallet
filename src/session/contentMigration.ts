@@ -27,7 +27,7 @@
  * descriptor logs of a promoted account). Each is re-created owner-only
  * under its archived attribution, and its Resources are written remote-direct on
  * every session kind, since no replica holds an app collection. A guest or a
- * no-WAS session leaves them counted as not migrated.
+ * no-PWS session leaves them counted as not migrated.
  */
 import { migrateBundle, MIGRATION_ORDER } from '@interop/wallet-backup'
 import type {
@@ -198,7 +198,7 @@ async function quotaWarningFor({
 /**
  * The DID the Import activity records as the account imported into: the
  * account's did:webvh once it has one, the pointer's DID before promotion,
- * and the session's own did:key on a guest or a no-WAS session.
+ * and the session's own did:key on a guest or a no-PWS session.
  *
  * @param session {Session}
  * @returns {string}

@@ -4,7 +4,7 @@
  * standard wallet collection (`private-credentials`, `public-credentials`,
  * `wallet-activity`) on the generic synced-doc schema (`{ id, updatedAt,
  * data }` plus the server's write stamp). All page reads and writes land here,
- * online or offline, guest or not; when a remote WAS Space is configured, the
+ * online or offline, guest or not; when a remote PWS Space is configured, the
  * sync controller replicates these same RxDB collections to it in the
  * background (see `src/stores/syncController.ts`).
  *
@@ -159,7 +159,7 @@ export class BrowserStore {
   // collections that replicate.
   #contactsHistoryIndex?: RxCollection<{ id: string; contactId: string }>
   // The local `connections` directory of a session with no remote Space (a
-  // guest, a no-WAS login): one resource replica per party entry, on the
+  // guest, a no-PWS login): one resource replica per party entry, on the
   // generic synced-doc schema. Held apart from `#collections`, which
   // enumerates exactly the collections that replicate: the directory is
   // never replicated, and only the directory store's local adapter reads or
@@ -355,7 +355,7 @@ export class BrowserStore {
    * Removing the database also removes each collection's connected storages.
    * Those are the `rx-replication-meta-*` instances that hold the replication
    * checkpoint, so the next replication re-pulls every Resource from the
-   * Space. A guest or no-WAS session has no Space, so its forgotten replica
+   * Space. A guest or no-PWS session has no Space, so its forgotten replica
    * is lost. Writes not yet pushed when the replica is forgotten are lost
    * too. The forget runs once per call, and a second refusal propagates.
    *
@@ -1582,7 +1582,7 @@ export class BrowserStore {
   /**
    * Writes a credential's world-readable copy into the local
    * `public-credentials` collection, keyed by its content cid. The sync
-   * controller replicates it to the remote WAS Collection in the background.
+   * controller replicates it to the remote PWS Collection in the background.
    *
    * @param options {object}
    * @param options.cid {string}

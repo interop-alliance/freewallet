@@ -31,7 +31,7 @@ import { WAS_E2E_DATA_DIR } from './wasDataDir'
 import { test, expect } from '../shared/consoleCapture'
 
 /**
- * The agent-grant e2e (WAS mode): a CLI agent asking for storage access
+ * The agent-grant e2e (PWS mode): a CLI agent asking for storage access
  * through the interaction-URL entry point, with pws-client standing in for
  * the CLI. The agent mints its own did:key, stores a zcap-only VPR (one
  * `#public-collection` descriptor named `web`) on an ephemeral exchange, and

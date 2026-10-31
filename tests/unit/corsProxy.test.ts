@@ -26,7 +26,7 @@ describe('fetchFromURL', () => {
     vi.unstubAllGlobals()
   })
 
-  it('appends ?url= to the WAS proxy base without an extra slash', async () => {
+  it('appends ?url= to the PWS proxy base without an extra slash', async () => {
     const { fetchFromURL } = await loadCorsProxy('https://was.example/api/cors')
 
     await fetchFromURL(TARGET_URL)

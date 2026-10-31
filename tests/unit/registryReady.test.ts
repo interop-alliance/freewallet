@@ -152,7 +152,7 @@ import {
   BrowserForgottenError
 } from '@/session/forget'
 import { captureCeremonyEvents } from './ceremonyEventCapture'
-import type { WASRemoteStore } from '@/stores/wasRemoteStore'
+import type { PWSRemoteStore } from '@/stores/pwsRemoteStore'
 
 const PASSPHRASE = 'correct horse battery staple'
 const POINTER = {
@@ -191,7 +191,7 @@ function makeFakeStorage() {
     // Where the real manager keeps the promotion storage provisioning fired,
     // read by the block's tail when the pointer heal fired none.
     keystorePromotion: undefined as Promise<{ outcome: string }> | undefined,
-    remoteStore: { isFakeRemoteStore: true } as unknown as WASRemoteStore
+    remoteStore: { isFakeRemoteStore: true } as unknown as PWSRemoteStore
   } as unknown as StorageManager
   return { storage, resolveProvisioning, rejectProvisioning }
 }

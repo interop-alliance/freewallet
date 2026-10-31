@@ -253,7 +253,7 @@ export function SettingsPage() {
   const keyringSectionVisible = !session?.isGuest
   // Both branches of the ceremony: the account-ceremony context (a remembered
   // client, or a transient session on a standing credential), and the plain
-  // path a no-WAS or unpromoted account still takes with this client's seed.
+  // path a no-PWS or unpromoted account still takes with this client's seed.
   const canRunUnlockCeremonies =
     !!session &&
     (canRunAccountCeremonies({ session }) || !!session.profile.clientSeed)

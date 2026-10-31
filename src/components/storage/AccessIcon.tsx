@@ -1,6 +1,6 @@
 /**
  * The access markers shown on a storage metadata/subtitle line (e.g. "Default
- * (WAS) · Public Readable", "... · Encrypted"). Both are the same icon + label
+ * (PWS) · Public Readable", "... · Encrypted"). Both are the same icon + label
  * pill, differing only in icon, label, and colour.
  */
 import Box from '@mui/material/Box'

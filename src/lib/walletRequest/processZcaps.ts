@@ -1,7 +1,7 @@
 /**
  * Zcap request processing for App Connect and the interaction-URL page:
  * resolves each requested capability's abstract `invocationTarget` descriptor
- * onto the user's own WAS Space, delegates a capability to the requester's
+ * onto the user's own PWS Space, delegates a capability to the requester's
  * DID (an app, service, or agent), and provisions any missing requester
  * collection. Every delegation is signed before any collection is provisioned, so the caller can persist the signed grants before a
  * provisioning step escrows the grantee into a key epoch. All delegations are rooted at the user's Space root
@@ -11,7 +11,7 @@
  * Attenuation is a table, not a switch: every resolved target falls into one
  * target class, and each class has an action ceiling (`ACTION_CEILINGS`) that
  * the requested actions are intersected against. The requested actions are
- * first normalized against the closed WAS action vocabulary, so a token the
+ * first normalized against the closed PWS action vocabulary, so a token the
  * spec does not define never reaches an `allowedAction` the user's root key
  * signs. The classes:
  *
@@ -149,8 +149,8 @@ const DEFAULT_ACTIONS = ['GET', 'HEAD']
 const READ_ONLY_ACTIONS = ['GET', 'HEAD']
 
 /**
- * The closed WAS action vocabulary. The set is not the wallet's to invent: the
- * WAS spec fixes it to the uppercase HTTP method names, enumerating `GET`,
+ * The closed PWS action vocabulary. The set is not the wallet's to invent: the
+ * PWS spec fixes it to the uppercase HTTP method names, enumerating `GET`,
  * `POST`, `PUT`, and `DELETE`.
  *
  * `HEAD` is the one deliberate addition, as a tolerated read alias rather than
@@ -521,11 +521,11 @@ interface ResolvedTarget {
   // this is. Absent only when the target is unsatisfiable, i.e. when no grant
   // will be made at all.
   targetClass?: TargetClass
-  // The concrete WAS URL to delegate against (absent when unsatisfiable).
+  // The concrete PWS URL to delegate against (absent when unsatisfiable).
   invocationTarget?: string
   // A named requester collection that does not exist yet and must be provisioned.
   needsProvisioning: boolean
-  // The WAS collection id, when the target is a (standard or requester) collection.
+  // The PWS collection id, when the target is a (standard or requester) collection.
   collectionId?: string
   // An encrypted collection the grantee does not join the key roster of, so
   // the requester will only see ciphertext: a standard EDV collection, or an
@@ -571,8 +571,8 @@ export interface ResolvedGrant {
 }
 
 /**
- * Raised when a zcap request arrives but the session has no remote WAS Space to
- * delegate against (a guest, or a no-WAS build). The page maps this to the
+ * Raised when a zcap request arrives but the session has no remote PWS Space to
+ * delegate against (a guest, or a no-PWS build). The page maps this to the
  * `zcapUnavailable` block reason.
  */
 export class ZcapUnavailableError extends Error {
@@ -604,7 +604,7 @@ export class GenerationDelegationStaleError extends Error {
 }
 
 /**
- * Whether a session can back a zcap request at all: it must have a remote WAS
+ * Whether a session can back a zcap request at all: it must have a remote PWS
  * Space (both a remote store and a resolved `spaceUrl`) to delegate against.
  * This is the exact condition `processZcaps` enforces before delegating (it
  * throws `ZcapUnavailableError` otherwise), exposed so a caller can surface the
@@ -790,7 +790,7 @@ function isCollectionName(name: string | undefined): name is string {
  * Two refusals stay here, ahead of the grammar. `new URL` resolves dot
  * segments, so `${spaceUrl}../other-space/x` lands outside this Space and the
  * grammar refuses it. A query or a fragment is refused outright rather
- * than silently dropped: a WAS URL has neither, and showing the user one
+ * than silently dropped: a PWS URL has neither, and showing the user one
  * target while delegating another is not consent.
  *
  * @param options {object}
@@ -1161,10 +1161,10 @@ function resolveTargetForm({
 }
 
 /**
- * Normalizes a query's `allowedAction` into a deduplicated set of WAS actions:
+ * Normalizes a query's `allowedAction` into a deduplicated set of PWS actions:
  * an absent value defaults to read-only (`['GET', 'HEAD']`), never inherit-all,
  * and every requested token is uppercased and intersected against the closed
- * WAS vocabulary. A token the vocabulary does not define -- an unknown verb, a
+ * PWS vocabulary. A token the vocabulary does not define -- an unknown verb, a
  * non-string, an action the server may grow support for later -- is dropped
  * here rather than passed through into an `allowedAction` the user's root key
  * signs, which is the same fail-closed treatment an unknown `descriptor.type`
@@ -1198,7 +1198,7 @@ function normalizeActions(
 
 /**
  * Whether a capability query asks for any action beyond reading, once its
- * actions are normalized against the WAS vocabulary (an absent
+ * actions are normalized against the PWS vocabulary (an absent
  * `allowedAction` reads as GET and HEAD). The interaction-URL precheck asks
  * it before any target is resolved, since resolution needs a session.
  *
@@ -1319,7 +1319,7 @@ export function resolveGrant({
     requested: normalizeActions(descriptor.allowedAction)
   })
   // Nothing survived the ceiling: the request asked only for actions its target
-  // class forbids (or only for tokens outside the WAS vocabulary). Refuse the
+  // class forbids (or only for tokens outside the PWS vocabulary). Refuse the
   // grant visibly instead of delegating an empty `allowedAction` array, which
   // means "every action" in the zcap model.
   if (isSatisfiable(target) && allowedActions.length === 0) {

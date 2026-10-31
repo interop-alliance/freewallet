@@ -161,7 +161,7 @@ export function LoginPage() {
       }
       if (forcedConnectOffer()) {
         // The connect-this-browser e2e seam: the two-party enrollment specs
-        // need the enrollee card from a cold browser, but a healthy WAS
+        // need the enrollee card from a cold browser, but a healthy PWS
         // account's default login now simply succeeds (every signup leaves
         // standing transient entry), so the seam stands in for the login
         // form's own connect entry until that ships -- the submit opens the
@@ -179,9 +179,9 @@ export function LoginPage() {
       if (!session && userExists) {
         // The passphrase located the account, but this browser holds no
         // client key set for it and the remembered route had nothing to
-        // self-enroll with. Only a no-WAS deployment produces this state:
-        // its bind is the plain pointer record, while every WAS signup
-        // writes the standing layout, and on a WAS server the non-remembered
+        // self-enroll with. Only a no-PWS deployment produces this state:
+        // its bind is the plain pointer record, while every PWS signup
+        // writes the standing layout, and on a PWS server the non-remembered
         // default is the transient route, whose refusals arrive as
         // `TransientLoginUnavailableError` in the catch below. Offer the
         // connect-this-browser flow.

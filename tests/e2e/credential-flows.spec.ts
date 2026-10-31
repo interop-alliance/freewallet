@@ -3,7 +3,7 @@ import { test, expect } from '../shared/consoleCapture'
 
 /**
  * End-to-end coverage for the four core credential flows -- add, accept,
- * delete, and verify -- against the local (IndexedDB) storage backend. No WAS
+ * delete, and verify -- against the local (IndexedDB) storage backend. No PWS
  * server is required: a guest session provides an authenticated wallet whose
  * data lives entirely in the browser. All external network is blocked so the
  * flows (and background credential verification) run fully offline and
@@ -92,7 +92,7 @@ async function blockExternalNetwork(page: Page) {
 
 /**
  * Logs in as a guest and lands on the dashboard. Guest sessions are fully
- * local and seed the welcome credential, so no WAS server is involved.
+ * local and seed the welcome credential, so no PWS server is involved.
  */
 async function loginAsGuest(page: Page) {
   await page.goto('/#/guest-login')

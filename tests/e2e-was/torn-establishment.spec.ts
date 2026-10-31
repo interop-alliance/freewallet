@@ -1,5 +1,5 @@
 /**
- * The torn credential-anchored establishment e2e (WAS mode): the signup is
+ * The torn credential-anchored establishment e2e (PWS mode): the signup is
  * killed between the record re-bind (and the registry write) and the Space
  * controller promotion (the `__E2E_TEAR_ESTABLISHMENT_BEFORE_PROMOTION__`
  * seam), leaving a record that names the account DID on a Space still

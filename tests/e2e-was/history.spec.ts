@@ -9,7 +9,7 @@ import { test, expect } from '../shared/consoleCapture'
 
 /**
  * Wallet-activity history tests. History is only recorded when the app runs in
- * remote (WAS) mode — see playwright.was.config.ts.
+ * remote (PWS) mode — see playwright.was.config.ts.
  */
 test.describe('Wallet activity history', () => {
   test('sign up records account and space creation entries', async ({

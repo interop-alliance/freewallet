@@ -7,7 +7,7 @@ The RP sends one Verifiable Presentation Request over CHAPI; the wallet shows a
 consent screen and responds with a Verifiable Presentation.
 
 A plain Login with Wallet request grants no storage access. To get delegated
-access to the user's Wallet Attached Storage (WAS), connect through
+access to the user's Portable Web Spaces (PWS), connect through
 [App Connect](https://github.com/interop-alliance/app-connect-spec) instead:
 see "Storage access" below.
 
@@ -80,7 +80,7 @@ describes those capability queries.
 
 ### `invocationTarget` grammar
 
-The wallet does not expose which WAS server or Space the user uses; you
+The wallet does not expose which PWS server or Space the user uses; you
 describe the target abstractly and the wallet maps it onto its own Space
 (a descriptor provisions a named collection if it does not exist yet):
 
@@ -125,7 +125,7 @@ is what `https://w3id.org/byoe#shared-wallet-collection` adds.
 
 ### `allowedAction` and the action limits
 
-`allowedAction` is a subset of the closed WAS action vocabulary: `GET`, `POST`,
+`allowedAction` is a subset of the closed PWS action vocabulary: `GET`, `POST`,
 `PUT`, `DELETE`, plus `HEAD`, which the wallet mints alongside `GET` in every
 read grant (the spec authorizes a `HEAD` request as a `GET`). Anything else --
 an unrecognized verb, a non-string entry -- is **dropped**, not passed through.
@@ -156,7 +156,7 @@ array. Each entry is a self-contained delegated capability carrying its own
 `invocationTarget` with a `Capability-Invocation` header signed by your app
 key (see the
 [zCap Developer Guide](https://github.com/interop-alliance/zcap-developer-guide)).
-You learn the user's WAS server and Space from each grant's
+You learn the user's PWS server and Space from each grant's
 `invocationTarget`. Correlate grants back to your requests by
 `invocationTarget` (the delegation proof cannot carry your `referenceId`).
 

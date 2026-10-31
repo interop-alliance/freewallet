@@ -9,13 +9,13 @@ third-party websites can request or deliver credentials through a browser
 popup without sharing the user's passphrase. It also grants apps and agents
 scoped access to the user's storage, through App Connect and interaction URLs.
 
-On a deployment with a **Portable Web Spaces (PWS, formerly Wallet Attached Storage / WAS)** server, wallet data
-lives in the user's WAS Space. The default (transient) session reads and
+On a deployment with a **Portable Web Spaces (PWS)** server, wallet data
+lives in the user's PWS Space. The default (transient) session reads and
 writes the Space directly. A remembered session keeps a local IndexedDB
 replica that replicates to the Space in the background. A guest session and a
-no-WAS deployment keep the data in that local database alone.
+no-PWS deployment keep the data in that local database alone.
 
-The WAS spec is normative for the protocol. The companion server,
+The PWS spec is normative for the protocol. The companion server,
 [was-teaching-server](https://github.com/interop-alliance/was-teaching-server),
 maps its implementation in its own ARCHITECTURE.md.
 
@@ -27,7 +27,7 @@ maps its implementation in its own ARCHITECTURE.md.
 - **Zustand** for global state: the session in `src/stores/authStore.ts`,
   plus the setup, sync status, PRF retry, and toast stores
 - **RxDB + Dexie (IndexedDB)** for the local replica of a remembered, guest,
-  or no-WAS session (`BrowserStore` in `src/stores/browserStore.ts`)
+  or no-PWS session (`BrowserStore` in `src/stores/browserStore.ts`)
 - **`credential-handler-polyfill` / `web-credential-handler`** for CHAPI
 - **`react-i18next`** for internationalisation (locales: `en`, `es`)
 - **`pnpm`** as the package manager; **`vitest`** for unit tests,
@@ -150,14 +150,14 @@ specs and the shared libraries' actual source. Check with the user before
 editing anything in them.
 
 - [portable-web-spaces-spec](https://github.com/w3c-ccg/portable-web-spaces-spec)
-  -- the WAS spec: the Space / Collection / Resource model, the HTTP API, and
+  -- the PWS spec: the Space / Collection / Resource model, the HTTP API, and
   the zCap authorization profile.
 - [app-connect-spec](https://github.com/interop-alliance/app-connect-spec)
   -- the App Connect companion spec: the `AppConnectQuery`, the app-key
   credential, descriptor vocabulary and action limitations, and the response
   presentation. The normative wire contract for `src/lib/walletRequest/`.
 - [encrypted-collections-spec](https://github.com/interop-alliance/encrypted-collections-spec)
-  -- the WAS Encrypted Collections profile: envelope cryptography, key
+  -- the PWS Encrypted Collections profile: envelope cryptography, key
   epochs, and recipient-key derivation.
 - [wallet-core](https://github.com/interop-alliance/wallet-core) --
   `@interop/wallet-core`, the shared wallet layer. Its own `ARCHITECTURE.md`
@@ -166,7 +166,7 @@ editing anything in them.
   `@interop/wallet-request`, the request pipeline shared with DCW.
 - [pws-client](https://github.com/interop-alliance/pws-client) /
   [was-teaching-server](https://github.com/interop-alliance/was-teaching-server)
-  -- the WAS HTTP client and the companion server.
+  -- the PWS HTTP client and the companion server.
 - [pws-sync](https://github.com/interop-alliance/pws-sync) -- the RxDB
   replication driver behind the local replica.
 - [wallet-backup](https://github.com/interop-alliance/wallet-backup) -- the

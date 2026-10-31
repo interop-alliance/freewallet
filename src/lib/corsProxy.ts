@@ -2,7 +2,7 @@
  * The wallet's single CORS-proxy path. Every cross-origin fetch the app makes
  * on behalf of a user-supplied URL (a pasted credential URL, the `oidf`
  * issuer-registry lookups) goes through one proxy base -- `CORS_PROXY_URL`, which
- * defaults to the configured WAS server's `/api/cors` facet -- so there is one
+ * defaults to the configured PWS server's `/api/cors` facet -- so there is one
  * config key and one URL-building rule to reason about.
  *
  * It also holds the one direct-first fallback (`fetchWithProxyFallback`):
@@ -38,7 +38,7 @@ const directBlockedOrigins = new Map<string, number>()
 /**
  * Builds the proxied URL for a target: the target is appended to the
  * configured proxy base as a `?url=` query parameter. A trailing slash on the
- * base is tolerated so that both `https://corsproxy.io` and `<WAS>/api/cors`
+ * base is tolerated so that both `https://corsproxy.io` and `<PWS>/api/cors`
  * (with or without a trailing slash) produce a well-formed proxy URL. With no
  * proxy configured the target is returned unchanged, so the fetch goes direct.
  *

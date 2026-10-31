@@ -36,7 +36,7 @@ import { ladderVmAgent } from '@interop/wallet-core/clientAnnex'
 import type { SessionCore } from '@/types/auth'
 import { isBrowserLocalSession } from '@/session/persistence'
 import { verifiedAccountLog } from '@/session/verifiedLog'
-import type { WASRemoteStore } from '@/stores/wasRemoteStore'
+import type { PWSRemoteStore } from '@/stores/pwsRemoteStore'
 
 /**
  * Builds the per-collection stores for a live session over wallet-core's
@@ -50,7 +50,7 @@ import type { WASRemoteStore } from '@/stores/wasRemoteStore'
  * @param options {object}
  * @param options.session {object}   the live session's profile and
  *   persistence strategy; the profile's account pointer must name a did:webvh
- * @param options.remoteStore {WASRemoteStore}   the session's remote store
+ * @param options.remoteStore {PWSRemoteStore}   the session's remote store
  * @param options.keyAgent {ICapabilityAgent}   the agent whose key signs the
  *   appends (`descriptorLogSignerAgent` names the session's default)
  * @returns {CollectionStoreFor}
@@ -61,7 +61,7 @@ export function sessionCollectionStores({
   keyAgent
 }: {
   session: SessionCore
-  remoteStore: WASRemoteStore
+  remoteStore: PWSRemoteStore
   keyAgent: ICapabilityAgent
 }): CollectionStoreFor {
   const { profile, persistence } = session
@@ -95,7 +95,7 @@ export function sessionCollectionStores({
  * @param options {object}
  * @param options.session {object}   the live session's profile and
  *   persistence strategy; the profile's account pointer must name a did:webvh
- * @param options.remoteStore {WASRemoteStore}
+ * @param options.remoteStore {PWSRemoteStore}
  * @returns {EncryptionDescriptorSource}
  */
 export function sessionCollectionDescriptorSource({
@@ -103,7 +103,7 @@ export function sessionCollectionDescriptorSource({
   remoteStore
 }: {
   session: SessionCore
-  remoteStore: WASRemoteStore
+  remoteStore: PWSRemoteStore
 }): EncryptionDescriptorSource {
   const { profile, persistence } = session
   const pointer = profile.accountPointer

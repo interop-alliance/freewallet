@@ -6,10 +6,10 @@ import { WAS_E2E_DATA_DIR } from './wasDataDir'
 import { test, expect } from '../shared/consoleCapture'
 
 /**
- * WAS (remote storage) smoke tests. These run against the app in remote mode
+ * PWS (remote storage) smoke tests. These run against the app in remote mode
  * (VITE_WAS_SERVER_URL set, see playwright.was.config.ts), backed by a local
  * was-teaching-server instance. They exercise the production storage path:
- * signing up creates a real Space + collections on the WAS server via
+ * signing up creates a real Space + collections on the PWS server via
  * ZCap-signed HTTP.
  */
 
@@ -32,7 +32,7 @@ async function expectConnectedSpace(page: Page): Promise<void> {
   await expect(page.getByText(new RegExp(`/space/${spaceId}/?$`))).toBeVisible()
 }
 
-test.describe('WAS remote storage', () => {
+test.describe('PWS remote storage', () => {
   test('signing up provisions a remote Space and reaches the dashboard', async ({
     page
   }, testInfo) => {

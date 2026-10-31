@@ -13,7 +13,7 @@ import type { DocCipher } from '@interop/pws-client/edv'
 import type { Json } from '@interop/pws-sync'
 import type { IVerifiableCredential } from '@interop/data-integrity-core'
 import { RemoteDirectStore } from './remoteDirectStore'
-import type { WASRemoteStore } from './wasRemoteStore'
+import type { PWSRemoteStore } from './pwsRemoteStore'
 
 const CREDENTIAL = {
   '@context': ['https://www.w3.org/ns/credentials/v2'],
@@ -56,10 +56,10 @@ function misboundCipher(): DocCipher {
  *
  * @param options {object}
  * @param options.resourceId {string}
- * @returns {{ remote: WASRemoteStore; deleted: string[] }}
+ * @returns {{ remote: PWSRemoteStore; deleted: string[] }}
  */
 function fakeRemote({ resourceId }: { resourceId: string }): {
-  remote: WASRemoteStore
+  remote: PWSRemoteStore
   deleted: string[]
 } {
   const deleted: string[] = []
@@ -79,7 +79,7 @@ function fakeRemote({ resourceId }: { resourceId: string }): {
     async deleteSyncedResource({ resourceId: id }: { resourceId: string }) {
       deleted.push(id)
     }
-  } as unknown as WASRemoteStore
+  } as unknown as PWSRemoteStore
   return { remote, deleted }
 }
 

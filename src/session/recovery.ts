@@ -200,7 +200,7 @@ import {
 } from '@/session/userKeyAdoption'
 import { deleteUnlockLocalState } from '@/lib/sessionKey'
 import { isStorageUnreachable } from '@/lib/storageErrors'
-import { mintSpaceId, WASRemoteStore } from '@/stores/wasRemoteStore'
+import { mintSpaceId, PWSRemoteStore } from '@/stores/pwsRemoteStore'
 import { createLogger } from '@/lib/log'
 import { pwsClientAt, wasServiceDescription } from '@/lib/wasService'
 import { spaceLocation } from '@/lib/spaceLocation'
@@ -217,7 +217,7 @@ export {
 } from '@interop/wallet-core/recovery'
 
 /**
- * Thrown when recovery is attempted with no WAS server configured: without a
+ * Thrown when recovery is attempted with no PWS server configured: without a
  * Space there is no unlock record, no roster, and no log -- nothing a code
  * could recover.
  */
@@ -1685,7 +1685,7 @@ export async function recoverAccountWithCode({
 
   // From here the new client is an enrolled client under the current-key-set
   // rule: its `<did:webvh>#<multibase>` key signs everything.
-  const remoteStore = new WASRemoteStore({
+  const remoteStore = new PWSRemoteStore({
     serviceDescription,
     baseServerUrl: accountBaseServerUrl,
     zcapClient: newZcapClient,
@@ -2410,7 +2410,7 @@ export async function resumeRecoverySpend({
         log.info(
           "Recovery-spend resume: publishing the credential's document entry"
         )
-        const remoteStore = new WASRemoteStore({
+        const remoteStore = new PWSRemoteStore({
           serviceDescription,
           baseServerUrl: accountBaseServerUrl,
           zcapClient: newZcapClient,
@@ -3115,7 +3115,7 @@ async function recoverAccountTransient({
   // collection takes a fresh epoch naming the rotated user key. Best-effort
   // per collection; a stranded collection stays keyed to the spent code
   // until the next login's collection fan-out, transient or remembered.
-  const remoteStore = new WASRemoteStore({
+  const remoteStore = new PWSRemoteStore({
     serviceDescription,
     baseServerUrl,
     zcapClient: transientZcapClient,

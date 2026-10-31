@@ -22,7 +22,7 @@ import { ensureIndexedFirstEpoch } from '@interop/wallet-core/keys'
 import { createEdvDocCipher, ownerRecipient } from '@interop/pws-client/edv'
 import { memoryDescriptorStores } from './fakeDescriptorStores'
 import { generateVaultKeys } from '../../src/stores/testing/vaultKeys'
-import { mintSpaceId, WASRemoteStore } from '../../src/stores/wasRemoteStore'
+import { mintSpaceId, PWSRemoteStore } from '../../src/stores/pwsRemoteStore'
 import { deriveSpaceId } from '@interop/pws-client/sync'
 import type { ControllerProfile, User } from '../../src/types/auth'
 import type { SessionPersistence } from '../../src/session/persistence'
@@ -33,23 +33,108 @@ import type { SessionPersistence } from '../../src/session/persistence'
 const SPACE_URL = 'https://example.test/space/space-id/'
 
 /**
- * Builds a WASRemoteStore whose `was` client has been replaced with a stub, so
+ * Builds a PWSRemoteStore whose `pws` client has been replaced with a stub, so
  * tests exercise the store's handle navigation without real network/ezcap I/O.
+ * `baseServerUrl` defaults to a root mount; a sub-path test passes its own.
  */
-function storeWithStubbedClient(was: unknown): WASRemoteStore {
-  const store = new WASRemoteStore({
+function storeWithStubbedClient(
+  pws: unknown,
+  { baseServerUrl = 'https://example.test/' }: { baseServerUrl?: string } = {}
+): PWSRemoteStore {
+  const store = new PWSRemoteStore({
     serviceDescription: TEST_SERVICE_DESCRIPTION,
     pinStore: memoryResourceLogPinStore(),
-    baseServerUrl: 'https://example.test/',
+    baseServerUrl,
     zcapClient: { request: vi.fn() } as unknown as ZcapClient,
     spaceId: 'space-id',
     controller: 'did:key:test'
   })
-  store.pws = was as PwsClient
+  store.pws = pws as PwsClient
   return store
 }
 
-describe('WASRemoteStore.listCollections', () => {
+/**
+ * A stubbed `pws` client whose one collection handle serves the JSON
+ * Resource `{ hello: 'world' }`, plus the `collection` and `resource` spies.
+ */
+function jsonResourceClient(): {
+  pws: unknown
+  collection: ReturnType<typeof vi.fn>
+  resource: ReturnType<typeof vi.fn>
+} {
+  const get = vi.fn().mockResolvedValue({ hello: 'world' })
+  const resource = vi.fn().mockReturnValue({ get })
+  const collection = vi.fn().mockReturnValue({ resource })
+  return {
+    pws: { spaceAt: vi.fn().mockReturnValue({ collection }) },
+    collection,
+    resource
+  }
+}
+
+describe('PWSRemoteStore on a sub-path deployment', () => {
+  /**
+   * A store bound to a server mounted under a sub-path, given without its
+   * trailing slash.
+   */
+  function subPathStore(pws: unknown): PWSRemoteStore {
+    return storeWithStubbedClient(pws, {
+      baseServerUrl: 'https://host.test/was'
+    })
+  }
+
+  it('canonicalizes the base server URL it exposes', () => {
+    expect(subPathStore({}).baseServerUrl).toBe('https://host.test/was/')
+  })
+
+  it('addresses the Space under the base path', () => {
+    const store = subPathStore({})
+    expect(store.spaceUrl).toBe('https://host.test/was/space/space-id/')
+  })
+
+  it('round-trips an absolute Resource URL under the base path', async () => {
+    const { pws, collection, resource } = jsonResourceClient()
+    const store = subPathStore(pws)
+
+    await expect(
+      store.fetchCollectionResource({
+        id: 'doc',
+        url: 'https://host.test/was/space/space-id/notes/doc'
+      })
+    ).resolves.toEqual({ kind: 'json', data: { hello: 'world' } })
+    expect(collection).toHaveBeenCalledWith('notes')
+    expect(resource).toHaveBeenCalledWith('doc', { encryption: 'plaintext' })
+  })
+
+  it('reads a root-anchored listing reference as a path under the base path', async () => {
+    // A server lists its items as `/space/{id}/...` from its own root.
+    // Resolved against the Space URL that would drop the `/was` mount, so
+    // the parser's second pass reads it under the base server URL.
+    const { pws, collection } = jsonResourceClient()
+    const store = subPathStore(pws)
+
+    await expect(
+      store.fetchCollectionResource({
+        id: 'doc',
+        url: '/space/space-id/notes/doc'
+      })
+    ).resolves.toEqual({ kind: 'json', data: { hello: 'world' } })
+    expect(collection).toHaveBeenCalledWith('notes')
+  })
+
+  it('refuses the same Space id at the server root, outside the base path', async () => {
+    const store = subPathStore({ spaceAt: vi.fn() })
+
+    await expect(
+      store.fetchCollectionResource({
+        id: 'doc',
+        url: 'https://host.test/space/space-id/notes/doc'
+      })
+    ).rejects.toThrow()
+  })
+})
+
+describe('PWSRemoteStore.listCollections', () => {
   it('uses the inline public flag without probing isPublic()', async () => {
     const items = [
       {
@@ -126,7 +211,7 @@ describe('WASRemoteStore.listCollections', () => {
   })
 })
 
-describe('WASRemoteStore.listCollectionPublicStates', () => {
+describe('PWSRemoteStore.listCollectionPublicStates', () => {
   it('answers from the inline public flag with no describe() reads', async () => {
     const items = [
       {
@@ -185,7 +270,7 @@ describe('WASRemoteStore.listCollectionPublicStates', () => {
   })
 })
 
-describe('WASRemoteStore.listCollectionResources', () => {
+describe('PWSRemoteStore.listCollectionResources', () => {
   it('returns listed resources without isPublic for private collections', async () => {
     const items = [
       {
@@ -242,14 +327,10 @@ describe('WASRemoteStore.listCollectionResources', () => {
   })
 })
 
-describe('WASRemoteStore.fetchCollectionResource', () => {
+describe('PWSRemoteStore.fetchCollectionResource', () => {
   it('returns parsed JSON for an object body', async () => {
-    const get = vi.fn().mockResolvedValue({ hello: 'world' })
-    const resource = vi.fn().mockReturnValue({ get })
-    const collection = vi.fn().mockReturnValue({ resource })
-    const store = storeWithStubbedClient({
-      spaceAt: vi.fn().mockReturnValue({ collection })
-    })
+    const { pws } = jsonResourceClient()
+    const store = storeWithStubbedClient(pws)
 
     await expect(
       store.fetchCollectionResource({
@@ -260,12 +341,8 @@ describe('WASRemoteStore.fetchCollectionResource', () => {
   })
 
   it('resolves a listing path reference against the Space URL', async () => {
-    const get = vi.fn().mockResolvedValue({ hello: 'world' })
-    const resource = vi.fn().mockReturnValue({ get })
-    const collection = vi.fn().mockReturnValue({ resource })
-    const store = storeWithStubbedClient({
-      spaceAt: vi.fn().mockReturnValue({ collection })
-    })
+    const { pws, collection } = jsonResourceClient()
+    const store = storeWithStubbedClient(pws)
 
     await expect(
       store.fetchCollectionResource({
@@ -332,9 +409,9 @@ describe('WASRemoteStore.fetchCollectionResource', () => {
   })
 })
 
-describe('WASRemoteStore.collectionMetadata', () => {
+describe('PWSRemoteStore.collectionMetadata', () => {
   /**
-   * A stubbed `was` client whose collection handle answers `describe()` with
+   * A stubbed `pws` client whose collection handle answers `describe()` with
    * the given value (or rejects with the given error), plus the `collection`
    * spy so a test can assert how the handle was opened.
    *
@@ -349,7 +426,7 @@ describe('WASRemoteStore.collectionMetadata', () => {
   }: {
     metadata?: unknown
     error?: unknown
-  }): { store: WASRemoteStore; collection: ReturnType<typeof vi.fn> } {
+  }): { store: PWSRemoteStore; collection: ReturnType<typeof vi.fn> } {
     const describeFn = error
       ? vi.fn().mockRejectedValue(error)
       : vi.fn().mockResolvedValue(metadata)
@@ -416,7 +493,7 @@ describe('WASRemoteStore.collectionMetadata', () => {
   })
 })
 
-describe('WASRemoteStore.listSyncedDocuments', () => {
+describe('PWSRemoteStore.listSyncedDocuments', () => {
   it('reads the feed snapshot under the bound capability at the configured page size', async () => {
     const capability = { id: 'urn:zcap:gen' } as unknown as IZcap
     const feed: ResourceChangeDocument[] = ['b', 'c'].map((id, position) => ({
@@ -472,7 +549,7 @@ describe('WASRemoteStore.listSyncedDocuments', () => {
   })
 })
 
-describe('WASRemoteStore.getSyncedResource', () => {
+describe('PWSRemoteStore.getSyncedResource', () => {
   it('reads the raw stored body via a root GET', async () => {
     const envelope = { id: 'z6Env1', sequence: 0, jwe: { ciphertext: 'x' } }
     const request = vi.fn().mockResolvedValue({ data: envelope })
@@ -504,7 +581,7 @@ describe('WASRemoteStore.getSyncedResource', () => {
   })
 })
 
-describe('WASRemoteStore.putSyncedResource', () => {
+describe('PWSRemoteStore.putSyncedResource', () => {
   it('creates the raw envelope with If-None-Match: *', async () => {
     const envelope = { id: 'z6Env1', sequence: 0, jwe: { ciphertext: 'x' } }
     const request = vi.fn().mockResolvedValue({})
@@ -553,10 +630,10 @@ describe('WASRemoteStore.putSyncedResource', () => {
   })
 })
 
-describe('WASRemoteStore.initClient', () => {
+describe('PWSRemoteStore.initClient', () => {
   it('uses signer DID as controller and space-id seed', async () => {
     const controller = 'did:key:z6MktestControllerDid'
-    const { remoteStore } = await WASRemoteStore.initClient({
+    const { remoteStore } = await PWSRemoteStore.initClient({
       baseServerUrl: 'https://example.test/',
       user: { id: 'user-id-that-is-not-controller' } as unknown as User,
       session: {
@@ -577,7 +654,7 @@ describe('WASRemoteStore.initClient', () => {
 
   it('binds to the pointer Space id and stays did:key-controlled pre-promotion', async () => {
     const clientDid = 'did:key:z6MktestControllerDid'
-    const { remoteStore } = await WASRemoteStore.initClient({
+    const { remoteStore } = await PWSRemoteStore.initClient({
       baseServerUrl: 'https://example.test/',
       user: { id: clientDid } as unknown as User,
       session: {
@@ -601,7 +678,7 @@ describe('WASRemoteStore.initClient', () => {
   it('binds to the promoted did:webvh controller once the pointer names it', async () => {
     const clientDid = 'did:key:z6MktestControllerDid'
     const webvhDid = 'did:webvh:zQmScid:example.test:space:minted-space-id:id'
-    const { remoteStore } = await WASRemoteStore.initClient({
+    const { remoteStore } = await PWSRemoteStore.initClient({
       baseServerUrl: 'https://example.test/',
       user: { id: clientDid } as unknown as User,
       session: {
@@ -634,7 +711,7 @@ describe('mintSpaceId', () => {
   })
 })
 
-describe('WASRemoteStore.ensureCollection', () => {
+describe('PWSRemoteStore.ensureCollection', () => {
   /**
    * The server's echo of a create, the shape `replaceDescription` resolves.
    */
@@ -768,7 +845,7 @@ describe('WASRemoteStore.ensureCollection', () => {
   })
 })
 
-describe('WASRemoteStore.ensureGovernedCollection', () => {
+describe('PWSRemoteStore.ensureGovernedCollection', () => {
   /**
    * A governing log's projection pointer, the member that marks a
    * Description's `encryption` as server-derived rather than client-written.
@@ -864,7 +941,7 @@ describe('WASRemoteStore.ensureGovernedCollection', () => {
       .fn()
       .mockReturnValue({ describeWithEtag, replaceDescription })
     const space = vi.fn().mockReturnValue({ collection, describe })
-    const store = new WASRemoteStore({
+    const store = new PWSRemoteStore({
       serviceDescription: TEST_SERVICE_DESCRIPTION,
       pinStore: memoryResourceLogPinStore(),
       baseServerUrl: 'https://example.test/',
@@ -922,7 +999,7 @@ describe('WASRemoteStore.ensureGovernedCollection', () => {
   })
 })
 
-describe('WASRemoteStore.promoteSpaceController', () => {
+describe('PWSRemoteStore.promoteSpaceController', () => {
   it('forwards a supplied `current` to the Space configure, validator included', async () => {
     // The caller's baseline carries the `ETag` of the read it came from:
     // pws-client pins the promotion write to it, and refuses a baseline
@@ -964,7 +1041,7 @@ describe('WASRemoteStore.promoteSpaceController', () => {
   })
 })
 
-describe('WASRemoteStore.ensureUserCollections', () => {
+describe('PWSRemoteStore.ensureUserCollections', () => {
   const USER = { id: 'user-id', email: 'user@example.test' } as unknown as User
 
   // Provisioning now runs through the shared `provisionWalletSpace`
@@ -1078,7 +1155,7 @@ describe('WASRemoteStore.ensureUserCollections', () => {
   })
 })
 
-describe('WASRemoteStore.keyedCollectionHandle', () => {
+describe('PWSRemoteStore.keyedCollectionHandle', () => {
   /**
    * Builds a store with the bound invocation capability a transient session
    * hands over (the generation delegation its every request rides), over a
@@ -1090,7 +1167,7 @@ describe('WASRemoteStore.keyedCollectionHandle', () => {
   function storeWithCapability(capability?: IZcap) {
     const collection = vi.fn().mockReturnValue({ isHandle: true })
     const space = vi.fn().mockReturnValue({ collection })
-    const store = new WASRemoteStore({
+    const store = new PWSRemoteStore({
       serviceDescription: TEST_SERVICE_DESCRIPTION,
       pinStore: memoryResourceLogPinStore(),
       baseServerUrl: 'https://example.test/',
@@ -1111,10 +1188,10 @@ describe('WASRemoteStore.keyedCollectionHandle', () => {
   /**
    * Opens the `connections` handle through `store`.
    *
-   * @param store {WASRemoteStore}
+   * @param store {PWSRemoteStore}
    * @returns {Promise<void>}
    */
-  async function openHandle(store: WASRemoteStore): Promise<void> {
+  async function openHandle(store: PWSRemoteStore): Promise<void> {
     const { keyAgreementKey, keyResolver } = await generateVaultKeys({
       controller: 'did:key:z6MkOwner'
     })
@@ -1173,7 +1250,7 @@ describe('WASRemoteStore.keyedCollectionHandle', () => {
   })
 })
 
-describe('WASRemoteStore.declareCollectionIndexes', () => {
+describe('PWSRemoteStore.declareCollectionIndexes', () => {
   it('seals the schema through its keystore-less client with the handle override', async () => {
     const { keyAgreementKey, keyResolver } = await generateVaultKeys({
       controller: 'did:key:z6MkOwner'
@@ -1224,7 +1301,7 @@ describe('WASRemoteStore.declareCollectionIndexes', () => {
         throw Object.assign(new Error('not found'), { status: 404 })
       }
     )
-    const store = new WASRemoteStore({
+    const store = new PWSRemoteStore({
       serviceDescription: TEST_SERVICE_DESCRIPTION,
       pinStore: memoryResourceLogPinStore(),
       // This store builds a real PwsClient, which refuses a base server URL

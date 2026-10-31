@@ -46,7 +46,7 @@ Nothing is persisted and nothing is revoked: on success the Space it
 names is gone, and on a torn run it lapses by TTL. The server admits
 the chain through the client-annex clause's target-and-verb predicate
 (app-connect-spec `decisions/0003`, third predicate; the reference
-server's own record sits in its `decisions/`) and the WAS container
+server's own record sits in its `decisions/`) and the PWS container
 rule's exact-target single-verb DELETE exception. The ladder VM never
 becomes a root invoker of anything.
 
@@ -147,7 +147,7 @@ Reopen this decision when one or more of the following holds:
    unsafe container method. Extend the clause with a new enumerated
    target-and-verb shape; never with a root-invoker rule.
 2. The clause predicate or the container rule's exceptions change
-   upstream (app-connect-spec `decisions/0003`, the WAS authorization
+   upstream (app-connect-spec `decisions/0003`, the PWS authorization
    profile) in a way that removes the admission this mechanism rides.
 
 ## Amendment (2026-09-03)

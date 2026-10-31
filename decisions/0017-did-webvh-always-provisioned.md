@@ -10,7 +10,7 @@
   `src/stores/storageManager.ts`, `src/session/credentialAnchoredGenesis.ts`,
   the Settings identity row, `public/docs/did-web.md`),
   `@interop/wallet-core` `/genesis` and `/clientAnnex` (the KMS key
-  closure), the WAS deployment's `id` collection.
+  closure), the PWS deployment's `id` collection.
 
 ## Context
 
@@ -29,13 +29,13 @@ server-held key may be a wrap target.
 
 ## Decision
 
-Every account on a WAS deployment provisions its `did:webvh`. The
+Every account on a PWS deployment provisions its `did:webvh`. The
 build-time opt-out and its config export are removed, so no
 configuration selects the reduced provisioning path.
 
 The reduced path survives only for a session that structurally lacks the
 material -- no keystore agent, no user key, or no client webvh keys, so
-a no-WAS deployment or a guest. Such a session presents did:key only and
+a no-PWS deployment or a guest. Such a session presents did:key only and
 publishes no `did.json` at all.
 
 The did:webvh log's did:web projection is the only producer of

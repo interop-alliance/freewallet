@@ -9,7 +9,7 @@
 import { describe, expect, it, vi } from 'vitest'
 import { browserLocalSessionPersistence } from '@/session/persistence'
 import { StorageManager } from './storageManager'
-import type { WASRemoteStore } from './wasRemoteStore'
+import type { PWSRemoteStore } from './pwsRemoteStore'
 
 /**
  * A named error, the shape the storage manager matches on.
@@ -73,7 +73,7 @@ function inboxStorage({
     spaceUrl: 'https://was.example/space/s/',
     baseServerUrl: 'https://was.example',
     collectionHandle: vi.fn(() => handle)
-  } as unknown as WASRemoteStore
+  } as unknown as PWSRemoteStore
   const storage = new StorageManager({
     persistence: browserLocalSessionPersistence(),
     remoteStore,

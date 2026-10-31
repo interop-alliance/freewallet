@@ -106,10 +106,10 @@ export async function completePopupLogin({
     })
     if (!session && userExists) {
       // The account was located but this browser holds no client key set for
-      // it and no transient session could be composed either. With a WAS
+      // it and no transient session could be composed either. With a PWS
       // server that state is unreachable (a record-less popup routes
       // transient, whose own refusals arrive as
-      // `TransientLoginUnavailableError` below); it is the no-WAS
+      // `TransientLoginUnavailableError` below); it is the no-PWS
       // deployment's plain pointer record -- distinct guidance from
       // "no account".
       return { errorKey: 'chapi.clientNotEnrolled' }

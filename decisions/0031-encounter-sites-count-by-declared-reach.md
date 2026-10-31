@@ -87,6 +87,6 @@ Reopen this decision when one or more of the following holds:
 1. The registry gains a way to observe which session kinds render a
    site, such as a route table the derivation can read. `reachedBy`
    then becomes derivable and the member can go.
-2. A third session kind appears (the guest and no-WAS sessions resolve
+2. A third session kind appears (the guest and no-PWS sessions resolve
    no account-ceremony kind today). `reachedBy`'s vocabulary then needs
    the new value before any site claims it.

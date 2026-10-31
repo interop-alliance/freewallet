@@ -9,7 +9,7 @@
  *   user's DID (the response VP is signed over the request challenge/domain);
  * - **Credential selection** -- the stored VCs matching the request's
  *   QueryByExample queries, including a self-issued Login Credential (username);
- * - **Storage access** -- the WAS capabilities the site is requesting, each
+ * - **Storage access** -- the PWS capabilities the site is requesting, each
  *   delegated to the site's DID and embedded in the response VP.
  *
  * A single Continue button approves everything shown; Cancel responds `null`.
@@ -132,7 +132,7 @@ const BLOCK_MESSAGE_KEY: Record<BlockReason, string> = {
 /**
  * The DID methods SOME session on this deployment could present a holder for,
  * which is all the pre-login gate can judge. A deployment with a key server
- * has WAS storage behind it, so its accounts publish a did:webvh document and
+ * has PWS storage behind it, so its accounts publish a did:webvh document and
  * its did:web projection; a local-only wallet has neither and presents its
  * did:key alone.
  */
@@ -394,7 +394,7 @@ export function WalletGetPage() {
 
     try {
       // `storage.ready()` resolves when the active backend can serve reads: the
-      // local collections being open (guest / no-WAS fallback -- a fast,
+      // local collections being open (guest / no-PWS fallback -- a fast,
       // local-only wait), or nothing at all in the popup's remote-direct mode
       // (reads hit the remote collections directly). Full provisioning (remote
       // Space, did:web) runs as `session.storageReady` in the background; await
@@ -416,7 +416,7 @@ export function WalletGetPage() {
       ])
 
       // An App Connect request's capability queries need a remote Space to
-      // delegate against; a guest or a no-WAS wallet cannot fulfill them.
+      // delegate against; a guest or a no-PWS wallet cannot fulfill them.
       // Surface it before the consent screen via the same predicate
       // `processZcaps` guards on (which the eventual delegation would
       // otherwise raise as `ZcapUnavailableError`), so the block does not

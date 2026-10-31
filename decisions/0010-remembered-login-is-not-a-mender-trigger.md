@@ -20,7 +20,7 @@
 
 The transient, credential-anchored session is the default entry on a
 non-remembered browser, and the credential-anchored establishment is
-every WAS signup. The account shape that produces is
+every PWS signup. The account shape that produces is
 ladder-anchored. Remembering a browser is a deliberate opt-in, not a
 stage an account passes through.
 

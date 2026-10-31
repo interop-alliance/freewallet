@@ -27,7 +27,7 @@ import type { Session } from '@/types/auth'
 
 /**
  * A session whose registry read resolves off the browser-local cache alone
- * (no WAS server configured), with the cache load counted.
+ * (no PWS server configured), with the cache load counted.
  */
 function fakeSession(): { session: Session; load: ReturnType<typeof vi.fn> } {
   const load = vi.fn(async () => null)

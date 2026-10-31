@@ -3,7 +3,7 @@ import { fillSettled, signupViaWizard } from './helpers'
 import { test, expect } from '../shared/consoleCapture'
 
 /**
- * WAS-backed E2E for the App Connect CHAPI consent flow. A single CHAPI `get`
+ * PWS-backed E2E for the App Connect CHAPI consent flow. A single CHAPI `get`
  * carrying an `AppConnectQuery` (plus DID Authentication) replaces the generic
  * consent sections with the app-centric "Connect {app}?" panel. On the
  * approve path the wallet match-or-mints the app-key credential for the
@@ -12,7 +12,7 @@ import { test, expect } from '../shared/consoleCapture'
  * capabilities to that credential's subject DID, and returns credential +
  * grants + a `firstRun` marker in one signed presentation.
  *
- * Like `chapi-login-zcap.spec.ts`, this runs against the local WAS teaching
+ * Like `chapi-login-zcap.spec.ts`, this runs against the local PWS teaching
  * server so the wallet provisions the app's collection and delegates real,
  * Space-rooted zcaps; the popup is driven through the `__E2E_CHAPI_GET_EVENT__`
  * seam (see the note in `WalletGetPage`).

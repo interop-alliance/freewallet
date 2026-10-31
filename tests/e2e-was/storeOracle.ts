@@ -2,7 +2,7 @@
  * The Playwright-bound half of the store-side oracle. The store reads
  * themselves live in `tests/shared/storeOracle.ts` and
  * `tests/shared/storedLogs.ts`, which take the server's data root as an
- * argument; the WAS suite passes its run's root (`WAS_E2E_DATA_DIR`). What
+ * argument; the PWS suite passes its run's root (`WAS_E2E_DATA_DIR`). What
  * stays here needs Playwright: a polled assertion over the store, the
  * account Space id read off a live page, and the annex Space ids read out of
  * the world-readable log over a request context.

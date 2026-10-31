@@ -17,7 +17,7 @@ import { test, expect } from '../shared/consoleCapture'
  * the default KMS). Covers:
  *
  * 1. Signing up publishes a hash-chained `did.jsonl` log as a world-readable
- *    WAS resource; a cold, unauthenticated fetch parses and
+ *    PWS resource; a cold, unauthenticated fetch parses and
  *    `resolveDIDFromLog`-verifies it (SCID + chain + proof), version 1 with
  *    prerotation committed. The sibling `did.json` is now the log's did:web
  *    projection (Multikey verification methods, `alsoKnownAs` cross-link).

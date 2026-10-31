@@ -3,9 +3,9 @@ import { fillSettled, forceRememberBrowser, signupViaWizard } from './helpers'
 import { test, expect } from '../shared/consoleCapture'
 
 /**
- * Keyring v2 e2e (WAS mode). A login derives an unlock identity from the
+ * Keyring v2 e2e (PWS mode). A login derives an unlock identity from the
  * passphrase (Argon2id), locates the account-pointer keyring record in the
- * unlock identity's own WAS Space, and unwraps this client's LOCAL key set
+ * unlock identity's own PWS Space, and unwraps this client's LOCAL key set
  * (the `freewallet-session` client-key record) to build the session -- the
  * account is never reconstructed from the passphrase. Signup binds this
  * client's fresh random key set to the passphrase before creating the data

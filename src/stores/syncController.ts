@@ -1,11 +1,11 @@
 /**
- * The session binding around background WAS replication. The driver and the
+ * The session binding around background PWS replication. The driver and the
  * lifecycle core live in `@interop/pws-sync`; what is here is everything that
  * is this app's: which sessions replicate at all, where the core's access seam
  * comes from, and where status and diagnostics go.
  *
  * The local RxDB collections owned by the session's storage (BrowserStore) are
- * the always-on active replica. A guest, a deployment with no remote WAS Space,
+ * the always-on active replica. A guest, a deployment with no remote PWS Space,
  * and a replica-less session (the transient session's remote-direct storage)
  * each have nothing to replicate, so the gate below returns before the core is
  * ever constructed.
@@ -18,7 +18,7 @@
  * in the sync path.
  *
  * Every push declares the session persistence's `writerId` (the per-profile
- * label) as the WAS writer-attribution label, so the changes feed echoes it.
+ * label) as the PWS writer-attribution label, so the changes feed echoes it.
  *
  * The core's `stop()` is terminal for an instance, so `restart()` constructs a
  * fresh core per session and this module-scope singleton is a thin shell
@@ -125,7 +125,7 @@ class SessionSyncController {
 
   /**
    * Builds the core for a logged-in session and starts it. A no-op for guests,
-   * when no remote WAS replica is configured, and for a replica-less session:
+   * when no remote PWS replica is configured, and for a replica-less session:
    * every synced-collection operation there is already served remote-direct,
    * so replication has no local end to drive. Expects the session storage's
    * local collections to be initialized (`ensureUserCollections()` runs before

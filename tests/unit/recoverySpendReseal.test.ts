@@ -136,9 +136,9 @@ vi.mock('@/session/rosterStore', () => ({
   sessionRosterStore: vi.fn(() => ({}))
 }))
 
-vi.mock('@/stores/wasRemoteStore', () => ({
+vi.mock('@/stores/pwsRemoteStore', () => ({
   mintSpaceId: vi.fn(() => 'space-fresh'),
-  WASRemoteStore: class {
+  PWSRemoteStore: class {
     webvhIdStore() {
       return { putIdResource: vi.fn(async () => {}) }
     }

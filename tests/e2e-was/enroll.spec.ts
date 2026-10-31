@@ -8,7 +8,7 @@ import { fillSettled, forceRememberBrowser, signupViaWizard } from './helpers'
 import { test, expect } from '../shared/consoleCapture'
 
 /**
- * The self-enrolling login e2e (WAS mode): connecting a second browser
+ * The self-enrolling login e2e (PWS mode): connecting a second browser
  * profile to an existing account with nothing but the standing passphrase.
  * The cold profile's login runs the whole continuation in place -- the
  * reveal-and-commit and add entries through the record's bridge delegation,

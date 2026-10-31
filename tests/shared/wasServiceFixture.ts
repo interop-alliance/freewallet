@@ -5,7 +5,7 @@
  * the app builds is given the discovered description, so no client makes
  * its own `HEAD` probe and a test that drives such a path has to supply a
  * stand-in. Minimal on purpose -- nothing under test reads past `url`, the
- * WAS version entry, and the client annex entry the signup's host gate
+ * PWS version entry, and the client annex entry the signup's host gate
  * checks (the shape the teaching server lists).
  */
 import type { ServiceDescription } from '@interop/pws-client'

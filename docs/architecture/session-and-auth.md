@@ -14,7 +14,7 @@ One post-KDF question decides the rest (`routeUnlockLogin` in
 for this credential? A browser holding none takes the transient composition,
 the default (see "The transient login" under "Session persistence" in session-persistence.md). A
 browser holding one proceeds as the **enrolled client** that record names. A
-no-WAS deployment always proceeds on the browser-local tier.
+no-PWS deployment always proceeds on the browser-local tier.
 
 An enrolled client's random 32-byte **client seed** is minted locally at
 the step that enrolled it, and its private halves stay on the client. The
@@ -63,9 +63,9 @@ the Glossary). `user.id` stays the client did:key, also the App Connect
 response VP's holder. A transient visit signs as its annex verification
 method instead, and its response VP holds as the visit key's bare did:key.
 
-On a WAS deployment with a promoted account, every unlock method is a
+On a PWS deployment with a promoted account, every unlock method is a
 **standing credential**. Three cases cannot be standing, and their records
-stay plain account pointers: a no-WAS deployment, a guest, and an account
+stay plain account pointers: a no-PWS deployment, a guest, and an account
 not yet promoted. Besides locating the account, a standing record holds a
 user-key roster wrap (escrowed into every epoch) and latent self-enrollment
 authority: a pre-minted PUT-on-`did.jsonl` bridge delegation and a random
@@ -105,7 +105,7 @@ enrolled client per popup visit would litter the log.
 **The remembered branch.** A fresh browser holding only the credential can
 self-enroll at login as an enrolled client. It runs through the programmatic
 `rememberBrowser: true` entry; a login-form choice is a planned follow-up.
-Until then only the e2e seam (`forcedRememberBrowser`) sets it, so on a WAS
+Until then only the e2e seam (`forcedRememberBrowser`) sets it, so on a PWS
 deployment a production browser becomes remembered only as the enrollee of
 a two-party client enrollment.
 Two loud entries extend the world-readable log through the bridge: a
@@ -184,7 +184,7 @@ valid only against the authority it read. The one exception is a pointer
 rewrite meeting a record that already names its target pointer, which
 another session's heal landed first. That rewrite writes nothing and
 refreshes the local cache from the served record. A read served with no ETag is
-refused too, so a WAS deployment must expose the `ETag` response header to
+refused too, so a PWS deployment must expose the `ETag` response header to
 the browser through CORS. A bind and a recovery-code issuance write a whole
 record of their own and stay plain upserts.
 
@@ -273,7 +273,7 @@ Settings says so, since the ceremony is its documented "I think my
 passphrase leaked" remedy. Ciphertext the credential's holder already
 fetched stays readable.
 
-A passphrase change runs establish-first on a WAS account. The old
+A passphrase change runs establish-first on a PWS account. The old
 passphrase is verified read-only, the NEW passphrase's whole standing
 establishment is the first write, and only then are the old record and
 unlock Space torn down and the old credential retired. A failed
@@ -602,7 +602,7 @@ under the current key. That replay window is open.
 The `Session` object lives in the Zustand `authStore` and is in-memory only
 (the passphrase is never persisted), so reloading the browser logs the user
 out. Guest sessions use a random 32-byte seed directly and never touch the
-WAS server or the KMS.
+PWS server or the KMS.
 
 All four session entry points (login, signup, both CHAPI popup pages) funnel
 through `initSessionFromSeed`. With a KMS configured (`KMS_SERVER_URL`), it

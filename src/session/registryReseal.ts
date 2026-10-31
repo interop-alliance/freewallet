@@ -48,7 +48,7 @@ const log = createLogger('fw:session:reseal')
  * Detects and mends a stale-sealed unlock-methods registry.
  *
  * Runs only for a session on the browser-local strategy, on a promoted
- * account with a WAS server and a successful login roster read (the escrow's
+ * account with a PWS server and a successful login roster read (the escrow's
  * source). Detection is the ordinary read: a `UnlockRegistryStaleSealError`
  * is the stale seal, and every other outcome -- a registry that opened, an
  * absent registry, a version or frame refusal, a network failure -- rethrows

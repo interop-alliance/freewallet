@@ -1,7 +1,7 @@
 // @vitest-environment node
 /**
- * Unit tests for the folded WAS signups (`src/session/signup.ts`, design
- * section 7): on a WAS deployment `signUpWithPassphrase` never binds a plain
+ * Unit tests for the folded PWS signups (`src/session/signup.ts`, design
+ * section 7): on a PWS deployment `signUpWithPassphrase` never binds a plain
  * record (`bindPassphrase` is unreachable there); the remembered branch runs
  * the credential-anchored establishment and then the ordinary remembered
  * login, reporting `userExists: false` with that login's session; the
@@ -127,7 +127,7 @@ afterEach(() => {
   state.wasUrl = 'https://was.example.test/'
 })
 
-describe('signUpWithPassphrase on a WAS deployment', () => {
+describe('signUpWithPassphrase on a PWS deployment', () => {
   it('never binds a plain record (default branch)', async () => {
     await signUpWithPassphrase({ passphrase: 'correct horse' })
     expect(bindPassphrase).not.toHaveBeenCalled()
@@ -179,7 +179,7 @@ describe('signUpWithPassphrase on a WAS deployment', () => {
   })
 })
 
-describe('signUpWithPasskey on a WAS deployment', () => {
+describe('signUpWithPasskey on a PWS deployment', () => {
   it('runs the fold with exactly one WebAuthn ceremony', async () => {
     // A distinct credential object, so the login half can be checked to take
     // the very credential the registration's PRF output derived.

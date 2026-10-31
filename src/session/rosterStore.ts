@@ -72,7 +72,7 @@ import { spaceLocation } from '@/lib/spaceLocation'
  * from within one run, never one carried across visits.
  *
  * @param options {object}
- * @param options.zcapClient {ZcapClient}   the signing client for the WAS
+ * @param options.zcapClient {ZcapClient}   the signing client for the PWS
  *   requests (promoted where the account is)
  * @param options.keyAgent {ICapabilityAgent}   this client's signing key
  *   agent -- its enrolled key signs the log appends

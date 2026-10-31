@@ -10,7 +10,7 @@
   `src/session/forget.ts`), `@interop/wallet-core` `/webvh`
   (`ensureDidWebProjection`, `putDidWebProjection`) and `/clientAnnex`
   (`ladderSignedAccountEntry`'s `beforePublish`, `forgetEnrolledClient`,
-  `forgetLastEnrolledClient`), the WAS deployment's `id` collection.
+  `forgetLastEnrolledClient`), the PWS deployment's `id` collection.
 
 ## Context
 
@@ -31,7 +31,7 @@ stale. After the last-client transition the forgotten client's
 `authentication` verification method kept standing in `did.json`. After a
 transient recovery the retired credential's `keyAgreement` entry did. Every
 did:web verifier accepted keys the account had revoked, with no writer left
-to correct the document. WAS authorization was never affected: the server
+to correct the document. PWS authorization was never affected: the server
 resolves a Space's controller by reading and verifying `did.jsonl` out of
 its own storage, and reads `did.json` nowhere.
 
@@ -94,7 +94,7 @@ already write.
   not a log, where every exercise of bridge authority today is itself a log
   append.
 - Projecting `did.json` server-side from the log at read time. It puts a
-  did:web special case inside a generic WAS resource route, so the server
+  did:web special case inside a generic PWS resource route, so the server
   would have to know which resource in which collection is derived from
   which other one.
 - Accepting the gap with a recorded bound. The projection is the wallet's
@@ -136,7 +136,7 @@ already write.
 
 Reopen this decision when one or more of the following holds:
 
-1. A WAS deployment serves the did:web projection from the log itself, at
+1. A PWS deployment serves the did:web projection from the log itself, at
    which point both writers become redundant and the freshness ensure is
    dead weight.
 2. The projection gains its own integrity story, a signature or a witness

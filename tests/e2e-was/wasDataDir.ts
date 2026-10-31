@@ -1,5 +1,5 @@
 /**
- * The filesystem root the WAS e2e run's teaching server stores under. The
+ * The filesystem root the PWS e2e run's teaching server stores under. The
  * server's start command in `playwright.was.config.ts` empties it ahead of
  * the boot, so each run gets a fresh one.
  *

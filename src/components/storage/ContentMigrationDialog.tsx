@@ -3,7 +3,7 @@
  * wallet" action: a backup file, the one secret that opens it, and the report
  * the migration leaves behind.
  *
- * It offers every session kind, a guest and a no-WAS deployment included --
+ * It offers every session kind, a guest and a no-PWS deployment included --
  * `migrateContent` writes through the session's own import methods, so
  * there is nothing here to gate on remote storage. The three secret inputs
  * are the ones the migration accepts: the old wallet's passphrase, a

@@ -75,7 +75,7 @@ commitments, so the add entry alone is appended and no fork is written.
 
 **The rendezvous transport (onboarding another wallet).** When the enrollee
 is a camera-holding wallet rather than a browser with a paste box, the same
-ceremony runs over the WAS server's ephemeral-exchanges facet
+ceremony runs over the PWS server's ephemeral-exchanges facet
 (`/workflows/ephemeral/exchanges`). That facet is unauthenticated. The
 unguessable exchange URL is the only access control, and it travels
 point-to-point in the QR. Settings > Connected wallets > "Connect another

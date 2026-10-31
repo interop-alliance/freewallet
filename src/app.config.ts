@@ -22,12 +22,12 @@ import { AGENT_GRANT_RENEWAL_WINDOW_MS as WALLET_CORE_AGENT_GRANT_RENEWAL_WINDOW
 
 const env = import.meta.env
 
-// The remote WAS server's base server URL: the URL under which the server
+// The remote PWS server's base server URL: the URL under which the server
 // serves `service`, `spaces/` and `space/{id}/` (`https://host/`, or
 // `https://host/was/` on a sub-path mount). Held in pws-client's canonical
 // form, with one trailing slash, so every URL derived from it (the KMS
 // facet, the CORS proxy facet) appends a bare segment. When set, a remote
-// WAS Space is available as a sync target: the sync controller replicates
+// PWS Space is available as a sync target: the sync controller replicates
 // the local RxDB collections to it in the background. (Guest sessions never
 // sync.) A value pws-client refuses (a scheme-less `localhost:3002`, a URL
 // with a query or fragment) is refused by name here, rather than leaving the
@@ -52,13 +52,13 @@ function canonicalWasBaseServerUrl(configured: string): string {
   } catch (err) {
     throw new Error(
       `VITE_WAS_SERVER_URL "${configured}" is not a base server URL. ` +
-        "Configure it as the WAS server's base server URL, an absolute " +
+        "Configure it as the PWS server's base server URL, an absolute " +
         'http(s) URL with no query or fragment, for example "https://host/".',
       { cause: err }
     )
   }
 }
-// WebKMS server URL. Defaults to the WAS server's in-process `/kms` facet;
+// WebKMS server URL. Defaults to the PWS server's in-process `/kms` facet;
 // set VITE_KMS_SERVER_URL only when the KMS is hosted separately. When
 // neither is set, the session has no KMS: no server-held `authentication`
 // key is minted, the account document publishes none, and DIDAuth is
@@ -68,7 +68,7 @@ export const KMS_SERVER_URL =
   (WAS_BASE_SERVER_URL ? `${WAS_BASE_SERVER_URL}kms` : undefined)
 // Lifetime of the capabilities delegated to a relying party when a user
 // approves a "Login with Wallet" zcap request (`src/lib/walletRequest/
-// processZcaps.ts`). Default 30 days: expiry bounds every RP grant. The WAS
+// processZcaps.ts`). Default 30 days: expiry bounds every RP grant. The PWS
 // server now also has a Space-scoped revocation endpoint, so a grant can be
 // retired before its expiry -- the recorded zcap ids are the hook for that.
 export const RP_ZCAP_TTL_MS =
@@ -229,7 +229,7 @@ export const ENCRYPTED_STANDARD_COLLECTIONS =
 export const ENCRYPTED_WALLET_COLLECTION_IDS: readonly string[] =
   encryptedWalletCollectionIds()
 
-// The WAS collections replicated by the sync controller: every standard
+// The PWS collections replicated by the sync controller: every standard
 // collection, projected down to the (key, id) pair the collection-agnostic
 // adapter needs. Every WALLET_STANDARD_COLLECTIONS entry syncs -- the `id`
 // collection (below) is deliberately kept out of that list and so out of this
@@ -372,11 +372,11 @@ export function isProtectedCollection(
 // drives regeneration of both.
 export const UNLOCK_MANAGE_ZCAP_TTL_MS = 365 * 24 * 60 * 60 * 1000
 
-// Offline-fallback lifetime of a locally cached keyring record when a WAS
+// Offline-fallback lifetime of a locally cached keyring record when a PWS
 // server is configured (the remote copy is the source of truth and is
 // consulted first on every login). Bounds how long a passphrase retired on
 // another device can keep unlocking this one while it is offline. Has no
-// effect in no-WAS deployments, where the cache is the keyring's only copy.
+// effect in no-PWS deployments, where the cache is the keyring's only copy.
 export const KEYRING_CACHE_TTL_MS =
   (Number(env.VITE_KEYRING_CACHE_TTL_HOURS) || 7 * 24) * 60 * 60 * 1000
 
@@ -387,7 +387,7 @@ export const MAX_CREDENTIAL_JSON_FILE_BYTES = 10 * 1024 * 1024
 // with `Access-Control-Allow-Origin: *`), and the retry behind a blocked
 // direct fetch during credential verification. The target URL is appended as a
 // `?url=` query parameter (the single
-// proxy path lives in `src/lib/corsProxy.ts`). When a WAS server is
+// proxy path lives in `src/lib/corsProxy.ts`). When a PWS server is
 // configured, its built-in proxy facet at `/api/cors` is the default.
 export const CORS_PROXY_URL =
   env.VITE_CORS_PROXY_URL ||

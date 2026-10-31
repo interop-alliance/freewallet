@@ -3,7 +3,7 @@ import { signupViaWizard } from './helpers'
 import { test, expect } from '../shared/consoleCapture'
 
 /**
- * WAS-backed E2E for a plain CHAPI `get` carrying a standalone capability
+ * PWS-backed E2E for a plain CHAPI `get` carrying a standalone capability
  * query (no App Connect query). Plain CHAPI delegates no capabilities: only
  * App Connect and the interaction-URL page grant storage access, since each
  * lists its grantees and can revoke them. So the popup refuses the request

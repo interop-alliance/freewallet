@@ -13,7 +13,7 @@
  * the Space metadata objects, each collection's own file, and the `/kms`
  * facet's keystores, which the invariant auditor reads.
  *
- * Every reader takes the server's data root as `dataDir`: the Playwright WAS
+ * Every reader takes the server's data root as `dataDir`: the Playwright PWS
  * suite's run root (`tests/e2e-was/wasDataDir.ts`) or the node harness's
  * temp backend (`tests/harness/`). The Playwright-bound pieces (a polled
  * assertion, the Space id read off a page) stay in
@@ -95,7 +95,7 @@ export async function spaceExistsInStore({
 /**
  * The Space ids the store gained since a baseline listing -- the Spaces one
  * account's setup created, when nothing else was writing to the server. The
- * WAS suite runs on a single worker, so a `beforeAll` baseline and a listing
+ * PWS suite runs on a single worker, so a `beforeAll` baseline and a listing
  * taken once the account is built bracket exactly that account's Spaces.
  *
  * @param options {object}
@@ -137,7 +137,7 @@ export async function survivingSpaceIds({
 }
 
 /**
- * The Space id a WAS Space URL names.
+ * The Space id a PWS Space URL names.
  *
  * @param url {string}
  * @returns {string}
@@ -145,7 +145,7 @@ export async function survivingSpaceIds({
 export function spaceIdOfUrl(url: string): string {
   const match = /\/space\/([^/?#]+)/.exec(url)
   if (!match) {
-    throw new Error(`Not a WAS Space URL: "${url}".`)
+    throw new Error(`Not a PWS Space URL: "${url}".`)
   }
   return decodeURIComponent(match[1]!)
 }

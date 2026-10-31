@@ -3,7 +3,7 @@ import { forceRememberBrowser } from './helpers'
 import { test, expect } from '../shared/consoleCapture'
 
 /**
- * Passkey (WebAuthn PRF) unlock e2e (WAS mode). A passkey is a Layer 1 unlock
+ * Passkey (WebAuthn PRF) unlock e2e (PWS mode). A passkey is a Layer 1 unlock
  * method: its per-credential PRF output derives an unlock identity that locates
  * and unwraps the account's random data seed through the keyring, exactly like
  * a passphrase. Signing up with a passkey binds a fresh seed to that PRF output

@@ -95,7 +95,7 @@ function signupErrorKey(err: unknown): string | null {
     return 'auth.errors.passkeyPrfUnsupported'
   }
   if (isStorageUnreachable(err)) {
-    // The WAS storage server is unreachable -- offer a guest-mode fallback.
+    // The PWS storage server is unreachable -- offer a guest-mode fallback.
     return 'auth.errors.storageUnreachable'
   }
   if (errorNameOf(err) === 'IncompatibleServerError') {
@@ -156,7 +156,7 @@ async function runSetup({
     const { session, userExists } = await signUpWithPassphrase({
       passphrase,
       ...(email ? { email } : {}),
-      // The e2e seam forces the remembered flow; without it a WAS-configured
+      // The e2e seam forces the remembered flow; without it a PWS-configured
       // signup on this (by definition non-remembered) browser runs
       // credential-anchored and ends in a transient session.
       ...(forcedRememberBrowser() ? { rememberBrowser: true } : {}),

@@ -1,7 +1,7 @@
 # Freewallet's nginx server block. It serves the SPA from dist/ and proxies
-# the WAS server's routes on the same origin, so the wallet's signed requests
+# the PWS server's routes on the same origin, so the wallet's signed requests
 # need no CORS preflight. The nginx image renders this template at startup,
-# substituting WAS_UPSTREAM (host:port of the WAS server) and nothing else.
+# substituting WAS_UPSTREAM (host:port of the PWS server) and nothing else.
 # See docs/deployment-fly.io.md.
 
 upstream was {
@@ -10,7 +10,7 @@ upstream was {
   keepalive 16;
 }
 
-# Headers the WAS server does not send yet. /api/cors relays third-party
+# Headers the PWS server does not send yet. /api/cors relays third-party
 # responses with their own content type, so it gets a strict sandbox and no
 # sniffing. An empty value sends no header. Resources and chunks need no entry:
 # the server sends its own sandbox header on them, which passes through
@@ -36,7 +36,7 @@ server {
   gzip_types text/css application/javascript application/json image/svg+xml
     application/manifest+json application/wasm;
 
-  # The WAS server's top-level routes. Keep this list in step with the
+  # The PWS server's top-level routes. Keep this list in step with the
   # server's routes when it adds one.
   location ~ ^/((spaces|space|kms|workflows|api|common)(/.*)?|service|health)$ {
     proxy_pass http://was;

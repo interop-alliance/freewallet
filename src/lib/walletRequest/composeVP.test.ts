@@ -26,7 +26,7 @@ import {
  * Plus the transient session's response identity (FW-203, over
  * app-connect-spec `decisions/0004`): the VP's `holder` and its DIDAuth
  * `proof.verificationMethod` are the visit key's BARE did:key forms. The
- * `<clientAnnexDid>#<vm>` form belongs to WAS invocations alone, and the
+ * `<clientAnnexDid>#<vm>` form belongs to PWS invocations alone, and the
  * app-side loader has to be able to resolve what it reads here.
  *
  * Plus the three-way holder dispatch (FW-344) at the bottom of this file: the

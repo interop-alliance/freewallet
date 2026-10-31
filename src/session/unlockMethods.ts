@@ -17,7 +17,7 @@
  * remote copy in the data Space is the
  * source of truth and is consulted first; a local cache in the
  * `freewallet-session` IndexedDB (keyed by the data controller did:key) serves
- * no-WAS deployments and refreshes on every remote hit.
+ * no-PWS deployments and refreshes on every remote hit.
  *
  * The `proof` member is the authenticity layer, and it is load-bearing: the
  * seal is to a recipient public key the host reads off the record's own
@@ -109,7 +109,7 @@ import {
 import {
   getUnlockMethodsRecord,
   putUnlockMethodsRecord
-} from '@/stores/wasRemoteStore'
+} from '@/stores/pwsRemoteStore'
 
 /**
  * The standing-inventory members a passphrase or passkey entry records once the
@@ -534,10 +534,10 @@ export function emptyUnlockMethodsRegistry(): UnlockMethodsRecord {
 
 /**
  * Loads the account's unlock-methods registry, or `null` when none has been
- * written yet. When a WAS server is configured the remote copy in the data
+ * written yet. When a PWS server is configured the remote copy in the data
  * Space is the source of truth: it is read first, refreshes the local cache on
  * a hit, and drops the cache on a 404-shaped miss. A remote read failure
- * rethrows. With no WAS server the cache is the only copy.
+ * rethrows. With no PWS server the cache is the only copy.
  *
  * A served record that does not decrypt under this session's vault keys is a
  * stale seal, not a missing registry: it throws
@@ -641,7 +641,7 @@ function registryRides({
  * lost race (412) re-enters the loop with a fresh read, up to
  * {@link MAX_CAS_ATTEMPTS}; exhaustion rethrows the conflict. A read that
  * served a record with no ETag refuses the unconditional overwrite outright
- * rather than degrading to last-write-wins (defensive only: the WAS server
+ * rather than degrading to last-write-wins (defensive only: the PWS server
  * always serves ETags).
  *
  * @param options {object}
@@ -735,7 +735,7 @@ async function casUpdateRegistryRecord({
  * (upsert this entry, drop that one) rather than reusing a stale page-held
  * record as the base. Wraps under the vault KAK and refreshes the local cache
  * the way a read does: saved after a landed write (or a declined one over an
- * existing record), dropped on a true absent. With no WAS server the local
+ * existing record), dropped on a true absent. With no PWS server the local
  * cache is the only copy and the loop is one read-modify-write over it.
  *
  * A served record that does not decrypt under this session's vault keys
@@ -881,7 +881,7 @@ export async function updateUnlockMethodsWithClient({
 }): Promise<UnlockMethodsRecord | null> {
   if (!WAS_BASE_SERVER_URL) {
     throw new TypeError(
-      'The direct registry write requires a configured WAS server.'
+      'The direct registry write requires a configured PWS server.'
     )
   }
   const writeKey = writeUserKey ?? userKey
@@ -960,7 +960,7 @@ export async function getUnlockMethodsWithClient({
 }): Promise<UnlockMethodsRecord | null> {
   if (!WAS_BASE_SERVER_URL) {
     throw new TypeError(
-      'The direct registry read requires a configured WAS server.'
+      'The direct registry read requires a configured PWS server.'
     )
   }
   const stored = await getUnlockMethodsRecord({
@@ -987,7 +987,7 @@ export async function getUnlockMethodsWithClient({
  * re-seal, and a concurrent re-seal is never downgraded (a fresh base no
  * longer sealed to `from` surfaces as `RecordEnvelopeDecryptError`, which
  * callers already treat as "not sealed to these keys"). A registry that does
- * not exist yet is a no-op. The local cache is left alone: with a WAS server
+ * not exist yet is a no-op. The local cache is left alone: with a PWS server
  * the remote copy is read first and refreshes the cache on the next hit.
  *
  * @param options {object}
@@ -1044,7 +1044,7 @@ export async function rewrapUnlockMethodsRecord({
 
 /**
  * Resolves the data Space URL from the session's storage, throwing when absent
- * (a WAS server is configured but the session has no remote store -- e.g. a
+ * (a PWS server is configured but the session has no remote store -- e.g. a
  * guest, which never reaches this registry).
  *
  * @param session {Session}
@@ -1197,7 +1197,7 @@ export async function dropRegistryEntry({
 
 /**
  * Whether an unlock method can be revoked without a WebAuthn ceremony: always
- * true with no WAS server (there is no Space to delete -- only the keyring cache
+ * true with no PWS server (there is no Space to delete -- only the keyring cache
  * and the registry entry are cleared), otherwise only when the entry carries a
  * management zcap the session's root key can invoke to delete its unlock Space.
  *
@@ -1243,7 +1243,7 @@ export function managementZcapClient({
  * - `deleted` -- the server accepted the DELETE.
  * - `not-found` -- the server answered 404, which is absent OR unauthorized
  *   (it masks the two), so this is never proof the Space is gone.
- * - `no-server` -- no WAS server is configured, so there is no Space at all.
+ * - `no-server` -- no PWS server is configured, so there is no Space at all.
  * - `no-capability` -- the entry records no management zcap, or one naming no
  *   delegatee. Nothing can be minted from it and the Space stays; that
  *   credential's own next login re-delegates.
@@ -1641,11 +1641,11 @@ export async function deleteUnlockSpaceForEntry({
  * VM on the ladder kind), drops the local
  * keyring cache for that Space, then removes the entry from the registry. This
  * is the path for a LOST passkey -- no ceremony on the authenticator being
- * removed. With a WAS server configured it requires a usable
+ * removed. With a PWS server configured it requires a usable
  * `entry.manageCapability` (callers gate on `canRevokeWithoutCeremony`
  * first), checked read-only BEFORE the retirement below so a refusal leaves
  * the credential standing and the entry removable; a 404 from the Space
- * delete is tolerated (already gone). With no WAS server there is no Space to
+ * delete is tolerated (already gone). With no PWS server there is no Space to
  * delete, so only the cache and the registry entry are cleaned up.
  *
  * A standing passphrase or passkey entry is first retired for real by the
@@ -2681,13 +2681,13 @@ export function adoptPassphraseRebind({
  * unlock identity, and assembles the registry entry describing the passkey.
  * The caller is responsible for persisting the returned entry in the registry
  * (and, at signup, for provisioning the data Space first). The one caller is
- * the no-WAS passkey signup, where no unlock Space exists and nothing can be
- * standing; every WAS flow runs the standing establishment instead (the
+ * the no-PWS passkey signup, where no unlock Space exists and nothing can be
+ * standing; every PWS flow runs the standing establishment instead (the
  * credential-anchored signup, and the Settings add-a-passkey ceremony's
  * `registerPasskey` + `establishStandingUnlock` order).
  *
  * `delegateManagementTo` drives the entry's optional `manageCapability`: when
- * an account DID is given (and a WAS server is configured) the bind
+ * an account DID is given (and a PWS server is configured) the bind
  * delegates GET/DELETE on the new unlock Space to it, and the entry carries
  * the resulting capability so the passkey can later be revoked tap-free;
  * otherwise the entry omits it.

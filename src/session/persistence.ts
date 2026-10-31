@@ -100,7 +100,7 @@ export interface UserKeyEpochPinStore {
 
 /**
  * The unlock-methods registry cache behind the seam: the wrapped record the
- * remote read write-through-caches (or, with no WAS server, the only copy).
+ * remote read write-through-caches (or, with no PWS server, the only copy).
  * The record is stored wrapped, so the cache holds ciphertext either way.
  */
 export interface UnlockMethodsCache {
@@ -143,7 +143,7 @@ interface SessionPersistenceBase {
   // the visit like the chain-head pins beside it.
   epochPins: UserKeyEpochPinStore
   // The unlock-methods registry's local cache (the write-through on every
-  // successful remote read; the only copy with no WAS server).
+  // successful remote read; the only copy with no PWS server).
   unlockMethodsCache: UnlockMethodsCache
   // The passkey-safety notice the dashboard reads on first render.
   passkeyNotices: PasskeySafetyNoticeStore
@@ -194,7 +194,7 @@ export interface TransientSessionStores extends SessionPersistenceBase {
 /**
  * A transient session's strategy: a public-terminal visit. Beside the
  * in-memory stores it carries the session's client-annex identity -- every
- * WAS request signs as `<clientAnnexDid>#<vm>` and rides the generation
+ * PWS request signs as `<clientAnnexDid>#<vm>` and rides the generation
  * delegation -- so the tier cannot be half-declared: a caller that supplies
  * the in-memory variant has, by type, already declared the annex identity,
  * and the members only a remembered login reaches (the KMS keystore, the
@@ -225,7 +225,7 @@ export type SessionPersistence =
  * non-browser environment) as absent; writes no-op without localStorage.
  *
  * What is stored is the `encryption` descriptor alone, with no other part of
- * the Collection Metadata object, so WAS v0.5 merging a Collection's
+ * the Collection Metadata object, so PWS v0.5 merging a Collection's
  * configuration into that object leaves every stored entry valid and needs
  * no invalidation.
  *

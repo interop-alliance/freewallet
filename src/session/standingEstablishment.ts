@@ -269,7 +269,7 @@ export async function completeStandingEntry({
  * `keyAgreement` entry, no roster wrap, and the record absent or plain),
  * the unlock Space and its local state are deleted and the bare registry
  * entry dropped: the credential then never exists -- the simplest mendable
- * state. When something WAS published (or that could not be told), the
+ * state. When something PWS published (or that could not be told), the
  * cleanup is an ACTUAL retirement (`rotateOffUnlockCredential` with the
  * ceremony-minted ladder seed -- the tapped-removal pattern minus the tap,
  * since the credential's secret is in hand), never a record delete: the

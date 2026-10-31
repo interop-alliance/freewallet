@@ -13,7 +13,7 @@ import type { DocCipher } from '@interop/pws-client/edv'
 import { cidFrom } from '@interop/pws-client/sync'
 import type { Json } from '@interop/pws-sync'
 import { RemoteDirectStore } from './remoteDirectStore'
-import type { WASRemoteStore } from './wasRemoteStore'
+import type { PWSRemoteStore } from './pwsRemoteStore'
 
 const CREDENTIAL = {
   '@context': ['https://www.w3.org/ns/credentials/v2'],
@@ -120,7 +120,7 @@ function fakeEnvelope({ id, data }: { id: string; data: Json }): Json {
  * @param options.resourceId {string}
  * @param options.body {Json}
  * @param [options.extra] {Record<string, Json>}
- * @returns {{ remote: WASRemoteStore; deleted: string[]; written: string[] }}
+ * @returns {{ remote: PWSRemoteStore; deleted: string[]; written: string[] }}
  */
 function fakeRemote({
   resourceId,
@@ -131,7 +131,7 @@ function fakeRemote({
   body: Json
   extra?: Record<string, Json>
 }): {
-  remote: WASRemoteStore
+  remote: PWSRemoteStore
   deleted: string[]
   written: string[]
 } {
@@ -164,7 +164,7 @@ function fakeRemote({
       deleted.push(id)
       resources.delete(id)
     }
-  } as unknown as WASRemoteStore
+  } as unknown as PWSRemoteStore
   return { remote, deleted, written }
 }
 
@@ -321,7 +321,7 @@ describe('RemoteDirectStore (a plaintext body in an encrypted collection)', () =
       async deleteSyncedResource({ resourceId }: { resourceId: string }) {
         deleted.push(resourceId)
       }
-    } as unknown as WASRemoteStore
+    } as unknown as PWSRemoteStore
     const { cipher, decrypted } = recordingCipher()
     const store = new RemoteDirectStore({
       remoteStore: remote,

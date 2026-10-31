@@ -95,7 +95,7 @@ function lastOptions(): CoreOptions {
 const localCollection = vi.fn((key: string) => ({ localKey: key }))
 
 /**
- * A session shaped just enough for the binding: not a guest, a remote WAS
+ * A session shaped just enough for the binding: not a guest, a remote PWS
  * client and Space URL present, a local replica behind `localCollection`, and
  * a persistence strategy answering the per-profile `writerId`.
  *
@@ -159,7 +159,7 @@ describe('sync binding: the port handed to the core', () => {
     expect(lastOptions().writerId).toBe('writer-profile-1')
   })
 
-  it('writes status keyed on the WAS collection id, not the logical key', async () => {
+  it('writes status keyed on the PWS collection id, not the logical key', async () => {
     await syncController.restart({ session: fakeSession() })
 
     lastOptions().onStatus('walletActivity', 'wallet-activity', 'syncing')

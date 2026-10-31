@@ -128,7 +128,7 @@ pending-enrollment resume, and the login-time chain passes carrying the
 guard). The Storage Access handle does not reach localStorage, so a
 persisted descriptor or meta cache would be partitioned residue no top-level
 wipe can reach. The popup's cache pair is therefore in-memory for the visit,
-on a WAS deployment. On a no-WAS deployment the same
+on a PWS deployment. On a no-PWS deployment the same
 store is the only record of the locally minted key epochs, so a local-mode
 popup keeps its persistent pair. Three chain passes carry no popup guard
 today: the standing-delegation self-refresh, the ladder-rung refresh, and
@@ -152,7 +152,7 @@ it. The popup page releases it with `closeUnenteredSession` when the session
 is replaced or the page unmounts, so the handle does not outlive the session.
 
 That backend serves credential, history, and public-link reads and writes
-straight over the remote WAS collections, with the same per-collection
+straight over the remote PWS collections, with the same per-collection
 ciphers the local store uses, so the envelope, id, and key-epoch logic lives
 once. A listing is pws-client's `Collection.documents()`, the snapshot walk
 over the `changes` feed, one request per page; the feed's tombstones drop

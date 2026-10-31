@@ -1,6 +1,6 @@
 // @vitest-environment node
 /**
- * The signup's host gate: a WAS signup publishes a ladder verification method,
+ * The signup's host gate: a PWS signup publishes a ladder verification method,
  * so it refuses a storage server whose service description does not claim the
  * client annex profile, before the key derivation and before any passkey is
  * registered.

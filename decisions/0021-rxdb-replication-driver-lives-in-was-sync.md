@@ -2,7 +2,7 @@
 
 - Status: accepted
 - Date: 2026-09-05
-- Driving work: the extraction design for the WAS replication driver for
+- Driving work: the extraction design for the PWS replication driver for
   RxDB, approved 2026-09-05. Extracted at that design's approval, from its
   placement decision and its rejected alternatives.
 - Affects: freewallet (`src/lib/sync/`, deleted; `src/stores/syncController.ts`,
@@ -16,7 +16,7 @@
 
 ## Context
 
-The WAS replication driver for RxDB exists twice. Freewallet has a copy
+The PWS replication driver for RxDB exists twice. Freewallet has a copy
 under `src/lib/sync/`; was-react has a more developed one under
 `src/sync/`. They were forked from one origin and have drifted. The
 was-react copy grew four modules freewallet lacks, the two `pushWrites.ts`
@@ -105,7 +105,7 @@ session gates stay app-side.
 
 - Freewallet gains a dependency on `@interop/was-sync` and deletes
   `src/lib/sync/`. Its sync controller becomes a session binding: the
-  guest, no-WAS, and replica gate, the port built from `session.storage`,
+  guest, no-PWS, and replica gate, the port built from `session.storage`,
   the status callback, the browser online source, and the dynamic import
   of `@interop/was-sync/rxdb`. `StorageManager.localCollection()` goes
   behind the port, since it is the one facade member whose return type
@@ -125,8 +125,8 @@ session gates stay app-side.
   and over an injected storage port. Freewallet's localStorage key stays
   exactly `freewallet:writerId`, and the persistence strategy keeps
   deciding which storage tier answers.
-- No Parties-table row lands in the WAS spec for the package. The driver
-  speaks no WAS HTTP itself: every request goes through was-client's sync
+- No Parties-table row lands in the PWS spec for the package. The driver
+  speaks no PWS HTTP itself: every request goes through was-client's sync
   port, so by the table's admission rule the package is a downstream
   consumer like the wallets. was-client stays the one named speaker of the
   `changes` profile. byoe-ecosystem's layer map gains the package's node

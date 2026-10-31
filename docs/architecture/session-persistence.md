@@ -5,7 +5,7 @@
 
 Sessions are in-memory only. A login builds the whole `Session`: a
 `keyAgent`, the user-key-backed vault KAK, and the `zcapClient` signing
-every WAS request. A transient login, the default, builds it from a
+every PWS request. A transient login, the default, builds it from a
 per-visit key minted in tab memory and the user key unwrapped from the
 credential's standing roster wrap, and persists none of it. A remembered
 login builds it from this client's stored seed and cached user key, and
@@ -37,7 +37,7 @@ reaches the session database, and it dies with the tab. The login carrying
 it skips storage provisioning, the KMS keystore, the login-time roster read,
 every login-time sweep, and the bare-Space-URL `userExists` probe. The
 variant also carries the visit's client-annex identity as a required member
-of its type (`InMemorySessionPersistence`): the annex DID every WAS request
+of its type (`InMemorySessionPersistence`): the annex DID every PWS request
 signs under, and the generation delegation every request rides. Both surface
 to the storage layer as `profile.invocationCapability`.
 
@@ -46,7 +46,7 @@ that holds a client-key record and by a guest session. It is the
 `freewallet-session` database, the localStorage caches, and the persistent
 `writerId`. It alone carries the `idb` factory, so code needing that
 database must hold it. Its `writerId` is the one label declared on the
-wire. The sync controller sends it on every replication push as the WAS
+wire. The sync controller sends it on every replication push as the PWS
 `Writer-Id` header. The in-memory variant cannot reach that label. It holds
 a per-visit one minted in tab memory, and declares none today, since it runs
 no replication and remote-direct writes send no `Writer-Id` on any session
@@ -66,11 +66,11 @@ no `BrowserStore` at all, since the versioned RxDB open alone creates the
 per-user database. `StorageManager.initStorageClients` builds one only on
 the browser-local strategy, and a replica-less session serves every
 synced-collection operation through the remote-direct backend, over the
-remote WAS collections. The sync controller never starts without a local
+remote PWS collections. The sync controller never starts without a local
 replica; `StorageManager.hasLocalReplica` is its gate. The transient CHAPI
 popup is this same shape (see "Remote-direct popup storage" in chapi.md).
 
-`WASRemoteStore` accepts an optional invocation capability, threaded from
+`PWSRemoteStore` accepts an optional invocation capability, threaded from
 `profile.invocationCapability`, that every request rides. wallet-core's
 `userKeyRosterDescriptorStore` takes the same option, so a session holding
 only a delegated Space-subtree zcap (the generation delegation) can read the
@@ -79,14 +79,14 @@ roster. Absent the option, every request invokes the root capability.
 The `connections` directory is not on the persistence axis. It is never
 replicated, so its tier follows the session's backend rather than the
 strategy. A session with a Space, transient or remembered, reads and writes
-it remote-direct under that same bound capability. A guest or a no-WAS
+it remote-direct under that same bound capability. A guest or a no-PWS
 session has no Space, and keeps it as a local RxDB collection in its
 `BrowserStore`, the only copy, under a locally minted blinded-index key
 (`decisions/0035-the-directory-rides-the-session-backend-and-is-never-replicated.md`).
 
 **The transient login (the default on a non-remembered browser).** Both
 keyring login entry points run one post-KDF routing decision
-(`routeUnlockLogin` in `src/session/transientLogin.ts`). With a WAS server
+(`routeUnlockLogin` in `src/session/transientLogin.ts`). With a PWS server
 configured, a browser holding no client-key record for this credential takes
 the transient composition; one holding such a record proceeds remembered. A
 record whose stamped `pointerDid` names a different account than the unlock
@@ -267,7 +267,7 @@ root-invokes. A transient session holding a standing unlock credential
 resolves the ladder kind: a rung of the credential's update-key ladder signs
 the entry through the record's bridge delegation, the credential's ladder VM
 signs the licensed roster append, and the per-visit annex VM invokes every
-request under the generation delegation. A guest, a no-WAS session, and a
+request under the generation delegation. A guest, a no-PWS session, and a
 transient session whose record carries no standing members resolve to
 neither. The ladder kind also carries its own members: the ladder VM's
 delegation signer, the DELETE-only child mint the account-deletion walk
@@ -459,7 +459,7 @@ included, stops the migration under `QuotaExceededError`.
 migration hands the sink every app collection in the bundle's account archive,
 one at a time: an `ensureCollection` call, then its Resources. The sink carries
 that member only when `StorageManager.canProvisionAppCollections` holds (remote
-storage and descriptor logs), so a guest or a no-WAS session leaves app
+storage and descriptor logs), so a guest or a no-PWS session leaves app
 collections in the report's not-migrated counts. `ensureImportedAppCollection`
 reads the collection's standing state and checks a standing collection before it
 writes anything. It then runs pws-client's guarded ensure, whose `created`
@@ -528,7 +528,7 @@ has none. It is re-sealed under the new user key with its blinded index entries,
 under a fresh content-derived id. One that decrypted to bytes, a chunked
 Resource or a small binary or text one, arrives as raw bytes under its sealed
 content type. Its identity is its archived resource id.
-`WASRemoteStore.putEncryptedResourceBytes` writes it at that id through
+`PWSRemoteStore.putEncryptedResourceBytes` writes it at that id through
 pws-client's `Resource.put` with `ifNoneMatch`, on a handle carrying the
 verified descriptor and the vault keys as a per-handle encryption override,
 since the store's client holds no keystore. A payload over the codec's blob

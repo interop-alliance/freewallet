@@ -1354,7 +1354,7 @@ describe('the outbox', () => {
     }
   })
 
-  it('stops pushing on a 404, which a WAS host answers a denied capability with', async () => {
+  it('stops pushing on a 404, which a PWS host answers a denied capability with', async () => {
     const { directory, deps, entryOf, pass } = fixture()
     const pairwise = await pairwiseSeed()
     await connect({ directory, pairwise })

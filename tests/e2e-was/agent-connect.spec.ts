@@ -20,7 +20,7 @@ import { WAS_E2E_DATA_DIR } from './wasDataDir'
 import { test, expect } from '../shared/consoleCapture'
 
 /**
- * The connection request e2e (WAS mode): a scripted agent test double with
+ * The connection request e2e (PWS mode): a scripted agent test double with
  * its own Space connects to a wallet owner over the interaction-URL entry
  * point, and the two keep the connection alive through the owner's inbox
  * and the double's.
@@ -315,7 +315,7 @@ async function readPost({
     .agentClient()
     .fromCapability(grant as never) as Collection
   const post = await audience.get(POST_ID)
-  // A refused read comes back as a missing Resource (WAS answers 404 for
+  // A refused read comes back as a missing Resource (PWS answers 404 for
   // both), which pws-client reports as `null` rather than throwing.
   if (post === null) {
     throw Object.assign(new Error('The post read was refused.'), {

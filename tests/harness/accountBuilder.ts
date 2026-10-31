@@ -13,7 +13,7 @@
  *   `issueRecoveryCode` from the signup's transient session. The code is
  *   not spent.
  * - `buildEnrolledClientAccount`: one enrolled client, a remembered
- *   browser. A WAS deployment offers two entries that produce one: the
+ *   browser. A PWS deployment offers two entries that produce one: the
  *   self-enrollment of a `rememberBrowser: true` login on a profile holding
  *   no client-key record (`initSession.ts`, through
  *   `selfEnrollStandingClient`), and the two-party enrollment

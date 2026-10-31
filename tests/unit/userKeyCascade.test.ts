@@ -22,7 +22,7 @@ vi.mock('@interop/wallet-core/keys', async importOriginal => ({
 import { cascadeCollectionsToUserKey as driveCascade } from '@interop/wallet-core/keys'
 import { ENCRYPTED_WALLET_COLLECTION_IDS } from '@/app.config'
 import { cascadeCollectionsToUserKey } from '@/session/userKeyCascade'
-import type { WASRemoteStore } from '@/stores/wasRemoteStore'
+import type { PWSRemoteStore } from '@/stores/pwsRemoteStore'
 import type { CollectionEncryption } from '@interop/pws-client'
 
 const USER_KEY = {
@@ -80,7 +80,7 @@ function makeFakeRemoteStore({
     collectionEncryption: vi.fn(
       async () => ({ scheme: 'edv' }) as unknown as CollectionEncryption
     )
-  } as unknown as WASRemoteStore
+  } as unknown as PWSRemoteStore
 }
 
 /**

@@ -32,7 +32,7 @@ import {
 import type { CascadeCollections } from '@interop/wallet-core/clients'
 import type { WebvhResourceLogController } from '@interop/wallet-core/resourceLog'
 import { ENCRYPTED_WALLET_COLLECTION_IDS } from '@/app.config'
-import type { WASRemoteStore } from '@/stores/wasRemoteStore'
+import type { PWSRemoteStore } from '@/stores/pwsRemoteStore'
 import { createLogger } from '@/lib/log'
 
 const log = createLogger('fw:session:cascade')
@@ -50,13 +50,13 @@ export type { UserKeyCascadeResult } from '@interop/wallet-core/keys'
  * login.
  *
  * @param options {object}
- * @param options.remoteStore {WASRemoteStore}
+ * @param options.remoteStore {PWSRemoteStore}
  * @returns {Promise<Set<string>>}
  */
 async function listedCollectionIds({
   remoteStore
 }: {
-  remoteStore: WASRemoteStore
+  remoteStore: PWSRemoteStore
 }): Promise<Set<string>> {
   const ids = new Set<string>()
   try {
@@ -87,7 +87,7 @@ async function listedCollectionIds({
  * own verified log and only drops one that has no log.
  *
  * @param options {object}
- * @param options.remoteStore {WASRemoteStore}
+ * @param options.remoteStore {PWSRemoteStore}
  * @param options.storeFor {CollectionStoreFor}   each collection's
  *   log-governed descriptor store, signed by the key the calling ceremony
  *   is licensed to append with at the post-edit document
@@ -98,7 +98,7 @@ export function cascadeCollections({
   remoteStore,
   storeFor
 }: {
-  remoteStore: WASRemoteStore
+  remoteStore: PWSRemoteStore
   storeFor: CollectionStoreFor
 }): CascadeCollections & { collectionIds: () => Promise<string[]> } {
   // One store per collection for the whole fan-out, so the encryption check
@@ -138,7 +138,7 @@ export function cascadeCollections({
  * that fails is reported in `failed` and the rest proceed.
  *
  * @param options {object}
- * @param options.remoteStore {WASRemoteStore}
+ * @param options.remoteStore {PWSRemoteStore}
  * @param options.storeFor {CollectionStoreFor}   each collection's
  *   log-governed descriptor store (see `cascadeCollections`)
  * @param options.rosterDescriptor {CollectionEncryption}   the freshly read
@@ -166,7 +166,7 @@ export async function cascadeCollectionsToUserKey({
   collectionIds,
   controller
 }: {
-  remoteStore: WASRemoteStore
+  remoteStore: PWSRemoteStore
   storeFor: CollectionStoreFor
   rosterDescriptor: CollectionEncryption
   clientKeyAgreementKey: IKeyAgreementKey

@@ -1,8 +1,8 @@
 // @vitest-environment node
 /**
- * Unit tests for `WASRemoteStore.putEncryptedResourceBytes`, the write the
+ * Unit tests for `PWSRemoteStore.putEncryptedResourceBytes`, the write the
  * content migration lands a bytes Resource of an encrypted app collection
- * through. The store's client is a real `PwsClient` over an in-memory WAS
+ * through. The store's client is a real `PwsClient` over an in-memory PWS
  * server (`memoryWasServer`), with a small blob limit, so a payload takes
  * pws-client's chunked write, and the create-if-absent `412`, the read-back
  * that reassembles chunks, the pending stub a torn write leaves, and a `507`
@@ -24,7 +24,7 @@ import { errorNameOf } from '@interop/wallet-core/menders'
 import { TEST_SERVICE_DESCRIPTION } from '../shared/wasServiceFixture'
 import { MEMORY_SERVER_URL, memoryWasServer } from './memoryWasServer'
 import { generateVaultKeys } from '../../src/stores/testing/vaultKeys'
-import { WASRemoteStore } from '../../src/stores/wasRemoteStore'
+import { PWSRemoteStore } from '../../src/stores/pwsRemoteStore'
 
 const COLLECTION_ID = 'app-photos'
 
@@ -48,7 +48,7 @@ async function setup() {
     currentEpoch: epochId
   }
   const server = memoryWasServer()
-  const store = new WASRemoteStore({
+  const store = new PWSRemoteStore({
     serviceDescription: TEST_SERVICE_DESCRIPTION,
     pinStore: memoryResourceLogPinStore(),
     baseServerUrl: MEMORY_SERVER_URL,
@@ -96,7 +96,7 @@ function freshId(): string {
 const LARGE = new Uint8Array(64).map((_value, index) => (index * 3) % 251)
 const SMALL = new Uint8Array([1, 2, 3, 4])
 
-describe('WASRemoteStore.putEncryptedResourceBytes', () => {
+describe('PWSRemoteStore.putEncryptedResourceBytes', () => {
   it('writes a large payload as chunks at the id, and reads it back on a re-run', async () => {
     const { server, put } = await setup()
     const resourceId = freshId()

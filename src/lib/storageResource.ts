@@ -1,6 +1,6 @@
 /**
- * Types and content-type helpers for WAS collection resources fetched by
- * WASRemoteStore. The FetchedCollectionResource discriminated union lets
+ * Types and content-type helpers for PWS collection resources fetched by
+ * PWSRemoteStore. The FetchedCollectionResource discriminated union lets
  * callers branch on how to render or save content without inspecting raw
  * Content-Type strings themselves.
  */

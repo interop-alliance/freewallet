@@ -1,5 +1,5 @@
 /**
- * An in-memory WAS server behind a stub `ZcapClient`, for tests that drive a
+ * An in-memory PWS server behind a stub `ZcapClient`, for tests that drive a
  * real `PwsClient` handle end to end: its EDV codec, a chunked write, the
  * create-if-absent `412`, and a read that reassembles chunks. Modeled on
  * pws-client's own chunked-put test server.
@@ -174,7 +174,7 @@ export function memoryWasServer(): {
         invocationSigner: { id: 'did:example:alice#key-1' },
         request
       } as unknown as ConstructorParameters<typeof PwsClient>[0]['zcapClient'],
-      // The fail-closed provider a WASRemoteStore's client carries, with a
+      // The fail-closed provider a PWSRemoteStore's client carries, with a
       // small blob limit so a test payload takes the chunked path.
       encryption: createEdvEncryption({
         resolveKeys: async () => null,

@@ -82,7 +82,7 @@ ladder-signed entry writes `did.jsonl` alone, since the bridge delegation is
 a PUT on exactly that resource. So the ceremonies a standing credential runs
 do not republish the projection, and a stale one keeps naming a client or a
 credential the log has struck. That is a revocation bypass for a did:web
-verifier rather than lag. WAS authorization is untouched, since the server
+verifier rather than lag. PWS authorization is untouched, since the server
 resolves a Space's controller out of `did.jsonl` and reads `did.json`
 nowhere
 (`decisions/0018-did-web-projection-refreshed-by-the-annex-writer.md`).
@@ -459,12 +459,12 @@ for passphrase guessing; the bound is KDF strength rather than placement.
 The DID's embedded Space id need not equal a controlled Space's id, since
 one did:webvh may control several Spaces on the host.
 
-Every WAS signup bootstraps the Space under the ladder VM's bare did:key
+Every PWS signup bootstraps the Space under the ladder VM's bare did:key
 inside the credential-anchored establishment, publishes the log, and PUTs
 the Space Metadata object carrying `controller: <did:webvh>`, before any
 enrolled client exists. `StorageManager.ensurePromotedController` is the
 login-time healer: it swaps the live session's signing to the promoted keyId
-and re-runs the promotion PUT when a session finds it missing. Only a no-WAS
+and re-runs the promotion PUT when a session finds it missing. Only a no-PWS
 deployment's plain genesis promotes on that path from scratch. From then on
 the server resolves the controller by reading and fully verifying the log
 out of its own storage (SCID-pinned, hash chain, prerotation, update-key

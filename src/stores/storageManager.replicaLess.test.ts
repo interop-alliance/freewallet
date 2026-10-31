@@ -1,7 +1,7 @@
 /**
  * Unit tests for the capability-bound, replica-less remote storage variant:
  *
- * - `WASRemoteStore` accepts an optional invocation capability and every
+ * - `PWSRemoteStore` accepts an optional invocation capability and every
  *   request it makes rides it -- the navigational handles through the one
  *   private Space-handle helper, and the raw `was.request()` escape hatch
  *   sites directly. Absent the option, every handle and request carries no
@@ -25,10 +25,10 @@
  *   under a rotated key epoch drives the facade's one-time descriptor refresh
  *   and re-runs, writing the edit once under the fresh epoch.
  *
- * The WAS layer is faked at two seams matching the two subjects: a recording
- * fake `PwsClient` under a real `WASRemoteStore` (so the store's own
+ * The PWS layer is faked at two seams matching the two subjects: a recording
+ * fake `PwsClient` under a real `PWSRemoteStore` (so the store's own
  * capability threading is what is exercised), and a structural fake
- * `WASRemoteStore` under the real `StorageManager` (the sharing test's
+ * `PWSRemoteStore` under the real `StorageManager` (the sharing test's
  * pattern), with real EDV ciphers over freshly generated X25519 keys.
  *
  * @vitest-environment node
@@ -73,7 +73,7 @@ import { adoptFollowerUserKey } from '@/session/userKeyAdoption'
 import { BrowserStore } from './browserStore'
 import { StorageManager, type DescriptorLogs } from './storageManager'
 import { generateVaultKeys } from '@/stores/testing/vaultKeys'
-import { WASRemoteStore } from './wasRemoteStore'
+import { PWSRemoteStore } from './pwsRemoteStore'
 
 vi.mock('@/app.config', async importOriginal => ({
   ...(await importOriginal<Record<string, unknown>>()),
@@ -176,15 +176,15 @@ function recordingWas(): {
 }
 
 /**
- * A real `WASRemoteStore` (optionally capability-bound) over the recording
+ * A real `PWSRemoteStore` (optionally capability-bound) over the recording
  * fake client, plus the recorders.
  */
 function makeRecordedStore({ capability }: { capability?: IZcap }): {
-  store: WASRemoteStore
+  store: PWSRemoteStore
   spaceCalls: Array<{ spaceUrl: string; capability?: unknown }>
   requestCalls: Array<{ url?: string; method?: string; capability?: unknown }>
 } {
-  const store = new WASRemoteStore({
+  const store = new PWSRemoteStore({
     serviceDescription: TEST_SERVICE_DESCRIPTION,
     pinStore: memoryResourceLogPinStore(),
     baseServerUrl: 'https://was.example/',
@@ -205,7 +205,7 @@ function makeRecordedStore({ capability }: { capability?: IZcap }): {
  * (describe, the quota read), a collection handle (describe, documents), and
  * every raw `was.request()` site the remote-direct backend uses.
  */
-async function driveStore(store: WASRemoteStore): Promise<void> {
+async function driveStore(store: PWSRemoteStore): Promise<void> {
   await store.userExists()
   await store.collectionEncryption({ collectionId: 'private-credentials' })
   await store.listSyncedDocuments({ logicalKey: 'privateCredentials' })
@@ -226,7 +226,7 @@ async function driveStore(store: WASRemoteStore): Promise<void> {
   await store.getSpaceQuotas()
 }
 
-describe('WASRemoteStore invocation capability', () => {
+describe('PWSRemoteStore invocation capability', () => {
   it('rides the bound capability on every handle and raw request', async () => {
     const { store, spaceCalls, requestCalls } = makeRecordedStore({
       capability: DELEGATED_ZCAP
@@ -262,14 +262,14 @@ const ENCRYPTED_COLLECTION_IDS = [
 ]
 
 /**
- * A structural fake of `WASRemoteStore` for the replica-less StorageManager:
+ * A structural fake of `PWSRemoteStore` for the replica-less StorageManager:
  * per-collection descriptors served from `collectionEncryption`, and an
  * in-memory synced-resource map behind the remote-direct read/write surface.
  * `rotate` stands in for the cascade's collection fan-out, and `epochStamps`
  * records the key epoch each write was sealed under.
  */
 function makeFakeRemote(): {
-  remoteStore: WASRemoteStore
+  remoteStore: PWSRemoteStore
   descriptors: Record<string, CollectionEncryption>
   descriptorLogs: DescriptorLogs
   provision(owner: { keyAgreementKey: IKeyAgreementKey }): Promise<void>
@@ -411,7 +411,7 @@ function makeFakeRemote(): {
       resourcesFor(logicalKey).delete(resourceId)
       versionsFor(logicalKey).delete(resourceId)
     }
-  } as unknown as WASRemoteStore
+  } as unknown as PWSRemoteStore
   // A CAS-backed minimal Collection per encrypted collection, so the real
   // `ensureFirstEpoch` and `replaceRecipient` write real epoch descriptors
   // (what provisioning and the cascade's fan-out would have written).
@@ -531,7 +531,7 @@ describe('replica-less remote-direct StorageManager', () => {
     } as ControllerProfile
 
     const initClientSpy = vi
-      .spyOn(WASRemoteStore, 'initClient')
+      .spyOn(PWSRemoteStore, 'initClient')
       .mockResolvedValue({ remoteStore })
     const browserStoreSpy = vi.spyOn(BrowserStore, 'initClient')
     // Production reads the global at call time, so a cache write that leaked
@@ -601,7 +601,7 @@ describe('replica-less remote-direct StorageManager', () => {
     } as ControllerProfile
 
     const initClientSpy = vi
-      .spyOn(WASRemoteStore, 'initClient')
+      .spyOn(PWSRemoteStore, 'initClient')
       .mockResolvedValue({ remoteStore })
     try {
       const { storage } = await StorageManager.initStorageClients({
@@ -686,7 +686,7 @@ describe('replica-less remote-direct StorageManager', () => {
     } as ControllerProfile
 
     const initClientSpy = vi
-      .spyOn(WASRemoteStore, 'initClient')
+      .spyOn(PWSRemoteStore, 'initClient')
       .mockResolvedValue({ remoteStore })
     try {
       const { storage } = await StorageManager.initStorageClients({
@@ -754,7 +754,7 @@ describe('replica-less remote-direct StorageManager', () => {
     } as ControllerProfile
 
     const initClientSpy = vi
-      .spyOn(WASRemoteStore, 'initClient')
+      .spyOn(PWSRemoteStore, 'initClient')
       .mockResolvedValue({ remoteStore })
     try {
       const { storage } = await StorageManager.initStorageClients({
@@ -802,7 +802,7 @@ describe('replica-less remote-direct StorageManager', () => {
     } as ControllerProfile
 
     const initClientSpy = vi
-      .spyOn(WASRemoteStore, 'initClient')
+      .spyOn(PWSRemoteStore, 'initClient')
       .mockResolvedValue({ remoteStore })
     try {
       const { storage } = await StorageManager.initStorageClients({
@@ -862,7 +862,7 @@ describe('replica-less remote-direct StorageManager', () => {
     } as ControllerProfile
 
     const initClientSpy = vi
-      .spyOn(WASRemoteStore, 'initClient')
+      .spyOn(PWSRemoteStore, 'initClient')
       .mockResolvedValue({ remoteStore })
     try {
       const { storage } = await StorageManager.initStorageClients({
@@ -925,7 +925,7 @@ describe('replica-less remote-direct StorageManager', () => {
     } as ControllerProfile
 
     const initClientSpy = vi
-      .spyOn(WASRemoteStore, 'initClient')
+      .spyOn(PWSRemoteStore, 'initClient')
       .mockResolvedValue({ remoteStore })
     try {
       const { storage } = await StorageManager.initStorageClients({
@@ -1004,7 +1004,7 @@ describe('replica-less remote-direct StorageManager', () => {
     } as ControllerProfile
 
     const initClientSpy = vi
-      .spyOn(WASRemoteStore, 'initClient')
+      .spyOn(PWSRemoteStore, 'initClient')
       .mockResolvedValue({ remoteStore })
     try {
       const { storage } = await StorageManager.initStorageClients({
@@ -1039,7 +1039,7 @@ describe('replica-less remote-direct StorageManager', () => {
             }
           })
         })
-    ).toThrow(/remote WAS store/)
+    ).toThrow(/remote PWS store/)
   })
 })
 
@@ -1107,7 +1107,7 @@ async function contactsRotationSession(): Promise<{
     keyResolver: owner.keyResolver
   } as ControllerProfile
   const initClientSpy = vi
-    .spyOn(WASRemoteStore, 'initClient')
+    .spyOn(PWSRemoteStore, 'initClient')
     .mockResolvedValue({ remoteStore })
   const { storage } = await StorageManager.initStorageClients({
     user,

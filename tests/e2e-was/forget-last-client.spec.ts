@@ -1,5 +1,5 @@
 /**
- * The last-enrolled-client forget transition, end to end (WAS mode): an
+ * The last-enrolled-client forget transition, end to end (PWS mode): an
  * account that has exactly one connected browser forgets it, and lands
  * ladder-anchored, with no enrolled client. That is the shape a
  * credential-anchored signup starts in.
@@ -26,7 +26,7 @@
  * what seals them: its heads must anchor at or past the removal entry,
  * signed by a key the post-removal document lists.
  *
- * Every stage pays the deliberately slow unlock KDF on top of several WAS
+ * Every stage pays the deliberately slow unlock KDF on top of several PWS
  * ceremonies, hence `test.slow()` and the generous timeouts.
  */
 import type { Page } from '@playwright/test'
@@ -253,7 +253,7 @@ test.describe('The last-enrolled-client forget transition', () => {
 
       // The ceremony ends in a hard reload onto the login page (the wipe has
       // just deleted the storage this tab's handles point at). The ceremony
-      // runs several ladder-signed WAS writes with no UI of its own; a
+      // runs several ladder-signed PWS writes with no UI of its own; a
       // failure is far easier to place with the page's own errors in hand,
       // so the console capture's error lines for this page ride the timeout.
       try {

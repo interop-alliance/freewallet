@@ -183,10 +183,10 @@ test.describe('CHAPI DID Authentication', () => {
   test('a DID method this deployment cannot present is blocked before login', async ({
     page
   }) => {
-    // Local mode configures no WAS (and so no key server), so no session here
+    // Local mode configures no PWS (and so no key server), so no session here
     // publishes an account document: `web` is refused on deployment
     // capability alone, before a password box renders. The post-login half of
-    // the gate, and the methods a WAS deployment can present, live in
+    // the gate, and the methods a PWS deployment can present, live in
     // `tests/e2e-was/did-web.spec.ts`.
     await injectGetEvent(page, {
       origin: 'https://verifier.example',

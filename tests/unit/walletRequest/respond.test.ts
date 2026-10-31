@@ -238,7 +238,7 @@ function grant({
 
 let directory: ReturnType<typeof memoryConnectionsStore>
 // The directory's container URL as the session reports it; `undefined` on
-// a guest or no-WAS session.
+// a guest or no-PWS session.
 let directorySpaceUrl: string | undefined
 // Every directory put from this ordinal on (1-based) fails.
 let entryThrowsFrom: number | null
@@ -522,7 +522,7 @@ describe('composeAndDeliverResponse', () => {
     })
 
     it('writes a zero-grant entry on a session with no Space', async () => {
-      // A guest or no-WAS session: the directory has no container URL.
+      // A guest or no-PWS session: the directory has no container URL.
       directorySpaceUrl = undefined
       state.appConnectResult = {
         firstRun: true,

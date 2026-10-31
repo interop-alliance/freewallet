@@ -60,7 +60,7 @@ step on the way to it.
 
 Reopen this decision when one or more of the following holds:
 
-1. The WAS spec defines a per-caller filter on a collection read under
+1. The PWS spec defines a per-caller filter on a collection read under
    its authorization profile, so one collection can serve different
    subsets to different valid holders. That satisfies the rule by other
    means and is the gate pivot, not a reopening of the leak.

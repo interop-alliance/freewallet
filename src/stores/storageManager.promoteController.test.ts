@@ -22,14 +22,14 @@ import type { IZcap } from '@interop/pws-client'
 import type { ControllerProfile } from '@/types/auth'
 import { StorageManager } from './storageManager'
 import { generateVaultKeys } from '@/stores/testing/vaultKeys'
-import type { WASRemoteStore } from './wasRemoteStore'
+import type { PWSRemoteStore } from './pwsRemoteStore'
 
 const ACCOUNT_DID = 'did:webvh:QmScid:was.example:space:s-space'
 
 /**
  * A recording stand-in for the remote store's promotion surface: the Space
  * handle's `describeWithEtag`, the controller rebinds, and the promotion PUT.
- * The read answers as a real WAS server does, with the Description and its
+ * The read answers as a real PWS server does, with the Description and its
  * validator, since the validator is what the promotion write is pinned to.
  */
 function fakeRemote({
@@ -52,7 +52,7 @@ function fakeRemote({
     spaceHandle: () => ({ describeWithEtag: describeSpace }),
     rebindController,
     promoteSpaceController
-  } as unknown as WASRemoteStore
+  } as unknown as PWSRemoteStore
   return {
     remoteStore,
     promoteSpaceController,
@@ -68,7 +68,7 @@ const VAULT_KEYS = await generateVaultKeys()
  * signer-shaped key agent (`didKeyZcapClient` only calls `getSigner()`) and
  * the account's did:webvh.
  */
-function managerFor(remoteStore: WASRemoteStore): {
+function managerFor(remoteStore: PWSRemoteStore): {
   manager: StorageManager
   profile: ControllerProfile
 } {

@@ -15,7 +15,7 @@ import { describe, expect, it } from 'vitest'
 import { browserLocalSessionPersistence } from '@/session/persistence'
 import { StorageManager } from '@/stores/storageManager'
 import { generateVaultKeys } from '@/stores/testing/vaultKeys'
-import type { WASRemoteStore } from '@/stores/wasRemoteStore'
+import type { PWSRemoteStore } from '@/stores/pwsRemoteStore'
 import type { ControllerProfile } from '@/types/auth'
 
 const ACCOUNT_DID =
@@ -25,7 +25,7 @@ const ACCOUNT_DID =
  * A remote store bound to the promoted controller already, whose one
  * describe confirms the server agrees.
  */
-function promotedRemoteStore(): WASRemoteStore {
+function promotedRemoteStore(): PWSRemoteStore {
   return {
     controller: ACCOUNT_DID,
     spaceHandle: () => ({
@@ -34,7 +34,7 @@ function promotedRemoteStore(): WASRemoteStore {
         etag: '"1"'
       })
     })
-  } as unknown as WASRemoteStore
+  } as unknown as PWSRemoteStore
 }
 
 /**

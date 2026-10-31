@@ -6,7 +6,7 @@
  * `provisionEncryptedCollection` they ride.
  *
  * The session is replica-less, since app collections are remote-only on
- * every session kind. The remote WAS store is a structural fake over the
+ * every session kind. The remote PWS store is a structural fake over the
  * in-memory descriptor stores (each collection's governing log, with real
  * create-if-absent semantics), the stored `/meta` values, and the raw
  * resource bodies per collection. Its index declaration seals the schema
@@ -55,7 +55,7 @@ import {
 import { TEST_SERVICE_DESCRIPTION } from '../../tests/shared/wasServiceFixture'
 import { StorageManager } from './storageManager'
 import { generateVaultKeys } from './testing/vaultKeys'
-import { WASRemoteStore } from './wasRemoteStore'
+import { PWSRemoteStore } from './pwsRemoteStore'
 
 type Keys = { keyAgreementKey: IKeyAgreementKey; keyResolver: IKeyResolver }
 
@@ -119,7 +119,7 @@ async function sealSchema({
 }
 
 /**
- * A structural fake of WASRemoteStore holding what the app-collection import
+ * A structural fake of PWSRemoteStore holding what the app-collection import
  * reaches: the governing logs (through `stores`), the plaintext collections,
  * the stored `/meta` values, and each collection's raw resource bodies.
  *
@@ -128,11 +128,11 @@ async function sealSchema({
  */
 function makeFakeRemote(stores: MemoryDescriptorStores) {
   // A bytes Resource of an encrypted collection is written by a real
-  // WASRemoteStore over an in-memory WAS server, so its envelope, its chunks,
+  // PWSRemoteStore over an in-memory PWS server, so its envelope, its chunks,
   // the 412 read-back, and a pending stub are pws-client's own. The small
   // blob limit sends anything over 16 bytes down the chunked path.
   const server = memoryWasServer()
-  const bytesStore = new WASRemoteStore({
+  const bytesStore = new PWSRemoteStore({
     serviceDescription: TEST_SERVICE_DESCRIPTION,
     pinStore: memoryResourceLogPinStore(),
     baseServerUrl: MEMORY_SERVER_URL,
@@ -335,7 +335,7 @@ function makeFakeRemote(stores: MemoryDescriptorStores) {
       ]
     },
     putEncryptedResourceBytes: (
-      options: Parameters<WASRemoteStore['putEncryptedResourceBytes']>[0]
+      options: Parameters<PWSRemoteStore['putEncryptedResourceBytes']>[0]
     ) => bytesStore.putEncryptedResourceBytes(options),
     async putPlaintextResource({
       collectionId,
@@ -390,7 +390,7 @@ function makeFakeRemote(stores: MemoryDescriptorStores) {
       held.set(resourceId, body)
       return { created: true }
     }
-  } as unknown as WASRemoteStore
+  } as unknown as PWSRemoteStore
   return {
     remoteStore,
     server,

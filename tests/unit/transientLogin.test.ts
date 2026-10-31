@@ -359,7 +359,7 @@ describe('routeUnlockLogin -- the post-KDF login-route decision', () => {
     expect(hasClientKeyRecord).not.toHaveBeenCalled()
   })
 
-  it('routes remembered with no WAS server, refusing an explicit transient ask', async () => {
+  it('routes remembered with no PWS server, refusing an explicit transient ask', async () => {
     state.wasUrl = undefined
     const routed = await routeUnlockLogin({ kdf: KDF, credential: CREDENTIAL })
     expect(routed.login).toBe('remembered')
@@ -468,7 +468,7 @@ describe('transientSessionFromKeyringHit -- typed refusals', () => {
   })
 
   it('treats a record without standing authority as an invariant bug', async () => {
-    // A standing record is the only record a WAS signup produces, so a
+    // A standing record is the only record a PWS signup produces, so a
     // plain pointer record here is a producer bug, not a typed refusal:
     // a plain Error, deliberately outside the reason union.
     const err = await refusalFor(makeFound({ standing: undefined }))

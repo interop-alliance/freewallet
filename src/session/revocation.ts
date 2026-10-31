@@ -369,7 +369,7 @@ async function revokeEnrolledClientHeld({
     // The post-removal did:web projection's store. The removal entry writes
     // `did.jsonl` alone, so without this the served `id/did.json` would keep
     // naming the client the log has struck -- a revocation bypass for a
-    // did:web verifier, though WAS authorization reads the log and never the
+    // did:web verifier, though PWS authorization reads the log and never the
     // projection. On the ladder branch the PUT lands immediately BEFORE the
     // entry, through the capability held at call time, since the renewal
     // above may have replaced it; on the enrolled branch it lands after,

@@ -63,7 +63,7 @@ export const landingStyles = {
     py: 1.25
   },
   /**
-   * Build-config warning shown below the hero card (e.g. missing WAS server).
+   * Build-config warning shown below the hero card (e.g. missing PWS server).
    */
   configWarning: {
     color: 'error.main',

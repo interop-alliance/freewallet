@@ -220,7 +220,7 @@ test.describe.serial('the CHAPI popup on a transient session', () => {
 
       // The DIDAuth proof is bound to the request, and BOTH the holder and
       // the verification method are the visit key's bare did:key: the
-      // `<clientAnnexDid>#<vm>` form belongs to WAS invocations alone,
+      // `<clientAnnexDid>#<vm>` form belongs to PWS invocations alone,
       // and an app-side loader has to be able to resolve what it reads here.
       expect(response.data.proof.challenge).toBe(challenge)
       expect(response.data.proof.domain).toBe(APP_DOMAIN)
@@ -253,7 +253,7 @@ test.describe.serial('the CHAPI popup on a transient session', () => {
       // publishes that key under `capabilityDelegation` as well as
       // `capabilityInvocation` (wallet-core 0.58.0). Under an annex VM
       // published for invocation alone every one of these calls came back
-      // 404, which is how WAS renders an unauthorized request.
+      // 404, which is how PWS renders an unauthorized request.
       const app = await appZcapClient(appKeySeed(response))
       // The granted target is the Collection's canonical container URL, so
       // it already carries its trailing slash and every URL below is joined
@@ -382,7 +382,7 @@ test.describe.serial('the CHAPI popup on a transient session', () => {
        * PUT is the grant not covering PUT. The URL is the one the GET above
        * just read with a 200, so the refusal is authorization and not a
        * missing route. The body is a well-formed Collection Metadata object,
-       * so the pre-auth shape check (a 400) cannot stand in for it. WAS masks
+       * so the pre-auth shape check (a 400) cannot stand in for it. PWS masks
        * the denial as a 404 and the client throws on it. A post-authorization
        * refusal would carry some other status, so the status is asserted
        * exactly.

@@ -1,5 +1,5 @@
 /**
- * Helpers for classifying errors thrown by the WAS storage client, so the UI
+ * Helpers for classifying errors thrown by the PWS storage client, so the UI
  * can distinguish "the storage server could not be reached" from ordinary
  * application errors and show an appropriate on-screen message.
  *
@@ -14,12 +14,12 @@
 import { errorNameOf } from '@interop/wallet-core/menders'
 
 /**
- * Returns true when the given error indicates the remote WAS storage server
+ * Returns true when the given error indicates the remote PWS storage server
  * could not be reached or is failing -- i.e. a network/CORS failure (the fetch
  * never returned a usable response, so `PwsError.status` is undefined) or a 5xx
  * server fault. Used to offer the user a guest-mode fallback at login time.
  *
- * Some call sites (e.g. `WASRemoteStore.ensureUserCollections`) rethrow the
+ * Some call sites (e.g. `PWSRemoteStore.ensureUserCollections`) rethrow the
  * underlying `PwsError` wrapped in a plain `Error` with the original as
  * `cause`, so the `cause` chain is walked (with a depth/cycle guard) before
  * classifying.

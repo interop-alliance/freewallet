@@ -18,7 +18,7 @@
  * parameters that hold at its version, so the last line carries the current
  * `updateKeys` and `nextKeyHashes` and the current roster state.
  *
- * Every reader takes the server's data root as `dataDir`. The Playwright WAS
+ * Every reader takes the server's data root as `dataDir`. The Playwright PWS
  * suite passes its run's root (`tests/e2e-was/wasDataDir.ts`), and the node
  * harness passes its temp backend's (`tests/harness/`), so both read the
  * same stores through this one implementation.

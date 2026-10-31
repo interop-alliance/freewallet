@@ -201,7 +201,7 @@ const shareDetail: ICapabilityQueryDetail = {
 /**
  * A session whose `keyAgent` really signs (for the round-trip VP
  * test), but whose `zcapClient.delegate` and `storage.ensureCollection` are
- * stubbed -- delegation and provisioning hit the WAS server in production.
+ * stubbed -- delegation and provisioning hit the PWS server in production.
  */
 let session: Session
 let delegated: Array<Record<string, unknown>>

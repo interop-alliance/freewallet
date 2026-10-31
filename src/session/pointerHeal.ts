@@ -1,6 +1,6 @@
 /**
  * The did:webvh heal: an account whose signup-time backfill never ran (a KMS
- * or WAS hiccup left the pointer naming a did:key) re-attempts the pointer
+ * or PWS hiccup left the pointer naming a did:key) re-attempts the pointer
  * backfill and the controller promotion, behind provisioning -- which is
  * where `ensureDidWebvh` publishes (or adopts) the log and sets
  * `profile.didWebvh`.

@@ -496,7 +496,7 @@ export async function establishCredentialAnchoredAccount({
 }): Promise<CredentialAnchoredEstablishment> {
   if (!WAS_BASE_SERVER_URL) {
     throw new TypeError(
-      'The credential-anchored establishment requires a configured WAS server.'
+      'The credential-anchored establishment requires a configured PWS server.'
     )
   }
   // One `mark` for the whole establishment: it closes each stage's timing
@@ -819,7 +819,7 @@ export async function mendCredentialAnchoredAccount({
 }): Promise<CredentialAnchoredMendReport> {
   if (!WAS_BASE_SERVER_URL) {
     throw new TypeError(
-      'The credential-anchored mend requires a configured WAS server.'
+      'The credential-anchored mend requires a configured PWS server.'
     )
   }
   const ceremony = 'credential-anchored-mend'

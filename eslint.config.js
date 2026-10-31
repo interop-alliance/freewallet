@@ -64,9 +64,9 @@ export default defineConfig([
     }
   },
   {
-    // `@interop/pws-sync/testing` is test fixtures: its fake WAS server accepts
+    // `@interop/pws-sync/testing` is test fixtures: its fake PWS server accepts
     // every write and serves a plausible changes feed, so a production import
-    // would show a healthy sync status over a replica writing nothing to WAS.
+    // would show a healthy sync status over a replica writing nothing to PWS.
     // `@interop/wallet-core/testing` is the recorded-grant and signer-check
     // fixtures, plausible zcaps that verify nowhere. Tests may use them;
     // `src/**/*.test.*` and `tests/` are outside this glob.

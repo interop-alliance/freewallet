@@ -459,7 +459,7 @@ async function keystoreListsKey({
  *   Promise<KeystoreAgent>` -- the MINT path's create-or-find, called only
  *   past the probe's miss
  * @param options.remoteStore {object}   the `keys.json` probe and the
- *   `id`-collection store (`WASRemoteStore` satisfies it structurally)
+ *   `id`-collection store (`PWSRemoteStore` satisfies it structurally)
  * @param options.did {string}   the did:web projection id, from
  *   {@link didWebOfSpace}
  * @param options.spaceReady {Promise<unknown>}   resolves once the account

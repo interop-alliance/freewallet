@@ -61,7 +61,7 @@ export interface User {
 export interface ControllerProfile {
   keyAgent?: ICapabilityAgent
   zcapClient: ZcapClient
-  // X25519 key agreement key used to encrypt/decrypt the EDV-over-WAS
+  // X25519 key agreement key used to encrypt/decrypt the EDV-over-PWS
   // encrypted collections (recipient zero of every key-epoch roster): the
   // user key's KAK when the account carries one, else the legacy seed-derived
   // vault KAK (the Montgomery form of the Ed25519 signing key).
@@ -81,7 +81,7 @@ export interface ControllerProfile {
   // The account's one KMS-held key binding, read from `key-map/keys.json`
   // once the KMS-authentication stage has run: the verification-method id it
   // was minted under (the did:web projection's) and the KMS key id its
-  // signer invokes. Absent for guests, without a KMS/WAS server, or when the
+  // signer invokes. Absent for guests, without a KMS/PWS server, or when the
   // stage failed. It records a binding, not a published verification method:
   // whether the account can present it is decided against the resolved
   // account document.
@@ -89,7 +89,7 @@ export interface ControllerProfile {
   // The user's published did:webvh DID, present once the log has been
   // published. The update keys behind the log are client-held
   // (`clientWebvhKeys` below), so the profile carries only the id. Absent
-  // when the did:webvh flag is off, without a WAS server, or when
+  // when the did:webvh flag is off, without a PWS server, or when
   // provisioning failed -- everything degrades to did:web behavior.
   didWebvh?: { did: string }
   // This client's did:webvh update-key seeds (active + staged), recovered
@@ -119,7 +119,7 @@ export interface ControllerProfile {
   // The account pointer { did, spaceUrl } this client holds as local state
   // (recovered from the keyring record at login, or stamped at provisioning).
   // The DID locates its own log and server, so nothing beside it is stored.
-  // Discovery only; absent for guests and no-WAS sessions.
+  // Discovery only; absent for guests and no-PWS sessions.
   accountPointer?: AccountPointer
   // The per-user key (user key) recovered from the local client-key record (or
   // freshly minted at provisioning), held in memory so bind flows can carry
@@ -173,7 +173,7 @@ export interface ControllerProfile {
       delegatedClients?: IZcap
     }) => Promise<{ delegation: IZcap; delegatedClients?: IZcap }>
   }
-  // The invocation capability the session's WAS requests ride, when the
+  // The invocation capability the session's PWS requests ride, when the
   // session's authority over the data Space is a delegated Space-subtree
   // zcap rather than the root capability -- the transient session's
   // generation delegation. Absent for remembered sessions, whose invocations
@@ -185,7 +185,7 @@ export interface ControllerProfile {
   // log (`src/session/verifiedLog.ts`): one verification per session instead
   // of one per surface, keyed on the account pointer and invalidated by every
   // ceremony that extends the log. Created on first use; absent until then,
-  // and on sessions that never read the log (guests, no-WAS).
+  // and on sessions that never read the log (guests, no-PWS).
   verifiedLog?: VerifiedLogCache
 }
 

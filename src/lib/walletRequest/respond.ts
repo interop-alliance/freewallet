@@ -170,7 +170,7 @@ async function recordRequestActivity({
           : [],
       expires: 'expires' in zcap ? zcap.expires : '',
       // The full delegated capability, kept verbatim alongside the display
-      // summary: the WAS revocation endpoint needs the capability document
+      // summary: the PWS revocation endpoint needs the capability document
       // itself, so a later App Connect revocation can retire this grant.
       zcap
     }

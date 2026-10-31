@@ -6,7 +6,7 @@
   account-management ceremonies from a credential-only transient
   session. Extracted at that design's approval, from its export and
   import section and its rejected alternatives.
-- Affects: freewallet (`src/stores/wasRemoteStore.ts`'s export and
+- Affects: freewallet (`src/stores/pwsRemoteStore.ts`'s export and
   import calls, the Storage page's two buttons, the deleted session-kind
   refusal), was-teaching-server (the client-annex clause, relied on
   unchanged), app-connect-spec `decisions/0003` (that clause's admission
@@ -47,7 +47,7 @@ its encryption descriptor, the collection and resource policies,
 arbitrary resources, and Space-scoped revocation records, all
 create-if-absent. The design review first read that as a controller-tier
 write admitted by a string-prefix accident. It is not. The first
-predicate admits any path under the Space URL with any WAS verb. It
+predicate admits any path under the Space URL with any PWS verb. It
 excludes only the bare-Space-URL operations, which are the Space
 Description PUT that rewrites the controller and the Space DELETE, plus
 keystores. A transient session can therefore already make every write

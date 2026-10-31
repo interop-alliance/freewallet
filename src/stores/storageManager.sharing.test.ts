@@ -14,7 +14,7 @@
  * semantics) that stand in for each collection's governing log -- the real
  * `initRecipients` / `addRecipient` / `removeRecipient` exercise their real
  * write path against them, and `StorageManager` reaches them through the
- * injected `descriptorLogs` seam. The remote WAS store is a structural fake
+ * injected `descriptorLogs` seam. The remote PWS store is a structural fake
  * around that: a `revoke` recorder on the Space handle, the raw synced-resource
  * bodies, the stored `/meta` values, and a `collectionEncryption` served from
  * the same stores (as the server derives a Collection Description's
@@ -118,7 +118,7 @@ import {
 } from '@interop/wallet-core/testing'
 import { mintUserKey, userKeyVaultKeys } from '@interop/wallet-core/keys'
 import { EXTERNAL_REQUEST_ORIGIN } from '@/lib/walletRequest/externalRequest'
-import type { WASRemoteStore } from './wasRemoteStore'
+import type { PWSRemoteStore } from './pwsRemoteStore'
 import type { StorageCollection } from '@/lib/storage'
 import type { StoredContact } from '@/types/contact'
 
@@ -176,7 +176,7 @@ async function generateAppIdentity(): Promise<{
 }
 
 /**
- * A structural fake of WASRemoteStore over the in-memory descriptor stores and
+ * A structural fake of PWSRemoteStore over the in-memory descriptor stores and
  * a revoke-recording Space handle. `collectionEncryption` is served from those
  * same stores -- the server derives a Collection Description's `encryption`
  * member from the collection's governing log -- so a recipient op through a
@@ -193,7 +193,7 @@ function makeFakeRemote({
    */
   revoke?: (zcap: unknown) => Promise<void>
 }): {
-  remoteStore: WASRemoteStore
+  remoteStore: PWSRemoteStore
   revoked: unknown[]
   /**
    * The collection ids `ensureGovernedCollection` was asked for, in order.
@@ -341,7 +341,7 @@ function makeFakeRemote({
     }) {
       resourcesFor(logicalKey).delete(resourceId)
     }
-  } as unknown as WASRemoteStore
+  } as unknown as PWSRemoteStore
   const seedResource = ({
     logicalKey,
     resourceId,
@@ -390,7 +390,7 @@ function makeFakeRemote({
 }
 /**
  * Builds the encrypted-collection ciphers over the owner's keys and the given
- * per-collection descriptors (keyed by WAS collection id), mirroring what
+ * per-collection descriptors (keyed by PWS collection id), mirroring what
  * StorageManager builds internally. Every encrypted collection carries a
  * key-epoch roster from birth, so a collection the test supplies no
  * descriptor for gets a local one-epoch descriptor wrapped to the owner --
@@ -438,7 +438,7 @@ const INDEX_SCHEMA = {
  * Mints the collection's stored `/meta` value the way a Collection-handle
  * `declareIndex` would: the schema encrypted into a metadata envelope by the
  * same EDV codec, AEAD-bound to the collection id, under the collection's own
- * descriptor and keys. What `WASRemoteStore.collectionMeta` would hand back.
+ * descriptor and keys. What `PWSRemoteStore.collectionMeta` would hand back.
  *
  * @param options {object}
  * @param options.collectionId {string}
@@ -509,7 +509,7 @@ async function storedCredentialEnvelopes(
  * of each standard encrypted collection, as the shared provisioning two-step
  * would have -- `shareCollection` now assumes every encrypted collection
  * already carries its epochs and always `addRecipient`s. Returns the
- * descriptors (keyed by WAS collection id) to build the ciphers and seed the
+ * descriptors (keyed by PWS collection id) to build the ciphers and seed the
  * StorageManager with, so a mid-test cipher rebuild keeps every collection
  * readable. `blindedIndex` mints each collection's blinded-index HMAC key
  * alongside epoch[0], as wallet provisioning does.
@@ -1966,7 +1966,7 @@ describe('StorageManager.revokeConnectionGrants', () => {
    */
   function makeRevokeRemote(
     revoke: (zcap: unknown) => Promise<void>
-  ): WASRemoteStore {
+  ): PWSRemoteStore {
     const space = { revoke } as unknown as Space
     return {
       spaceId: 's-space',
@@ -1974,7 +1974,7 @@ describe('StorageManager.revokeConnectionGrants', () => {
       spaceHandle() {
         return space
       }
-    } as unknown as WASRemoteStore
+    } as unknown as PWSRemoteStore
   }
 
   /**

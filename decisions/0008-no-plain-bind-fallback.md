@@ -25,7 +25,7 @@ the cause.
 
 ## Decision
 
-On a WAS deployment, no ceremony leaves an unlock record plain on a
+On a PWS deployment, no ceremony leaves an unlock record plain on a
 transient-reachable account. Every producer either writes the
 standing-layout record (the signups, folded into the
 credential-anchored genesis) or fails-or-reports when the establishment
@@ -49,9 +49,9 @@ do-not-reopen.
 
 ## Consequences
 
-- The signups run the credential-anchored establishment for every WAS
+- The signups run the credential-anchored establishment for every PWS
   account (the FW-315 design's option A); the plain bind survives only
-  on no-WAS deployments, where no unlock Space exists and nothing can
+  on no-PWS deployments, where no unlock Space exists and nothing can
   be standing.
 - The recovery tail reports a failed establishment truthfully (the
   credential IS live, only the standing upgrade is pending) through its

@@ -417,7 +417,7 @@ export function refuseUntrustedInbox({
 }
 
 /**
- * The core-profile feature token by which a WAS server promises to record
+ * The core-profile feature token by which a PWS server promises to record
  * `createdBy` on every Resource, Collection, and Space created under a
  * capability invocation.
  */

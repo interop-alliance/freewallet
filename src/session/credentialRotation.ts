@@ -166,9 +166,9 @@ function annexInventoryEntry(
  * collection re-epoch'd onto the fresh key.
  *
  * Resolves to `null` -- nothing to retire -- when the method records no
- * standing configuration (a no-WAS bind never established one) or
+ * standing configuration (a no-PWS bind never established one) or
  * when this session cannot act as an enrolled client on a promoted account
- * (a guest, a no-WAS deployment, an unpromoted account). Otherwise the
+ * (a guest, a no-PWS deployment, an unpromoted account). Otherwise the
  * ceremony is real and its failures propagate: the caller decides whether the
  * surrounding change can still be reported as done.
  *

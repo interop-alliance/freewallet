@@ -61,7 +61,7 @@ export function loginErrorKey({
   err: unknown
   label: string
 }): { key: string; transientReason?: TransientLoginUnavailableReason } {
-  // The WAS storage server is unreachable -- offer a guest-mode fallback.
+  // The PWS storage server is unreachable -- offer a guest-mode fallback.
   if (isStorageUnreachable(err)) {
     return { key: 'auth.errors.storageUnreachable' }
   }
@@ -265,7 +265,7 @@ export function transientRefusalKey(
     case 'no-generation-delegation':
       return 'auth.errors.transientUnavailable'
     // The configuration refusal (a `rememberBrowser: false` caller on a
-    // no-WAS deployment). The login form never produces it; the
+    // no-PWS deployment). The login form never produces it; the
     // developer-facing string is the error's own message, carried in the log
     // above.
     case 'no-was-server':

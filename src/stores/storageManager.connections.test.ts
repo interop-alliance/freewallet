@@ -2,8 +2,8 @@
 /**
  * Unit tests for the `connections` directory's store seam on
  * `StorageManager` (`connectionsDirectory`): the session's one directory
- * store, resolved to wallet-core's WAS adapter on a session with a remote
- * Space and to the local adapter on a guest or no-WAS session.
+ * store, resolved to wallet-core's PWS adapter on a session with a remote
+ * Space and to the local adapter on a guest or no-PWS session.
  *
  * - The binding refuses a `connections` collection whose current epoch lists
  *   a kid outside the account's user key generations, one whose Collection
@@ -19,11 +19,11 @@
  * - A transient session writes and reads the directory under its generation
  *   delegation.
  * - `decryptCollectionResource` opens a directory entry after a rotation.
- * - A guest or no-WAS session keeps its directory locally, its ids derived
+ * - A guest or no-PWS session keeps its directory locally, its ids derived
  *   under the locally minted blinded-index key.
  *
- * The remote side is a real `WASRemoteStore` over a real `PwsClient`, served
- * by the in-memory WAS server, with real EDV ciphers over generated keys.
+ * The remote side is a real `PWSRemoteStore` over a real `PwsClient`, served
+ * by the in-memory PWS server, with real EDV ciphers over generated keys.
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { getRxStorageMemory } from 'rxdb/plugins/storage-memory'
@@ -69,7 +69,7 @@ import {
 } from '../../tests/unit/memoryWasServer'
 import { StorageManager } from './storageManager'
 import { generateVaultKeys } from './testing/vaultKeys'
-import { WASRemoteStore } from './wasRemoteStore'
+import { PWSRemoteStore } from './pwsRemoteStore'
 
 const SPACE_ID = 's-space'
 const AGENT = 'did:key:z6MkhaXgBZDvotDkL5257faiztiGiC2QtKLGpbnnEGta2doK'
@@ -107,14 +107,14 @@ async function installDirectory({
 }
 
 /**
- * A remote session's storage manager over the in-memory WAS server: the
+ * A remote session's storage manager over the in-memory PWS server: the
  * descriptors read through the in-memory logs, the requests through a real
- * `WASRemoteStore` bound to `capability` when one is given.
+ * `PWSRemoteStore` bound to `capability` when one is given.
  *
  * @param options {object}
  * @param options.owner {VaultKeys}   the session's vault keys
  * @param options.stores {MemoryDescriptorStores}
- * @param options.server {object}   the in-memory WAS server
+ * @param options.server {object}   the in-memory PWS server
  * @param [options.capability] {IZcap}   the generation delegation of a
  *   transient session
  * @param [options.generator] {CollectionGenerator}   the directory's
@@ -138,7 +138,7 @@ function remoteSession({
   generator?: CollectionGenerator
   generationKids?: string[]
 }): StorageManager {
-  const remoteStore = new WASRemoteStore({
+  const remoteStore = new PWSRemoteStore({
     serviceDescription: TEST_SERVICE_DESCRIPTION,
     pinStore: memoryResourceLogPinStore(),
     baseServerUrl: MEMORY_SERVER_URL,
@@ -390,7 +390,7 @@ describe('the directory binding', () => {
   })
 
   it('reads the metadata again after an absent verdict, and opens the directory once it is present', async () => {
-    // WAS masks an unauthorized read as a 404, so one missing Collection
+    // PWS masks an unauthorized read as a 404, so one missing Collection
     // Metadata object may be transient and is not kept for the descriptor.
     const owner = await generateVaultKeys()
     const stores = memoryDescriptorStores()
@@ -636,7 +636,7 @@ describe('a transient session', () => {
   })
 })
 
-describe('a guest or no-WAS session', () => {
+describe('a guest or no-PWS session', () => {
   beforeEach(() => {
     // `BrowserStore.userExists` probes the browser's database list; a local
     // session never branches on the answer, so an empty listing is enough.

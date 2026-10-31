@@ -1,13 +1,13 @@
 # Deployment
 
-The production image serves the built SPA from nginx and proxies the WAS
+The production image serves the built SPA from nginx and proxies the PWS
 server's routes on the same origin. The repo also carries an example Fly.io
 configuration and deploy workflows for staging and production. The server side
 is covered by the was-teaching-server repo's `docs/deployment-fly.io.md`.
 
 ## Why one origin
 
-The wallet's WAS requests carry `Authorization`, `Capability-Invocation` and
+The wallet's PWS requests carry `Authorization`, `Capability-Invocation` and
 `Digest` headers. Sent to another origin, each one needs a CORS preflight
 first. Browsers cache a preflight per URL, and a signup touches many distinct
 URLs, so the preflights add a round trip to most of signup's requests. With
@@ -21,7 +21,7 @@ browser --> https://wallet.example.com --> TLS termination
                                       [this image: nginx]
                                               |  server routes
                                               v
-                                         [WAS server]
+                                         [PWS server]
 ```
 
 The image listens on plain HTTP, port 8080. Something in front of it
@@ -76,7 +76,7 @@ from `deploy/nginx.conf.template`.
 
 | Path                                                                                          | Served by                                |
 | --------------------------------------------------------------------------------------------- | ---------------------------------------- |
-| `/spaces`, `/space/*`, `/kms/*`, `/workflows/*`, `/api/*`, `/common/*`, `/service`, `/health` | the WAS server, proxied                  |
+| `/spaces`, `/space/*`, `/kms/*`, `/workflows/*`, `/api/*`, `/common/*`, `/service`, `/health` | the PWS server, proxied                  |
 | `/assets/*`                                                                                   | nginx: the file, or a 404                |
 | anything else                                                                                 | nginx: a `public/` file, or `index.html` |
 
@@ -160,7 +160,7 @@ Then open `http://localhost:8080`.
 ## Example: Fly.io
 
 `fly.toml` and the deploy workflows run the image as one Fly app per
-environment, with the WAS server as a second app deployed from its own repo.
+environment, with the PWS server as a second app deployed from its own repo.
 nginx reaches the server over Flycast, a private address inside the Fly
 organization's network, so the server app needs no public IP. Each repo
 deploys its own app.

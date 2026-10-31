@@ -1,6 +1,6 @@
 /**
  * An in-memory `connections` store with ETags, honoring `ifMatch` and
- * `ifNoneMatch` the way the WAS server does, for tests that drive the
+ * `ifNoneMatch` the way the PWS server does, for tests that drive the
  * directory logic in `@interop/wallet-core/connections` against a store the
  * test can inspect. Mirrors wallet-core's own test fixture, which its
  * package does not export.

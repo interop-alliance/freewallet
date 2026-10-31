@@ -65,6 +65,50 @@ describe('resolveGrant recipient presence', () => {
   })
 })
 
+describe('resolveGrant on a sub-path deployment', () => {
+  // The Space URL is the grant's root, so every target it derives keeps
+  // the server's mount path. A target that dropped it would name a URL
+  // the server does not serve.
+  const SUB_PATH_SPACE_URL = 'https://host.test/was/space/abc/'
+
+  it('names a provisioned collection under the base path', () => {
+    const { target } = resolveGrant({
+      descriptor: DESCRIPTOR,
+      spaceUrl: SUB_PATH_SPACE_URL,
+      collections: existingCollectionsFrom([])
+    })
+    expect(isSatisfiable(target)).toBe(true)
+    expect(target.invocationTarget).toBe(
+      'https://host.test/was/space/abc/docs/'
+    )
+  })
+
+  it('admits a string target under the base path and refuses one at the root', () => {
+    const collections = existingCollectionsFrom([{ id: 'notes' }])
+    const underBasePath = resolveGrant({
+      descriptor: {
+        ...DESCRIPTOR,
+        invocationTarget: `${SUB_PATH_SPACE_URL}notes/`
+      },
+      spaceUrl: SUB_PATH_SPACE_URL,
+      collections
+    })
+    expect(isSatisfiable(underBasePath.target)).toBe(true)
+    expect(underBasePath.target.invocationTarget).toBe(
+      'https://host.test/was/space/abc/notes/'
+    )
+    const atRoot = resolveGrant({
+      descriptor: {
+        ...DESCRIPTOR,
+        invocationTarget: 'https://host.test/space/abc/notes/'
+      },
+      spaceUrl: SUB_PATH_SPACE_URL,
+      collections
+    })
+    expect(isSatisfiable(atRoot.target)).toBe(false)
+  })
+})
+
 describe('resolveGrant provisioning', () => {
   it('provisions a new and an existing private collection', () => {
     for (const collections of [

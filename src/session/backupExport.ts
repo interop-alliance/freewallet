@@ -308,7 +308,7 @@ export interface BackupExportProgress {
 /**
  * Whether this session can produce a backup. It establishes a standing
  * credential, so it needs an account-ceremony context and the user key, and
- * it exports Spaces, so it needs a remote backend: a guest and a no-WAS
+ * it exports Spaces, so it needs a remote backend: a guest and a no-PWS
  * deployment are offered no backup.
  *
  * @param options {object}

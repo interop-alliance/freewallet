@@ -287,7 +287,7 @@ describe('StorageManager app-key collection surface', () => {
   })
 
   it('refuses when the local replica of the key it names will not open', async () => {
-    // A guest or no-WAS session: the Resource `appKey` names is held locally
+    // A guest or no-PWS session: the Resource `appKey` names is held locally
     // but will not open, and nothing else binds the DID. Reading it as absent
     // would retire the entry and strand the key.
     const { storage, localStore } = await makeStorage()

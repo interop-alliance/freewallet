@@ -252,7 +252,7 @@ test('signup publishes the did:webvh projection as the only did.json writer', as
   }
 
   // The key-id map lives alone in the private `key-map` collection and is not
-  // public: an unauthenticated GET is refused (WAS returns 404 for both
+  // public: an unauthenticated GET is refused (PWS returns 404 for both
   // not-found and unauthorized).
   const keysUrl = didJsonUrl.replace('/id/did.json', '/key-map/keys.json')
   const keysRes = await page.request.get(keysUrl)

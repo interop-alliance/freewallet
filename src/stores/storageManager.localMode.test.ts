@@ -1,5 +1,5 @@
 /**
- * Unit tests for the local-mode (guest / no-WAS-server) storage provisioning
+ * Unit tests for the local-mode (guest / no-PWS-server) storage provisioning
  * path: a session with no remote store still gets WORKING ciphers for every
  * encrypted standard collection, because `localOnlyDescriptors` mints a local
  * one-epoch descriptor per collection wrapped to the session's vault KAK.
@@ -80,7 +80,7 @@ function makeUser(): User {
 }
 
 /**
- * Runs `StorageManager.initStorageClients` the way a guest / no-WAS login
+ * Runs `StorageManager.initStorageClients` the way a guest / no-PWS login
  * does -- the same descriptor mint, cipher build, and local replica -- with
  * RxDB memory storage injected in place of IndexedDB, then provisions the
  * local collections so reads and writes can run.

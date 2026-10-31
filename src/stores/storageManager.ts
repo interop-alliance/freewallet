@@ -3,12 +3,12 @@
  * all pages. Every credential, public-link, and history read/write goes
  * through one `SyncedCollectionStore` backend, chosen ONCE at session
  * construction. A session that has a local replica (a remembered login, a
- * guest, a no-WAS session) serves them from the local `BrowserStore`
+ * guest, a no-PWS session) serves them from the local `BrowserStore`
  * (RxDB/IndexedDB), online or offline. A session that has none -- the
  * replica-less transient session, the default -- serves them remote-direct
- * over the remote WAS collections, and so does a CHAPI popup session. When
+ * over the remote PWS collections, and so does a CHAPI popup session. When
  * VITE_WAS_SERVER_URL (the server's base server URL) is set (and the
- * session is not a guest), a WASRemoteStore is attached as well: the sync
+ * session is not a guest), a PWSRemoteStore is attached as well: the sync
  * controller replicates a local replica's collections to it in the
  * background, and the storage browser / export / import / quota pages read
  * through it directly.
@@ -19,12 +19,12 @@
  * there would be stranded and a credential list would always come back empty.
  * A transient session constructs no BrowserStore at all. Either way the
  * backend reads and writes the standard synced collections straight over the
- * remote WAS collections, reproducing verbatim what background replication
+ * remote PWS collections, reproducing verbatim what background replication
  * would have pushed (the raw EDV envelope under its content-derived id,
  * `Key-Epoch` stamped) so the main app pulls those writes cleanly. Both
  * backends share the session's per-collection ciphers, so the envelope / id /
  * epoch logic lives once. The remote-direct backend is selected only when a
- * remote store is configured; a guest / no-WAS session always uses the local
+ * remote store is configured; a guest / no-PWS session always uses the local
  * BrowserStore.
  */
 import type {
@@ -175,7 +175,7 @@ import type { FetchedCollectionResource } from '@/lib/storageResource'
 import type { StoredAppKey, StoredCredential } from '@/types/credential'
 import type { StoredContact } from '@/types/contact'
 import { BrowserStore } from '@/stores/browserStore'
-import { WASRemoteStore } from '@/stores/wasRemoteStore'
+import { PWSRemoteStore } from '@/stores/pwsRemoteStore'
 import {
   RemoteDirectStore,
   type SyncedCollectionStore
@@ -470,7 +470,7 @@ async function decryptHeldAppResource({
  * its `encryption` member, its `custom` value, and its attribution.
  */
 type StandingAppCollection = NonNullable<
-  Awaited<ReturnType<WASRemoteStore['collectionMetadata']>>
+  Awaited<ReturnType<PWSRemoteStore['collectionMetadata']>>
 >
 
 /**
@@ -531,7 +531,7 @@ const CREDENTIAL_ACTIVITY_BUILDERS: Record<
   unshared: buildHistoryCredentialUnshared
 }
 
-// The WAS collection ids of the provision roster's encrypted collections --
+// The PWS collection ids of the provision roster's encrypted collections --
 // the set whose descriptors are acquired at session start and refreshed on an
 // unknown-epoch read: the synced ones, and the `connections` directory.
 const ENCRYPTED_COLLECTION_IDS = [...ENCRYPTED_WALLET_COLLECTION_IDS]
@@ -595,7 +595,7 @@ function directoryDescriptorRefusal({
 }
 
 /**
- * Descriptors for a session with no remote store (a guest, or no WAS server
+ * Descriptors for a session with no remote store (a guest, or no PWS server
  * configured). Every encrypted collection still carries a key-epoch roster from
  * birth, so each collection gets a local one-epoch descriptor, with its
  * blinded-index key, wrapped to the session's vault KAK alone (see
@@ -712,7 +712,7 @@ export interface DescriptorLogs {
  * @param options {object}
  * @param options.session {object}   the live session's profile and
  *   persistence strategy
- * @param options.remoteStore {WASRemoteStore}
+ * @param options.remoteStore {PWSRemoteStore}
  * @returns {DescriptorLogs}
  */
 function sessionDescriptorLogs({
@@ -720,7 +720,7 @@ function sessionDescriptorLogs({
   remoteStore
 }: {
   session: SessionCore
-  remoteStore: WASRemoteStore
+  remoteStore: PWSRemoteStore
 }): DescriptorLogs {
   return {
     source: sessionCollectionDescriptorSource({ session, remoteStore }),
@@ -794,7 +794,7 @@ function regressionWarningCache(
  *   store)
  * @param [options.cache] {object}   the localStorage meta cache
  * @param options.collectionIds {string[]}
- * @returns {Promise<Record<string, { custom?: unknown }>>}   keyed by WAS
+ * @returns {Promise<Record<string, { custom?: unknown }>>}   keyed by PWS
  *   collection id
  */
 async function acquireCollectionMetas({
@@ -962,7 +962,7 @@ export class AppCollectionMismatchError extends Error {
 /**
  * Manages storage operations for the wallet and a logged-in user profile:
  * routes all wallet reads/writes to the local active replica and exposes the
- * optional remote WAS backend for replication and remote-only features.
+ * optional remote PWS backend for replication and remote-only features.
  */
 export class StorageManager {
   // The local active replica -- absent in the replica-less (transient)
@@ -970,7 +970,7 @@ export class StorageManager {
   // in this browser and every synced-collection operation is served
   // remote-direct.
   #localStore?: BrowserStore
-  #remoteStore?: WASRemoteStore // Only set if VITE_WAS_SERVER_URL env var is present
+  #remoteStore?: PWSRemoteStore // Only set if VITE_WAS_SERVER_URL env var is present
   // The backend every synced-collection read/write routes through, chosen once
   // at construction: the local active replica, or the remote-direct popup
   // backend. Never re-forked per operation.
@@ -979,10 +979,10 @@ export class StorageManager {
   // readiness contract: its reads need no local provisioning).
   #remoteDirect: boolean
   // The per-collection document ciphers, kept here for the storage browser's own
-  // decrypt at the WAS seam (`decryptCollectionResource`) and rebuilt on a
+  // decrypt at the PWS seam (`decryptCollectionResource`) and rebuilt on a
   // descriptor refresh.
   #ciphers?: Record<string, DocCipher>
-  // The encrypted collections whose current cipher refuses, by WAS id, and
+  // The encrypted collections whose current cipher refuses, by PWS id, and
   // why: `stranded` when no key epoch names the vault KAK (see
   // `strandsReader`), `integrity` when an epoch entry naming it failed its
   // key-wrap check (`IntegrityError`). Rewritten at every cipher (re)build,
@@ -1007,18 +1007,18 @@ export class StorageManager {
     keyAgreementKey: IKeyAgreementKey
     keyResolver: IKeyResolver
   }
-  // The last-known per-collection encryption descriptors, keyed by WAS collection
+  // The last-known per-collection encryption descriptors, keyed by PWS collection
   // id, that the current ciphers were built from.
   #descriptors: Record<string, CollectionEncryption>
   // The last-known per-collection stored `/meta` values (the `custom` envelope
-  // carrying the persisted blinded-index schema), keyed by WAS collection id,
+  // carrying the persisted blinded-index schema), keyed by PWS collection id,
   // installed onto the ciphers at every (re)build so wallet writes emit
   // blinded `indexed` entries. Acquired and refreshed beside the descriptors.
   #metas: Record<string, { custom?: unknown }>
   // The descriptor cache for this account's Space -- localStorage or
   // in-memory by the session's persistence strategy -- the offline fallback
   // descriptor acquisition falls back to. Only set with a remote store (a
-  // guest / no-WAS session has no descriptors to cache).
+  // guest / no-PWS session has no descriptors to cache).
   #descriptorCache?: EncryptionDescriptorCache
   // The collection-metadata cache, beside the descriptor cache and on the
   // same storage tier.
@@ -1060,19 +1060,19 @@ export class StorageManager {
     }
   })
   // Lazily-built per-collection ciphers for App Connect app-provisioned
-  // (non-standard) encrypted collections, keyed by WAS collection id. The
+  // (non-standard) encrypted collections, keyed by PWS collection id. The
   // wallet decrypts these as an ordinary recipient with its vault KAK (recipient
   // zero), driven by the collection's fetched descriptor; built on first
   // decrypt-read from the storage browser, invalidated when a rekey lands.
   #appCiphers: Record<string, DocCipher> = {}
-  // The descriptors the `#appCiphers` entries were built from, keyed by WAS
+  // The descriptors the `#appCiphers` entries were built from, keyed by PWS
   // collection id -- the offline/lazy source for an app collection's cipher.
   #appDescriptors: Record<string, CollectionEncryption> = {}
   // The encrypted app collections the content migration has ensured this
-  // session, by WAS collection id. A Set, since the ids come from a bundle.
+  // session, by PWS collection id. A Set, since the ids come from a bundle.
   #importCollections = new Set<string>()
   // The ciphers the content migration reads and writes those collections'
-  // Resources through, keyed by WAS collection id, each beside the verified
+  // Resources through, keyed by PWS collection id, each beside the verified
   // descriptor it was built from. Each carries the collection's index schema
   // as it stands, so its writes carry the blinded index entries. An
   // unknown-epoch refresh drops the entry, and the next use rebuilds it from
@@ -1122,7 +1122,7 @@ export class StorageManager {
     userKeyGenerationKids
   }: {
     localStore?: BrowserStore
-    remoteStore?: WASRemoteStore
+    remoteStore?: PWSRemoteStore
     ciphers?: Record<string, DocCipher>
     refusals?: Record<string, CipherRefusal>
     remoteDirect?: boolean
@@ -1164,11 +1164,11 @@ export class StorageManager {
       ? persistence.metaCache({ scope: remoteStore.spaceId })
       : undefined
     // Remote-direct routing is only meaningful when a remote store is configured
-    // (a guest / no-WAS session always uses the local BrowserStore). A
+    // (a guest / no-PWS session always uses the local BrowserStore). A
     // replica-less construction -- no local store at all, the transient
     // variant -- is remote-direct outright, so it requires a remote store.
     if (!localStore && !remoteStore) {
-      throw new Error('Replica-less storage requires a remote WAS store.')
+      throw new Error('Replica-less storage requires a remote PWS store.')
     }
     this.#remoteDirect = (remoteDirect || !localStore) && !!remoteStore
     this.#store = this.#remoteDirect
@@ -1193,7 +1193,7 @@ export class StorageManager {
   }
 
   /**
-   * The WAS ids of the encrypted collections whose installed cipher refuses
+   * The PWS ids of the encrypted collections whose installed cipher refuses
    * because no key epoch names the current user key: collections a torn user
    * key rotation left on a retired generation. The login's collection fan-out
    * reads it to decide whether the ciphers need a rebuild once it has run.
@@ -1209,7 +1209,7 @@ export class StorageManager {
   }
 
   /**
-   * The WAS ids of the standard encrypted collections whose current cipher
+   * The PWS ids of the standard encrypted collections whose current cipher
    * refuses because a key epoch entry naming the vault KAK failed its
    * key-wrap check (`IntegrityError`): the entry is tampered or corrupt. No
    * cascade converges it, so the set is disjoint from
@@ -1227,7 +1227,7 @@ export class StorageManager {
   /**
    * @param options {object}
    * @param options.refusal {CipherRefusal}
-   * @returns {string[]}   the WAS ids of the collections whose current
+   * @returns {string[]}   the PWS ids of the collections whose current
    *   cipher refuses for that reason
    */
   #refusedCollectionIds({ refusal }: { refusal: CipherRefusal }): string[] {
@@ -1300,9 +1300,9 @@ export class StorageManager {
    *
    * @param action {string}   what the caller was doing, as the message opens
    *   ("Sharing a collection requires remote storage.")
-   * @returns {WASRemoteStore}
+   * @returns {PWSRemoteStore}
    */
-  #requireRemote(action: string): WASRemoteStore {
+  #requireRemote(action: string): PWSRemoteStore {
     if (!this.#remoteStore) {
       throw new Error(`${action} requires remote storage.`)
     }
@@ -1359,7 +1359,7 @@ export class StorageManager {
   }
 
   /**
-   * Whether a remote WAS backend is configured for this session. Pages use this
+   * Whether a remote PWS backend is configured for this session. Pages use this
    * instead of reaching into the backend directly.
    */
   get hasRemoteStorage(): boolean {
@@ -1370,7 +1370,7 @@ export class StorageManager {
    * Whether this session can create an app collection: it needs remote
    * storage, and for an encrypted one the descriptor logs of a promoted
    * account to write the collection's governing log through. A guest and a
-   * no-WAS session have neither.
+   * no-PWS session have neither.
    */
   get canProvisionAppCollections(): boolean {
     return !!this.#remoteStore && this.#descriptorLogsFor() !== undefined
@@ -1384,11 +1384,11 @@ export class StorageManager {
   }
 
   /**
-   * The remote WAS client, or undefined when there is no remote backend. Used by
+   * The remote PWS client, or undefined when there is no remote backend. Used by
    * the sync controller to drive background replication against remote Collection
    * replicas (it signs with the same session key).
    */
-  get pwsClient(): WASRemoteStore['pws'] | undefined {
+  get pwsClient(): PWSRemoteStore['pws'] | undefined {
     return this.#remoteStore?.pws
   }
 
@@ -1413,12 +1413,12 @@ export class StorageManager {
   }
 
   /**
-   * The remote WAS store, or undefined when there is no remote backend. Exposed
+   * The remote PWS store, or undefined when there is no remote backend. Exposed
    * for the did:webvh rotation ceremony (`rotateWebvhUpdateKey`), which reads
    * and rewrites the `id` collection's `did.jsonl` / `did.json` and the
    * `key-map` collection's `keys.json` directly through it.
    */
-  get remoteStore(): WASRemoteStore | undefined {
+  get remoteStore(): PWSRemoteStore | undefined {
     return this.#remoteStore
   }
 
@@ -1445,16 +1445,16 @@ export class StorageManager {
    * Builds the per-collection document ciphers for the encrypted standard
    * collections from a session's key material (the vault KAK and its resolver).
    * When a collection has a multi-recipient encryption descriptor (its `descriptors`
-   * entry, keyed by WAS collection id), the cipher is built epoch-aware from
+   * entry, keyed by PWS collection id), the cipher is built epoch-aware from
    * it; without one it is the single-key path, unchanged.
    *
    * @param options {object}
    * @param options.keyAgreementKey {IKeyAgreementKey}
    * @param options.keyResolver {IKeyResolver}
    * @param [options.descriptors] {Record<string, CollectionEncryption>}   per-
-   *   collection encryption descriptors, keyed by WAS collection id
+   *   collection encryption descriptors, keyed by PWS collection id
    * @param [options.metas] {Record<string, { custom?: unknown }>}   per-
-   *   collection stored `/meta` values, keyed by WAS collection id; a
+   *   collection stored `/meta` values, keyed by PWS collection id; a
    *   collection whose descriptor declares a blinded-index key gets its
    *   persisted index schema installed from it, so wallet writes carry the
    *   same blinded `indexed` entries a Collection-handle write does
@@ -1465,7 +1465,7 @@ export class StorageManager {
    *   {@link StorageManager.#buildCipher}
    * @returns {Promise<{ ciphers: Record<string, DocCipher>,
    *   refusals: Record<string, CipherRefusal> }>}   the cipher map, keyed by
-   *   logical key, and the collections given a refusing cipher, by WAS id,
+   *   logical key, and the collections given a refusing cipher, by PWS id,
    *   with the reason
    */
   static async #buildCiphers({
@@ -1578,7 +1578,7 @@ export class StorageManager {
    * @param options {object}
    * @param options.collection {object}   the collection's spec entry
    * @param options.collection.key {string}   its logical key
-   * @param options.collection.id {string}   its WAS collection id
+   * @param options.collection.id {string}   its PWS collection id
    * @param options.collection.idDerivation {IdDerivation}   its id mint
    * @param options.keyAgreementKey {IKeyAgreementKey}
    * @param options.keyResolver {IKeyResolver}
@@ -1726,7 +1726,7 @@ export class StorageManager {
    *
    * @param options {object}
    * @param options.collection {object}
-   * @param options.collection.id {string}   the WAS collection id
+   * @param options.collection.id {string}   the PWS collection id
    * @param options.collection.idDerivation {IdDerivation}   its id mint
    * @param options.keyAgreementKey {IKeyAgreementKey}
    * @param options.keyResolver {IKeyResolver}
@@ -1953,7 +1953,7 @@ export class StorageManager {
    * lazily per read) is a no-op.
    *
    * @param options {object}
-   * @param options.collectionId {string}   the WAS collection id
+   * @param options.collectionId {string}   the PWS collection id
    * @returns {Promise<void>}
    */
   async #rebuildCipherFor({
@@ -2004,7 +2004,7 @@ export class StorageManager {
    * cipher rebuild, and reports a stranding to the session binding.
    *
    * @param options {object}
-   * @param options.collectionId {string}   the WAS collection id
+   * @param options.collectionId {string}   the PWS collection id
    * @param [options.refusal] {CipherRefusal}   absent when the rebuilt
    *   cipher does not refuse
    * @returns {void}
@@ -2170,7 +2170,7 @@ export class StorageManager {
    * with a remote Space the store reads and writes the account Space's
    * collection remote-direct, invoking under the session's bound capability
    * (the generation delegation of a transient session) and the root
-   * capability otherwise. On a guest or a no-WAS session it reads and writes
+   * capability otherwise. On a guest or a no-PWS session it reads and writes
    * the local copy. The store resolves its adapter at every call, so the
    * cipher and the handle follow a descriptor refresh.
    *
@@ -2279,7 +2279,7 @@ export class StorageManager {
   }
 
   /**
-   * The directory store's adapter for one call: wallet-core's WAS adapter
+   * The directory store's adapter for one call: wallet-core's PWS adapter
    * over the `connections` Collection handle, built from the current
    * descriptor, on a session with a remote Space, and the local adapter
    * otherwise.
@@ -2390,7 +2390,7 @@ export class StorageManager {
    *
    * Only a pass and the two structural refusals (`foreign-recipient`,
    * `generator`) are kept, since they are properties of the descriptor. An
-   * `absent` verdict is dropped once it settles. WAS masks an unauthorized
+   * `absent` verdict is dropped once it settles. PWS masks an unauthorized
    * read as a 404, so a missing Collection Metadata object may be transient:
    * a generation delegation mid-renewal, or a server error. Keeping it would
    * fail every consent closed until an unrelated descriptor refresh. The
@@ -2496,7 +2496,7 @@ export class StorageManager {
    * either backend, since the remote-direct backend surfaces the same counts.
    *
    * @param options {object}
-   * @param options.collectionId {string}   the WAS collection id
+   * @param options.collectionId {string}   the PWS collection id
    * @param options.read {() => Promise<{ value: T; unknownEpoch: boolean }>}
    * @returns {Promise<T>}
    */
@@ -2538,7 +2538,7 @@ export class StorageManager {
     // offline.
     serviceDescription?: ServiceDescription
     isGuest?: boolean
-    // Route credential + history operations straight to the remote WAS
+    // Route credential + history operations straight to the remote PWS
     // collections (the CHAPI popup path, whose local IndexedDB is partitioned).
     remoteDirect?: boolean
     // An explicit RxDB storage for the local active replica, in place of the
@@ -2557,9 +2557,9 @@ export class StorageManager {
     // `signerCheck`; absent, a rotation keeps no earlier generation.
     userKeyGenerationKids?: () => Promise<string[]>
   }) {
-    // Guest sessions never touch the remote WAS server -- they get no remote
+    // Guest sessions never touch the remote PWS server -- they get no remote
     // replica. This keeps guest mode usable as a fallback even when the
-    // configured WAS server is unreachable.
+    // configured PWS server is unreachable.
     const baseServerUrl = isGuest ? undefined : WAS_BASE_SERVER_URL
     log.info('Initializing storage clients', { baseServerUrl })
 
@@ -2572,9 +2572,9 @@ export class StorageManager {
     // Build the remote store first (when configured), so its encryption descriptors
     // can be fetched before the ciphers are built: a shared collection encrypts
     // under its current key epoch, discovered from the Collection Description.
-    let remoteStore: WASRemoteStore | undefined
+    let remoteStore: PWSRemoteStore | undefined
     if (baseServerUrl) {
-      ;({ remoteStore } = await WASRemoteStore.initClient({
+      ;({ remoteStore } = await PWSRemoteStore.initClient({
         baseServerUrl,
         serviceDescription,
         user,
@@ -2587,7 +2587,7 @@ export class StorageManager {
     // login is not gated on a serial chain of describes), caching each
     // success and falling back to the cached copy on a fetch failure. A
     // collection whose descriptor cannot be acquired gets a fail-closed
-    // refusing cipher below. With no remote store (guest / no-WAS) the
+    // refusing cipher below. With no remote store (guest / no-PWS) the
     // descriptors are minted locally instead -- every encrypted collection
     // carries its key epochs from birth, server or not -- and there is no
     // metadata to fetch (no index schema can have been declared).
@@ -2868,7 +2868,7 @@ export class StorageManager {
    * silent no-op, so a disconnect before the pull would leave the key on the
    * server for a reconnect to match. A remembered session's replica copies
    * are removed after the server's, and their pushed deletes find nothing
-   * left. A guest or no-WAS session deletes from its local copy, the only
+   * left. A guest or no-PWS session deletes from its local copy, the only
    * one.
    *
    * Outcomes: `deleted` when some Resource binding the DID was deleted;
@@ -3012,10 +3012,10 @@ export class StorageManager {
    * as every other encrypted read does.
    *
    * @param options {object}
-   * @param options.remote {WASRemoteStore}
+   * @param options.remote {PWSRemoteStore}
    * @returns {Promise<{ entries: StoredAppKey[]; unreadable: string[] }>}
    */
-  async #scanRemoteAppKeys({ remote }: { remote: WASRemoteStore }): Promise<{
+  async #scanRemoteAppKeys({ remote }: { remote: PWSRemoteStore }): Promise<{
     entries: StoredAppKey[]
     unreadable: string[]
   }> {
@@ -3553,7 +3553,7 @@ export class StorageManager {
    * so a freshly-rekeyed resource is not rendered as raw JWE until re-login.
    *
    * @param options {object}
-   * @param options.collectionId {string}   the WAS collection id (e.g.
+   * @param options.collectionId {string}   the PWS collection id (e.g.
    *   `private-credentials`)
    * @param options.resourceId {string}   the id the resource was fetched
    *   under, which the decrypt verifies the stored envelope against
@@ -3644,7 +3644,7 @@ export class StorageManager {
    * a decrypt error), letting the caller show the raw envelope.
    *
    * @param options {object}
-   * @param options.collectionId {string}   the WAS collection id
+   * @param options.collectionId {string}   the PWS collection id
    * @param options.resourceId {string}   the id the resource was fetched under
    * @param options.data {Json}   the fetched EDV envelope
    * @returns {Promise<Json | undefined>}
@@ -3757,13 +3757,13 @@ export class StorageManager {
   }
 
   /**
-   * Provisions an arbitrary plaintext collection on the remote WAS Space, for
+   * Provisions an arbitrary plaintext collection on the remote PWS Space, for
    * a relying party's delegated capability. No local counterpart -- RP
    * collections are the RP's data, reached only over its zcap. Requires a
    * remote backend. With `isPublic`, the collection also gets a
    * collection-level world-readable (PublicCanRead) policy.
    *
-   * `generator` is the collection's app attribution, stamped on the create (see {@link WASRemoteStore.ensureCollection}).
+   * `generator` is the collection's app attribution, stamped on the create (see {@link PWSRemoteStore.ensureCollection}).
    *
    * @param options {object}
    * @param options.id {string}
@@ -3826,7 +3826,7 @@ export class StorageManager {
    * written. It is never converted in place.
    *
    * @param options {object}
-   * @param options.collectionId {string}   the WAS collection id to provision
+   * @param options.collectionId {string}   the PWS collection id to provision
    * @param [options.recipient] {RecipientPublicKey}   the grantee's identity
    *   public key-agreement key, the X25519 twin of its controller `did:key`
    *   (its `id` is the recipient `kid`); omitted for an owner-only provision,
@@ -3944,7 +3944,7 @@ export class StorageManager {
    * unreadable.
    *
    * @param options {object}
-   * @param options.remote {WASRemoteStore}
+   * @param options.remote {PWSRemoteStore}
    * @param options.collectionId {string}
    * @returns {Promise<void>}
    */
@@ -3952,7 +3952,7 @@ export class StorageManager {
     remote,
     collectionId
   }: {
-    remote: WASRemoteStore
+    remote: PWSRemoteStore
     collectionId: string
   }): Promise<void> {
     const metadata = await remote.collectionMetadata({ collectionId })
@@ -4199,7 +4199,7 @@ export class StorageManager {
       // Space is up before the call. The concurrency wins nothing on either
       // of this method's paths -- the Space exists by the time a login gets
       // here, so the probe short-circuits -- and it costs nothing either.
-      // Non-fatal like keystore provisioning: a KMS/WAS hiccup must not fail
+      // Non-fatal like keystore provisioning: a KMS/PWS hiccup must not fail
       // login; the settings page surfaces the unprovisioned state, and the
       // idempotent flow resumes on the next login.
       const provideKmsAuthentication = async ({
@@ -4272,7 +4272,7 @@ export class StorageManager {
         const pointerDid = profile.accountPointer?.did
         // A signup torn between the log publication and the pointer backfill
         // heals here at a later login whose pointer still names no did:webvh
-        // -- but the log WAS published in this browser, so the DID is known
+        // -- but the log PWS published in this browser, so the DID is known
         // locally and the read can still state an `expectedDid` (see
         // `saveAccountDidForSpace`).
         const knownDid = isWebvhDid(pointerDid)
@@ -4640,7 +4640,7 @@ export class StorageManager {
    * Records (in the `wallet-activity` collection) a Grant activity: the user
    * connected an app through App Connect, or granted an agent storage access
    * from the interaction-URL page, delegating the listed capabilities. The
-   * recorded zcap ids are the hook for revocation: the WAS server exposes a
+   * recorded zcap ids are the hook for revocation: the PWS server exposes a
    * Space-scoped revocation endpoint, so a grant can be retired before its
    * expiry.
    *
@@ -4929,7 +4929,7 @@ export class StorageManager {
   }
 
   /**
-   * Revokes a set of recorded capabilities on the WAS server, one POST each
+   * Revokes a set of recorded capabilities on the PWS server, one POST each
    * through {@link #postRevocations}, which holds the per-POST policy.
    * A capability named in `revokedByRotation` was already revoked by the
    * rotation stage's pull axis, which ran the same policy, so it is not
@@ -6133,7 +6133,7 @@ export class StorageManager {
 
   /**
    * Whether public links (sharing) are available this session. A public link
-   * only means something as a world-readable URL on the remote WAS server, so
+   * only means something as a world-readable URL on the remote PWS server, so
    * sharing requires a remote replica to be configured.
    */
   get canShare(): boolean {
@@ -6153,7 +6153,7 @@ export class StorageManager {
    * The public copy is plaintext and content-addressed (keyed by the
    * credential's cid, a hash of its content). It is written to the local
    * `public-credentials` collection; background replication mirrors it to the
-   * remote WAS Collection, where the returned URL resolves.
+   * remote PWS Collection, where the returned URL resolves.
    *
    * @param credential {IVerifiableCredential}
    * @returns {Promise<string>}
@@ -6214,7 +6214,7 @@ export class StorageManager {
    *
    * @param options {object}
    * @param options.profile {ControllerProfile}   the session profile
-   * @param options.collectionId {string}   the WAS collection id to share
+   * @param options.collectionId {string}   the PWS collection id to share
    * @param options.controller {string}   the grantee's DID (the zcap controller)
    * @param [options.expires] {Date}   the zcap's expiry; defaults to the
    *   read-only grant TTL
@@ -6280,7 +6280,7 @@ export class StorageManager {
    * @param options.profile {ControllerProfile}   the passphrase session profile
    *   (vault KAK)
    * @param options.user {User}   recorded as the share activity's actor
-   * @param options.collectionId {string}   the WAS collection id to share
+   * @param options.collectionId {string}   the PWS collection id to share
    * @param options.recipient {RecipientPublicKey}   the grantee's public
    *   key-agreement key (its `id` is the recipient `kid`)
    * @param options.zcap {IDelegatedZcap}   the pull-axis capability
@@ -7293,7 +7293,7 @@ export class StorageManager {
    * `generator` is stamped on a create only.
    *
    * @param options {object}
-   * @param options.collectionId {string}   the WAS collection id
+   * @param options.collectionId {string}   the PWS collection id
    * @param options.encrypted {boolean}   whether the archived collection
    *   carried a governing collection log
    * @param [options.isPublic] {boolean}   whether the archived collection was
@@ -7401,7 +7401,7 @@ export class StorageManager {
    * caller's to set, and only on a collection this run made.
    *
    * @param options {object}
-   * @param options.remote {WASRemoteStore}
+   * @param options.remote {PWSRemoteStore}
    * @param options.collectionId {string}
    * @param [options.generator] {CollectionGenerator}
    * @returns {Promise<{ created: boolean }>}
@@ -7411,7 +7411,7 @@ export class StorageManager {
     collectionId,
     generator
   }: {
-    remote: WASRemoteStore
+    remote: PWSRemoteStore
     collectionId: string
     generator?: CollectionGenerator
   }): Promise<{ created: boolean }> {
@@ -7440,7 +7440,7 @@ export class StorageManager {
    * is.
    *
    * @param options {object}
-   * @param options.remote {WASRemoteStore}
+   * @param options.remote {PWSRemoteStore}
    * @param options.collectionId {string}
    * @param [options.generator] {CollectionGenerator}
    * @returns {Promise<{ created: boolean }>}
@@ -7450,7 +7450,7 @@ export class StorageManager {
     collectionId,
     generator
   }: {
-    remote: WASRemoteStore
+    remote: PWSRemoteStore
     collectionId: string
     generator?: CollectionGenerator
   }): Promise<{ created: boolean }> {
@@ -7505,7 +7505,7 @@ export class StorageManager {
    * encrypted archive, which finishes such a provision.
    *
    * @param options {object}
-   * @param options.remote {WASRemoteStore}
+   * @param options.remote {PWSRemoteStore}
    * @param options.collectionId {string}
    * @param options.encrypted {boolean}   the archived kind
    * @param options.isPublic {boolean}   the archived public read; always
@@ -7524,7 +7524,7 @@ export class StorageManager {
     generator,
     standing
   }: {
-    remote: WASRemoteStore
+    remote: PWSRemoteStore
     collectionId: string
     encrypted: boolean
     isPublic: boolean

@@ -39,7 +39,7 @@ export function useResourceSourceCopy() {
  *
  * @param options {object}
  * @param options.storage {StorageManager}
- * @param [options.collectionId] {string}   the WAS collection id
+ * @param [options.collectionId] {string}   the PWS collection id
  * @param options.resourceId {string}   the id the resource was fetched under,
  *   which the decrypt verifies the stored envelope against
  * @param options.body {FetchedCollectionResource}   the fetched resource body

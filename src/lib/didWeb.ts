@@ -5,7 +5,7 @@
  * rewritten, so did:web resolution and did:webvh resolution of the same
  * account can never disagree.
  *
- * The projection is an ordinary WAS Resource served by the unauthenticated
+ * The projection is an ordinary PWS Resource served by the unauthenticated
  * public-read path, so hosting needs zero server changes: the DID's path
  * segments name the `id` collection that holds it --
  * `did:web:<host>:<prefix...>:space:<spaceId>:id` resolves to

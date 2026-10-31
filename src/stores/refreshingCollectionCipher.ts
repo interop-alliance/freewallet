@@ -30,7 +30,7 @@ import {
 
 /**
  * @param options {object}
- * @param options.collectionId {string}   the WAS collection id
+ * @param options.collectionId {string}   the PWS collection id
  * @param [options.idDerivation] {'content' | 'random'}
  * @param options.descriptor {CollectionEncryption}   the descriptor the
  *   session acquired, which primes the cipher's first build

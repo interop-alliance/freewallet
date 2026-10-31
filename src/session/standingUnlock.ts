@@ -21,7 +21,7 @@
  * 3. The re-bind: the unlock record is rewritten in the standing layout
  *    (`wrapUnlockRecord` -- shell, bridge, sibling, ladder, binding MAC),
  *    superseding the credential's previous record (the plain layout
- *    survives only on no-WAS deployments, where this ceremony never runs).
+ *    survives only on no-PWS deployments, where this ceremony never runs).
  *    The record is inert until the entry below publishes its ladder VM, and
  *    it is what makes the seed durable before anything names it.
  * 4. The document entry: the credential's `keyAgreement` key -- verbatim for
@@ -182,7 +182,7 @@ export function unlockLogStore({
  * entry, and the re-bind supersedes the previous record.
  *
  * The callers are the Settings ceremonies (add-a-passkey,
- * add-a-passphrase, the passphrase change); a WAS signup establishes
+ * add-a-passphrase, the passphrase change); a PWS signup establishes
  * through the credential-anchored establishment instead, before any Space
  * exists. A failed establishment here leaves the credential's record in
  * the plain layout -- a state the transient login cannot enter -- so a
@@ -790,7 +790,7 @@ export async function establishClientAnnexGeneration({
 /**
  * Whether a keyring hit can self-enroll this browser: the record carries the
  * standing members (bridge delegation and ladder seed), the pointer names a
- * did:webvh, a WAS server is configured, and the fetch exposed the enrollment
+ * did:webvh, a PWS server is configured, and the fetch exposed the enrollment
  * persist closure. The login path gates on this before running
  * `selfEnrollStandingClient`.
  *

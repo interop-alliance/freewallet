@@ -44,7 +44,7 @@
  * channel, invoking that capability as the pairwise did:key. A delivered
  * item is removed. A network failure or a 5xx keeps it for the next pass. An
  * authorization refusal (401 or 403) stops the pushes to that entry for the
- * pass, and so does a 404, since a WAS host answers every capability denial
+ * pass, and so does a 404, since a PWS host answers every capability denial
  * (revoked, expired, unauthorized) with one. The refused channel record is
  * dropped from the entry (`dropReceivedGrant`), and the queued envelopes
  * stay on the outbox. The next pass pushes nothing to an entry with no
@@ -178,7 +178,7 @@ type InboxRefusalReason =
  * Why a push did not deliver an outbox item.
  *
  * - `channel-refused` -- the agent's server answered 401, 403, or 404: the
- *   channel capability is expired or revoked. A WAS host answers every
+ *   channel capability is expired or revoked. A PWS host answers every
  *   capability denial with a 404. Pushes to the entry stop, and the channel
  *   record is dropped from the entry. The items wait for the agent's next
  *   invitation.
@@ -1574,7 +1574,7 @@ export async function drainOutboxes({
         }
       } catch (err) {
         const status = httpStatus(err)
-        // A WAS host masks every capability denial (revoked, expired,
+        // A PWS host masks every capability denial (revoked, expired,
         // unauthorized) as a 404, so a 404 reads as a dead channel too.
         if (status === 401 || status === 403 || status === 404) {
           log.warn(

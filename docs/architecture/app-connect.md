@@ -130,7 +130,7 @@ match-time binding is the backstop.
 The wallet delegates to the subject DID of the credential it just matched or
 minted, so the request names no controller DID. That is what makes the flow
 single-round. Delegation reuses `resolveGrants` / `processZcaps` verbatim.
-Requested actions are normalized against the closed WAS action vocabulary and
+Requested actions are normalized against the closed PWS action vocabulary and
 intersected with the limitation for the target's class: read-only for a
 protected collection and a share, the full vocabulary for public
 collections and app-provisioned private collections. The consent screen
@@ -672,7 +672,7 @@ a session with no Space run none. Each pass has three steps, in order.
    parallel up to `INBOX_PUSH_PARALLELISM` and under one time budget per
    pass. A delivered item is removed. A network failure or a 5xx keeps it
    for the next pass. A 401, 403, or 404 stops the pushes to that entry for
-   the pass, since a WAS host answers every capability denial with one of
+   the pass, since a PWS host answers every capability denial with one of
    them. The refused channel record is then dropped from the entry
    (`dropReceivedGrant`), and the queued envelopes stay on the `outbox`.
    The next pass pushes nothing to an entry with no channel. It lists the

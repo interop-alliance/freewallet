@@ -12,7 +12,7 @@ import { WAS_E2E_DATA_DIR } from './wasDataDir'
 import { test, expect } from '../shared/consoleCapture'
 
 /**
- * The Settings "Connected wallets" surface e2e (WAS mode): the enrolled
+ * The Settings "Connected wallets" surface e2e (PWS mode): the enrolled
  * wallet clients listed from the locally verified did:webvh log. A fresh
  * account shows exactly one wallet (marked as this browser) and the honest
  * last-client copy; an issued recovery code NEVER appears in the list (its

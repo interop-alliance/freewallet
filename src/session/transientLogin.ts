@@ -112,7 +112,7 @@ import type { WebvhIdStore } from '@interop/wallet-core/webvh'
  * Why a transient login cannot proceed. Typed reasons, no copy: the login
  * page maps each onto its own refusal copy (`loginErrorKey`).
  *
- * - `no-was-server`: transient login presupposes a remote WAS server.
+ * - `no-was-server`: transient login presupposes a remote PWS server.
  * - `no-delegated-clients`: a standing record without the annex-Space
  *   sibling delegation (a recovery-code record, or one minted before the
  *   sibling existed).
@@ -214,7 +214,7 @@ export class AlreadyRememberedError extends Error {
  * (threaded onward so the KDF never re-runs) and the client-key record probe
  * never creates the session database.
  *
- * The decision table: no WAS server is always remembered (transient login is
+ * The decision table: no PWS server is always remembered (transient login is
  * unreachable there); `rememberBrowser: true` is remembered (the programmatic
  * standing self-enrollment entry); a browser holding this credential's
  * client-key record is remembered (the ratchet -- with
@@ -554,12 +554,12 @@ export async function transientSessionFromKeyringHit({
   const standing = found.standing
   if (!standing?.ladderSeed) {
     // Invariant, not a user state: a standing record is the only record a
-    // WAS signup produces (the standing layout is written before the Space
+    // PWS signup produces (the standing layout is written before the Space
     // exists), so a plain pointer record here is a bug in a producer, not
     // a refusal with copy of its own.
     throw new Error(
       'Invariant violated: the unlock record carries no standing authority ' +
-        '(a standing record is the only record a WAS signup produces).'
+        '(a standing record is the only record a PWS signup produces).'
     )
   }
   const pointer = found.pointer
@@ -850,7 +850,7 @@ export async function transientSessionFromKeyringHit({
   }
 
   // The per-visit key set: 32 random bytes, held in memory only. Its did:key
-  // is the session identity (and any presentation's holder); only WAS
+  // is the session identity (and any presentation's holder); only PWS
   // invocations take the annex spelling.
   const seed = crypto.getRandomValues(new Uint8Array(32))
   const { keyAgent } = await agentsFromSeed({ seed })

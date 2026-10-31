@@ -886,7 +886,7 @@ export class ConnectionEntryMissingError extends Error {
 }
 
 /**
- * Retires an app's live authority on the WAS server: the first stage of the
+ * Retires an app's live authority on the PWS server: the first stage of the
  * interactive revoke ({@link revokeAppAccess}). The key rotation runs first:
  * for each collection the app's entry has a grant on, or whose
  * `generator.id` names the app, it appends a fresh epoch without the app's
@@ -1032,7 +1032,7 @@ export async function revokeAppAccess({
  * renews or pushes to an entry with no channel, so a revoke torn after it
  * cannot be undone by the next login's renewal. The write is durable and a
  * re-run finds it done. Then the collection rotation and the grant POSTs run
- * on the WAS server, then the agent's entry is retired, then the revocation
+ * on the PWS server, then the agent's entry is retired, then the revocation
  * is recorded. There is no app key to delete. A stage that does not land
  * throws before the retirement, so the row stays listed and a retry re-runs
  * every stage, as on the app path ({@link revokeAppAccess}). Every grant on

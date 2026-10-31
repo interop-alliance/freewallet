@@ -192,7 +192,7 @@ export function startLoginMenderBlock({
   session.inboxPass = new Promise<MendReport<CeremonyId>>(resolve => {
     settleInbox = resolve
   })
-  // A guest or a no-WAS session has no Space and no inbox.
+  // A guest or a no-PWS session has no Space and no inbox.
   const runsInbox = !session.isGuest && !!session.storage?.hasRemoteStorage
   // A mend raised at a read waits behind the registry writers, not beside
   // them.

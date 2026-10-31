@@ -22,7 +22,7 @@ import { browserLocalSessionPersistence } from '@/session/persistence'
 import { PublicCopyRetractionError, StorageManager } from './storageManager'
 import { RemoteDirectStore } from './remoteDirectStore'
 import { generateVaultKeys } from './testing/vaultKeys'
-import type { WASRemoteStore } from './wasRemoteStore'
+import type { PWSRemoteStore } from './pwsRemoteStore'
 
 /**
  * A minimal well-formed VC body; the storage layer treats it as opaque JSON.
@@ -1727,7 +1727,7 @@ describe('StorageManager (local-first facade)', () => {
       ? ({
           publicCredentialUrl: (cid: string) =>
             `https://was.example/space/s/public-credentials/${cid}`
-        } as unknown as WASRemoteStore)
+        } as unknown as PWSRemoteStore)
       : undefined
     return {
       storage: new StorageManager({
@@ -1816,7 +1816,7 @@ describe('StorageManager (local-first facade)', () => {
     const remoteStore = {
       publicCredentialUrl: (cid: string) =>
         `https://was.example/space/s/public-credentials/${cid}`
-    } as unknown as WASRemoteStore
+    } as unknown as PWSRemoteStore
     const storage = new StorageManager({
       persistence: browserLocalSessionPersistence(),
       vaultKeys: VAULT_KEYS,
@@ -1853,7 +1853,7 @@ describe('StorageManager (local-first facade)', () => {
     const remoteStore = {
       publicCredentialUrl: (cid: string) =>
         `https://was.example/space/s/public-credentials/${cid}`
-    } as unknown as WASRemoteStore
+    } as unknown as PWSRemoteStore
     const storage = new StorageManager({
       persistence: browserLocalSessionPersistence(),
       vaultKeys: VAULT_KEYS,
@@ -1881,7 +1881,7 @@ describe('StorageManager (local-first facade)', () => {
     const remoteStore = {
       publicCredentialUrl: (cid: string) =>
         `https://was.example/space/s/public-credentials/${cid}`
-    } as unknown as WASRemoteStore
+    } as unknown as PWSRemoteStore
     const storage = new StorageManager({
       persistence: browserLocalSessionPersistence(),
       vaultKeys: VAULT_KEYS,
@@ -1956,7 +1956,7 @@ describe('StorageManager (local-first facade)', () => {
 })
 
 /**
- * An in-memory stand-in for the remote WAS standard collections: one map of
+ * An in-memory stand-in for the remote PWS standard collections: one map of
  * resource-id to raw stored body per logical collection, exposing the same
  * `listSyncedDocuments` / `getSyncedResource` / `getSyncedResourceWithEtag` /
  * `putSyncedResource` / `deleteSyncedResource` surface the remote-direct
@@ -1970,7 +1970,7 @@ describe('StorageManager (local-first facade)', () => {
  * assert a remote-direct write carried it.
  */
 function makeFakeRemoteStore(): {
-  remoteStore: WASRemoteStore
+  remoteStore: PWSRemoteStore
   collections: Map<string, Map<string, Json>>
   epochs: Map<string, Map<string, string | undefined>>
   versions: Map<string, Map<string, number>>
@@ -2077,7 +2077,7 @@ function makeFakeRemoteStore(): {
       epochsFor(logicalKey).delete(resourceId)
       versionsFor(logicalKey).delete(resourceId)
     }
-  } as unknown as WASRemoteStore
+  } as unknown as PWSRemoteStore
   return { remoteStore, collections, epochs, versions }
 }
 
@@ -2336,7 +2336,7 @@ describe('RemoteDirectStore', () => {
         lists += 1
         return remoteStore.listSyncedDocuments(options)
       }
-    } as unknown as WASRemoteStore
+    } as unknown as PWSRemoteStore
     const store = new RemoteDirectStore({
       remoteStore: spied,
       ciphers: {

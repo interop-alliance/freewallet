@@ -1,7 +1,7 @@
 /**
  * A scripted agent test double for the connection request e2e. It stands in
  * for a third-party agent that connects to a wallet owner: it runs its own
- * WAS Space on the suite's teaching server, owning an `inbox` collection,
+ * PWS Space on the suite's teaching server, owning an `inbox` collection,
  * and presents a separate did:key (its connection key) to the owner.
  *
  * Its half of the contract is hand-built from the agent's obligations rather

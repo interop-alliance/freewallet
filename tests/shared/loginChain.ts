@@ -1,5 +1,5 @@
 /**
- * The login-chain seam wait, shared by the WAS e2e suite and the
+ * The login-chain seam wait, shared by the PWS e2e suite and the
  * ceremony-event fixture the default suite runs.
  */
 import type { Page } from '@playwright/test'

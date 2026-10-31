@@ -51,8 +51,8 @@ vi.mock('@/app.config', async importOriginal => ({
 // it swaps the session onto the converged key, and only swaps when that
 // re-seal reports success. This account has no registry written yet, which
 // makes the re-seal the no-op it should be here.
-vi.mock('@/stores/wasRemoteStore', async importOriginal => ({
-  ...(await importOriginal<typeof import('@/stores/wasRemoteStore')>()),
+vi.mock('@/stores/pwsRemoteStore', async importOriginal => ({
+  ...(await importOriginal<typeof import('@/stores/pwsRemoteStore')>()),
   getUnlockMethodsRecord: vi.fn(async () => null)
 }))
 
@@ -178,7 +178,7 @@ import { StorageManager } from '@/stores/storageManager'
 import { initSessionFromSeed, loginWithPassphrase } from '@/session/initSession'
 import { sweepUserKeyToDocument } from '@/session/userKeySweep'
 import type { Session } from '@/types/auth'
-import type { WASRemoteStore } from '@/stores/wasRemoteStore'
+import type { PWSRemoteStore } from '@/stores/pwsRemoteStore'
 
 const PASSPHRASE = 'correct horse battery staple'
 const OLD_USER_KEY = {
@@ -244,7 +244,7 @@ function makeFakeStorage({
     resolveProvisioning = resolve
     rejectProvisioning = reject
   })
-  const remoteStore = { isFakeRemoteStore: true } as unknown as WASRemoteStore
+  const remoteStore = { isFakeRemoteStore: true } as unknown as PWSRemoteStore
   const refreshEncryptedDescriptors = vi.fn(async () => undefined)
   const adoptRotatedVaultKeys = vi.fn(async () => undefined)
   const holdRotatedVaultKeys = vi.fn(() => undefined)

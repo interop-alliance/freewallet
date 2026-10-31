@@ -1,5 +1,5 @@
 /**
- * WASRemoteStore: the remote WAS (Wallet Attached Storage) backend, attached
+ * PWSRemoteStore: the remote PWS (Portable Web Spaces) backend, attached
  * when VITE_WAS_SERVER_URL (the server's base server URL) is set.
  * Since the local BrowserStore became the always-active replica, this class
  * no longer serves credential / history / public-link reads and writes for
@@ -17,7 +17,7 @@
  * `getSyncedResource` / `putSyncedResource` -- reproducing verbatim what
  * background replication would have pushed.
  *
- * All WAS operations go through `@interop/pws-client`'s `PwsClient` and its
+ * All PWS operations go through `@interop/pws-client`'s `PwsClient` and its
  * lazy navigational handles (`space` / `collection` / `resource`) rather than
  * hand-built ezcap requests. The `PwsClient` wraps the ezcap `ZcapClient` that
  * carries the user's invocation signer.
@@ -46,6 +46,7 @@ import {
   type SpaceMetadata
 } from '@interop/pws-client'
 import {
+  canonicalBaseServerUrl,
   collectionUrl,
   parseSpaceTarget,
   resourceUrl,
@@ -104,7 +105,7 @@ const log = createLogger('fw:storage:remote')
 const SYNCED_LISTING_PAGE_SIZE = 100
 
 /**
- * Map from logical collection name to its WAS base URL.
+ * Map from logical collection name to its PWS base URL.
  * Expected keys: 'privateCredentials' | 'publicCredentials' | 'walletActivity'
  */
 export type ICollectionsSet = Map<string, string>
@@ -144,7 +145,7 @@ function controllerDid(controller: string): IDID {
   return controller as IDID
 }
 
-export class WASRemoteStore {
+export class PWSRemoteStore {
   public baseServerUrl: string
   // The server's service description, discovered once per page load by
   // `@/lib/wasService` and handed in: every client this store builds takes
@@ -181,7 +182,7 @@ export class WASRemoteStore {
   get serviceDescription(): ServiceDescription {
     if (!this.#discovered) {
       throw new Error(
-        'The WAS server was unreachable when this session started, so no ' +
+        'The PWS server was unreachable when this session started, so no ' +
           'service description was discovered.'
       )
     }
@@ -205,7 +206,9 @@ export class WASRemoteStore {
     capability?: IZcap
     pinStore: ResourceLogPinStore
   }) {
-    this.baseServerUrl = baseServerUrl
+    // Canonical once, here, so every reader of the public field (the
+    // onboarding invite, the path parser, the Space URL) sees the same bytes.
+    this.baseServerUrl = canonicalBaseServerUrl(baseServerUrl)
     this.#discovered = serviceDescription
     this.#pinStore = pinStore
     this.pws = this.#clientFor({ zcapClient })
@@ -216,7 +219,7 @@ export class WASRemoteStore {
     // `invocationTarget`, which the server matches by exact bytes, and the
     // canonical container form (a trailing slash) and the server layout are
     // pws-client's rules to own.
-    this.spaceUrl = spaceUrlById({ baseServerUrl, spaceId })
+    this.spaceUrl = spaceUrlById({ baseServerUrl: this.baseServerUrl, spaceId })
   }
 
   /**
@@ -247,7 +250,7 @@ export class WASRemoteStore {
   }
 
   /**
-   * Resolves the actual WAS collection id for one of the wallet's standard
+   * Resolves the actual PWS collection id for one of the wallet's standard
    * logical collection keys.
    *
    * @param logicalKey {string} e.g. 'privateCredentials' | 'walletActivity'.
@@ -264,7 +267,7 @@ export class WASRemoteStore {
   }
 
   /**
-   * Classifies a WAS collection or resource URL beneath this store's own
+   * Classifies a PWS collection or resource URL beneath this store's own
    * Space into its `collectionId` / `resourceId` components. The URL is
    * absolute, or a path reference as a server listing serves one. A path
    * reference is resolved against this store's Space URL first. A server
@@ -302,11 +305,11 @@ export class WASRemoteStore {
         resourceId: parsed.resourceId
       }
     }
-    throw new Error(`Not a WAS resource URL: "${url}".`)
+    throw new Error(`Not a PWS resource URL: "${url}".`)
   }
 
   /**
-   * Returns a `Collection` handle addressed by an arbitrary WAS collection URL
+   * Returns a `Collection` handle addressed by an arbitrary PWS collection URL
    * (used by the storage browser, which works over collections beyond the
    * standard set).
    *
@@ -316,13 +319,13 @@ export class WASRemoteStore {
   #collectionFromUrl(url: string): Collection {
     const { collectionId } = this.#parsePath(url)
     if (!collectionId) {
-      throw new Error(`Not a WAS collection URL: "${url}".`)
+      throw new Error(`Not a PWS collection URL: "${url}".`)
     }
     return this.#space().collection(collectionId)
   }
 
   /**
-   * Returns a `Resource` handle addressed by an arbitrary WAS resource URL.
+   * Returns a `Resource` handle addressed by an arbitrary PWS resource URL.
    *
    * The handle forces the `plaintext` encryption override, so a `get()` returns
    * the raw stored body (the EDV envelope for an encryption-marked collection)
@@ -340,7 +343,7 @@ export class WASRemoteStore {
   #resourceFromUrl(url: string): Resource {
     const { collectionId, resourceId } = this.#parsePath(url)
     if (!collectionId || !resourceId) {
-      throw new Error(`Not a WAS resource URL: "${url}".`)
+      throw new Error(`Not a PWS resource URL: "${url}".`)
     }
     return this.#space()
       .collection(collectionId)
@@ -374,7 +377,7 @@ export class WASRemoteStore {
    * back to a cached copy.
    *
    * @param options {object}
-   * @param options.collectionId {string}   the WAS collection id (e.g.
+   * @param options.collectionId {string}   the PWS collection id (e.g.
    *   `private-credentials`)
    * @returns {Promise<CollectionEncryption | undefined>}
    */
@@ -389,7 +392,7 @@ export class WASRemoteStore {
 
   /**
    * Reads one Collection Metadata object -- the Collection's configuration
-   * (`encryption` among it) and its user-writable `custom`, which WAS v0.5
+   * (`encryption` among it) and its user-writable `custom`, which PWS v0.5
    * serves as one object at one path under one `metaVersion` validator. The
    * read is `describe()`, which never resolves the codec, so `custom` comes
    * back exactly as stored: on an encrypted collection that is the opaque
@@ -402,7 +405,7 @@ export class WASRemoteStore {
    * callers treat the fetch as best-effort and fall back to a cached copy.
    *
    * @param options {object}
-   * @param options.collectionId {string}   the WAS collection id
+   * @param options.collectionId {string}   the PWS collection id
    * @returns {Promise<{ encryption?: CollectionEncryption, custom?: unknown,
    *   generator?: CollectionGenerator } | undefined>}
    */
@@ -427,7 +430,7 @@ export class WASRemoteStore {
    * has one shape here).
    *
    * @param options {object}
-   * @param options.collectionId {string}   the WAS collection id
+   * @param options.collectionId {string}   the PWS collection id
    * @returns {Promise<{ custom?: unknown } | undefined>}
    */
   async collectionMeta({
@@ -468,7 +471,7 @@ export class WASRemoteStore {
    * descriptor resolved at each directory call.
    *
    * @param options {object}
-   * @param options.collectionId {string}   the WAS collection id
+   * @param options.collectionId {string}   the PWS collection id
    * @param options.encryption {CollectionEncryption}   the collection's
    *   current descriptor
    * @param options.keyAgreementKey {IKeyAgreementKey}   a recipient of the
@@ -493,13 +496,13 @@ export class WASRemoteStore {
   }
 
   /**
-   * Writes one plaintext resource into any collection of this Space, by WAS
+   * Writes one plaintext resource into any collection of this Space, by PWS
    * collection id, under the given content type, create-if-absent. A JSON
    * body is sent as JSON and raw bytes as they are. A `412` (the id is
    * already taken) reports `{ created: false }` rather than throwing.
    *
    * @param options {object}
-   * @param options.collectionId {string}   the WAS collection id
+   * @param options.collectionId {string}   the PWS collection id
    * @param options.resourceId {string}
    * @param options.data {Json | Uint8Array}   a JSON body or raw bytes
    * @param options.contentType {string}
@@ -532,11 +535,11 @@ export class WASRemoteStore {
 
   /**
    * Reads one plaintext resource of any collection of this Space as its raw
-   * stored bytes. Returns `undefined` when the resource is missing (WAS
+   * stored bytes. Returns `undefined` when the resource is missing (PWS
    * conflates 404 for missing and unauthorized).
    *
    * @param options {object}
-   * @param options.collectionId {string}   the WAS collection id
+   * @param options.collectionId {string}   the PWS collection id
    * @param options.resourceId {string}
    * @returns {Promise<Uint8Array | undefined>}
    */
@@ -573,7 +576,7 @@ export class WASRemoteStore {
    * epoch.
    *
    * @param options {object}
-   * @param options.collectionId {string}   the WAS collection id
+   * @param options.collectionId {string}   the PWS collection id
    * @param options.encryption {CollectionEncryption}   the collection's
    *   current descriptor, carrying its blinded-index key
    * @param options.keyAgreementKey {IKeyAgreementKey}   a recipient of the
@@ -620,7 +623,7 @@ export class WASRemoteStore {
    * pws-client's `QuotaExceededError`.
    *
    * @param options {object}
-   * @param options.collectionId {string}   the WAS collection id
+   * @param options.collectionId {string}   the PWS collection id
    * @param options.resourceId {string}   the id to write at
    * @param options.bytes {Uint8Array}   the plaintext bytes
    * @param options.contentType {string}   the content type sealed with them
@@ -738,7 +741,7 @@ export class WASRemoteStore {
   }
 
   /**
-   * Binds the local collection map (logical name to WAS base URL) for the
+   * Binds the local collection map (logical name to PWS base URL) for the
    * synced feeds. Split out of `ensureUserCollections` so a caller that
    * provisioned the Space through the shared account-genesis ceremony -- which
    * runs the same `provisionWalletSpace` -- still gets the map without
@@ -950,7 +953,7 @@ export class WASRemoteStore {
    * and the app's canonical URL), stamped on the create.
    *
    * @param options {object}
-   * @param options.id {string}   the WAS collection id (validated by the caller)
+   * @param options.id {string}   the PWS collection id (validated by the caller)
    * @param [options.name] {string}   display name; defaults to the id
    * @param [options.isPublic] {boolean}   grant collection-level world read
    * @param [options.generator] {CollectionGenerator}   the application this
@@ -1004,7 +1007,7 @@ export class WASRemoteStore {
    * create.
    *
    * @param options {object}
-   * @param options.id {string}   the WAS collection id
+   * @param options.id {string}   the PWS collection id
    * @param [options.name] {string}   display name; defaults to the id
    * @param [options.generator] {CollectionGenerator}   the application this
    *   collection is provisioned for
@@ -1082,7 +1085,7 @@ export class WASRemoteStore {
    * user's Space. Idempotent.
    *
    * @param options {object}
-   * @param options.id {string}   the WAS collection id
+   * @param options.id {string}   the PWS collection id
    * @returns {Promise<void>}
    */
   async deleteCollection({ id }: { id: string }): Promise<void> {
@@ -1099,7 +1102,7 @@ export class WASRemoteStore {
 
   /**
    * The canonical (trailing-slash) URL of one Collection in this user's
-   * Space, keyed by WAS collection id: the target a grant on it names, and a
+   * Space, keyed by PWS collection id: the target a grant on it names, and a
    * stable identifier for history entries.
    *
    * @param collectionId {string}
@@ -1138,7 +1141,7 @@ export class WASRemoteStore {
     const spaceId = profile.accountPointer
       ? spaceLocation({ spaceUrl: profile.accountPointer.spaceUrl }).spaceId
       : deriveSpaceId(clientDid)
-    const remoteStore = new WASRemoteStore({
+    const remoteStore = new PWSRemoteStore({
       baseServerUrl,
       serviceDescription,
       zcapClient: profile.zcapClient,
@@ -1377,7 +1380,7 @@ export class WASRemoteStore {
   }
 
   /**
-   * Lists every live document of one collection, by WAS collection id, as its
+   * Lists every live document of one collection, by PWS collection id, as its
    * raw stored body (the EDV envelope on an encrypted collection, the
    * document itself on a plaintext one). It walks the collection's `changes`
    * feed, so it costs one request per page rather than one per resource. A
@@ -1385,7 +1388,7 @@ export class WASRemoteStore {
    * 404 for both) lists as empty.
    *
    * @param options {object}
-   * @param options.collectionId {string}   the WAS collection id
+   * @param options.collectionId {string}   the PWS collection id
    * @returns {Promise<Array<{ id: string; data: Json }>>}
    */
   async listCollectionDocuments({
@@ -1418,7 +1421,7 @@ export class WASRemoteStore {
    * (the EDV envelope or a plaintext document), bypassing the fail-closed
    * encryption codec via the raw `was.request()` escape hatch -- the same
    * verbatim-body contract the sync port uses. Returns `undefined` when the
-   * resource is missing (WAS conflates 404 for missing/unauthorized).
+   * resource is missing (PWS conflates 404 for missing/unauthorized).
    *
    * @param options {object}
    * @param options.logicalKey {string}
@@ -1442,7 +1445,7 @@ export class WASRemoteStore {
   /**
    * The GET both synced-resource reads share: the raw `was.request()` escape
    * hatch aimed at one resource of a standard synced collection, resolving to
-   * the response, or to `undefined` on the 404 WAS conflates for
+   * the response, or to `undefined` on the 404 PWS conflates for
    * missing/unauthorized. The two public reads differ only in how much of the
    * response they surface.
    *
@@ -1561,14 +1564,14 @@ export class WASRemoteStore {
   }
 
   /**
-   * Writes one raw body into any collection of this Space, by WAS collection
+   * Writes one raw body into any collection of this Space, by PWS collection
    * id, on the terms {@link putSyncedResource} states: the body is stored
    * verbatim, created-if-absent by default (a `412` reports
    * `{ created: false }`), updated in place with `ifMatch` (a `412`
    * propagates), and stamped with `Key-Epoch` when `epoch` is given.
    *
    * @param options {object}
-   * @param options.collectionId {string}   the WAS collection id
+   * @param options.collectionId {string}   the PWS collection id
    * @param options.resourceId {string}
    * @param options.body {Json}   the raw EDV envelope or plaintext document
    * @param [options.epoch] {string}   the key epoch the envelope was
@@ -1796,7 +1799,7 @@ export class WASRemoteStore {
  * below derive the server from the Space URL and address the record.
  *
  * The registry sits apart from the store's own collections, so this is a
- * standalone function rather than a `WASRemoteStore` method. Each call builds
+ * standalone function rather than a `PWSRemoteStore` method. Each call builds
  * its own `PwsClient` over the caller's `zcapClient`, whose invocation signer
  * is the data identity's root key. The record is a plaintext JSON document
  * (its payload is already ciphertext), so no encryption provider is wired in,

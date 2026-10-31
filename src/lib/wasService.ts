@@ -1,5 +1,5 @@
 /**
- * The one service discovery for the configured WAS server: the unsigned read
+ * The one service discovery for the configured PWS server: the unsigned read
  * of the service description at `{base}service`. Every `PwsClient` this app
  * builds takes the result through its `serviceDescription` option, so no
  * client reads the document on its own and it is fetched once per page load
@@ -78,7 +78,7 @@ export function pwsClientAt({
 }
 
 /**
- * The configured WAS server's service description.
+ * The configured PWS server's service description.
  *
  * @returns {Promise<ServiceDescription>}
  * @throws {Error}   as {@link wasServiceInfo}
@@ -89,12 +89,12 @@ export async function wasServiceDescription(): Promise<ServiceDescription> {
 }
 
 /**
- * What discovery learned about the configured WAS server: the service
+ * What discovery learned about the configured PWS server: the service
  * description, the version entry chosen from it, and its `features` tokens
  * with `hasFeature(token)`. A caller gating on a feature token reads it here.
  *
  * @returns {Promise<ServiceInfo>}
- * @throws {Error}   when no WAS server is configured
+ * @throws {Error}   when no PWS server is configured
  * @throws {IncompatibleServerError}   when the document is malformed, lists
  *   no version the client speaks, or describes a server other than the
  *   configured base (its `url` is not `{base}service`, or its Spaces
@@ -102,7 +102,7 @@ export async function wasServiceDescription(): Promise<ServiceDescription> {
  */
 export function wasServiceInfo(): Promise<ServiceInfo> {
   if (!WAS_BASE_SERVER_URL) {
-    return Promise.reject(new Error('No WAS server is configured.'))
+    return Promise.reject(new Error('No PWS server is configured.'))
   }
   const baseServerUrl = WAS_BASE_SERVER_URL
   if (pending === undefined) {
@@ -164,7 +164,7 @@ function assertDescribesConfiguredServer({
 }
 
 /**
- * The configured WAS server's service description, or `undefined` when the
+ * The configured PWS server's service description, or `undefined` when the
  * server could not be reached. The offline seam: a login entry point that
  * must keep working off this browser's cached state calls this one, so an
  * unreachable server costs it the description rather than the session,
@@ -184,7 +184,7 @@ export async function wasServiceDescriptionIfReachable(): Promise<
     if (!isStorageUnreachable(err)) {
       throw err
     }
-    log.warn('The WAS server could not be reached for service discovery', {
+    log.warn('The PWS server could not be reached for service discovery', {
       err
     })
     return undefined

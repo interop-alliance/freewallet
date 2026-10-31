@@ -838,7 +838,7 @@ export function didWebProjectionStore({
  * The served `id/did.json` therefore keeps publishing whatever it said before
  * -- a forgotten client's verification method, a retired credential's
  * `keyAgreement` entry -- and a did:web verifier reading the projection
- * accepts a key the account has struck. WAS authorization is unaffected (the
+ * accepts a key the account has struck. PWS authorization is unaffected (the
  * server resolves the controller out of `did.jsonl`), so this is a did:web
  * verifier's revocation bypass rather than a storage one, and this visit is
  * what closes it: the generation delegation targets the account Space's items

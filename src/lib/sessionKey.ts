@@ -2,7 +2,7 @@
  * The `freewallet-session` IndexedDB database: a local, per-browser store
  * (deliberately separate from the RxDB wallet database, so it survives
  * wallet-storage decisions independently and is shared across tabs) holding
- * what ordinary login relies on -- the keyring cache (the offline / no-WAS
+ * what ordinary login relies on -- the keyring cache (the offline / no-PWS
  * copy of the account-pointer record), this client's wrapped client-key
  * records, the writer first-seen records, the Space-to-DID mapping, the
  * unlock-methods registry cache, and the passkey-safety notices. None of it
@@ -154,7 +154,7 @@ const keyringCache = sessionEntry({ prefix: 'keyring', idKey: 'spaceId' })
 
 /**
  * Caches a keyring record locally (keyed by its unlock Space id) so that
- * offline and no-WAS logins can unwrap the data seed without a remote read.
+ * offline and no-PWS logins can unwrap the data seed without a remote read.
  * The record is the ciphertext-bearing keyring document; it is inert without
  * the passphrase that derives the unlock key-agreement key. The entry is
  * stamped with the write time so callers can bound how long it may answer
@@ -460,7 +460,7 @@ export const deleteAccountDidForSpace = accountDidForSpace.delete
  * An account's cached unlock-methods registry record. Keyed by the data
  * controller did:key, so several accounts can hold caches side by side in the
  * shared session database. (The controller DID, not the data Space id, is the
- * stable identity available wherever the registry is read -- including no-WAS
+ * stable identity available wherever the registry is read -- including no-PWS
  * deployments that have no Space.)
  */
 const unlockMethodsCache = sessionEntry({
@@ -470,8 +470,8 @@ const unlockMethodsCache = sessionEntry({
 
 /**
  * Caches an unlock-methods registry record locally (keyed by the data
- * controller did:key) so a no-WAS deployment has a copy to read and a
- * WAS-configured one can refresh on a remote hit. The record is the
+ * controller did:key) so a no-PWS deployment has a copy to read and a
+ * PWS-configured one can refresh on a remote hit. The record is the
  * JWE-wrapped registry document; it is inert without the vault KAK that
  * decrypts it.
  *

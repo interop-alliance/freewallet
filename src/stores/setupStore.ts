@@ -13,7 +13,7 @@
  * later `/lobby` mount to enter.
  *
  * The step list is a fixed order per signup path AND per deployment (the
- * ceremonies a no-WAS signup runs are not the ones a WAS signup runs), and
+ * ceremonies a no-PWS signup runs are not the ones a PWS signup runs), and
  * the ceremonies report stage boundaries through the observational
  * `StageNotifier` seam. A mark fires when a stage ENDS, so the Lobby shows
  * the first not-yet-marked step as the one currently running. Every action is
@@ -91,14 +91,14 @@ const ESTABLISHMENT_STEPS: readonly string[] =
 
 /**
  * Every path's stage order, keyed by deployment and method. A signup on a
- * deployment with no WAS server runs none of the establishment, so listing
+ * deployment with no PWS server runs none of the establishment, so listing
  * its stages there would show a feed of lines that can never be reported.
  *
  * Each list ends with a closing line for the wallet entry, which has no stage
  * name of its own: it is the current line from the last real mark until the
- * run settles. The WAS lists open with the signup-level marks
+ * run settles. The PWS lists open with the signup-level marks
  * (`src/session/signup.ts`) and carry the establishment's steps between them;
- * the local lists are that module's own no-WAS marks throughout.
+ * the local lists are that module's own no-PWS marks throughout.
  */
 export const SETUP_STAGE_LISTS: Record<
   'was' | 'local',
@@ -131,7 +131,7 @@ export const SETUP_STAGE_LISTS: Record<
       'local-provisioning',
       'entering-wallet'
     ],
-    // The no-WAS passkey flow mints the key set before the ceremony, and
+    // The no-PWS passkey flow mints the key set before the ceremony, and
     // registration and the keyring bind are one call, so they share a line.
     passkey: [
       'local-account-keys',

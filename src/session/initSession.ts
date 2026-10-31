@@ -6,14 +6,14 @@
  * authStore. A passphrase (or passkey) login resolves through the keyring:
  * the unlock identity locates the account (the encrypted account pointer) and
  * unwraps this client's local key set. On a fresh browser holding no key set,
- * the default (with a WAS server) is the TRANSIENT login -- the
+ * the default (with a PWS server) is the TRANSIENT login -- the
  * public-terminal composition in `src/session/transientLogin.ts`, which
  * persists nothing locally. A STANDING credential -- one whose unlock record
  * carries the bridge delegation and update-key ladder seed -- self-enrolls
  * an ordinary enrolled client in place on the programmatic
  * `rememberBrowser: true` entry (loud log entries first, then the first
  * roster read through the credential's standing wrap); a plain pointer
- * record -- which only a no-WAS bind produces, since every WAS signup writes
+ * record -- which only a no-PWS bind produces, since every PWS signup writes
  * the standing layout before the Space exists -- still surfaces the
  * not-enrolled state and the connect-another-wallet ceremony.
  */
@@ -207,9 +207,9 @@ export async function initGuestSession() {
  * @param [options.popup] {boolean}   this session is a CHAPI popup visit, in
  *   the third-party partitioned iframe. Two consequences, both of the
  *   partitioning: credential + history operations route straight to the
- *   remote WAS collections (the local replica there is a bucket no sync
+ *   remote PWS collections (the local replica there is a bucket no sync
  *   controller ever drives), and the browser-local variant's localStorage
- *   cache families are suppressed for the visit on a WAS deployment (the
+ *   cache families are suppressed for the visit on a PWS deployment (the
  *   Storage Access handle unpartitions IndexedDB and does not reach
  *   localStorage, so a persisted cache would be partitioned residue no
  *   top-level wipe can reach -- see the shared wipe enumeration's stated
@@ -233,7 +233,7 @@ export async function initGuestSession() {
  *   over `idb` (with cache persistence off for guests). A transient login
  *   supplies the in-memory variant here, which carries the client-annex
  *   identity: the annex DID whose generation holds this visit's
- *   verification method (every WAS request signs as `<clientAnnexDid>#<vm>`
+ *   verification method (every PWS request signs as `<clientAnnexDid>#<vm>`
  *   in place of the account-document form) and the generation delegation
  *   every request rides (stamped as `profile.invocationCapability`). The
  *   in-memory variant also skips the KMS keystore, the login-time roster
@@ -274,11 +274,11 @@ export async function initSessionFromSeed({
   persistence?: SessionPersistence
 }) {
   // A popup's localStorage cache pair is suppressed -- but only where the
-  // pair is genuinely a CACHE. With a WAS server the descriptors are served
+  // pair is genuinely a CACHE. With a PWS server the descriptors are served
   // and the local copy is the offline fallback, so dropping it costs the
   // popup nothing and spares the partitioned bucket residue no top-level
   // wipe can reach (the Storage Access handle unpartitions IndexedDB, never
-  // localStorage). With no WAS server the same store is the only record of
+  // localStorage). With no PWS server the same store is the only record of
   // the locally minted key epochs, so dropping it would mint fresh ones and
   // orphan everything already encrypted.
   const suppressPopupCaches = popup && !!WAS_BASE_SERVER_URL
@@ -291,7 +291,7 @@ export async function initSessionFromSeed({
   // The one discovery of this login chain, threaded into everything below
   // rather than probed per call site. Started here so it overlaps the key
   // derivation and the KMS round trip, and awaited where the first consumer
-  // needs it. A guest never touches the WAS server, so a guest skips it. An
+  // needs it. A guest never touches the PWS server, so a guest skips it. An
   // unreachable server costs the description, not the session: the roster
   // check is skipped (exactly as an unreachable roster read always was) and
   // the storage clients are built without it, so a remembered login keeps
@@ -322,7 +322,7 @@ export async function initSessionFromSeed({
 
   // Ensure a KMS keystore exists for this controller (list-by-controller,
   // create on first login) and bind a KeystoreAgent to it. Guests skip the
-  // KMS entirely, as they skip WAS. This provisioning round trip is started
+  // KMS entirely, as they skip PWS. This provisioning round trip is started
   // here and awaited at the `Promise.all` below, so it runs concurrently with
   // the roster read and with storage init -- nothing in either depends on the
   // keystore, so the independent trips need not be serialized.
@@ -434,7 +434,7 @@ export async function initSessionFromSeed({
     ...(persistClientKeys ? { persistClientKeys } : {}),
     ...(accountPointer ? { accountPointer } : {}),
     // Every remote request a transient session makes rides the generation
-    // delegation the strategy carries (WASRemoteStore invokes it in place of
+    // delegation the strategy carries (PWSRemoteStore invokes it in place of
     // the root capability).
     ...(!isBrowserLocalSession(persistence)
       ? { invocationCapability: persistence.clientAnnex.invocationCapability }
@@ -744,13 +744,13 @@ async function healUnpromotedRememberedAccount({
  * passphrase derives an unlock identity that locates the account and unwraps
  * this client's local key set.
  *
- * The post-KDF login routing runs first (`routeUnlockLogin`): with a WAS
+ * The post-KDF login routing runs first (`routeUnlockLogin`): with a PWS
  * server configured and no client-key record held for this credential, the
  * DEFAULT is the transient login -- the public-terminal composition in
  * `src/session/transientLogin.ts`, which persists nothing locally -- and the
  * remembered branches below are reached on a remembered browser (the silent
  * ratchet), with `rememberBrowser: true` (the programmatic standing
- * self-enrollment entry), or with no WAS server. The CHAPI popup runs the
+ * self-enrollment entry), or with no PWS server. The CHAPI popup runs the
  * same routing: a granted Storage Access handle lets the probe see the
  * first-party record and a remembered browser proceeds remembered, while a
  * denied one routes transient like any non-remembered browser
@@ -771,10 +771,10 @@ async function healUnpromotedRememberedAccount({
  * - **Located, not enrolled**: the keyring record was found (the account
  *   exists) but this client holds no key set -- a fresh browser. A standing
  *   record self-enrolls this browser right here and the login proceeds as an
- *   enrolled hit; only a plain pointer record (the no-WAS reduced path)
+ *   enrolled hit; only a plain pointer record (the no-PWS reduced path)
  *   returns `{ session: null, userExists: true }`, and the caller surfaces
  *   the not-enrolled guidance. A popup visit reaches this branch only on a
- *   no-WAS deployment: with a WAS server, a record-less popup routed
+ *   no-PWS deployment: with a PWS server, a record-less popup routed
  *   transient long before here. On the
  *   explicit `rememberBrowser: true` entry, a standing record whose pointer
  *   names no did:webvh yet (a remembered signup torn before the
@@ -798,7 +798,7 @@ async function healUnpromotedRememberedAccount({
  *   partitioned iframe. It no longer forces the remembered route -- the
  *   routing decides that from the record probe over the Storage Access
  *   handle -- and gates only what the partitioning actually implies:
- *   remote-direct storage, suppressed localStorage caches on a WAS
+ *   remote-direct storage, suppressed localStorage caches on a PWS
  *   deployment, and the remembered arm's popup refusals (no
  *   self-enrollment, no pending resume, and the login-time chain passes
  *   that carry the guard). Default false
@@ -997,7 +997,7 @@ async function loginWithUnlockCredential({
     // verify) could let the login run on to the dead key's authorization
     // errors. A transport failure and a continuity refusal rethrow
     // unchanged. A pointer naming no did:webvh has no log to read, and the
-    // no-WAS deployment none to reach.
+    // no-PWS deployment none to reach.
     // The verified head is handed on to the detector, which reads it in
     // place of fetching the same log again.
     const accountLog =
@@ -1200,8 +1200,8 @@ async function sessionFromKeyringHit({
     // login proceeds enrolled. A remote-direct session (the partitioned
     // CHAPI popup) deliberately does not: its storage bucket is ephemeral,
     // and an enrolled client minted per popup visit would litter the account
-    // log. Without standing authority (a plain pointer record -- the no-WAS
-    // reduced path; every WAS signup writes the standing layout) the caller
+    // log. Without standing authority (a plain pointer record -- the no-PWS
+    // reduced path; every PWS signup writes the standing layout) the caller
     // surfaces the not-enrolled state and offers the connect-another-wallet
     // ceremony.
     if (popup || !canSelfEnroll({ found })) {

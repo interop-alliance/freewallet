@@ -1,5 +1,5 @@
 /**
- * The remembered signup e2e (WAS mode): the remembered signup rides the
+ * The remembered signup e2e (PWS mode): the remembered signup rides the
  * credential-anchored fold -- the establishment (ladder-anchored genesis plus
  * the `#DelegatedClients` pointer entry) followed by the ordinary remembered
  * login's self-enrollment (the reveal-and-commit and add entries). The

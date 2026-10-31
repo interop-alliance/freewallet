@@ -31,11 +31,11 @@
  *   the sealed bridge delegation (a pre-minted PUT-on-`did.jsonl` zcap) and
  *   the sealed update-key ladder seed -- which is what lets a fresh browser
  *   holding nothing but the credential self-enroll as an ordinary client.
- *   The reduced (no-WAS) layout stays the plain keyring record: the
+ *   The reduced (no-PWS) layout stays the plain keyring record: the
  *   pointer, never key material or authority. Both layouts are
  *   SIGNED by the unlock identity's own Ed25519 key. The remote copy is the
  *   source of truth and is consulted first on every login; a **local
- *   cache** in the `freewallet-session` IndexedDB serves no-WAS deployments
+ *   cache** in the `freewallet-session` IndexedDB serves no-PWS deployments
  *   and, within `KEYRING_CACHE_TTL_MS`, offline logins.
  * - The **client-key record** lives only in the `freewallet-session`
  *   IndexedDB: this client's key set (the client seed) and its cached copy of
@@ -208,7 +208,7 @@ export interface PersistableClientKeys {
  * the derived unlock Space id (always -- it is already computed),
  * `clientKeys` when this client holds a key set under the unlock method (an
  * enrolled client; absent on a fresh browser, which can locate the account
- * but not act), and, when `mintManageCapability` was requested and a WAS
+ * but not act), and, when `mintManageCapability` was requested and a PWS
  * server is configured, a management zcap the unlock identity delegated to
  * the recovered `controller`. The capability grants GET/DELETE on the unlock
  * Space only, so a later Settings flow can retire this method (a lost
@@ -231,7 +231,7 @@ export interface KeyringFetchResult extends KeyringRecordContents {
   // the pointer can durably adopt the did. In-memory only.
   persistAccountPointer?: (pointer: AccountPointer) => Promise<void>
   // The standing-credential members recovered from an unlock record in the
-  // standing layout (absent on a plain keyring record -- the no-WAS reduced
+  // standing layout (absent on a plain keyring record -- the no-PWS reduced
   // path): the pre-minted PUT-on-`did.jsonl` bridge delegation
   // and the update-key ladder seed, both credential-authenticated by the
   // record's binding MAC, plus the optional annex-Space sibling
@@ -348,7 +348,7 @@ export function unlockManagementGrantee({
  * URL by default, expiring after `UNLOCK_MANAGE_ZCAP_TTL_MS`. Pure signing (no
  * server round trip); the chain roots at the Space's synthesized root
  * capability (the ezcap client generates it from the target). Only ever
- * called when a WAS server is configured -- the unlock Space, and thus the
+ * called when a PWS server is configured -- the unlock Space, and thus the
  * capability, exist only then.
  *
  * A standing record's management zcap widens the actions to
@@ -561,7 +561,7 @@ function clientKeysPersister({
  * hiccup at signup).
  *
  * Only the pointer changes. Every other member is carried from the record
- * the write replaces: with a WAS server, a fresh read taken just before the
+ * the write replaces: with a PWS server, a fresh read taken just before the
  * write, which then lands as a compare-and-swap under that read's ETag
  * ({@link casRewriteUnlockRecord}). So a record another writer replaced since
  * this login's read keeps what that writer wrote, a standing layout's bridge,
@@ -572,7 +572,7 @@ function clientKeysPersister({
  * @param options {object}
  * @param options.credential {UnlockCredential}
  * @param options.unwrapped {UnwrappedStoredRecord}   the record this login
- *   read, the base when no WAS server is configured
+ *   read, the base when no PWS server is configured
  * @param options.accountLogPinStore {ResourceLogPinStore}   the pin store a
  *   fresh read's pending-proof settlement rides
  * @param [options.idb] {IDBFactory}
@@ -809,7 +809,7 @@ interface UnwrappedStoredRecord {
  * record's layout: a frame carrying a `bridge` member is an unlock record in
  * the standing layout (the account core verified under the credential's
  * binding MAC before the pointer is trusted), anything else is a plain
- * keyring record (the pre-promotion or no-WAS reduced path -- a pure
+ * keyring record (the pre-promotion or no-PWS reduced path -- a pure
  * pointer, no standing authority). Throws raw codec errors; callers map them
  * through `keyringUnwrapError`.
  *
@@ -1045,7 +1045,7 @@ async function readCachedRecord({
 }
 
 /**
- * Locates the keyring for an unlock secret. When a WAS server is configured
+ * Locates the keyring for an unlock secret. When a PWS server is configured
  * the remote copy is consulted first -- it is the source of truth, and
  * checking it before the cache is what makes a method change (e.g. a
  * passphrase change) on another client take effect here: a found record
@@ -1063,14 +1063,14 @@ async function readCachedRecord({
  * any other reason throws `KeyringRecordUnusableError` (corrupt record -- a
  * state distinct from both "no account" and "server unreachable"). Neither
  * refreshes the cache. With no
- * WAS server configured the cache is the keyring's only copy, so the lookup
+ * PWS server configured the cache is the keyring's only copy, so the lookup
  * is cache-only with no TTL.
  *
  * A hit carries `clientKeys` when this client holds a key set under the
  * unlock method (an enrolled client -- the session can be built), and omits
  * it on a fresh browser (the account is located; acting requires enrollment).
  * The result always carries the derived `unlockSpaceId` (cheap -- it is
- * already computed); when `mintManageCapability` is set and a WAS server is
+ * already computed); when `mintManageCapability` is set and a PWS server is
  * configured it also carries a `manageCapability` delegated to the recovered
  * controller (pure signing, minted on both the remote-hit and cache-fallback
  * paths), so a full login can record the method's revocation authority in the
@@ -1268,7 +1268,7 @@ export interface TransientKeyringFetchResult extends KeyringRecordContents {
 /**
  * The transient unlock-record fetch: `fetchKeyring`'s public-terminal
  * sibling, which writes nothing -- not on this browser, and not on the
- * server. Remote-only (the transient login presupposes a WAS server -- with
+ * server. Remote-only (the transient login presupposes a PWS server -- with
  * none configured it throws), it fetches the record, verifies its proof and,
  * for a standing record, the credential-authenticated account binding, and
  * settles a pending proof (a cascade-re-minted record) against the account
@@ -1311,7 +1311,7 @@ export async function fetchTransientKeyring({
 }): Promise<TransientKeyringFetchResult | null> {
   if (!WAS_BASE_SERVER_URL) {
     throw new TypeError(
-      'The transient unlock fetch requires a configured WAS server.'
+      'The transient unlock fetch requires a configured PWS server.'
     )
   }
   if (!derived && (secret === undefined || kdf === undefined)) {
@@ -1552,10 +1552,10 @@ function assertSameRecordAuthority({
  * stands and nothing is PUT. The stamp advances past the record actually
  * read.
  *
- * The read refuses a record served with no ETag, so a WAS deployment must
+ * The read refuses a record served with no ETag, so a PWS deployment must
  * expose the `ETag` response header to the browser.
  *
- * With no WAS server the local cache is the record's only copy and no other
+ * With no PWS server the local cache is the record's only copy and no other
  * writer shares it, so `base` (the record this login read) is the one input
  * and nothing goes on the wire.
  *
@@ -1789,7 +1789,7 @@ function standingRecordRebinder({
 /**
  * Assembles a `fetchKeyring` hit: the unwrapped record contents plus the
  * derived unlock Space id, this client's key set when one is stored under the
- * unlock method, and, when requested and a WAS server is configured, the
+ * unlock method, and, when requested and a PWS server is configured, the
  * management zcap delegated to the recovered controller.
  *
  * @param options {object}
@@ -2134,11 +2134,11 @@ export type RemoteUnlockRecordBind = typeof bindCredentialAnchoredUnlockSecret
 /**
  * Binds an unlock secret to this client's key set and the account it belongs
  * to: derives the unlock identity for the method's KDF, ensures the unlock
- * Space (when WAS is configured), wraps, signs, and PUTs the account-pointer
+ * Space (when PWS is configured), wraps, signs, and PUTs the account-pointer
  * keyring
  * record, wraps the client seed + user key into the local client-key record,
  * and saves the local cache. Throws on failure (the caller
- * decides fatality -- fatal for signups). With no WAS server configured the
+ * decides fatality -- fatal for signups). With no PWS server configured the
  * keyring is cache-only, so the account is then only recoverable in this
  * browser profile. Returns the unlock Space id so callers (the unlock-methods
  * registry) can record which Space this method resolves to. Also returns a
@@ -2159,10 +2159,10 @@ export type RemoteUnlockRecordBind = typeof bindCredentialAnchoredUnlockSecret
  *   did:webvh update-key seeds, cached in the local client-key record so any
  *   unlock method recovers update authority at login
  * @param [options.pointer] {AccountPointer}   the account pointer the record
- *   carries; absent on no-WAS deployments
+ *   carries; absent on no-PWS deployments
  * @param [options.delegateManagementTo] {string}   an account DID (see
  *   `unlockManagementGrantee`) to delegate the unlock Space management zcap
- *   to (GET/DELETE on this unlock Space). When set and a WAS server is
+ *   to (GET/DELETE on this unlock Space). When set and a PWS server is
  *   configured, the returned `manageCapability` is the revocation authority
  *   a later Settings flow uses to retire this method (a lost passkey)
  *   without tapping or re-deriving from the secret.
@@ -2171,7 +2171,7 @@ export type RemoteUnlockRecordBind = typeof bindCredentialAnchoredUnlockSecret
  *   (with `ladderSeed`), the record is written in the standing unlock-record
  *   layout -- the credential can self-enroll a fresh browser -- instead of as
  *   a plain pointer record. Requires `pointer` (unlock records exist only on
- *   WAS deployments).
+ *   PWS deployments).
  * @param [options.delegatedClients] {IZcap}   the pre-minted annex-Space
  *   sibling delegation (GET+PUT over the auxiliary Space's items subtree),
  *   sealed into the standing record beside the bridge
@@ -2528,7 +2528,7 @@ export async function bindCredentialAnchoredUnlockSecret({
 }> {
   if (!WAS_BASE_SERVER_URL) {
     throw new TypeError(
-      'The credential-anchored bind requires a configured WAS server.'
+      'The credential-anchored bind requires a configured PWS server.'
     )
   }
   if (!derived && (secret === undefined || kdf === undefined)) {
@@ -2635,10 +2635,10 @@ export class WrongPassphraseError extends Error {
 
 /**
  * Verifies an already-derived unlock identity against an account controller
- * by reading and unwrapping its keyring record. When a WAS server is
+ * by reading and unwrapping its keyring record. When a PWS server is
  * configured the remote copy is read -- the source of truth, so a locally
  * cached record cannot verify a passphrase already retired on another client;
- * with no WAS server the local cache is the keyring's only copy.
+ * with no PWS server the local cache is the keyring's only copy.
  *
  * A missing record, or one that fails to unwrap or whose controller does not
  * match, is a `WrongPassphraseError`. A network error while reading the remote
@@ -2823,10 +2823,10 @@ export async function verifyPassphrase({
 
 /**
  * Retires an unlock method's keyring (account deletion, method removal):
- * derives the unlock identity, deletes its unlock Space (when a WAS server is
+ * derives the unlock identity, deletes its unlock Space (when a PWS server is
  * configured), and always clears the local records -- the cache and this
  * method's client-key record (an explicit lifecycle flow is the one place a
- * client-key record may be deleted). With no WAS server
+ * client-key record may be deleted). With no PWS server
  * configured there is no Space, so `unlockSpaceDeleted` stays `true`.
  *
  * Performs no verification -- a wrong secret derives a different unlock Space
@@ -2893,7 +2893,7 @@ export async function deleteKeyring({
 
 /**
  * Changes the account passphrase. Verifies the old passphrase by unwrapping
- * its keyring (the remote copy when a WAS server is configured -- the source
+ * its keyring (the remote copy when a PWS server is configured -- the source
  * of truth -- else the local cache) and matching the recovered controller
  * against the account did:key, binds the new passphrase (re-wrapping this
  * client's key set, the user key, and the did:webvh update-key seeds, and carrying
@@ -2990,11 +2990,11 @@ export async function changePassphrase({
     }))
   const oldUnlock = oldCredential.unlock
 
-  // Verify the old passphrase via its keyring. With a WAS server configured
+  // Verify the old passphrase via its keyring. With a PWS server configured
   // the remote copy is read -- the source of truth, so a locally cached record
   // cannot verify a passphrase already retired on another client. A network
   // error while reading the remote rethrows -- an unreachable remote must not
-  // be misread as a wrong passphrase. With no WAS server the local cache is
+  // be misread as a wrong passphrase. With no PWS server the local cache is
   // the keyring's only copy.
   const { found: verified, ladderSeed: oldLadderSeed } =
     await verifyUnlockKeyring({

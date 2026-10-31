@@ -5,7 +5,7 @@
  * delete of a credential with no local public copy keeps working.
  *
  * The manager runs over a real BrowserStore on memory RxDB, with a structural
- * fake `WASRemoteStore` behind the synced-resource surface.
+ * fake `PWSRemoteStore` behind the synced-resource surface.
  *
  * @vitest-environment node
  */
@@ -17,7 +17,7 @@ import type { User } from '@/types/auth'
 import { BrowserStore } from './browserStore'
 import { StorageManager } from './storageManager'
 import { generateVaultKeys } from '@/stores/testing/vaultKeys'
-import type { WASRemoteStore } from './wasRemoteStore'
+import type { PWSRemoteStore } from './pwsRemoteStore'
 
 const openStores: BrowserStore[] = []
 let userCounter = 0
@@ -44,7 +44,7 @@ function makeCredential(name: string): IVerifiableCredential {
 }
 
 /**
- * A structural fake `WASRemoteStore` recording any synced-resource call the
+ * A structural fake `PWSRemoteStore` recording any synced-resource call the
  * retraction makes to it. None is expected.
  *
  * @returns {object}
@@ -62,11 +62,11 @@ function makeFakeRemote() {
  * fake remote store attached (a plaintext-only session: no ciphers needed,
  * since `public-credentials` is plaintext).
  *
- * @param [remoteStore] {WASRemoteStore}
+ * @param [remoteStore] {PWSRemoteStore}
  * @returns {Promise<StorageManager>}
  */
 async function makeStorage(
-  remoteStore?: WASRemoteStore
+  remoteStore?: PWSRemoteStore
 ): Promise<StorageManager> {
   userCounter += 1
   const user: User = {
@@ -93,7 +93,7 @@ async function makeStorage(
 describe('StorageManager.deleteCredential public-copy retraction', () => {
   it('decides on the local replica alone with a remote configured', async () => {
     const fake = makeFakeRemote()
-    const storage = await makeStorage(fake as unknown as WASRemoteStore)
+    const storage = await makeStorage(fake as unknown as PWSRemoteStore)
     const credential = makeCredential('Dave')
     await storage.addCredential({
       credential,

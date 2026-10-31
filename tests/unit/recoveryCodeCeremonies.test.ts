@@ -6,7 +6,7 @@
  *
  * What is real here: the code's whole key set (HKDF from the code bytes, the
  * ladder seed and its VM), the bridge delegation and its proof, the unlock
- * record's EDV wrap. What is mocked is the WAS seam -- the account log's
+ * record's EDV wrap. What is mocked is the PWS seam -- the account log's
  * entries, the roster appends, the registry record, the unlock Space -- so
  * the stage order, the pivot, and a re-run from each tear point can be
  * asserted against durable state the mocks hold.

@@ -2,7 +2,7 @@
  * Unit tests for the one service discovery: the memo that makes every
  * `PwsClient` this app builds share one read of the service description at
  * `{base}service`, the retry a failed discovery leaves open, the refusal
- * when no WAS server is configured, and the refusal of a description that
+ * when no PWS server is configured, and the refusal of a description that
  * describes a server other than the configured base. The `app.config` canonicalization of the
  * configured base server URL is covered beside them, since the discovery
  * starts from it and every Space URL hangs off it.
@@ -119,18 +119,18 @@ describe('wasServiceDescription', () => {
     expect(readServiceDescription).toHaveBeenCalledTimes(2)
   })
 
-  it('rejects when no WAS server is configured', async () => {
+  it('rejects when no PWS server is configured', async () => {
     baseServerUrl = undefined
     const { wasServiceDescription } = await loadModule()
 
     await expect(wasServiceDescription()).rejects.toThrow(
-      'No WAS server is configured.'
+      'No PWS server is configured.'
     )
     expect(readServiceDescription).not.toHaveBeenCalled()
   })
 })
 
-describe('the WAS base server URL canonicalized in app.config', () => {
+describe('the PWS base server URL canonicalized in app.config', () => {
   afterEach(() => {
     vi.unstubAllEnvs()
     vi.resetModules()

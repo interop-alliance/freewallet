@@ -14,7 +14,7 @@ import { signupViaWizard } from './helpers'
 import { test, expect } from '../shared/consoleCapture'
 
 /**
- * The wallet-onboarding rendezvous e2e (WAS mode): the inviter's half of the
+ * The wallet-onboarding rendezvous e2e (PWS mode): the inviter's half of the
  * enrollment ceremony carried over an ephemeral exchange instead of a pasted
  * connect code. Settings mints an exchange holding a `WalletOnboardingQuery`
  * and shows its interaction URL (the QR payload); a malformed response

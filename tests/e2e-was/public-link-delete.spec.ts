@@ -13,7 +13,7 @@ import { test, expect } from '../shared/consoleCapture'
  * Deleting a credential that has a live public link. The public copy is
  * retracted BEFORE the private credential is deleted, so a credential the user
  * deleted never stays world-readable; the deliberate "keep public copy" choice
- * is the one path that leaves the public URL live. Both need the remote WAS
+ * is the one path that leaves the public URL live. Both need the remote PWS
  * Space the public URL resolves against -- see playwright.was.config.ts.
  */
 test.describe('Deleting a credential with a public link', () => {

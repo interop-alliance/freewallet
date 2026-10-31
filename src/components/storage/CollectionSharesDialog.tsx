@@ -74,7 +74,7 @@ function hostOf(origin: string): string {
  *
  * @param options {object}
  * @param options.session {Session}          the logged-in session
- * @param options.collectionId {string}      the WAS collection id
+ * @param options.collectionId {string}      the PWS collection id
  * @param options.collectionName {string}    its display name, for the title
  * @param options.shares {CollectionShare[]} the collection's current readers
  * @param options.onClose {Function}         closes the dialog

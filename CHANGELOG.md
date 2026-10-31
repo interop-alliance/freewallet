@@ -55,6 +55,12 @@
 
 ### Changed
 
+- Docs, comments, UI strings, and error messages say Portable Web Spaces
+  (PWS) in place of Wallet Attached Storage (WAS). Identifiers such as
+  `VITE_WAS_SERVER_URL` are unchanged.
+- `WASRemoteStore` (`src/stores/wasRemoteStore.ts`) is renamed
+  `PWSRemoteStore` (`src/stores/pwsRemoteStore.ts`), following the
+  protocol's rename to Portable Web Spaces.
 - Moves from `@interop/was-client` 0.103.0 to its renamed successor
   `@interop/pws-client` 0.106.0, and from `@interop/was-sync` 0.11.0 to
   `@interop/pws-sync` 0.14.0. The imported names follow the rename:
@@ -66,7 +72,7 @@
   `pwsAsClient`, and the store builders are `pwsWebvhIdStore`,
   `pwsWebvhLogStore`, `pwsConnectionsStore`, and
   `pwsLogGovernedDescriptorStore`. The app-side seams that hold the client
-  follow: `pwsClientAt`, `WASRemoteStore.pws`, `ClientAnnexReach.pws`, and
+  follow: `pwsClientAt`, `PWSRemoteStore.pws`, `ClientAnnexReach.pws`, and
   `StorageManager.pwsClient`.
 - Breaking: the epoch-configuration state type is now
   `PwsEpochConfiguration`, with no fallback. A roster or collection
@@ -78,7 +84,7 @@
   `replica-pull-grants-are-current`,
   `replica-space-controller-is-the-account-did`) with no converger yet, each
   with a `none` gap row.
-- Breaking: `VITE_WAS_SERVER_URL` holds the WAS server's base server URL
+- Breaking: `VITE_WAS_SERVER_URL` holds the PWS server's base server URL
   (`https://host/`, the URL under which it serves `service`, `spaces/` and
   `space/{id}/`), not its Spaces Repository URL. `WAS_BASE_SERVER_URL` in
   `app.config.ts` carries it in was-client's canonical form (one trailing
@@ -100,13 +106,13 @@
   `src/lib/spaceLocation.ts`) or the DID (`didWebvhLogLocation`). The account
   Space is opened with `was.spaceAt(spaceUrl)`, an unlock Space with
   `was.space(derivedId)` on the configured server (one idempotent `PUT`), and
-  every URL is built by was-client's `*Url` builders. `WASRemoteStore` names
+  every URL is built by was-client's `*Url` builders. `PWSRemoteStore` names
   its server `baseServerUrl` and its Space `spaceUrl`. The did:web projection
   id is derived from the did:webvh (`didWebOfAccount`), so it carries a
   sub-path mount's prefix segments. The onboarding invite follows
   wallet-request 0.6.0's `WalletOnboardingQuery` (`did`, optional
   `baseServerUrl`). The pws-link rename (`isPwsLinkPayload`) is adopted.
-  Greenfield: existing dev WAS data and test profiles are re-created.
+  Greenfield: existing dev PWS data and test profiles are re-created.
 - `VITE_WAS_SERVER_URL` in `playwright.was.config.ts`, `fly.toml`, and the
   deployment docs is the base server URL.
 - Grant resolution (`resolveGrants` and its siblings) and the unlock-methods
@@ -229,14 +235,15 @@
   push's ack write-back or echo replaces it. The schema change makes RxDB
   refuse every existing replica, so each is forgotten at the next login and
   re-pulled from the Space, its replication checkpoint included. Local writes
-  not yet pushed at the update are lost, and a guest or no-WAS session's
+  not yet pushed at the update are lost, and a guest or no-PWS session's
   replica is lost whole.
 
 ### Fixed
 
 - The storage browser reads a server listing's path-absolute item URLs on a
   sub-path mount: a reference the Space URL does not resolve is read as a
-  path under the base server URL.
+  path under the canonical base server URL, so a base URL given without its
+  trailing slash (`https://host/was`) keeps its last segment.
 - The account deletion walk admits a sibling delegation whose target sits
   anywhere beneath the annex Space this server places its id at, rather
   than only an exact Space URL.

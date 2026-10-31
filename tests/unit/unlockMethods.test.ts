@@ -2,9 +2,9 @@
 /**
  * Unit tests for the unlock-methods registry (`src/session/unlockMethods.ts`):
  * the wrap/unwrap round-trip (a record survives JWE encryption under the vault
- * KAK and its outer/inner version validation), the no-WAS cache-only path, and
+ * KAK and its outer/inner version validation), the no-PWS cache-only path, and
  * the remote-first read that refreshes the local cache on a hit. The
- * `wasRemoteStore` data-Space helpers are replaced by an in-memory fake keyed
+ * `pwsRemoteStore` data-Space helpers are replaced by an in-memory fake keyed
  * by data Space id; the `freewallet-session` IndexedDB cache runs unmocked
  * against a minimal in-memory `IDBFactory` (node has no IndexedDB). The real
  * EDV cipher and CapabilityAgent / X25519 derivations run unmocked.
@@ -32,7 +32,7 @@ import {
 } from '@/lib/sessionKey'
 
 /**
- * Shared mutable state for the two mocks: the configured WAS url (mutable so a
+ * Shared mutable state for the two mocks: the configured PWS url (mutable so a
  * test can drop it to exercise the cache-only branch), the in-memory data
  * Spaces (Space URL to stored record), and an optional error the remote GET
  * should throw.
@@ -60,7 +60,7 @@ vi.mock('@/app.config', async importOriginal => ({
   }
 }))
 
-vi.mock('@/stores/wasRemoteStore', () => ({
+vi.mock('@/stores/pwsRemoteStore', () => ({
   putUnlockMethodsRecord: vi.fn(
     async ({
       spaceUrl,
@@ -220,7 +220,7 @@ import {
 import {
   getUnlockMethodsRecord,
   putUnlockMethodsRecord
-} from '@/stores/wasRemoteStore'
+} from '@/stores/pwsRemoteStore'
 
 const DATA_CONTROLLER = 'did:key:z6MkDataControllerForUnlockMethods'
 const DATA_SPACE_ID = 'PVkVUyJ24oyQh2BebkeUOygDfR5opfhJhG4KkMYTlzU'
@@ -676,7 +676,7 @@ describe('put / get round-trip', () => {
   })
 })
 
-describe('no-WAS cache-only path', () => {
+describe('no-PWS cache-only path', () => {
   it('writes and reads the registry from the cache with no remote call', async () => {
     wasState.url = undefined
     const idb = createFakeIdb()
@@ -790,7 +790,7 @@ describe('revokeUnlockMethod', () => {
     expect(after!.methods).toHaveLength(0)
   })
 
-  it('throws when a WAS server is configured and the entry has no capability', async () => {
+  it('throws when a PWS server is configured and the entry has no capability', async () => {
     const idb = createFakeIdb()
     const session = await makeSession(idb)
     const entry = passkeyEntry()
@@ -820,7 +820,7 @@ describe('revokeUnlockMethod', () => {
     expect(deleteUnlockSpace).not.toHaveBeenCalled()
   })
 
-  it('skips the Space delete but still cleans up with no WAS server', async () => {
+  it('skips the Space delete but still cleans up with no PWS server', async () => {
     wasState.url = undefined
     const idb = createFakeIdb()
     const session = await makeSession(idb)
@@ -1204,7 +1204,7 @@ describe('deleteUnlockMethodSpace', () => {
     expect(deleteUnlockSpace).not.toHaveBeenCalled()
   })
 
-  it('skips the server delete with no WAS server configured', async () => {
+  it('skips the server delete with no PWS server configured', async () => {
     wasState.url = undefined
     const idb = createFakeIdb()
     const session = await makeSession(idb)

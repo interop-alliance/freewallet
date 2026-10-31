@@ -3,7 +3,7 @@ import { fillSettled, forceRememberBrowser, signupViaWizard } from './helpers'
 import { test, expect } from '../shared/consoleCapture'
 
 /**
- * Revoking an unlock method from a client that did NOT create it (WAS mode).
+ * Revoking an unlock method from a client that did NOT create it (PWS mode).
  * A recovery code's and a passkey's unlock records are managed through a
  * delegated management zcap; that grant goes to the ACCOUNT IDENTITY (the
  * did:webvh on a promoted account), and an invocation picks its signer from

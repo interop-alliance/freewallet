@@ -3,7 +3,7 @@ import { fillSettled, forceRememberBrowser, signupViaWizard } from './helpers'
 import { test, expect } from '../shared/consoleCapture'
 
 /**
- * The login page's forget affordance (the no-unlock-material grade) e2e (WAS
+ * The login page's forget affordance (the no-unlock-material grade) e2e (PWS
  * mode). A wedged login -- a keyring forgery refusal or either continuity
  * refusal -- offers "Forget wallet data on this browser": a whole-database,
  * browser-scoped wipe that runs no ceremony and signs nothing, since nothing
@@ -21,7 +21,7 @@ import { test, expect } from '../shared/consoleCapture'
  *    non-forgettable reason (PRF unsupported) -- so a failure sequence can
  *    never act on the earlier account's state.
  *
- * Every login here pays the deliberately slow unlock KDF on top of the WAS
+ * Every login here pays the deliberately slow unlock KDF on top of the PWS
  * ceremonies, hence `test.slow()` and the generous timeouts.
  */
 

@@ -12,7 +12,7 @@ import type { User } from '@/types/auth'
 import { BrowserStore } from './browserStore'
 import { StorageManager } from './storageManager'
 import { generateVaultKeys } from '@/stores/testing/vaultKeys'
-import type { WASRemoteStore } from './wasRemoteStore'
+import type { PWSRemoteStore } from './pwsRemoteStore'
 
 const openStores: BrowserStore[] = []
 let userCounter = 0
@@ -27,11 +27,11 @@ afterEach(async () => {
  * A StorageManager over a fresh memory-RxDB BrowserStore, optionally with a
  * structural fake remote store attached.
  *
- * @param [remoteStore] {WASRemoteStore}
+ * @param [remoteStore] {PWSRemoteStore}
  * @returns {Promise<StorageManager>}
  */
 async function makeStorage(
-  remoteStore?: WASRemoteStore
+  remoteStore?: PWSRemoteStore
 ): Promise<StorageManager> {
   userCounter += 1
   const user: User = {
@@ -63,7 +63,7 @@ describe('StorageManager metadata reads', () => {
         size: 12
       }))
     }
-    const storage = await makeStorage(fake as unknown as WASRemoteStore)
+    const storage = await makeStorage(fake as unknown as PWSRemoteStore)
 
     const meta = await storage.fetchResourceMeta({
       url: 'https://was.example/space/s/notes/n1'
@@ -77,7 +77,7 @@ describe('StorageManager metadata reads', () => {
 
   it('passes a collection metadata read through, null included', async () => {
     const fake = { fetchCollectionMeta: vi.fn(async () => null) }
-    const storage = await makeStorage(fake as unknown as WASRemoteStore)
+    const storage = await makeStorage(fake as unknown as PWSRemoteStore)
 
     const meta = await storage.fetchCollectionMeta({
       url: 'https://was.example/space/s/notes/'

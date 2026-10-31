@@ -1,6 +1,6 @@
 /**
- * New-wallet provisioning sequence, shared by the guest flow and the no-WAS
- * signup (a WAS signup runs the credential-anchored establishment instead
+ * New-wallet provisioning sequence, shared by the guest flow and the no-PWS
+ * signup (a PWS signup runs the credential-anchored establishment instead
  * and seeds its welcome content through `seedWelcomeContent` below).
  *
  * Both callers create a brand-new wallet identity and then run the exact same
@@ -13,7 +13,7 @@
  * Ordering matters and is deliberate: `ensureUserCollections` must run first so
  * there is somewhere to write to before the history entries and the seeded
  * contacts/credential, and so the self-contact can carry the did:web/did:webvh
- * DIDs it mints. The no-WAS signup additionally binds the passphrase *before*
+ * DIDs it mints. The no-PWS signup additionally binds the passphrase *before*
  * calling this (an account whose keyring failed to publish must not be
  * created); that bind stays with the caller, since it needs the passphrase
  * this helper never sees.
@@ -99,7 +99,7 @@ export async function provisionNewWallet({
   // Seed the default contacts: the Interop Alliance Team, and a self-contact
   // carrying the account's did:web and did:webvh forms, derived from the
   // pointer `ensureUserCollections` promoted above (absent for guests, without
-  // a WAS server, or if provisioning failed) plus the signup email, when one
+  // a PWS server, or if provisioning failed) plus the signup email, when one
   // was entered. `session.isGuest` gates the
   // email: a guest's `user.email` is an internal placeholder (see
   // `initGuestSession`), never something the user typed, so it must not leak
@@ -136,7 +136,7 @@ export async function provisionNewWallet({
 const SEED_WELCOME_TIMEOUT_MS = 15_000
 
 /**
- * Best-effort welcome-content seeding for the WAS signup tails: the welcome
+ * Best-effort welcome-content seeding for the PWS signup tails: the welcome
  * credential and the two new-account history records, written through the
  * session's own storage (the replica-less remote-direct variant a transient
  * session carries, or the local replica of a remembered/passkey signup's
@@ -182,7 +182,7 @@ export async function seedWelcomeContent({
     // Alliance Team, and a self-contact carrying the account DIDs the
     // establishment published, derived from the pointer (the profile
     // resolves no `didWebvh` on a transient tail), plus the signup email --
-    // gated on `isGuest` the same way, though no guest reaches this WAS-only
+    // gated on `isGuest` the same way, though no guest reaches this PWS-only
     // tail.
     const selfDids = accountSelfDids({ profile })
     // The records and contacts are independent, so they are written together.

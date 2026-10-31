@@ -165,9 +165,9 @@ vi.mock('@interop/pws-client', async importOriginal => ({
   }
 }))
 
-vi.mock('@/stores/wasRemoteStore', () => ({
+vi.mock('@/stores/pwsRemoteStore', () => ({
   mintSpaceId: vi.fn(() => 'annex-space'),
-  WASRemoteStore: class {
+  PWSRemoteStore: class {
     webvhIdStore() {
       return { putIdResource: vi.fn(async () => {}) }
     }

@@ -26,8 +26,8 @@ vi.mock('@/stores/sessionTeardown', () => ({
 }))
 
 // The step lists differ per deployment, and the unit environment configures
-// no WAS server. Pinning one here keeps `SETUP_STAGES` the WAS pair, which is
-// what these ordering tests walk; the no-WAS pair is asserted through
+// no PWS server. Pinning one here keeps `SETUP_STAGES` the PWS pair, which is
+// what these ordering tests walk; the no-PWS pair is asserted through
 // `SETUP_STAGE_LISTS.local` directly.
 vi.mock('@/app.config', async importOriginal => ({
   ...(await importOriginal<typeof import('@/app.config')>()),
@@ -150,8 +150,8 @@ describe('setupStore stage ordering', () => {
     expect(listed).toEqual([...upstream])
   })
 
-  it('lists no establishment stage on a deployment with no WAS server', () => {
-    // A no-WAS signup runs no establishment, so listing its stages there
+  it('lists no establishment stage on a deployment with no PWS server', () => {
+    // A no-PWS signup runs no establishment, so listing its stages there
     // would show a feed of lines that can never be reported.
     for (const stages of Object.values(SETUP_STAGE_LISTS.local)) {
       for (const stage of CREDENTIAL_ANCHORED_ESTABLISHMENT_STAGES) {

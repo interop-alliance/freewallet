@@ -49,7 +49,7 @@ src/lib/            Pure business logic (no React)
   passkey.ts        The WebAuthn registration and assertion ceremonies and
                     their PRF output
   registerWallet.ts CHAPI handler registration with the mediator
-  wasService.ts     The one WAS service discovery every PwsClient reuses
+  wasService.ts     The one PWS service discovery every PwsClient reuses
   decryptFailure.ts The classifier sorting a failed envelope decrypt into
                     its handling bucket
   collectionAttribution.ts  A collection's and a Resource's creator lines
@@ -87,10 +87,10 @@ src/stores/         Global state
   storageManager.ts StorageManager facade over the session's backend
   connectionsStore.ts   The `connections` directory's store seam: the
                     remote-direct adapter on a session with a Space, the
-                    local one on a guest or no-WAS session
+                    local one on a guest or no-PWS session
   browserStore.ts   BrowserStore -- the local RxDB active replica
   remoteDirectStore.ts   The replica-less backend (transient and popup sessions)
-  wasRemoteStore.ts WASRemoteStore -- the remote WAS backend
+  pwsRemoteStore.ts PWSRemoteStore -- the remote PWS backend
   syncController.ts Background replication lifecycle (restart/stop/reSync)
   syncStatusStore.ts     Per-collection replication status (in-memory only)
   contactsConflictHandler.ts  The contacts collection's conflict decision
@@ -116,7 +116,7 @@ src/session/        Session bootstrap and the account ceremonies -- the
                     it offers), retireUnlockIdentity.ts (the one unlock
                     identity retirement)
   Signup            credentialAnchoredGenesis.ts and standingUnlock.ts
-                    (the default signup, every WAS deployment),
+                    (the default signup, every PWS deployment),
                     signup.ts, provisionNewWallet.ts, standingEstablishment.ts
                     (the entry-first establishment a passkey add and a
                     backup credential share)
@@ -211,9 +211,9 @@ One post-KDF question decides the rest (`routeUnlockLogin` in
 `src/session/transientLogin.ts`). Does this browser hold a client-key record
 for this credential? A browser holding none takes the transient
 composition, the default. A browser holding one proceeds as the enrolled
-client that record names. A no-WAS deployment always proceeds on the
+client that record names. A no-PWS deployment always proceeds on the
 browser-local tier. The explicit `rememberBrowser: true` entry self-enrolls
-a browser holding no record. No login form offers it yet, so on a WAS
+a browser holding no record. No login form offers it yet, so on a PWS
 deployment a production browser becomes remembered only as the enrollee of
 a two-party client enrollment.
 
@@ -266,7 +266,7 @@ enrolled-client roster: each enrolled client contributes its signing and
 key-agreement methods and one client-held update key, so the server cannot
 extend the log. Authorization follows the current-key-set rule (Glossary).
 A standing unlock credential carries a ladder in place of a client key.
-Every WAS signup produces a credential-anchored account, whose document
+Every PWS signup produces a credential-anchored account, whose document
 publishes a ladder VM and no enrolled client.
 
 The user key is recipient zero of every encrypted collection. Its one remote
@@ -385,9 +385,9 @@ The three flows are in ["CHAPI integration"](docs/architecture/chapi.md),
 Every credential, contact, public-link, and history read and write goes through
 one `SyncedCollectionStore` backend, chosen once at session construction by the
 session's storage tier. A session with a local replica (a remembered login, a
-guest, a no-WAS session) serves them from the local `BrowserStore` (RxDB over
+guest, a no-PWS session) serves them from the local `BrowserStore` (RxDB over
 Dexie/IndexedDB), online or offline. A transient session and a remembered CHAPI
-popup serve them remote-direct over the remote WAS collections (see
+popup serve them remote-direct over the remote PWS collections (see
 "Replica-less, capability-bound storage" in
 docs/architecture/session-persistence.md, and "Remote-direct popup storage" in
 docs/architecture/chapi.md). One local database per user holds every standard
@@ -405,7 +405,7 @@ whose stored hash differs, so its shape is browser-local stored state rather
 than a code detail. `BrowserStore` forgets a replica RxDB refuses on its
 schema hash. It removes the whole database, the replication checkpoint
 included, and the next replication re-pulls it from the Space. Writes not yet
-pushed are lost. A guest or no-WAS session has no Space to re-pull from, so
+pushed are lost. A guest or no-PWS session has no Space to re-pull from, so
 its replica is lost whole. No member of a resource replica is an order key,
 so a listing that needs an order sorts on a timestamp in the decrypted
 payload.
@@ -447,7 +447,7 @@ index. The `wallet-activity` rows are audit trail, which the History page reads
 and nothing deciding about a party does
 (`decisions/0034-the-directory-is-the-grant-index.md`). The directory is never
 replicated. It is read and written remote-direct on a session with a Space, and
-is a local RxDB collection on a guest or a no-WAS session
+is a local RxDB collection on a guest or a no-PWS session
 (`decisions/0035-the-directory-rides-the-session-backend-and-is-never-replicated.md`).
 It is never grantable, and nothing authenticates an entry's body, so reader
 rules bound what a host can steer
@@ -464,24 +464,24 @@ list or read one. The wallet reads and deletes its mail remote-direct under
 the session's own capability, with no local replica. It refuses an `inbox`
 that is public, carries an `encryption` descriptor, or carries a
 `generator` stamp. Each marks a collection some requester created under
-that name, and a refused inbox counts as absent. A guest or no-WAS session
+that name, and a refused inbox counts as absent. A guest or no-PWS session
 has no inbox. The inbox pass that reads it is in "The agent connection" in
 docs/architecture/app-connect.md.
 
 When `VITE_WAS_SERVER_URL` (the server's base server URL, under which it
 serves `service`, `spaces/` and `space/{id}/`) is set, and the session holds a local replica and is not a guest, a
-remote WAS Space is attached as a **sync target**. `SessionSyncController` in
+remote PWS Space is attached as a **sync target**. `SessionSyncController` in
 `src/stores/syncController.ts` replicates every synced local collection to its
-remote WAS Collection counterpart in the background, over `@interop/pws-sync`'s
+remote PWS Collection counterpart in the background, over `@interop/pws-sync`'s
 collection-agnostic driver, which ships stored bodies verbatim and touches no
 keys. That module is the session binding around the package's controller core,
 and owns that gate. It also owns the port the core reads the Space and the local
 collections through, where status and diagnostics go, and the `writerId` every
 push declares (the session persistence's per-profile label). Replication signs
-with the session's root key. A transient session's `WASRemoteStore` requests
+with the session's root key. A transient session's `PWSRemoteStore` requests
 invoke under its generation delegation (`profile.invocationCapability`).
 
-`WASRemoteStore` does not serve credential reads and writes. It keeps the
+`PWSRemoteStore` does not serve credential reads and writes. It keeps the
 Space lifecycle (create/exists/wipe), the storage-browser read-through
 (`/storage/**` pages work directly over remote collections), export/import,
 and quotas. `StorageManager` is the facade; pages and components always talk
@@ -497,7 +497,7 @@ copy deletes normally offline. The delete dialog's "keep public copy"
 choice skips retraction entirely.
 
 The world-readable share link a public copy gets
-(`WASRemoteStore.publicCredentialUrl`) is built by wallet-core/space's
+(`PWSRemoteStore.publicCredentialUrl`) is built by wallet-core/space's
 `publicCredentialUrl`, over pws-client's path helpers, which join onto the
 storage server's base path, so on a sub-path deployment (a server URL like
 `https://host/was`) the link addresses exactly the resource replication wrote,
@@ -626,7 +626,7 @@ every mend entry, also emits on the ceremony event channel (wallet-core's
 
 | Ceremony                                              | Entry point                                                                                                                                                               | Module                                                                      | Shared half                 | Mender                                                                                                                                                                                                                                                                                                                            | Topic doc                |
 | ----------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------- | --------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------ |
-| Credential-anchored genesis                           | every WAS signup, remembered or not (the default)                                                                                                                         | `src/session/credentialAnchoredGenesis.ts`                                  | `/clientAnnex`              | re-run; the transient login's heal branch; the transient chain's keystore promotion                                                                                                                                                                                                                                               | `account-genesis.md`     |
+| Credential-anchored genesis                           | every PWS signup, remembered or not (the default)                                                                                                                         | `src/session/credentialAnchoredGenesis.ts`                                  | `/clientAnnex`              | re-run; the transient login's heal branch; the transient chain's keystore promotion                                                                                                                                                                                                                                               | `account-genesis.md`     |
 | Recovery spend (remembered and transient)             | `/recover`                                                                                                                                                                | `src/session/recovery.ts`                                                   | `/recovery`, `/clientAnnex` | remembered: pending record pre-pivot + spend resume; transient: re-run, the next login's collection fan-out, open gaps (below)                                                                                                                                                                                                    | `recovery-codes.md`      |
 | Self-enrollment at login                              | `rememberBrowser: true` on a browser holding no record (no login form offers it yet)                                                                                      | `src/session/initSession.ts` + `src/session/pendingEnrollment.ts`           | `/clientAnnex`              | pending record pre-pivot; the next remembered login's resume                                                                                                                                                                                                                                                                      | `session-and-auth.md`    |
 | Client enrollment (two-party)                         | Settings > Connected wallets, any session type                                                                                                                            | `src/lib/enrollment.ts` (UI in `src/components/EnrolledClientsSection.tsx`) | `/enrollment`               | re-run with the same connect code; the escrow-direction convergence of any later ladder-branch ceremony                                                                                                                                                                                                                           | `client-enrollment.md`   |
@@ -637,7 +637,7 @@ every mend entry, also emits on the ceremony event channel (wallet-core's
 | Forget ceremony                                       | Settings > Connected wallets, own row, browser-local only; ends the agent grants this client signed                                                                       | `src/session/forget.ts`                                                     | `/clientAnnex`              | re-run (wipe last); forgotten-browser detector at the next remembered login                                                                                                                                                                                                                                                       | `did-webvh-identity.md`  |
 | Last-client transition                                | same row, `lastClient` confirm, browser-local only; the dialog marks unticked agents declined                                                                             | `src/session/forget.ts`                                                     | `/clientAnnex`              | re-run                                                                                                                                                                                                                                                                                                                            | `did-webvh-identity.md`  |
 | Update-key rotation                                   | Settings, browser-local only                                                                                                                                              | `src/session/accountSettings.ts`                                            | `/webvh`                    | re-run (persist-before-publish)                                                                                                                                                                                                                                                                                                   | `did-webvh-identity.md`  |
-| Account genesis (plain)                               | every remembered login's storage provisioning on a WAS deployment, as a heal (a no-WAS signup mints keys only)                                                            | `src/stores/storageManager.ts` + `src/session/signup.ts`                    | `/genesis`                  | re-run (every stage an ensure)                                                                                                                                                                                                                                                                                                    | `account-genesis.md`     |
+| Account genesis (plain)                               | every remembered login's storage provisioning on a PWS deployment, as a heal (a no-PWS signup mints keys only)                                                            | `src/stores/storageManager.ts` + `src/session/signup.ts`                    | `/genesis`                  | re-run (every stage an ensure)                                                                                                                                                                                                                                                                                                    | `account-genesis.md`     |
 | Account deletion                                      | Settings, any session type                                                                                                                                                | `src/session/accountSettings.ts` + `wipe.ts`                                | app-side phase order        | re-run; an in-run retry for the acting credential's own unlock Space; otherwise the dead-pointer prompt at the next login or recovery spend with that credential, which offers to remove its sign-in data                                                                                                                         | `did-webvh-identity.md`  |
 | Shared wipe (executor, not user-facing)               | consumed by the deletion-shaped ceremonies                                                                                                                                | `src/session/wipe.ts`                                                       | app-side                    | re-probe verification; the `unverified` report                                                                                                                                                                                                                                                                                    | `did-webvh-identity.md`  |
 | Content migration                                     | Storage page, beside Export Space, every session kind including guest                                                                                                     | `src/session/contentMigration.ts`                                           | `@interop/wallet-backup`    | re-run (skip existing by content identity; the import activity replaced put-then-delete-others; an app collection's own torn create, empty and carrying the archived `generator`, finished)                                                                                                                                       | `session-persistence.md` |
@@ -650,7 +650,7 @@ Wallet-core's `CEREMONY_IDS` also names four replica ceremonies
 `replica-deletion`). This wallet does not run them yet, so the table has
 no row for them.
 
-A WAS signup's remembered and passkey flavors continue into the
+A PWS signup's remembered and passkey flavors continue into the
 self-enrollment row, and the credential-anchored genesis heal branch also
 mends a remembered signup torn before its self-enrollment.
 
@@ -837,7 +837,7 @@ cascades, and the permanent wire-level constants.
   - `/keys` (the user key, its wrap-set roster, the per-collection
     descriptor log store, the client-key record codec)
   - `/connections` (the `connections` directory: the entry codec, the
-    keyed resource id, the store seam and its WAS adapter, the upsert
+    keyed resource id, the store seam and its PWS adapter, the upsert
     helpers, and the grant index)
   - `/keyring` (the unlock layer), `/unlock` (standing unlock credentials,
     the ladder seed mint, the credential rotation and retirement sequence)
@@ -871,7 +871,7 @@ cascades, and the permanent wire-level constants.
   wallet-core's `isWasLinkPayload` and `isConnectCode` as injected
   recognizers. The package has its own logger seam, wired beside
   wallet-core's in `lib/log.ts`.
-- **`@interop/pws-sync`** (+ `/rxdb`, `/testing`) -- the WAS replication
+- **`@interop/pws-sync`** (+ `/rxdb`, `/testing`) -- the PWS replication
   driver for RxDB, shared with `@interop/was-react`: the synced-document
   schema, the opaque-body helpers, the conflict-handler seam, and the
   writer-id mint on the root entry; the changes-feed pull handler, the
@@ -892,7 +892,7 @@ cascades, and the permanent wire-level constants.
   break `instanceof`. The did:webvh controller adapter stays on
   `@interop/wallet-core/resourceLog`.
 - **`@interop/pws-client`** (+ `/edv`, `/sync`, `/paths`, `/log`, `/identity`)
-  -- the WAS HTTP client, the sync wire contract the RxDB driver speaks, its
+  -- the PWS HTTP client, the sync wire contract the RxDB driver speaks, its
   error classes and the `err.name` predicates that classify them
   (`isUnknownEpochError`), the EDV envelope cipher and key-epoch construction
   (`createEdvDocCipher`, `x25519RecipientFromDidKey`), the descriptor-store
@@ -950,7 +950,7 @@ Containment hierarchy (remote mode): **Space > Collection > Resource**.
   of the canonicalized credential JSON (`cidFrom()` from
   `@interop/pws-client/sync`), the primary key for stored credentials.
 - **ZCap (Authorization Capability)** -- the authorization model for HTTP
-  requests to the WAS server. Clients sign with their Ed25519 key, and the
+  requests to the PWS server. Clients sign with their Ed25519 key, and the
   server verifies against the Space controller's DID.
 - **CHAPI (Credential Handler API)** -- a browser standard that lets
   websites delegate credential operations to a registered wallet via a
@@ -1069,10 +1069,10 @@ Containment hierarchy (remote mode): **Space > Collection > Resource**.
   and `outbox`, and keeps the pairwise `seed`, so the same agent's later
   consent reuses it. What it changes, and what retires an entry, are in
   "Storage model (local-first)". Avoid: removal, tombstone.
-- **WAS (Wallet Attached Storage)** -- an HTTP protocol for storing
+- **PWS (Portable Web Spaces)** -- an HTTP protocol for storing
   arbitrary resources in user-owned Spaces, authorized via ZCap. See [the
   spec](https://w3c-ccg.github.io/portable-web-spaces-spec/).
-- **Space** -- a storage area on the WAS server, owned by one controller.
+- **Space** -- a storage area on the PWS server, owned by one controller.
   The account Space's id is an independent random identifier carried in the
   account pointer; unlock Spaces are addressed by `spaceId =
 base64url(SHA-256(unlock did:key))` (a discovery convention).
@@ -1245,7 +1245,7 @@ base64url(SHA-256(unlock did:key))` (a discovery convention).
   adds ZCap headers to HTTP requests. The signer is an enrolled client's key,
   or on a transient session the per-visit annex VM.
 - **WebKMS / keystore** -- the key management server (`KMS_SERVER_URL`, by
-  default the WAS server's `/kms` facet), holding a per-controller
+  default the PWS server's `/kms` facet), holding a per-controller
   **keystore** in which operational keys live server-side while the
   controlling key stays client-side. One key is minted there today, the
   `authentication` key the account document publishes, recorded in
@@ -1259,7 +1259,7 @@ base64url(SHA-256(unlock did:key))` (a discovery convention).
   `session.persistence`. The strategy sits beside `storage` rather than on
   the profile: it is session-lifetime scaffolding, and the profile is the
   identity bundle alone.
-- **Durable** -- persisted server-side, on the WAS host: the account log,
+- **Durable** -- persisted server-side, on the PWS host: the account log,
   the user key roster, the unlock records, the Collection Metadata objects
   and their key epochs. It survives a cleared browser, an evicted origin, and a
   lost machine, and the word names this tier alone
@@ -1286,7 +1286,7 @@ base64url(SHA-256(unlock did:key))` (a discovery convention).
   (`decisions/0001-no-memory-overlay-storage-fork.md`). Avoid: persistence
   handle, durability handle ("handle" in this repo is the Storage Access
   API's).
-- **Transient session** -- the default session, taken on a WAS deployment by
+- **Transient session** -- the default session, taken on a PWS deployment by
   a login on a browser holding no client-key record for the credential typed
   and given no explicit `rememberBrowser`. It signs with a per-visit annex
   key and runs on the in-memory tier with no local replica (see "Session &
@@ -1317,13 +1317,13 @@ base64url(SHA-256(unlock did:key))` (a discovery convention).
   root-invokes; the **ladder kind** signs with a rung of the credential's
   ladder through the record's bridge delegation, appends with the ladder VM,
   and invokes as the per-visit annex VM under the generation delegation. A
-  guest, a no-WAS session, and a transient session whose record carries no
+  guest, a no-PWS session, and a transient session whose record carries no
   standing members resolve to neither, so no account-management ceremony
   runs. Update-key rotation and the forget ceremony ignore both kinds, since
   their subject is this browser itself.
 - **StorageManager** -- the facade class in `src/stores/storageManager.ts`,
   routing all wallet reads and writes to the session's
-  `SyncedCollectionStore` backend and exposing the optional `WASRemoteStore`
+  `SyncedCollectionStore` backend and exposing the optional `PWSRemoteStore`
   for remote-only features.
 - **BrowserStore** -- the local active replica of a session that has one,
   over RxDB / IndexedDB (Dexie), holding every standard wallet collection on
@@ -1335,7 +1335,7 @@ base64url(SHA-256(unlock did:key))` (a discovery convention).
   Replication keeps it in step with the Resource in both directions. A
   replica-less session holds none and reads the Resource directly. Avoid:
   row, local row, doc.
-- **WASRemoteStore** -- remote storage client, speaking the WAS protocol via
+- **PWSRemoteStore** -- remote storage client, speaking the PWS protocol via
   `ZcapClient`. Handles the Space lifecycle, the storage-browser
   read-through over arbitrary collections and resources, export/import, and
   quotas.

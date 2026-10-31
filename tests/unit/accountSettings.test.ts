@@ -17,7 +17,7 @@ import { captureCeremonyEvents } from './ceremonyEventCapture'
 
 const state = vi.hoisted(() => ({
   calls: [] as string[],
-  // The deployment's storage URL. Absent is the no-WAS deployment, whose
+  // The deployment's storage URL. Absent is the no-PWS deployment, whose
   // deletion must still complete with every remote arm skipped by scope; the
   // deletion suites set it, and the other ceremonies' suites run without one.
   wasUrl: undefined as string | undefined,
@@ -165,7 +165,7 @@ const zcapStub = vi.hoisted(() => (id: string) => ({
   id,
   read: async ({ url }: { url: string }) => {
     // `/space/{spaceId}/meta` -- the Space Metadata object the probe reads
-    // under WAS v0.5, so the Space id is the segment after `space`.
+    // under PWS v0.5, so the Space id is the segment after `space`.
     const segments = new URL(url).pathname.split('/').filter(Boolean)
     const spaceId = decodeURIComponent(
       segments[segments.indexOf('space') + 1] ?? ''
@@ -2761,7 +2761,7 @@ describe('deleteAccount (the remembered and scope-skipped sessions)', () => {
     ])
   })
 
-  it('completes on a no-WAS deployment with every remote arm skipped', async () => {
+  it('completes on a no-PWS deployment with every remote arm skipped', async () => {
     state.wasUrl = undefined
     const outcome = await deleteAccount({
       session: makeSession(),
@@ -3582,7 +3582,7 @@ describe('changeAccountPassphrase', () => {
       oldPassphrase: 'old',
       newPassphrase: 'new'
     })
-    // No WAS, a guest, or an unpromoted account: there is no standing configuration to
+    // No PWS, a guest, or an unpromoted account: there is no standing configuration to
     // read, so an unreadable registry cannot refuse the change. The one read
     // left is the entry write's own, which is best-effort.
     expect(rotation).toBe('skipped')

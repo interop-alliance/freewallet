@@ -21,7 +21,7 @@ sides diverge: a union resurrects a grant one side revoked, and
 last-write-wins drops a grant one side added. Revocation also has to
 read current server state, not a replica that may lag.
 
-A guest session and a no-WAS deployment have no Space, yet App Connect
+A guest session and a no-PWS deployment have no Space, yet App Connect
 still mints an app key there, and the user needs a surface that lists
 and removes it.
 
@@ -43,7 +43,7 @@ It rides the session's storage backend through one store seam with two
 adapters. On a session with a Space it is read and written remote-direct:
 listings read the documents feed with ETags, a write re-GETs only its own
 entry, and every write is a read-modify-write under `ifMatch` or a create
-under `ifNoneMatch`. On a guest or no-WAS session it is a local RxDB
+under `ifNoneMatch`. On a guest or no-PWS session it is a local RxDB
 collection on the generic synced-doc schema, the only copy, and the
 consent-time write and every listing run there unchanged. Such a
 session's entries are `app` entries with empty `grants`.

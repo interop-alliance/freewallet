@@ -61,7 +61,7 @@ import type { Session } from '@/types/auth'
 
 /**
  * Builds a minimal non-guest session whose storage looks like it has a
- * configured remote WAS replica and a local one, so the binding proceeds past
+ * configured remote PWS replica and a local one, so the binding proceeds past
  * its gate.
  *
  * @param options {object}

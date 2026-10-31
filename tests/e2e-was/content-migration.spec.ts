@@ -23,7 +23,7 @@
  * A's app collection is re-created in the importing account's Space, and
  * no collection stops early.
  *
- * The guest cell stands for the no-WAS deployment. A guest session holds no
+ * The guest cell stands for the no-PWS deployment. A guest session holds no
  * remote Space (`hasRemoteStorage` is false, the same branch a deployment
  * with no `VITE_WAS_SERVER_URL` takes), and it is the only local-only session
  * this config can build: `playwright.config.ts` pins `VITE_WAS_SERVER_URL`

@@ -1,5 +1,5 @@
 /**
- * Zustand store holding per-collection replication status, mirroring the WAS
+ * Zustand store holding per-collection replication status, mirroring the PWS
  * spec's planned per-replica sync-status vocabulary. The sync controller writes
  * to it off the RxDB replication `active$` / `error$` streams; UI (e.g. a header
  * indicator or the Storage page's collection listing) reads from it. In-memory
@@ -12,7 +12,7 @@ export type { SyncStatus }
 
 interface SyncStatusState {
   /**
-   * Keyed by WAS collection id (e.g. `public-credentials`).
+   * Keyed by PWS collection id (e.g. `public-credentials`).
    */
   statuses: Record<string, SyncStatus>
   setStatus: (collectionId: string, status: SyncStatus) => void
@@ -40,7 +40,7 @@ const IN_SYNC_WAIT_MS = 5000
 /**
  * Whether one collection's replication has settled: `synced`, `error`, and
  * `idle` are all resting states, and an absent status means no replication
- * controller is carrying that collection at all (a guest, a no-WAS
+ * controller is carrying that collection at all (a guest, a no-PWS
  * deployment, a replica-less session), which nothing can wait for.
  *
  * @param status {SyncStatus | undefined}
@@ -55,7 +55,7 @@ function isSettled(status: SyncStatus | undefined): boolean {
  * the timeout expires -- whichever comes first.
  *
  * @param options {object}
- * @param options.collectionIds {ReadonlyArray<string>}   WAS collection ids
+ * @param options.collectionIds {ReadonlyArray<string>}   PWS collection ids
  * @param [options.timeoutMs] {number}
  * @returns {Promise<boolean>}   whether every collection settled in time
  */

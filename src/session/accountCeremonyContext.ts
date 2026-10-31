@@ -5,14 +5,14 @@
  *
  * A remembered session is the ENROLLED kind. Its account-log entries are
  * signed by this client's own did:webvh update keys, its roster appends by
- * this client's key agent, and its WAS requests invoke the Space's root
+ * this client's key agent, and its PWS requests invoke the Space's root
  * capability.
  *
  * A transient session on a standing unlock credential is the LADDER kind. Its
  * account-log entries are signed by a rung of the credential's update-key
  * ladder and published through the record's bridge delegation, its roster
  * appends by the credential's ladder VM (the ceremony-tail license's
- * anchoring), and its WAS requests are invoked by the per-visit annex VM
+ * anchoring), and its PWS requests are invoked by the per-visit annex VM
  * under the generation delegation. It also carries what only that kind needs:
  * the ladder VM's own delegation signer (every single-verb child and every
  * generation-delegation replacement chains to it, since the annex VM stands
@@ -21,7 +21,7 @@
  * browser), the credential's sibling delegation into the client annex, and
  * the standing key-agreement key every roster and registry unwrap needs.
  *
- * A guest, a no-WAS session, and a transient session whose record carries no
+ * A guest, a no-PWS session, and a transient session whose record carries no
  * standing members resolve to `null`: neither kind's authorities exist.
  *
  * The boolean gates the UI enables its controls on are DERIVED from the same
@@ -52,7 +52,7 @@ import type {
 } from '@interop/wallet-core/keys'
 import { WAS_BASE_SERVER_URL } from '@/app.config'
 import type { ControllerProfile, ICapabilityAgent, Session } from '@/types/auth'
-import type { WASRemoteStore } from '@/stores/wasRemoteStore'
+import type { PWSRemoteStore } from '@/stores/pwsRemoteStore'
 import { sessionRosterStore } from '@/session/rosterStore'
 import { sessionCollectionStores } from '@/session/collectionLogStore'
 import { unlockLogStore } from '@/session/standingUnlock'
@@ -101,7 +101,7 @@ export interface LadderDeleter {
  * What every ceremony reads off the context whichever kind it is.
  */
 interface CeremonyContextBase {
-  remoteStore: WASRemoteStore
+  remoteStore: PWSRemoteStore
   pointer: AccountPointer & { did: string }
   controller: string
   signer: AccountLogSigner
@@ -228,7 +228,7 @@ type MissingPrecondition =
  */
 function resolveAccountReach({ session }: { session: Session }):
   | {
-      remoteStore: WASRemoteStore
+      remoteStore: PWSRemoteStore
       pointer: AccountPointer & { did: string }
       controller: string
     }

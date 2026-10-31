@@ -8,7 +8,7 @@ import { fillSettled, forceRememberBrowser, signupViaWizard } from './helpers'
 import { test, expect } from '../shared/consoleCapture'
 
 /**
- * The recovery-code flow e2e (WAS mode), end to end -- the REMEMBERED
+ * The recovery-code flow e2e (PWS mode), end to end -- the REMEMBERED
  * recovery cell: a code issued from Settings (the split configuration:
  * roster wrap, the code's `keyAgreement` VM, `nextKeyHashes` commitment,
  * delegated unlock record), then recovery on a COLD browser profile holding

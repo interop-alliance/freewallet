@@ -77,8 +77,8 @@ export function forcedEstablishmentTearBeforePromotion(): boolean {
 /**
  * Whether a test has forced the connect-this-browser card open. In
  * production the card opens only for the remembered path's own two-client
- * states (a torn enrollment's roster-unwrap failure, or a no-WAS plain
- * pointer record), and a healthy WAS account's default login simply
+ * states (a torn enrollment's roster-unwrap failure, or a no-PWS plain
+ * pointer record), and a healthy PWS account's default login simply
  * succeeds -- so the two-party enrollment e2e, which needs the enrollee's
  * card from a cold browser, opens it through this flag: the login submit
  * becomes the planned connect-this-browser entry (the card with the typed

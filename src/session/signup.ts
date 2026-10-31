@@ -1,13 +1,13 @@
 /**
  * The two new-account provisioning sequences behind the signup page: one for a
- * passkey account, one for a passphrase account. On a WAS deployment BOTH run
+ * passkey account, one for a passphrase account. On a PWS deployment BOTH run
  * the credential-anchored establishment (`establishCredentialAnchoredAccount`)
  * -- the standing-layout unlock record is durably written before the Space
  * exists, so no signup can leave a plain pointer record behind. The
  * non-remembered passphrase default then enters through the transient
  * composition; a remembered passphrase signup and every passkey signup follow
  * the establishment with the ordinary remembered login, whose self-enrollment
- * makes this browser an enrolled client. Only a no-WAS deployment keeps the
+ * makes this browser an enrolled client. Only a no-PWS deployment keeps the
  * plain remembered flow (no unlock Space exists there, so there is nothing to
  * be standing in). The page keeps the wizard state and the error copy; the
  * orderings live here.
@@ -60,7 +60,7 @@ import {
 } from '@/lib/e2eSeams'
 import { registerPasskey } from '@/lib/passkey'
 import { wasServiceDescription } from '@/lib/wasService'
-import { mintSpaceId } from '@/stores/wasRemoteStore'
+import { mintSpaceId } from '@/stores/pwsRemoteStore'
 import type { StageNotifier } from '@interop/wallet-core'
 import type { Session } from '@/types/auth'
 import { createLogger, stageMarker } from '@/lib/log'
@@ -102,7 +102,7 @@ function freshAccountPointer(): AccountPointer {
  * place of the retired data seed: where the account lives. The Space id is an
  * independent random identifier minted here (nothing about the account derives
  * from any key). Built before session creation so the storage clients bind to
- * the minted id. Only the no-WAS remembered flow mints here now -- a WAS
+ * the minted id. Only the no-PWS remembered flow mints here now -- a PWS
  * signup mints inside the credential-anchored establishment and the
  * remembered login's self-enrollment.
  *
@@ -129,7 +129,7 @@ async function mintAccountKeySet() {
 
 /**
  * Refuses a signup on a storage server whose service description does not
- * claim the client annex profile. Every WAS signup publishes a ladder
+ * claim the client annex profile. Every PWS signup publishes a ladder
  * verification method, and the delegation clause that bounds it fails open on
  * a server that does not enforce it. Runs before the key derivation and before
  * any durable write, so a refused signup leaves nothing behind.
@@ -293,7 +293,7 @@ async function enterEstablishedAccountTransiently({
 }
 
 /**
- * Best-effort tail of a remembered (passphrase or passkey) WAS signup: write
+ * Best-effort tail of a remembered (passphrase or passkey) PWS signup: write
  * the first enrolled client's `connections` entry, named by the default
  * platform label (every later client is named at enrollment approval; this
  * one has no approving screen, so the wallet names itself -- the Connected
@@ -326,7 +326,7 @@ async function finishRememberedSignup({
  * Creates a new wallet under a passphrase, or reports that this passphrase
  * already has one.
  *
- * On a WAS deployment every signup runs the credential-anchored
+ * On a PWS deployment every signup runs the credential-anchored
  * establishment (the standing-layout record before the Space, the
  * ladder-anchored genesis, the registry hook). The non-remembered default
  * then enters through the transient composition, leaving zero local residue;
@@ -340,7 +340,7 @@ async function finishRememberedSignup({
  * login's `userExists: true` describes the account the signup itself just
  * created and must not route the page to "this profile already exists".
  *
- * A no-WAS deployment keeps the plain remembered flow: probe (the remembered
+ * A no-PWS deployment keeps the plain remembered flow: probe (the remembered
  * `loginWithPassphrase` probe -- resolving the passphrase through the
  * keyring and reading `userExists` prevents a re-signup with an existing
  * passphrase from overwriting that account's keyring), bind BEFORE the local
@@ -351,7 +351,7 @@ async function finishRememberedSignup({
  * @param options.passphrase {string}
  * @param [options.email] {string}
  * @param [options.rememberBrowser] {boolean}   `true` runs the remembered
- *   signup; absent or `false`, a WAS-configured signup ends in a transient
+ *   signup; absent or `false`, a PWS-configured signup ends in a transient
  *   session
  * @param [options.onStage] {StageNotifier}   observational stage-boundary
  *   hook, fed to the lobby page's progress feed
@@ -430,8 +430,8 @@ export async function signUpWithPassphrase({
       accountLog: outcome.accountLog
     })
   }
-  // The no-WAS remembered flow. Its stage names are this module's own: no
-  // establishment runs here, so none of the WAS-only names is ever reported
+  // The no-PWS remembered flow. Its stage names are this module's own: no
+  // establishment runs here, so none of the PWS-only names is ever reported
   // and the lobby lists a different set (`SETUP_STAGE_LISTS.local`).
   const mark = stageMarker({
     log,
@@ -660,9 +660,9 @@ async function signUpCredentialAnchoredWithPasskey({
 }
 
 /**
- * Creates a new wallet under a passkey. On a WAS deployment the whole signup
+ * Creates a new wallet under a passkey. On a PWS deployment the whole signup
  * is the credential-anchored fold (see
- * `signUpCredentialAnchoredWithPasskey`); a no-WAS deployment keeps the
+ * `signUpCredentialAnchoredWithPasskey`); a no-PWS deployment keeps the
  * plain remembered flow -- register and bind BEFORE the local collections
  * exist, provision, then record the registry entry. There is no `userExists`
  * probe on either path: a fresh credential cannot collide with an existing
@@ -705,9 +705,9 @@ export async function signUpWithPasskey({
     })
   }
 
-  // The no-WAS flow's own stage names (see the passphrase twin above): the
+  // The no-PWS flow's own stage names (see the passphrase twin above): the
   // establishment never runs here, so the lobby lists `SETUP_STAGE_LISTS`'
-  // local passkey set instead of the WAS one.
+  // local passkey set instead of the PWS one.
   const mark = stageMarker({
     log,
     ceremony: 'account-genesis',

@@ -36,7 +36,7 @@ export default defineConfig({
   ],
   webServer: [
     {
-      // Local WAS teaching server (FileSystem backend). The data dir is
+      // Local PWS teaching server (FileSystem backend). The data dir is
       // emptied in the same command, ahead of the boot, so the run begins
       // against an empty store. A `globalSetup` hook runs after the web
       // servers are up, which would delete the `store.json` version stamp
@@ -61,7 +61,7 @@ export default defineConfig({
       timeout: 60_000
     },
     {
-      // App in remote (WAS) mode, pointed at the local teaching server.
+      // App in remote (PWS) mode, pointed at the local teaching server.
       // `--host` also answers on 127.0.0.1, the cross-site top level the
       // saved-login popup spec embeds the wallet from.
       command: `pnpm exec vite --cors --host --port ${APP_PORT} --strictPort`,

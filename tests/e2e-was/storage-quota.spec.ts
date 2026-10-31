@@ -18,7 +18,7 @@ import { test, expect } from '../shared/consoleCapture'
 const USAGE_POLL = { timeout: 60_000, intervals: [1000, 2000, 5000] }
 
 /**
- * Storage quota UI — requires remote (WAS) mode; see playwright.was.config.ts.
+ * Storage quota UI — requires remote (PWS) mode; see playwright.was.config.ts.
  * The teaching server reports an unlimited filesystem backend by default.
  */
 test.describe('Storage quota', () => {
