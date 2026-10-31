@@ -1,6 +1,6 @@
 /**
  * The session binding around background WAS replication. The driver and the
- * lifecycle core live in `@interop/was-sync`; what is here is everything that
+ * lifecycle core live in `@interop/pws-sync`; what is here is everything that
  * is this app's: which sessions replicate at all, where the core's access seam
  * comes from, and where status and diagnostics go.
  *
@@ -24,7 +24,7 @@
  * fresh core per session and this module-scope singleton is a thin shell
  * holding the current one.
  */
-import type { SyncController } from '@interop/was-sync/rxdb'
+import type { SyncController } from '@interop/pws-sync/rxdb'
 import {
   SYNCED_COLLECTIONS,
   WAS_SYNC_BATCH_SIZE,
@@ -137,11 +137,11 @@ class SessionSyncController {
    * @returns {Promise<void>}
    */
   async #start({ session }: { session: Session }): Promise<void> {
-    const wasClient = session.storage.wasClient
+    const pwsClient = session.storage.pwsClient
     const spaceUrl = session.storage.spaceUrl
     if (
       session.isGuest ||
-      !wasClient ||
+      !pwsClient ||
       !spaceUrl ||
       !session.storage.hasLocalReplica
     ) {
@@ -154,10 +154,10 @@ class SessionSyncController {
       // Dynamically imported: the RxDB half of the driver drags in RxDB's
       // replication machinery (rxdb core, rxjs, broadcast-channel), which
       // would otherwise land in the eager entry chunk via the auth store.
-      const { createSyncController } = await import('@interop/was-sync/rxdb')
+      const { createSyncController } = await import('@interop/pws-sync/rxdb')
       const core = createSyncController({
         port: {
-          wasClient,
+          pwsClient,
           spaceUrl,
           collections: SYNCED_COLLECTIONS,
           // The local end of replication IS the page-facing active replica.

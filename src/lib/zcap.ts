@@ -3,8 +3,8 @@
  * many call sites share one shape assertion instead of restating it.
  */
 import type { IZcap } from '@interop/data-integrity-core'
-import { x25519RecipientFromDidKey } from '@interop/was-client/edv'
-import { parseSpaceTarget } from '@interop/was-client/paths'
+import { x25519RecipientFromDidKey } from '@interop/pws-client/edv'
+import { parseSpaceTarget } from '@interop/pws-client/paths'
 
 /**
  * A zcap's `expires` caveat, or `undefined` when it carries none.
@@ -22,7 +22,7 @@ export function zcapExpires(zcap?: IZcap): string | undefined {
 
 /**
  * The WAS collection id a grant zcap targets, when its `invocationTarget`
- * addresses a Collection of the given Space, classified by was-client's path
+ * addresses a Collection of the given Space, classified by pws-client's path
  * grammar. Returns undefined for anything else -- a resource or reserved
  * sub-endpoint, another Space, or a foreign URL.
  *

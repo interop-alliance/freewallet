@@ -334,6 +334,26 @@ export const INVARIANT_CENSUS: Readonly<
     standsOn: ['ladder-anchored', 'enrolled'],
     reason:
       'No stored or key-holder state shows which party read a pairwise seed from the directory.'
+  },
+  // The three replica rows. No replica registration is built, so no
+  // harness account carries a replica to check.
+  'pointed-annex-names-every-replica-server': {
+    kind: 'unchecked',
+    standsOn: ['ladder-anchored', 'enrolled'],
+    reason:
+      "The annex document's pointers are stored, but the live replicas items ride in encrypted connections entries, and no replica registration is built to produce either."
+  },
+  'replica-pull-grants-are-current': {
+    kind: 'unchecked',
+    standsOn: ['ladder-anchored', 'enrolled'],
+    reason:
+      'The recorded pull grants ride in encrypted connections entries, and no replica registration is built to record one.'
+  },
+  'replica-space-controller-is-the-account-did': {
+    kind: 'unchecked',
+    standsOn: ['ladder-anchored', 'enrolled'],
+    reason:
+      "A replica Space's controller is stored on the replica server, which the auditor does not read, and no replica registration is built to create one."
   }
 }
 

@@ -1,11 +1,11 @@
 /**
  * The one service discovery for the configured WAS server: the unsigned read
- * of the service description at `{base}service`. Every `WasClient` this app
+ * of the service description at `{base}service`. Every `PwsClient` this app
  * builds takes the result through its `serviceDescription` option, so no
  * client reads the document on its own and it is fetched once per page load
  * rather than once per client.
  *
- * This module is the app's only discoverer. A `WasClient` copies the
+ * This module is the app's only discoverer. A `PwsClient` copies the
  * description it was constructed with, so `was.service({ refresh: true })`
  * must not be called on an app-built client: it re-reads the document from
  * the client's base server URL, which is exactly the request this module
@@ -13,7 +13,7 @@
  * configured base (`url` equal to `{base}service`, `spaces` equal to
  * `{base}spaces/`) before memoizing it, so a server that has moved its mount
  * is refused by name here, ahead of the KMS, CORS-proxy, and did:web URLs
- * derived from the configured value. A `WasClient` runs the same check on
+ * derived from the configured value. A `PwsClient` runs the same check on
  * its first request.
  *
  * The discovery is memoized on success only, so entry points are the right
@@ -24,17 +24,17 @@ import type {
   EncryptionProvider,
   ServiceDescription,
   ServiceInfo
-} from '@interop/was-client'
+} from '@interop/pws-client'
 import {
   IncompatibleServerError,
   readServiceDescription,
-  WasClient
-} from '@interop/was-client'
+  PwsClient
+} from '@interop/pws-client'
 import type { ZcapClient } from '@interop/ezcap'
 import {
   serviceDescriptionUrl,
   spacesRepositoryUrl
-} from '@interop/was-client/paths'
+} from '@interop/pws-client/paths'
 
 import { WAS_BASE_SERVER_URL } from '@/app.config'
 import { createLogger } from '@/lib/log'
@@ -45,9 +45,9 @@ const log = createLogger('fw:was:service')
 let pending: Promise<ServiceInfo> | undefined
 
 /**
- * A `WasClient` on a storage server named by its base server URL: the
+ * A `PwsClient` on a storage server named by its base server URL: the
  * configured server, or the one an account's Space URL sits under. The one
- * place the app builds a `WasClient`, so every client is built the same way
+ * place the app builds a `PwsClient`, so every client is built the same way
  * and carries the discovered description.
  *
  * @param options {object}
@@ -56,9 +56,9 @@ let pending: Promise<ServiceInfo> | undefined
  * @param options.zcapClient {ZcapClient}
  * @param [options.serviceDescription] {ServiceDescription}
  * @param [options.encryption] {EncryptionProvider}
- * @returns {WasClient}
+ * @returns {PwsClient}
  */
-export function wasClientAt({
+export function pwsClientAt({
   baseServerUrl,
   zcapClient,
   serviceDescription,
@@ -68,8 +68,8 @@ export function wasClientAt({
   zcapClient: ZcapClient
   serviceDescription?: ServiceDescription
   encryption?: EncryptionProvider
-}): WasClient {
-  return new WasClient({
+}): PwsClient {
+  return new PwsClient({
     baseServerUrl,
     zcapClient,
     serviceDescription,

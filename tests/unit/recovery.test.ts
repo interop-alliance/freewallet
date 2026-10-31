@@ -15,7 +15,7 @@
  * unlock identity, the EDV record cipher) runs for real.
  */
 import { beforeEach, describe, expect, it, vi } from 'vitest'
-import { resourceUrl } from '@interop/was-client/paths'
+import { resourceUrl } from '@interop/pws-client/paths'
 
 import type { IKeyAgreementKey, IZcap } from '@interop/data-integrity-core'
 
@@ -128,7 +128,7 @@ import {
   verifyAccountLog
 } from '@interop/wallet-core/webvh'
 import { DeadAccountPointerError } from '@/session/deadAccountPointer'
-import { WasError } from '@interop/was-client'
+import { PwsError } from '@interop/pws-client'
 import {
   deriveUnlockIdentity,
   type AccountPointer
@@ -370,9 +370,9 @@ describe('recovery record proof (the mixed-signer policy)', () => {
 
   it('rethrows an unreachable storage server unchanged, never as forged', async () => {
     const signer = await accountSigner({ secret: 'an enrolled client key' })
-    // A WasError with no HTTP status: the account-log fetch never reached
+    // A PwsError with no HTTP status: the account-log fetch never reached
     // the server, so the record could not be CHECKED.
-    const networkError = new WasError('fetch failed')
+    const networkError = new PwsError('fetch failed')
     clientsState.signingKeysError = networkError
     const { code } = await storeRecordForCode({ signer })
     await expect(locateRecoveryAccount({ code })).rejects.toBe(networkError)

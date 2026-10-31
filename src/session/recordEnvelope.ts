@@ -27,7 +27,7 @@ import type {
   IKeyAgreementKey,
   IKeyResolver
 } from '@interop/data-integrity-core'
-import type { CollectionEncryption, Json } from '@interop/was-client'
+import type { CollectionEncryption, Json } from '@interop/pws-client'
 import {
   mintRecordEncryption,
   parseRecordFrame,

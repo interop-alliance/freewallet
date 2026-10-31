@@ -78,7 +78,7 @@ vi.mock('@/stores/wasRemoteStore', () => ({
         wasState.beforePut = undefined
         await hook()
       }
-      const { PreconditionFailedError } = await import('@interop/was-client')
+      const { PreconditionFailedError } = await import('@interop/pws-client')
       const exists = wasState.records.has(spaceUrl)
       const version = wasState.versions.get(spaceUrl) ?? 0
       if (ifNoneMatch && exists) {
@@ -199,7 +199,7 @@ import {
 import {
   PreconditionFailedError,
   zcapClientForSigner
-} from '@interop/was-client'
+} from '@interop/pws-client'
 import {
   RecordEnvelopeDecryptError,
   wrapRecordEnvelope
@@ -209,7 +209,7 @@ import { rotateOffUnlockCredential } from '@/session/credentialRotation'
 import { reportCeremonyTail } from '@/session/menders/ceremonyTail'
 import { browserLocalSessionPersistence } from '@/session/persistence'
 import { UNLOCK_METHODS_COLLECTION } from '@/app.config'
-import { rootCapabilityId, spaceUrlById } from '@interop/was-client/paths'
+import { rootCapabilityId, spaceUrlById } from '@interop/pws-client/paths'
 import { DELETION_ZCAP_TTL_MS } from '@interop/wallet-core/clientAnnex'
 import {
   mintUserKey,
@@ -1375,7 +1375,7 @@ describe('refreshTransientManageCapability', () => {
             allowedAction: ['GET', 'PUT', 'DELETE']
           }) as unknown as Record<string, unknown>),
           // A root-anchored target minted before the mint moved onto
-          // was-client's path helpers: unusable on a sub-path deployment, and
+          // pws-client's path helpers: unusable on a sub-path deployment, and
           // neither expiring nor narrower, so only the target comparison
           // catches it.
           invocationTarget: 'https://was.example.test/space/other-space/'

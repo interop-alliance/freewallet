@@ -3,8 +3,8 @@
  * can distinguish "the storage server could not be reached" from ordinary
  * application errors and show an appropriate on-screen message.
  *
- * Every was-client class here is matched on its `name` rather than by
- * `instanceof`: in a dependency tree that resolves was-client twice (a
+ * Every pws-client class here is matched on its `name` rather than by
+ * `instanceof`: in a dependency tree that resolves pws-client twice (a
  * linked checkout, or a duplicate through the tree) the class object
  * differs, and an `instanceof` check silently takes the wrong branch. A
  * subclass overrides `name`, so a check that must catch a subtype names
@@ -16,11 +16,11 @@ import { errorNameOf } from '@interop/wallet-core/menders'
 /**
  * Returns true when the given error indicates the remote WAS storage server
  * could not be reached or is failing -- i.e. a network/CORS failure (the fetch
- * never returned a usable response, so `WasError.status` is undefined) or a 5xx
+ * never returned a usable response, so `PwsError.status` is undefined) or a 5xx
  * server fault. Used to offer the user a guest-mode fallback at login time.
  *
  * Some call sites (e.g. `WASRemoteStore.ensureUserCollections`) rethrow the
- * underlying `WasError` wrapped in a plain `Error` with the original as
+ * underlying `PwsError` wrapped in a plain `Error` with the original as
  * `cause`, so the `cause` chain is walked (with a depth/cycle guard) before
  * classifying.
  *
@@ -28,19 +28,19 @@ import { errorNameOf } from '@interop/wallet-core/menders'
  * @returns {boolean}
  */
 export function isStorageUnreachable(err: unknown): boolean {
-  // Walk the `cause` chain so a WasError wrapped in a plain Error is still
+  // Walk the `cause` chain so a PwsError wrapped in a plain Error is still
   // classified.
   for (const current of causeChain(err)) {
     const name = errorNameOf(current)
-    if (name === 'WasServerError') {
+    if (name === 'PwsServerError') {
       return true
     }
-    // A base WasError with no HTTP status means the request never reached the
+    // A base PwsError with no HTTP status means the request never reached the
     // server (network failure, CORS block, DNS error, connection refused).
     // The subclasses (a 404, a 412, a pre-request encryption failure) each
     // carry their own name, so only the base class matches here.
     if (
-      name === 'WasError' &&
+      name === 'PwsError' &&
       (current as { status?: number }).status === undefined
     ) {
       return true
@@ -73,13 +73,13 @@ export function* causeChain(err: unknown): Generator<unknown> {
 /**
  * Whether `err` is the compare-and-swap conflict a conditional PUT raises
  * (`PreconditionFailedError`, 412), or its sync-driver subclass
- * `WasSyncConflictError`. An `instanceof`-only check would turn every lost
- * race into a hard failure instead of a rebase under a duplicated was-client.
+ * `PwsSyncConflictError`. An `instanceof`-only check would turn every lost
+ * race into a hard failure instead of a rebase under a duplicated pws-client.
  *
  * @param err {unknown}   the caught error
  * @returns {boolean}
  */
 export function isPreconditionFailed(err: unknown): boolean {
   const name = errorNameOf(err)
-  return name === 'PreconditionFailedError' || name === 'WasSyncConflictError'
+  return name === 'PreconditionFailedError' || name === 'PwsSyncConflictError'
 }

@@ -11,12 +11,12 @@
  * what an earlier store wrote. It mirrors wallet-core's own fixture of the
  * same name; nothing is imported from that package's test tree.
  */
-import { PreconditionFailedError } from '@interop/was-client'
-import type { CollectionEncryption } from '@interop/was-client'
+import { PreconditionFailedError } from '@interop/pws-client'
+import type { CollectionEncryption } from '@interop/pws-client'
 import type {
   EncryptionDescriptorSource,
   EncryptionDescriptorStore
-} from '@interop/was-client/edv'
+} from '@interop/pws-client/edv'
 import type { SealableEncryptionDescriptorStore } from '@interop/wallet-core/keys'
 import type { WebvhResourceLogController } from '@interop/wallet-core/resourceLog'
 

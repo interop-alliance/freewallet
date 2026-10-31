@@ -21,7 +21,7 @@
  * real.
  */
 import { beforeEach, describe, expect, it, vi } from 'vitest'
-import { resourceUrl } from '@interop/was-client/paths'
+import { resourceUrl } from '@interop/pws-client/paths'
 
 import type { IKeyAgreementKey, IZcap } from '@interop/data-integrity-core'
 
@@ -149,9 +149,9 @@ vi.mock('@interop/wallet-core/clientAnnex', async importOriginal => ({
   )
 }))
 
-vi.mock('@interop/was-client', async importOriginal => ({
-  ...(await importOriginal<typeof import('@interop/was-client')>()),
-  WasClient: class {
+vi.mock('@interop/pws-client', async importOriginal => ({
+  ...(await importOriginal<typeof import('@interop/pws-client')>()),
+  PwsClient: class {
     space(spaceId: string) {
       return {
         async configure({ controller }: { controller?: string } = {}) {

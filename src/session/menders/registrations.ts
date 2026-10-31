@@ -44,7 +44,7 @@ import {
   type UserKeyCascadeResult,
   type UserKeyRosterReadResult
 } from '@interop/wallet-core/keys'
-import type { CollectionEncryption } from '@interop/was-client'
+import type { CollectionEncryption } from '@interop/pws-client'
 import type { SealableEncryptionDescriptorStore } from '@interop/wallet-core/keys'
 import type { IZcap } from '@interop/data-integrity-core'
 import {

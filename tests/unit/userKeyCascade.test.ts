@@ -23,7 +23,7 @@ import { cascadeCollectionsToUserKey as driveCascade } from '@interop/wallet-cor
 import { ENCRYPTED_WALLET_COLLECTION_IDS } from '@/app.config'
 import { cascadeCollectionsToUserKey } from '@/session/userKeyCascade'
 import type { WASRemoteStore } from '@/stores/wasRemoteStore'
-import type { CollectionEncryption } from '@interop/was-client'
+import type { CollectionEncryption } from '@interop/pws-client'
 
 const USER_KEY = {
   id: 'did:key:z6LSFreshUserKey',

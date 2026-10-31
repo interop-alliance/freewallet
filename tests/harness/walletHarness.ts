@@ -146,7 +146,7 @@
  * storage. Shared by every actor in the process:
  *
  * - the service discovery memo (`src/lib/wasService.ts`), one per process;
- * - `@interop/logger`'s sinks and filter, and wallet-core's, was-sync's, and
+ * - `@interop/logger`'s sinks and filter, and wallet-core's, pws-sync's, and
  *   wallet-request's `setLogger` wiring;
  * - the sync controller singleton (`src/stores/syncController.ts`), never
  *   started by any actor, but stopped by every actor's logout;
@@ -163,7 +163,7 @@
  *   broadcast reaches every remembered actor's listener. Only a store whose
  *   replica prefix matches (the same enrolled client) closes on it;
  * - the absent `localStorage`, so no actor persists a cache or a `writerId`;
- * - pure memos with no session state: was-client's resolved did:key cache,
+ * - pure memos with no session state: pws-client's resolved did:key cache,
  *   the webvh and resource-log `WeakMap` indexes keyed by log or document;
  * - the server, its data dir, and its request recorder and armed faults.
  */
@@ -180,7 +180,7 @@ import {
   type RequestFaults,
   type RequestRecord
 } from 'was-teaching-server/testing'
-import { canonicalBaseServerUrl, spaceIdOfUrl } from '@interop/was-client/paths'
+import { canonicalBaseServerUrl, spaceIdOfUrl } from '@interop/pws-client/paths'
 import type { Session } from '@/types/auth'
 import type { PasskeyRegistration } from '@/lib/passkey'
 import { createFakeSessionIdb } from '../unit/fakeSessionIdb'

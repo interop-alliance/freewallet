@@ -13,7 +13,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { TEST_SERVICE_DESCRIPTION } from '../../tests/shared/wasServiceFixture'
 
 import { memoryResourceLogPinStore } from '@interop/vh-resource-log'
-import { agentsFromSeed } from '@interop/was-client/identity'
+import { agentsFromSeed } from '@interop/pws-client/identity'
 import {
   assertClientStillEnrolled,
   BrowserForgottenError,
@@ -378,7 +378,7 @@ describe('forgetBrowserWalletData (the no-unlock-material grade)', () => {
         wiped.push(this.dbPrefix)
         return { verified: false }
       })
-    const { deriveSpaceId } = await import('@interop/was-client/sync')
+    const { deriveSpaceId } = await import('@interop/pws-client/sync')
     const clientDid = 'did:key:z6MkLocalModeCacheScopeClientKey'
     const dbPrefix = deriveSpaceId(clientDid)
     const { keys } = stubLocalStorage({
@@ -454,7 +454,7 @@ describe('assertClientStillEnrolled (the forgotten-browser detector)', () => {
       }
     )
     const agents = await agentsFromSeed({ seed: clientSeed })
-    const { deriveSpaceId } = await import('@interop/was-client/sync')
+    const { deriveSpaceId } = await import('@interop/pws-client/sync')
     const dbPrefix = deriveSpaceId(agents.keyAgent.id)
     const { deleted } = stubIndexedDb({ names: [`${dbPrefix}-wallet-db`] })
     stubLocalStorage({ entries: {} })
@@ -532,7 +532,7 @@ describe('wipeStaleClientResidue', () => {
   it('derives its wipe targets from the record and never clears writerId', async () => {
     const clientSeed = new Uint8Array(32).fill(11)
     const agents = await agentsFromSeed({ seed: clientSeed })
-    const { deriveSpaceId } = await import('@interop/was-client/sync')
+    const { deriveSpaceId } = await import('@interop/pws-client/sync')
     const dbPrefix = deriveSpaceId(agents.keyAgent.id)
     const staleAccountDid = 'did:webvh:scid-old:example.com:space:old-space:id'
     const { deleted } = stubIndexedDb({ names: [`${dbPrefix}-wallet-db`] })

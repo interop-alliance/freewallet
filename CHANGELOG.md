@@ -55,6 +55,29 @@
 
 ### Changed
 
+- Moves from `@interop/was-client` 0.103.0 to its renamed successor
+  `@interop/pws-client` 0.106.0, and from `@interop/was-sync` 0.11.0 to
+  `@interop/pws-sync` 0.14.0. The imported names follow the rename:
+  `PwsClient`, `PwsSyncPort`, `createPwsSyncPort`, `PwsSyncConflictError`,
+  `createPwsReplication` (its `pwsPort` option), and the sync controller
+  port's `pwsClient`.
+- Takes `@interop/wallet-core` 0.113.0. Every ceremony's `was` option is
+  now `pws`, `bootstrapWasFor` is `bootstrapPwsFor`, `wasAsClient` is
+  `pwsAsClient`, and the store builders are `pwsWebvhIdStore`,
+  `pwsWebvhLogStore`, `pwsConnectionsStore`, and
+  `pwsLogGovernedDescriptorStore`. The app-side seams that hold the client
+  follow: `pwsClientAt`, `WASRemoteStore.pws`, `ClientAnnexReach.pws`, and
+  `StorageManager.pwsClient`.
+- Breaking: the epoch-configuration state type is now
+  `PwsEpochConfiguration`, with no fallback. A roster or collection
+  descriptor log written under `WasEpochConfiguration` stops reading, so an
+  account provisioned before this release is re-provisioned rather than
+  migrated.
+- The mender registry declares the three replica invariants (rows 41 to 43:
+  `pointed-annex-names-every-replica-server`,
+  `replica-pull-grants-are-current`,
+  `replica-space-controller-is-the-account-did`) with no converger yet, each
+  with a `none` gap row.
 - Breaking: `VITE_WAS_SERVER_URL` holds the WAS server's base server URL
   (`https://host/`, the URL under which it serves `service`, `spaces/` and
   `space/{id}/`), not its Spaces Repository URL. `WAS_BASE_SERVER_URL` in

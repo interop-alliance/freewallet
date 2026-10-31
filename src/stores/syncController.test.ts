@@ -1,14 +1,14 @@
 /**
  * Unit tests for the port and callbacks the sync binding
  * (`src/stores/syncController.ts`) hands the replication core in
- * `@interop/was-sync/rxdb`. The core itself is that package's, with its own
+ * `@interop/pws-sync/rxdb`. The core itself is that package's, with its own
  * suites, so it is stubbed here: what these cases pin is the seam between the
  * session and the core -- which collections, which handles, where status goes,
  * and which reachability signal the poll tick reads.
  */
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import { addSink, captureSink } from '@interop/logger'
-import type { SyncStatus } from '@interop/was-client/sync'
+import type { SyncStatus } from '@interop/pws-client/sync'
 import type { Session } from '@/types/auth'
 
 const POLL_MS = 30_000
@@ -34,7 +34,7 @@ const cores = vi.hoisted(() => ({
   startRejection: undefined as Error | undefined
 }))
 
-vi.mock('@interop/was-sync/rxdb', () => ({
+vi.mock('@interop/pws-sync/rxdb', () => ({
   createSyncController: vi.fn((options: unknown) => {
     cores.options.push(options)
     const instance = {
@@ -67,7 +67,7 @@ import { syncController } from './syncController'
  */
 interface CoreOptions {
   port: {
-    wasClient: unknown
+    pwsClient: unknown
     spaceUrl: string
     collections: Array<{ key: string; id: string }>
     rxCollection: (key: string) => unknown
@@ -106,7 +106,7 @@ function fakeSession(): Session {
     isGuest: false,
     persistence: { getWriterId: () => 'writer-profile-1' },
     storage: {
-      wasClient: { fake: 'client' },
+      pwsClient: { fake: 'client' },
       spaceUrl: 'http://localhost/space/space-1/',
       hasLocalReplica: true,
       localCollection
@@ -134,7 +134,7 @@ describe('sync binding: the port handed to the core', () => {
 
     const { port, pollMs } = lastOptions()
     expect(port.spaceUrl).toBe('http://localhost/space/space-1/')
-    expect(port.wasClient).toEqual({ fake: 'client' })
+    expect(port.pwsClient).toEqual({ fake: 'client' })
     expect(port.collections).toEqual([
       { key: 'privateCredentials', id: 'private-credentials' },
       { key: 'walletActivity', id: 'wallet-activity' }

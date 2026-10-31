@@ -21,7 +21,7 @@ vi.mock('@/app.config', async importOriginal => ({
 }))
 
 import type { IZcap } from '@interop/data-integrity-core'
-import { agentsFromSeed } from '@interop/was-client/identity'
+import { agentsFromSeed } from '@interop/pws-client/identity'
 import { keyAgreementCommitment } from '@interop/wallet-core/webvh'
 import { registryEntriesForCredentialVmIds } from '@/session/credentialCoverage'
 import {

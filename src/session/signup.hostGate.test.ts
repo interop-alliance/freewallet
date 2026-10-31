@@ -6,7 +6,7 @@
  * registered.
  */
 import { beforeEach, describe, expect, it, vi } from 'vitest'
-import type { ServiceDescription } from '@interop/was-client'
+import type { ServiceDescription } from '@interop/pws-client'
 
 vi.mock('@/app.config', async importOriginal => ({
   ...(await importOriginal<Record<string, unknown>>()),

@@ -60,7 +60,7 @@
  */
 import type { IZcap } from '@interop/data-integrity-core'
 import { equalBytes } from '@noble/ciphers/utils.js'
-import type { ServiceDescription } from '@interop/was-client'
+import type { ServiceDescription } from '@interop/pws-client'
 import {
   generateLadderSeed,
   publishUnlockKey,
@@ -126,7 +126,7 @@ import {
 } from '@/session/unlockMethods'
 import { createLogger } from '@/lib/log'
 import { spaceLocation } from '@/lib/spaceLocation'
-import { wasClientAt, wasServiceDescription } from '@/lib/wasService'
+import { pwsClientAt, wasServiceDescription } from '@/lib/wasService'
 
 const log = createLogger('fw:session:unlock')
 
@@ -723,7 +723,7 @@ export async function establishClientAnnexGeneration({
     account: { did: pointer.did, doc: account.doc, log: account.log },
     baseServerUrl,
     ladderSeed,
-    was: wasClientAt({
+    pws: pwsClientAt({
       baseServerUrl,
       zcapClient: didKeyZcapClient({ keyAgent }),
       serviceDescription

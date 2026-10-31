@@ -17,9 +17,9 @@
  * `getSyncedResource` / `putSyncedResource` -- reproducing verbatim what
  * background replication would have pushed.
  *
- * All WAS operations go through `@interop/was-client`'s `WasClient` and its
+ * All WAS operations go through `@interop/pws-client`'s `PwsClient` and its
  * lazy navigational handles (`space` / `collection` / `resource`) rather than
- * hand-built ezcap requests. The `WasClient` wraps the ezcap `ZcapClient` that
+ * hand-built ezcap requests. The `PwsClient` wraps the ezcap `ZcapClient` that
  * carries the user's invocation signer.
  */
 import type { ZcapClient } from '@interop/ezcap'
@@ -31,7 +31,7 @@ import type {
 } from '@interop/data-integrity-core'
 import {
   readEtag,
-  type WasClient,
+  type PwsClient,
   type Collection,
   type CollectionEncryption,
   type CollectionGenerator,
@@ -44,19 +44,19 @@ import {
   type ServiceDescription,
   type Space,
   type SpaceMetadata
-} from '@interop/was-client'
+} from '@interop/pws-client'
 import {
   collectionUrl,
   parseSpaceTarget,
   resourceUrl,
   spaceUrlById
-} from '@interop/was-client/paths'
-import { blobBytes, createEdvEncryption } from '@interop/was-client/edv'
+} from '@interop/pws-client/paths'
+import { blobBytes, createEdvEncryption } from '@interop/pws-client/edv'
 import { errorNameOf } from '@interop/wallet-core/menders'
 import { publicCredentialUrl as buildPublicCredentialUrl } from '@interop/wallet-core/space'
 import {
   isWebvhDid,
-  wasWebvhIdStore,
+  pwsWebvhIdStore,
   type WebvhIdStore
 } from '@interop/wallet-core/webvh'
 import type { SessionCore, User } from '@/types/auth'
@@ -70,7 +70,7 @@ import {
   WALLET_STANDARD_COLLECTIONS,
   WAS_SYNC_BATCH_SIZE
 } from '@/app.config'
-import type { Json } from '@interop/was-sync'
+import type { Json } from '@interop/pws-sync'
 import type { StorageCollection, StorageResource } from '@/lib/storage'
 import type { SpaceQuotaReport } from '@/types/storageQuota'
 import {
@@ -83,16 +83,16 @@ import {
   ensureSpaceAndCollection,
   errorStatus,
   KEY_EPOCH_HEADER
-} from '@interop/was-client/sync'
+} from '@interop/pws-client/sync'
 import { provisionWalletSpace } from '@interop/wallet-core/space'
-import type { EncryptionDescriptorStore } from '@interop/was-client/edv'
+import type { EncryptionDescriptorStore } from '@interop/pws-client/edv'
 import {
   ensureWalletSpaceEpochs,
   type UserKey
 } from '@interop/wallet-core/keys'
 import { createLogger } from '@/lib/log'
 import { spaceLocation } from '@/lib/spaceLocation'
-import { wasClientAt, wasServiceDescription } from '@/lib/wasService'
+import { pwsClientAt, wasServiceDescription } from '@/lib/wasService'
 
 const log = createLogger('fw:storage:remote')
 
@@ -129,7 +129,7 @@ export type ICollectionsSet = Map<string, string>
 export { mintSpaceId } from '@interop/wallet-core/genesis'
 
 /**
- * The one narrowing of a Space controller onto the DID type was-client's
+ * The one narrowing of a Space controller onto the DID type pws-client's
  * Space Description carries. Every controller this store is handed is a
  * did:key or a did:webvh, but the pointer and key-agent ids it arrives
  * through are typed as plain strings upstream.
@@ -154,7 +154,7 @@ export class WASRemoteStore {
   // discover for themselves at their first request (and fail there, exactly
   // as an unreachable server always did).
   #discovered?: ServiceDescription
-  public was: WasClient
+  public pws: PwsClient
   public spaceId: string
   public controller: IDID
 
@@ -208,14 +208,14 @@ export class WASRemoteStore {
     this.baseServerUrl = baseServerUrl
     this.#discovered = serviceDescription
     this.#pinStore = pinStore
-    this.was = this.#clientFor({ zcapClient })
+    this.pws = this.#clientFor({ zcapClient })
     this.spaceId = spaceId
     this.controller = controllerDid(controller)
     this.#capability = capability
     // Through the path builders rather than by hand: the Space URL is a zcap
     // `invocationTarget`, which the server matches by exact bytes, and the
     // canonical container form (a trailing slash) and the server layout are
-    // was-client's rules to own.
+    // pws-client's rules to own.
     this.spaceUrl = spaceUrlById({ baseServerUrl, spaceId })
   }
 
@@ -243,7 +243,7 @@ export class WASRemoteStore {
    * @returns {Space}
    */
   #space(): Space {
-    return this.was.spaceAt(this.spaceUrl, { capability: this.#capability })
+    return this.pws.spaceAt(this.spaceUrl, { capability: this.#capability })
   }
 
   /**
@@ -327,7 +327,7 @@ export class WASRemoteStore {
    * The handle forces the `plaintext` encryption override, so a `get()` returns
    * the raw stored body (the EDV envelope for an encryption-marked collection)
    * rather than running the codec. The override is load-bearing: this store's
-   * `WasClient` is built with a fail-closed encryption provider (its
+   * `PwsClient` is built with a fail-closed encryption provider (its
    * `resolveKeys` always returns `null`), so without it a read of a marked
    * collection's resource would throw during codec resolution before the GET.
    * That matches the storage browser's contract -- it renders raw bodies
@@ -398,7 +398,7 @@ export class WASRemoteStore {
    * needed for the fetch.
    *
    * Returns `undefined` when the collection is missing or not visible
-   * (was-client resolves `null` for both). Network errors throw through:
+   * (pws-client resolves `null` for both). Network errors throw through:
    * callers treat the fetch as best-effort and fall back to a cached copy.
    *
    * @param options {object}
@@ -423,7 +423,7 @@ export class WASRemoteStore {
    * object {@link collectionMetadata} reads, narrowed to the member the index
    * schema rides in. The envelope is decrypted later, by the cipher it is
    * handed. Returns `undefined` when the collection is missing or no `custom`
-   * value is stored (was-client's read drops a cleared `custom`, so absence
+   * value is stored (pws-client's read drops a cleared `custom`, so absence
    * has one shape here).
    *
    * @param options {object}
@@ -562,7 +562,7 @@ export class WASRemoteStore {
 
   /**
    * Declares a batch of blinded-index attributes on an encrypted collection:
-   * was-client's `declareIndexes`, an add-only compare-and-swap over the
+   * pws-client's `declareIndexes`, an add-only compare-and-swap over the
    * collection's sealed metadata `custom`. An attribute already declared on
    * the same terms is skipped, so it works on a new collection and on one
    * that already carries a schema.
@@ -604,7 +604,7 @@ export class WASRemoteStore {
 
   /**
    * Writes one binary Resource into an encrypted collection at a chosen id,
-   * create-if-absent: was-client's `Resource.put` with `ifNoneMatch`, which
+   * create-if-absent: pws-client's `Resource.put` with `ifNoneMatch`, which
    * stores a payload over the codec's blob limit as a chunked document. The
    * handle carries the descriptor and the reader's keys as a per-handle
    * encryption override, as {@link declareCollectionIndexes} does, since this
@@ -617,7 +617,7 @@ export class WASRemoteStore {
    * (the `{ pending: true }` document a killed chunked write leaves) is
    * deleted with its chunks and the write is tried again. Only the id being
    * written is ever reaped. Any other failure propagates, a `507` as
-   * was-client's `QuotaExceededError`.
+   * pws-client's `QuotaExceededError`.
    *
    * @param options {object}
    * @param options.collectionId {string}   the WAS collection id
@@ -729,7 +729,7 @@ export class WASRemoteStore {
     // entry in the local collection map (`id` / `key-map` have no RxDB `key`,
     // no local replica).
     await provisionWalletSpace({
-      was: this.was,
+      pws: this.pws,
       spaceId: this.spaceId,
       controllerDid: this.controller
     })
@@ -830,7 +830,7 @@ export class WASRemoteStore {
    * Rebinds this store's signing client and controller -- the in-session
    * swap right after controller promotion: from here on every request is
    * signed with the promoted controller's keyId. Every handle this store
-   * hands out goes through `this.was`, so replacing it is sufficient.
+   * hands out goes through `this.pws`, so replacing it is sufficient.
    *
    * @param options {object}
    * @param options.zcapClient {ZcapClient}   signs with the promoted keyId
@@ -844,7 +844,7 @@ export class WASRemoteStore {
     zcapClient: ZcapClient
     controller: string
   }): void {
-    this.was = this.#clientFor({ zcapClient })
+    this.pws = this.#clientFor({ zcapClient })
     this.controller = controllerDid(controller)
   }
 
@@ -856,10 +856,10 @@ export class WASRemoteStore {
    *
    * @param options {object}
    * @param options.zcapClient {ZcapClient}
-   * @returns {WasClient}
+   * @returns {PwsClient}
    */
-  #clientFor({ zcapClient }: { zcapClient: ZcapClient }): WasClient {
-    return wasClientAt({
+  #clientFor({ zcapClient }: { zcapClient: ZcapClient }): PwsClient {
+    return pwsClientAt({
       baseServerUrl: this.baseServerUrl,
       zcapClient,
       serviceDescription: this.#discovered,
@@ -894,8 +894,8 @@ export class WASRemoteStore {
    * @returns {WebvhIdStore}
    */
   webvhIdStore(): WebvhIdStore {
-    return wasWebvhIdStore({
-      was: this.was,
+    return pwsWebvhIdStore({
+      pws: this.pws,
       spaceId: this.spaceId,
       pinStore: this.#pinStore
     })
@@ -938,7 +938,7 @@ export class WASRemoteStore {
    * capability-only on the server, so only the wallet -- holding the space
    * root -- can set it.
    *
-   * This is was-client's ensure with `encryption: 'plaintext'`: a guarded
+   * This is pws-client's ensure with `encryption: 'plaintext'`: a guarded
    * create (`If-None-Match: *`) that leaves a standing collection untouched.
    * A standing collection may be log-governed (an App Connect provisioning
    * made it so), and its served `encryption` member is the server's own
@@ -989,7 +989,7 @@ export class WASRemoteStore {
 
   /**
    * Ensures an App Connect app-provisioned collection exists as a
-   * log-governed encrypted collection: was-client's ensure with
+   * log-governed encrypted collection: pws-client's ensure with
    * `encryption: 'governed'`, a bare guarded create (`{ name }` under
    * `If-None-Match: *`), since the Description's `encryption` member is the
    * server's to derive from the collection's governing log, and the
@@ -1030,11 +1030,11 @@ export class WASRemoteStore {
   }
 
   /**
-   * The one was-client ensure both provisioning paths ride. The Space half
+   * The one pws-client ensure both provisioning paths ride. The Space half
    * is skipped by supplying the description of the Space this session
    * already runs in, since the bound invocation capability (a transient
    * session's generation delegation) may be scoped below the bare Space URL.
-   * The attribution passes through as supplied: was-client stamps it on the
+   * The attribution passes through as supplied: pws-client stamps it on the
    * create only and leaves a standing collection's attribution alone.
    *
    * @param options {object}
@@ -1043,7 +1043,7 @@ export class WASRemoteStore {
    * @param options.encryption {'plaintext' | 'governed'}
    * @param [options.isPublic] {boolean}
    * @param [options.generator] {CollectionGenerator}
-   * @returns {Promise<{ created: boolean }>}   was-client's report of whether
+   * @returns {Promise<{ created: boolean }>}   pws-client's report of whether
    *   its guarded create made the collection
    */
   async #ensureCollectionInSpace({
@@ -1060,7 +1060,7 @@ export class WASRemoteStore {
     generator?: CollectionGenerator
   }): Promise<{ created: boolean }> {
     return await ensureSpaceAndCollection({
-      was: this.was,
+      pws: this.pws,
       spaceUrl: this.spaceUrl,
       controllerDid: this.controller,
       collectionId: id,
@@ -1353,7 +1353,7 @@ export class WASRemoteStore {
 
   /**
    * Reads the live JSON documents of one of the wallet's standard synced
-   * collections through was-client's `Collection.documents()`, the snapshot
+   * collections through pws-client's `Collection.documents()`, the snapshot
    * walk over the `changes` feed background replication pulls, under the
    * bound invocation capability. One request per page rather than one per
    * resource, so a replica-less session lists a collection in a handful of
@@ -1449,7 +1449,7 @@ export class WASRemoteStore {
    * @param options {object}
    * @param options.logicalKey {string}
    * @param options.resourceId {string}
-   * @returns {Promise<Awaited<ReturnType<WasClient['request']>> | undefined>}
+   * @returns {Promise<Awaited<ReturnType<PwsClient['request']>> | undefined>}
    */
   async #requestSyncedResource({
     logicalKey,
@@ -1457,10 +1457,10 @@ export class WASRemoteStore {
   }: {
     logicalKey: string
     resourceId: string
-  }): Promise<Awaited<ReturnType<WasClient['request']>> | undefined> {
+  }): Promise<Awaited<ReturnType<PwsClient['request']>> | undefined> {
     const collectionId = this.#collectionId(logicalKey)
     try {
-      return await this.was.request({
+      return await this.pws.request({
         url: resourceUrl({ spaceUrl: this.spaceUrl, collectionId, resourceId }),
         method: 'GET',
         capability: this.#capability
@@ -1596,7 +1596,7 @@ export class WASRemoteStore {
       headers[KEY_EPOCH_HEADER] = epoch
     }
     try {
-      await this.was.request({
+      await this.pws.request({
         url: resourceUrl({ spaceUrl: this.spaceUrl, collectionId, resourceId }),
         method: 'PUT',
         json: body as object,
@@ -1639,7 +1639,7 @@ export class WASRemoteStore {
   }): Promise<void> {
     const collectionId = this.#collectionId(logicalKey)
     try {
-      await this.was.request({
+      await this.pws.request({
         url: resourceUrl({ spaceUrl: this.spaceUrl, collectionId, resourceId }),
         method: 'DELETE',
         ...(ifMatch !== undefined ? { headers: { 'if-match': ifMatch } } : {}),
@@ -1684,9 +1684,9 @@ export class WASRemoteStore {
     zcapClient?: ZcapClient
   } = {}): Promise<{ outcome: 'deleted' | 'not-found' }> {
     try {
-      const was = zcapClient ? this.#clientFor({ zcapClient }) : this.was
+      const pws = zcapClient ? this.#clientFor({ zcapClient }) : this.pws
       const space = capability
-        ? was.spaceAt(this.spaceUrl, { capability })
+        ? pws.spaceAt(this.spaceUrl, { capability })
         : this.#space()
       const result = await space.deleteWithOutcome()
       log.info('Remote space deleted', { outcome: result.outcome })
@@ -1720,7 +1720,7 @@ export class WASRemoteStore {
    * The handle is built the same way every request in this store is, so the
    * archive streams rather than buffering.
    *
-   * was-client's `exportStream` takes no `AbortSignal`, so the request itself
+   * pws-client's `exportStream` takes no `AbortSignal`, so the request itself
    * is not cancelled; an abort cancels the stream's source and errors the
    * stream with the signal's reason. A cancel is the caller's own AbortError,
    * which travels un-wrapped and unlogged rather than as an export failure.
@@ -1759,7 +1759,7 @@ export class WASRemoteStore {
           ...(capability ? { capability } : {})
         })
       } else {
-        space = this.was.spaceAt(spaceUrl, {
+        space = this.pws.spaceAt(spaceUrl, {
           capability: capability ?? this.#capability
         })
       }
@@ -1797,7 +1797,7 @@ export class WASRemoteStore {
  *
  * The registry sits apart from the store's own collections, so this is a
  * standalone function rather than a `WASRemoteStore` method. Each call builds
- * its own `WasClient` over the caller's `zcapClient`, whose invocation signer
+ * its own `PwsClient` over the caller's `zcapClient`, whose invocation signer
  * is the data identity's root key. The record is a plaintext JSON document
  * (its payload is already ciphertext), so no encryption provider is wired in,
  * and the handle passes the explicit `{ encryption: 'plaintext' }` override.
@@ -1822,12 +1822,12 @@ async function unlockMethodsRegistryResource({
   spaceUrl: string
   capability?: IZcap
 }): Promise<Resource> {
-  const was = await wasClientAt({
+  const pws = await pwsClientAt({
     baseServerUrl: spaceLocation({ spaceUrl }).baseServerUrl,
     zcapClient,
     serviceDescription: await wasServiceDescription()
   })
-  return was
+  return pws
     .spaceAt(spaceUrl, { capability })
     .collection(UNLOCK_METHODS_COLLECTION.id, { encryption: 'plaintext' })
     .resource(UNLOCK_METHODS_RESOURCE)
@@ -1869,7 +1869,7 @@ export async function getUnlockMethodsRecord({
  * Writes (upserts) the unlock-methods registry record into the data Space as a
  * JSON document. `ifMatch` (the ETag from the read the record was built on)
  * makes the write an update-if-unchanged; `ifNoneMatch` a create-if-absent. A
- * failed precondition throws was-client's `PreconditionFailedError` (412).
+ * failed precondition throws pws-client's `PreconditionFailedError` (412).
  *
  * @param options {object}
  * @param options.zcapClient {ZcapClient}   the data identity's root client

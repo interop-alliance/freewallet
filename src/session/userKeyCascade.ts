@@ -21,7 +21,7 @@
  * epochs. Failures are collected per collection rather than aborting the
  * fan-out; the cascade-completion sweep is the standing backstop.
  */
-import type { CollectionEncryption } from '@interop/was-client'
+import type { CollectionEncryption } from '@interop/pws-client'
 import type { IKeyAgreementKey } from '@interop/data-integrity-core'
 import {
   cascadeCollectionsToUserKey as driveCascade,

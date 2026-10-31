@@ -62,7 +62,7 @@ import {
   standingFieldsOfKeyringHit,
   unlockLogStore
 } from '@/session/standingUnlock'
-import { agentsFromSeed } from '@interop/was-client/identity'
+import { agentsFromSeed } from '@interop/pws-client/identity'
 import {
   deriveUnlockIdentity,
   deleteUnlockSpace,
@@ -115,8 +115,8 @@ import { webvhResourceLogController } from '@interop/wallet-core/resourceLog'
 import type {
   CollectionEncryption,
   ServiceDescription
-} from '@interop/was-client'
-import { unwrapEpochSecret } from '@interop/was-client/edv'
+} from '@interop/pws-client'
+import { unwrapEpochSecret } from '@interop/pws-client/edv'
 import {
   currentAccountRecordSigners,
   type VerifiedAccountLog
@@ -202,7 +202,7 @@ import { deleteUnlockLocalState } from '@/lib/sessionKey'
 import { isStorageUnreachable } from '@/lib/storageErrors'
 import { mintSpaceId, WASRemoteStore } from '@/stores/wasRemoteStore'
 import { createLogger } from '@/lib/log'
-import { wasClientAt, wasServiceDescription } from '@/lib/wasService'
+import { pwsClientAt, wasServiceDescription } from '@/lib/wasService'
 import { spaceLocation } from '@/lib/spaceLocation'
 import { zcapExpires } from '@/lib/zcap'
 
@@ -2833,7 +2833,7 @@ async function recoverAccountTransient({
   const rung0 = await ladderRung({ ladderSeed, index: 0 })
   const bootstrapAgent = await ladderVmAgent({ ladderSeed })
   const serviceDescription = await wasServiceDescription()
-  const bootstrapWas = wasClientAt({
+  const bootstrapPws = pwsClientAt({
     serviceDescription,
     baseServerUrl,
     zcapClient: didKeyZcapClient({ keyAgent: bootstrapAgent })
@@ -2906,7 +2906,7 @@ async function recoverAccountTransient({
       if (!clientAnnexDid) {
         clientAnnexSpaceId = mintSpaceId()
         const minted = await mintCredentialClientAnnexGeneration({
-          was: bootstrapWas,
+          pws: bootstrapPws,
           baseServerUrl,
           spaceId: clientAnnexSpaceId,
           controller: bootstrapAgent.id,
@@ -2915,7 +2915,7 @@ async function recoverAccountTransient({
         })
         await ensureGenerationDelegationCurrent({
           store: clientAnnexLogStore({
-            was: bootstrapWas,
+            pws: bootstrapPws,
             spaceId: clientAnnexSpaceId,
             generationId: minted.generationId,
             pinStore: logPins
@@ -2940,7 +2940,7 @@ async function recoverAccountTransient({
         // first request that follows it.
         const enrolled = await enrollClientAnnexTransientClient({
           store: clientAnnexLogStore({
-            was: bootstrapWas,
+            pws: bootstrapPws,
             spaceId: clientAnnexSpaceId,
             generationId: minted.generationId,
             pinStore: logPins
@@ -2955,7 +2955,7 @@ async function recoverAccountTransient({
         // The description the annex Space's own ensure just read (present
         // exactly when that ensure ran); nothing between it and this flip
         // writes the Space Description.
-        await bootstrapWas.space(clientAnnexSpaceId).configure({
+        await bootstrapPws.space(clientAnnexSpaceId).configure({
           controller: did,
           force: true,
           ...(minted.spaceDescription !== undefined

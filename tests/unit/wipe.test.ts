@@ -8,7 +8,7 @@
  * report.
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { deriveSpaceId } from '@interop/was-client/sync'
+import { deriveSpaceId } from '@interop/pws-client/sync'
 import {
   saveAccountDidForSpace,
   saveClientKeyRecord,

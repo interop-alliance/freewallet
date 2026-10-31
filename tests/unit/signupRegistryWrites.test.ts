@@ -73,7 +73,7 @@ vi.mock('@/session/credentialAnchoredGenesis', async importOriginal => ({
       standingFields: { keyAgreementKeyMultibase: 'z6LSstanding' }
     }
     await beforePromotion?.({
-      was: {},
+      pws: {},
       zcapClient: {},
       did: establishment.did,
       userKey: { id: 'did:key:z6MkUserKey' },

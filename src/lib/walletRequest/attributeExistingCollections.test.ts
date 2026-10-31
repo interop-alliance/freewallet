@@ -1,6 +1,6 @@
 // @vitest-environment node
 import { describe, it, expect, vi } from 'vitest'
-import { x25519RecipientFromDidKey } from '@interop/was-client/edv'
+import { x25519RecipientFromDidKey } from '@interop/pws-client/edv'
 import type { ConnectionsListing } from '@interop/wallet-core/connections'
 import type { Session } from '@/types/auth'
 import { attributeExistingCollections } from './attributeExistingCollections'

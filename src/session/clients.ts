@@ -47,7 +47,7 @@ import {
   type ConnectionEntry,
   type ReadConnection
 } from '@interop/wallet-core/connections'
-import { epochKeyIdFor } from '@interop/was-client/edv'
+import { epochKeyIdFor } from '@interop/pws-client/edv'
 import {
   currentAccountSigningKeys as sharedCurrentAccountSigningKeys,
   listAccountClients as sharedListAccountClients,

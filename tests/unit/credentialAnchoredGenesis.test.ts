@@ -29,7 +29,7 @@ vi.mock('@/app.config', async importOriginal => ({
   }
 }))
 
-vi.mock('@interop/was-client', async importOriginal => {
+vi.mock('@interop/pws-client', async importOriginal => {
   class MockWasClient {
     options: unknown
     constructor(options: unknown) {
@@ -37,8 +37,8 @@ vi.mock('@interop/was-client', async importOriginal => {
     }
   }
   return {
-    ...(await importOriginal<typeof import('@interop/was-client')>()),
-    WasClient: MockWasClient
+    ...(await importOriginal<typeof import('@interop/pws-client')>()),
+    PwsClient: MockWasClient
   }
 })
 
@@ -54,7 +54,7 @@ vi.mock('@interop/wallet-core/clientAnnex', async importOriginal => ({
 vi.mock('@interop/wallet-core/webvh', async importOriginal => ({
   ...(await importOriginal<typeof import('@interop/wallet-core/webvh')>()),
   didKeyZcapClient: vi.fn(() => ({ isBootstrapZcapClient: true })),
-  wasWebvhIdStore: vi.fn(() => ({ isIdStore: true }))
+  pwsWebvhIdStore: vi.fn(() => ({ isIdStore: true }))
 }))
 
 vi.mock('@/lib/kms', () => ({
@@ -195,13 +195,13 @@ describe('establishCredentialAnchoredAccount -- the orchestrator binding', () =>
     expect(ladderVmAgent).toHaveBeenCalledTimes(1)
     // The bootstrap storage client the hooks share, signing as the ladder
     // VM's bare did:key.
-    const bootstrapWas = (
-      options.bootstrapWasFor as (context: object) => {
+    const bootstrapPws = (
+      options.bootstrapPwsFor as (context: object) => {
         options: { baseServerUrl: string; zcapClient: unknown }
       }
     )({})
-    expect(bootstrapWas.options.baseServerUrl).toBe(BASE_SERVER_URL)
-    expect(bootstrapWas.options.zcapClient).toEqual({
+    expect(bootstrapPws.options.baseServerUrl).toBe(BASE_SERVER_URL)
+    expect(bootstrapPws.options.zcapClient).toEqual({
       isBootstrapZcapClient: true
     })
     // A DID-less signup pointer states no expectedDid and no prior stamp.
@@ -384,7 +384,7 @@ describe('mendCredentialAnchoredAccount -- the mend binding', () => {
   it('hands wallet-core the account core, the shared hooks, and the mend members', async () => {
     const persistence = transientSessionStores()
     const invocation = {
-      was: { isInvocationWas: true },
+      pws: { isInvocationWas: true },
       zcapClient: { isInvocationZcap: true },
       capability: { id: 'urn:zcap:generation' }
     }
@@ -429,7 +429,7 @@ describe('mendCredentialAnchoredAccount -- the mend binding', () => {
     })
     expect(typeof options.bindRecord).toBe('function')
     expect(typeof options.rosterStoreFor).toBe('function')
-    expect(typeof options.bootstrapWasFor).toBe('function')
+    expect(typeof options.bootstrapPwsFor).toBe('function')
     expect(options.idStore).toEqual({ isIdStore: true })
     // The mend members ride through unchanged.
     expect(options.priorCreatedAt).toBe('2026-08-20T00:00:00.000Z')

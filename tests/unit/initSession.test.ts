@@ -55,7 +55,7 @@ import {
   BOOTSTRAP_HANDLE,
   BOOTSTRAP_KEY_NAME,
   agentsFromSeed
-} from '@interop/was-client/identity'
+} from '@interop/pws-client/identity'
 import { initGuestSession, initSessionFromSeed } from '@/session/initSession'
 
 const KEYSTORE_ID = `${KMS_SERVER_URL}/keystores/z6QkKeystore`

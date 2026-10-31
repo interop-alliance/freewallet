@@ -1,6 +1,6 @@
 /**
  * Unit tests for the one service discovery: the memo that makes every
- * `WasClient` this app builds share one read of the service description at
+ * `PwsClient` this app builds share one read of the service description at
  * `{base}service`, the retry a failed discovery leaves open, the refusal
  * when no WAS server is configured, and the refusal of a description that
  * describes a server other than the configured base. The `app.config` canonicalization of the
@@ -18,8 +18,8 @@ vi.unmock('@/lib/wasService')
 const readServiceDescription = vi.fn()
 let baseServerUrl: string | undefined = 'http://localhost/'
 
-vi.mock('@interop/was-client', async importOriginal => ({
-  ...(await importOriginal<typeof import('@interop/was-client')>()),
+vi.mock('@interop/pws-client', async importOriginal => ({
+  ...(await importOriginal<typeof import('@interop/pws-client')>()),
   readServiceDescription: (options: { serviceUrl: string }) =>
     readServiceDescription(options)
 }))

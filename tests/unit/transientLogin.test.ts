@@ -13,7 +13,7 @@ import { TEST_SERVICE_DESCRIPTION } from '../shared/wasServiceFixture'
 import { captureCeremonyEvents } from './ceremonyEventCapture'
 
 import { addSink, captureSink } from '@interop/logger'
-import { WasError } from '@interop/was-client'
+import { PwsError } from '@interop/pws-client'
 
 const state = vi.hoisted(() => ({
   wasUrl: 'https://was.example.test/' as string | undefined
@@ -1598,7 +1598,7 @@ describe('transientSessionFromKeyringHit -- the shared mend ceremony', () => {
   it('rethrows a transport-class establishment failure unchanged', async () => {
     // A flap is not an account state: it must stay distinguishable from the
     // refusal whose copy says a retry finishes the setup.
-    const offline = new WasError('the server could not be reached')
+    const offline = new PwsError('the server could not be reached')
     const torn = makeFound({
       pointer: { spaceUrl: POINTER.spaceUrl } as never
     })

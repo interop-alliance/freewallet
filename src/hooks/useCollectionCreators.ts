@@ -17,7 +17,7 @@ import {
   type CollectionCreator
 } from '@/lib/connectedApps'
 import { appGeneratorIds } from '@/lib/collectionAttribution'
-import type { CollectionGenerator } from '@interop/was-client'
+import type { CollectionGenerator } from '@interop/pws-client'
 import { createLogger } from '@/lib/log'
 import { readDirectoryListing } from '@/session/clients'
 import type { Session } from '@/types/auth'

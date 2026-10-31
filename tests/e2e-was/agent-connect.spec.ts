@@ -1,6 +1,6 @@
 import type { BrowserContext, Page } from '@playwright/test'
 import { CapabilityAgent } from '@interop/capability-agent'
-import { WasClient, type Collection } from '@interop/was-client'
+import { PwsClient, type Collection } from '@interop/pws-client'
 import type { IZcap } from '@interop/wallet-request'
 import { externalRequestPath } from '@/lib/walletRequest/externalRequestPath'
 import {
@@ -316,7 +316,7 @@ async function readPost({
     .fromCapability(grant as never) as Collection
   const post = await audience.get(POST_ID)
   // A refused read comes back as a missing Resource (WAS answers 404 for
-  // both), which was-client reports as `null` rather than throwing.
+  // both), which pws-client reports as `null` rather than throwing.
   if (post === null) {
     throw Object.assign(new Error('The post read was refused.'), {
       status: 404
@@ -564,7 +564,7 @@ test.describe.serial('agent connection over the interaction URL', () => {
     expect(agentParent).not.toMatch(/^urn:zcap:root:/)
     expect(child.proof?.capabilityChain).toHaveLength(3)
 
-    const reader = WasClient.fromSigner({
+    const reader = PwsClient.fromSigner({
       baseServerUrl: WAS_URL,
       signer: subscriber.getSigner()
     }).fromCapability(child as never) as Collection

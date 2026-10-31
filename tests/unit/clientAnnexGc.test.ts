@@ -18,9 +18,9 @@ vi.mock('@interop/wallet-core/clientAnnex', async importOriginal => ({
   runClientAnnexGc: vi.fn()
 }))
 
-vi.mock('@interop/was-client', async importOriginal => ({
-  ...(await importOriginal<typeof import('@interop/was-client')>()),
-  WasClient: vi.fn(function WasClientStub(this: Record<string, unknown>) {
+vi.mock('@interop/pws-client', async importOriginal => ({
+  ...(await importOriginal<typeof import('@interop/pws-client')>()),
+  PwsClient: vi.fn(function WasClientStub(this: Record<string, unknown>) {
     this.isWasClientStub = true
   })
 }))

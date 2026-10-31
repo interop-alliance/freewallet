@@ -8,9 +8,9 @@
  * @vitest-environment node
  */
 import { describe, expect, it } from 'vitest'
-import { IntegrityError } from '@interop/was-client'
-import type { DocCipher } from '@interop/was-client/edv'
-import type { Json } from '@interop/was-sync'
+import { IntegrityError } from '@interop/pws-client'
+import type { DocCipher } from '@interop/pws-client/edv'
+import type { Json } from '@interop/pws-sync'
 import type { IVerifiableCredential } from '@interop/data-integrity-core'
 import { RemoteDirectStore } from './remoteDirectStore'
 import type { WASRemoteStore } from './wasRemoteStore'

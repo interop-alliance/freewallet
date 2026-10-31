@@ -5,13 +5,13 @@ import * as vc from '@interop/vc'
 import { securityLoader } from '@interop/security-document-loader'
 import type { Session } from '@/types/auth'
 import type { ICapabilityQueryDetail, IZcap } from '@/lib/walletRequest'
-import { x25519RecipientFromDidKey } from '@interop/was-client/edv'
+import { x25519RecipientFromDidKey } from '@interop/pws-client/edv'
 import { base64urlnopad } from '@scure/base'
 import {
   connectionDidKey,
   connectionSeedTag
 } from '@interop/wallet-core/connections'
-import type { CollectionGenerator } from '@interop/was-client'
+import type { CollectionGenerator } from '@interop/pws-client'
 import {
   APP_KEYS_COLLECTION,
   KEY_MAP_COLLECTION,
@@ -626,7 +626,7 @@ describe('resolveInvocationTarget', () => {
   })
 
   it('refuses a URL that names no Space, Collection, or Resource', () => {
-    // was-client's grammar classifies these as sub-endpoints rather than as
+    // pws-client's grammar classifies these as sub-endpoints rather than as
     // handles: a reserved segment at Collection or Resource depth, and any
     // path deeper than a Resource. None is a target this module grants.
     for (const target of [

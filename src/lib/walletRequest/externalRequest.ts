@@ -40,8 +40,8 @@ import type {
   IVPRDetails as ISpecVPRDetails
 } from '@interop/wallet-request'
 import { errorNameOf } from '@interop/wallet-core/menders'
-import type { ServiceInfo } from '@interop/was-client'
-import { isEd25519DidKey } from '@interop/was-client/edv'
+import type { ServiceInfo } from '@interop/pws-client'
+import { isEd25519DidKey } from '@interop/pws-client/edv'
 import { classifyRequest, queriesOf } from './classify'
 import { isInboxDescriptor, namesInboxTarget } from './connectionRequest'
 import {

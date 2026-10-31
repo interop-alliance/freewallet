@@ -14,7 +14,7 @@
  */
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import type { ContactData, ContactHeadPayload } from '@interop/social-core'
-import { QuotaExceededError } from '@interop/was-client'
+import { QuotaExceededError } from '@interop/pws-client'
 import { mintAppKeyCredential } from '@interop/wallet-request'
 import { SEED_CONTACT_NAMES } from '@/fixtures/defaultContacts'
 import {

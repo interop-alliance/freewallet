@@ -26,7 +26,7 @@
  *   and re-runs, writing the edit once under the fresh epoch.
  *
  * The WAS layer is faked at two seams matching the two subjects: a recording
- * fake `WasClient` under a real `WASRemoteStore` (so the store's own
+ * fake `PwsClient` under a real `WASRemoteStore` (so the store's own
  * capability threading is what is exercised), and a structural fake
  * `WASRemoteStore` under the real `StorageManager` (the sharing test's
  * pattern), with real EDV ciphers over freshly generated X25519 keys.
@@ -44,8 +44,8 @@ import type {
   CollectionEncryption,
   IZcap,
   Space,
-  WasClient
-} from '@interop/was-client'
+  PwsClient
+} from '@interop/pws-client'
 import {
   addRecipient,
   createEdvDocCipher,
@@ -53,9 +53,9 @@ import {
   ownerRecipient,
   removeRecipient,
   replaceRecipient
-} from '@interop/was-client/edv'
-import { cidFrom } from '@interop/was-client/sync'
-import type { Json } from '@interop/was-sync'
+} from '@interop/pws-client/edv'
+import { cidFrom } from '@interop/pws-client/sync'
+import type { Json } from '@interop/pws-sync'
 import type { ContactData, ContactHeadPayload } from '@interop/social-core'
 import {
   descriptorLogsFrom,
@@ -105,13 +105,13 @@ const DELEGATED_ZCAP = {
 } as unknown as IZcap
 
 /**
- * A recording fake `WasClient`: every `spaceAt()` handle records the options
+ * A recording fake `PwsClient`: every `spaceAt()` handle records the options
  * it was created with, every raw `request()` records its input, and the handles
  * serve just enough structure (describe / list / resource.get) for the store
  * methods under test to complete.
  */
 function recordingWas(): {
-  was: WasClient
+  was: PwsClient
   spaceCalls: Array<{ spaceUrl: string; capability?: unknown }>
   requestCalls: Array<{ url?: string; method?: string; capability?: unknown }>
 } {
@@ -171,7 +171,7 @@ function recordingWas(): {
       requestCalls.push(input)
       return { data: { ok: true } }
     }
-  } as unknown as WasClient
+  } as unknown as PwsClient
   return { was, spaceCalls, requestCalls }
 }
 
@@ -196,7 +196,7 @@ function makeRecordedStore({ capability }: { capability?: IZcap }): {
     capability
   })
   const { was, spaceCalls, requestCalls } = recordingWas()
-  store.was = was
+  store.pws = was
   return { store, spaceCalls, requestCalls }
 }
 

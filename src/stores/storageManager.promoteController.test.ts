@@ -1,24 +1,24 @@
 /**
  * Unit tests for the login-time controller promotion
  * (`StorageManager.ensurePromotedController`), specifically what it hands
- * was-client's `Space.configure()` as `current`. The promoted-signer read it
+ * pws-client's `Space.configure()` as `current`. The promoted-signer read it
  * makes is a description in hand, so it rides along with that read's `ETag`
  * and the pre-merge re-describe is skipped. Two answers do not ride along: a
  * `null`, since an unauthorized answer under the promoted signer is masked as
  * the same 404 an absent description returns, and a read carrying no `ETag`,
- * which is no compare-and-swap baseline -- was-client refuses such a write
+ * which is no compare-and-swap baseline -- pws-client refuses such a write
  * rather than sending it unconditionally.
  *
  * @vitest-environment node
  */
 import { describe, expect, it, vi } from 'vitest'
 import type { ZcapClient } from '@interop/ezcap'
-import type { SpaceMetadata } from '@interop/was-client'
+import type { SpaceMetadata } from '@interop/pws-client'
 import {
   inMemorySessionPersistence,
   transientSessionStores
 } from '@/session/persistence'
-import type { IZcap } from '@interop/was-client'
+import type { IZcap } from '@interop/pws-client'
 import type { ControllerProfile } from '@/types/auth'
 import { StorageManager } from './storageManager'
 import { generateVaultKeys } from '@/stores/testing/vaultKeys'

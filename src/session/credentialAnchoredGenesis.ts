@@ -11,7 +11,7 @@
  * - the unlock-record codec (`bindRecord` wraps
  *   `bindCredentialAnchoredUnlockSecret`, carrying the credential and the
  *   email);
- * - the storage wiring under the bootstrap identity (the `WasClient`, the
+ * - the storage wiring under the bootstrap identity (the `PwsClient`, the
  *   account `id`-collection store, the ladder-signed roster store builder);
  * - the KMS-authentication thunk (`provideKmsAuthentication`, best-effort
  *   with a local timeout) and the keystore-controller promotion closure it
@@ -35,8 +35,8 @@
  * leave -- with the same hook set, so any entry point into a torn account
  * runs the shared arms instead of hand-rolling its own heal.
  */
-import type { WasClient } from '@interop/was-client'
-import type { EncryptionDescriptorStore } from '@interop/was-client/edv'
+import type { PwsClient } from '@interop/pws-client'
+import type { EncryptionDescriptorStore } from '@interop/pws-client/edv'
 import {
   accountCollectionStores,
   userKeyRosterLogSigner,
@@ -55,7 +55,7 @@ import {
 } from '@interop/wallet-core/clientAnnex'
 import {
   didKeyZcapClient,
-  wasWebvhIdStore,
+  pwsWebvhIdStore,
   type KmsAuthenticationBinding
 } from '@interop/wallet-core/webvh'
 import { plaintextCollection } from '@interop/wallet-core/space'
@@ -100,7 +100,7 @@ import {
 import { createLogger, stageMarker, stageSpan, stageTimer } from '@/lib/log'
 import { didWebOfSpace } from '@/lib/didWeb'
 import { spaceLocation } from '@/lib/spaceLocation'
-import { wasClientAt, wasServiceDescription } from '@/lib/wasService'
+import { pwsClientAt, wasServiceDescription } from '@/lib/wasService'
 import type { StageLabel } from '@/lib/log'
 
 export type { CredentialAnchoredEstablishment, CredentialAnchoredMendReport }
@@ -184,7 +184,7 @@ const KMS_AUTHENTICATION_TIMEOUT_MS = 30_000
 /**
  * Builds the app-specific hook set both wallet-core entry points take (the
  * establishment orchestrator and the mend entry point): the bootstrap
- * identity wiring (`WasClient`, `id`-collection store, ladder-signed roster
+ * identity wiring (`PwsClient`, `id`-collection store, ladder-signed roster
  * store builder), the unlock-record codec closure, and -- when a KMS is
  * configured -- the KMS-authentication thunk plus the keystore-promotion
  * closure it arms. One builder, so the two bindings can never drift.
@@ -231,25 +231,25 @@ async function establishmentHooks({
   // wallet-core builds from the parts below included.
   const serviceDescription = await wasServiceDescription()
   // The client shape wallet-core builds from the agent it hands over, which
-  // owns the bootstrap identity; the app-side `bootstrapWas` below (the KMS
+  // owns the bootstrap identity; the app-side `bootstrapPws` below (the KMS
   // thunk and the id store) is the same shape over `bootstrapZcap`.
-  const bootstrapWasFor = ({
+  const bootstrapPwsFor = ({
     keyAgent
   }: {
     keyAgent: Parameters<typeof didKeyZcapClient>[0]['keyAgent']
   }) =>
-    wasClientAt({
+    pwsClientAt({
       baseServerUrl,
       zcapClient: didKeyZcapClient({ keyAgent }),
       serviceDescription
     })
-  const bootstrapWas = wasClientAt({
+  const bootstrapPws = pwsClientAt({
     baseServerUrl,
     zcapClient: bootstrapZcap,
     serviceDescription
   })
-  const idStore = wasWebvhIdStore({
-    was: bootstrapWas,
+  const idStore = pwsWebvhIdStore({
+    pws: bootstrapPws,
     spaceId,
     pinStore: logPins
   })
@@ -313,7 +313,7 @@ async function establishmentHooks({
             remoteStore: {
               getKeyMap: async () => {
                 const result = await plaintextCollection({
-                  was: bootstrapWas,
+                  pws: bootstrapPws,
                   spaceId,
                   collectionId: KEY_MAP_COLLECTION.id
                 })
@@ -414,7 +414,7 @@ async function establishmentHooks({
         serviceDescription,
         log
       }),
-    bootstrapWasFor,
+    bootstrapPwsFor,
     idStore,
     ...(provideKmsAuthentication ? { provideKmsAuthentication } : {}),
     // The keystore half of the promotion, only when the KMS stage bound a
@@ -487,7 +487,7 @@ export async function establishCredentialAnchoredAccount({
   persistence: { logPins: ResourceLogPinStore }
   onStage?: StageNotifier
   beforePromotion?: (context: {
-    was: WasClient
+    pws: PwsClient
     zcapClient: ZcapClient
     did: string
     userKey: UserKey
@@ -672,7 +672,7 @@ export async function ladderMendAuthority({
   pinStore: ResourceLogPinStore
   log?: DIDLog
 }): Promise<{
-  invocation: { was: WasClient; zcapClient: ZcapClient; capability: IZcap }
+  invocation: { pws: PwsClient; zcapClient: ZcapClient; capability: IZcap }
   rosterStore: SealableEncryptionDescriptorStore
   collectionStore: CollectionStoreFor
 }> {
@@ -683,7 +683,7 @@ export async function ladderMendAuthority({
   })
   return {
     invocation: {
-      was: wasClientAt({
+      pws: pwsClientAt({
         baseServerUrl,
         zcapClient,
         serviceDescription
@@ -800,14 +800,14 @@ export async function mendCredentialAnchoredAccount({
   priorCreatedAt?: string
   persistence: { logPins: ResourceLogPinStore }
   beforePromotion?: (context: {
-    was: WasClient
+    pws: PwsClient
     zcapClient: ZcapClient
     did: string
     userKey: UserKey
     establishment: CredentialAnchoredEstablishment
   }) => Promise<void>
   delegatedClients?: IZcap
-  invocation?: { was: WasClient; zcapClient: ZcapClient; capability: IZcap }
+  invocation?: { pws: PwsClient; zcapClient: ZcapClient; capability: IZcap }
   rosterStore?: EncryptionDescriptorStore
   collectionStore?: (collectionId: string) => EncryptionDescriptorStore
   delegatedRead?: { error: unknown; retry: () => Promise<void> }

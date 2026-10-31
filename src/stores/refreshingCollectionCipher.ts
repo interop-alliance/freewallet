@@ -2,10 +2,10 @@
  * The self-refreshing cipher for a mutable-head collection (`contacts`): the
  * one collection whose decrypt runs somewhere the session's read-level
  * refresh guard cannot reach. Its head conflicts are settled inside
- * `@interop/was-sync`'s conflict handler, which decrypts both sides through
+ * `@interop/pws-sync`'s conflict handler, which decrypts both sides through
  * the cipher it is handed and runs no refresh of its own. A side sealed under
  * an epoch this session's descriptor has not seen would otherwise count as
- * undecryptable and be adopted unread. So the contacts cipher is was-client's
+ * undecryptable and be adopted unread. So the contacts cipher is pws-client's
  * `createRefreshingEdvDocCipher`: on an unknown-epoch decrypt it re-reads the
  * descriptor once per instance, rebuilds, and retries.
  *
@@ -20,13 +20,13 @@ import type {
   IKeyAgreementKey,
   IKeyResolver
 } from '@interop/data-integrity-core'
-import type { CollectionEncryption } from '@interop/was-client'
+import type { CollectionEncryption } from '@interop/pws-client'
 import {
   createRefreshingEdvDocCipher,
   type DocCipher,
   type EncryptionDescriptorCache,
   type EncryptionDescriptorSource
-} from '@interop/was-client/edv'
+} from '@interop/pws-client/edv'
 
 /**
  * @param options {object}

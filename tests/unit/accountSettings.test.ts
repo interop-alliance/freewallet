@@ -156,7 +156,7 @@ const state = vi.hoisted(() => ({
 
 /**
  * A stubbed `ZcapClient` whose `read` stands in for the status-exact Space
- * probe: `probeSpace` no longer uses was-client's `describe()` (which
+ * probe: `probeSpace` no longer uses pws-client's `describe()` (which
  * collapses a 404 and an unparseable 2xx into the same `null`), so the stub
  * throws a 404-carrying error for an absent Space and resolves for a present
  * one. The URL it reads is the Space Metadata object, `/space/{s}/meta`.
@@ -826,13 +826,13 @@ vi.mock('@/session/verifiedLog', async importOriginal => ({
   })
 }))
 
-vi.mock('@interop/was-client', async importOriginal => ({
-  ...(await importOriginal<typeof import('@interop/was-client')>()),
+vi.mock('@interop/pws-client', async importOriginal => ({
+  ...(await importOriginal<typeof import('@interop/pws-client')>()),
   // Every Space the deletion walk probes or deletes goes through this handle:
   // the discovery describe, and the root-invoked deletes (an auxiliary annex
   // Space on a remembered session, and the acting credential's own unlock
   // Space on both).
-  WasClient: class {
+  PwsClient: class {
     space(spaceId: string) {
       return {
         deleteWithOutcome: async () => {
@@ -2297,7 +2297,7 @@ describe('deleteAccount (the discovery probe and the coverage checks)', () => {
   })
 
   it('reads a probe as absent only on a 404, never on an unreadable body', async () => {
-    // was-client's `describe()` resolves `null` for a 404 AND for a 2xx whose
+    // pws-client's `describe()` resolves `null` for a 404 AND for a 2xx whose
     // body did not parse, so the walk asks status-exactly instead: a probe
     // that fails for anything but a 404 refuses rather than recording an
     // absence a later 404 would grade as a deletion.

@@ -4,7 +4,7 @@
  * per ceremony. The account document's `#DelegatedClients` pointer names the
  * live generation; its did:webvh splits into the auxiliary Space id and the
  * generation id, which together address the generation's log store (carrying
- * the log's chain-head pin), reached through a `WasClient` on the account
+ * the log's chain-head pin), reached through a `PwsClient` on the account
  * Space's base server URL under this session's own authority.
  *
  * "No pointed generation" is resolved as `null` rather than thrown: an
@@ -19,7 +19,7 @@
  * minting closure, differing only in the ladder seed's provenance and whether
  * they hand it a post-edit account document -- both passed in by the caller.
  */
-import type { ServiceDescription, WasClient } from '@interop/was-client'
+import type { ServiceDescription, PwsClient } from '@interop/pws-client'
 import {
   clientAnnexDidParts,
   clientAnnexLogStore,
@@ -48,7 +48,7 @@ import type { AccountPointer } from '@interop/wallet-core/keyring'
 import { ID_COLLECTION } from '@interop/wallet-core/space'
 import { createLogger } from '@/lib/log'
 import { spaceLocation } from '@/lib/spaceLocation'
-import { wasClientAt, wasServiceDescription } from '@/lib/wasService'
+import { pwsClientAt, wasServiceDescription } from '@/lib/wasService'
 import { verifiedAccountLog } from '@/session/verifiedLog'
 import { MENDER_WARNINGS } from '@/session/menders/warnings'
 import type { Session } from '@/types/auth'
@@ -71,7 +71,7 @@ export interface ClientAnnexReach {
   clientAnnexDid: string
   spaceId: string
   generationId: string
-  was: WasClient
+  pws: PwsClient
   logStore: () => ReturnType<typeof clientAnnexLogStore>
 }
 
@@ -100,7 +100,7 @@ export function clientAnnexReachOf({
   const { spaceId, generationId } = clientAnnexDidParts({
     did: clientAnnexDid
   })
-  const was = wasClientAt({
+  const pws = pwsClientAt({
     baseServerUrl: spaceLocation({ spaceUrl: pointer.spaceUrl }).baseServerUrl,
     zcapClient: session.profile.zcapClient,
     serviceDescription
@@ -110,10 +110,10 @@ export function clientAnnexReachOf({
     clientAnnexDid,
     spaceId,
     generationId,
-    was,
+    pws,
     logStore: () =>
       (store ??= clientAnnexLogStore({
-        was,
+        pws,
         spaceId,
         generationId,
         pinStore: session.persistence.logPins
@@ -157,7 +157,7 @@ export function standingClientAnnexReachOf({
   const { spaceId, generationId } = clientAnnexDidParts({
     did: clientAnnexDid
   })
-  const was = wasClientAt({
+  const pws = pwsClientAt({
     baseServerUrl: spaceLocation({ spaceUrl: pointer.spaceUrl }).baseServerUrl,
     zcapClient: standing.standingClient.agents.zcapClient,
     serviceDescription
@@ -167,10 +167,10 @@ export function standingClientAnnexReachOf({
     clientAnnexDid,
     spaceId,
     generationId,
-    was,
+    pws,
     logStore: () =>
       (store ??= clientAnnexLogStore({
-        was,
+        pws,
         spaceId,
         generationId,
         pinStore,

@@ -32,7 +32,7 @@ maps its implementation in its own ARCHITECTURE.md.
 - **`react-i18next`** for internationalisation (locales: `en`, `es`)
 - **`pnpm`** as the package manager; **`vitest`** for unit tests,
   **`playwright`** for e2e tests
-- The `@interop/*` packages (wallet-core, wallet-request, was-client, was-sync,
+- The `@interop/*` packages (wallet-core, wallet-request, pws-client, pws-sync,
   ezcap, capability-agent, webkms-client, verifier-core, logger, and others),
   mapped in ARCHITECTURE.md's "What lives elsewhere"
 
@@ -164,10 +164,10 @@ editing anything in them.
   maps the module layers, key hierarchy, and ceremonies.
 - [wallet-request](https://github.com/interop-alliance/wallet-request) --
   `@interop/wallet-request`, the request pipeline shared with DCW.
-- [was-client](https://github.com/interop-alliance/was-client) /
+- [pws-client](https://github.com/interop-alliance/pws-client) /
   [was-teaching-server](https://github.com/interop-alliance/was-teaching-server)
   -- the WAS HTTP client and the companion server.
-- [was-sync](https://github.com/interop-alliance/was-sync) -- the RxDB
+- [pws-sync](https://github.com/interop-alliance/pws-sync) -- the RxDB
   replication driver behind the local replica.
 - [wallet-backup](https://github.com/interop-alliance/wallet-backup) -- the
   backup bundle format, read by content migration and written by the backup

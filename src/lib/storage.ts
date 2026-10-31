@@ -3,7 +3,7 @@
  * StorageCollection and StorageResource mirror the JSON shapes returned by the
  * WAS server's list endpoints; see the WAS spec for the authoritative schema.
  */
-import type { CollectionGenerator } from '@interop/was-client'
+import type { CollectionGenerator } from '@interop/pws-client'
 
 export type StorageCollection = {
   id: string

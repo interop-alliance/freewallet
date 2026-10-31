@@ -12,7 +12,7 @@
  */
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { memoryResourceLogPinStore } from '@interop/vh-resource-log'
-import { agentsFromSeed } from '@interop/was-client/identity'
+import { agentsFromSeed } from '@interop/pws-client/identity'
 import { clientSigningKeyMultibase } from '@interop/wallet-core/webvh'
 
 vi.mock('@interop/wallet-core/webvh', async importOriginal => ({

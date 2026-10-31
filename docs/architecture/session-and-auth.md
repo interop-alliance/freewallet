@@ -150,7 +150,7 @@ seed) is also MAC'd under a credential-derived key the host never holds,
 verified before the pointer is trusted, which closes the redirect a record
 signed by another credential would reopen.
 
-was-client's paths helpers build the unlock Space's request paths on both
+pws-client's paths helpers build the unlock Space's request paths on both
 the delegation and invocation side, so the bytes the server's
 `allowedTarget` check compares cannot drift.
 

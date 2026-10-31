@@ -4,7 +4,7 @@
  *
  * DCW (the mobile wallet) replicates with `@interop/wallet-core/sync`'s
  * `SyncEngine`; this wallet replicates with the RxDB driver in
- * `@interop/was-sync`. They are two independent implementations of one wire
+ * `@interop/pws-sync`. They are two independent implementations of one wire
  * protocol, written to agree, and this exercise is the proof that they do:
  * both replicas attach to the SAME Space on a real in-process
  * `was-teaching-server` (no fakes anywhere on the wire) and round-trip
@@ -22,9 +22,9 @@
  * engine's suppression on/off matrix is wallet-core's own sync suite's.
  *
  * Each replica is assembled from its app's REAL parts wherever the part is on
- * the compatibility surface: the engine, the port (`createWasSyncPort`), the
+ * the compatibility surface: the engine, the port (`createPwsSyncPort`), the
  * EDV cipher (`createEdvDocCipher`), the LWW rule (`remotePayloadWins`), and --
- * for this wallet -- the whole RxDB driver (`createWasReplication`) and the
+ * for this wallet -- the whole RxDB driver (`createPwsReplication`) and the
  * real `BrowserStore` over a memory RxDB, which carries its own synced-doc
  * schema and contacts conflict handler. Every freewallet-authored write goes
  * through the store's own writers (`addContact`, `updateContact`,
@@ -43,7 +43,7 @@
  * - EDV `sequence` stays advisory on the wire: an updater advances from
  *   whatever it finds rather than trusting a count. The server's opaque ETag
  *   is the enforced concurrency control.
- * - A resource id is first-class on the update path: was-client accepts a
+ * - A resource id is first-class on the update path: pws-client accepts a
  *   pre-existing id verbatim when a `current` envelope is supplied (the id is
  *   already on the server, so the URL-leak guard only covers creates).
  *
@@ -60,30 +60,30 @@ import type { RxCollection } from 'rxdb/plugins/core'
 import { getRxStorageMemory } from 'rxdb/plugins/storage-memory'
 import { uuidv7 } from 'uuidv7'
 
-import { createWasReplication } from '@interop/was-sync/rxdb'
+import { createPwsReplication } from '@interop/pws-sync/rxdb'
 import {
   type SyncedDoc,
-  type WasSyncPort as FwWasSyncPort
-} from '@interop/was-sync'
+  type PwsReplicationPort as FwReplicationPort
+} from '@interop/pws-sync'
 import { BrowserStore } from '../../src/stores/browserStore'
 import { WALLET_STANDARD_COLLECTIONS } from '../../src/app.config'
-import { wasClientAt } from '../../src/lib/wasService'
+import { pwsClientAt } from '../../src/lib/wasService'
 
 import type { IVerifiableCredential } from '@interop/data-integrity-core'
-import type { WasClient, CollectionEncryption } from '@interop/was-client'
+import type { PwsClient, CollectionEncryption } from '@interop/pws-client'
 import {
   createEdvDocCipher,
   createEdvEncryption,
   ensureFirstEpoch,
   ownerRecipient,
   type DocCipher
-} from '@interop/was-client/edv'
+} from '@interop/pws-client/edv'
 import {
   cidFrom,
-  createWasSyncPort,
+  createPwsSyncPort,
   deriveSpaceId,
   ensureSpaceAndCollection
-} from '@interop/was-client/sync'
+} from '@interop/pws-client/sync'
 import { SyncEngine } from '@interop/wallet-core/sync'
 import type {
   Json,
@@ -93,10 +93,10 @@ import type {
   SyncCheckpoint,
   SyncStore,
   SyncedResourceReplica,
-  WasSyncPort,
+  PwsSyncPort,
   WireDoc
 } from '@interop/wallet-core/sync'
-import { agentsFromSeed } from '@interop/was-client/identity'
+import { agentsFromSeed } from '@interop/pws-client/identity'
 import { PRIVATE_CREDENTIALS_COLLECTION } from '@interop/wallet-core/space'
 import {
   CONTACTS_COLLECTION,
@@ -130,22 +130,22 @@ async function startTeachingServer(): Promise<{
 }
 
 /**
- * A WasClient over one replica's agents, mirroring wasRemoteStore's
+ * A PwsClient over one replica's agents, mirroring wasRemoteStore's
  * codec-bypassing client: a no-op keystore, envelopes move verbatim.
  *
  * @param options {object}
  * @param options.baseServerUrl {string}   the storage server's base URL
  * @param options.zcapClient {object}
- * @returns {WasClient}
+ * @returns {PwsClient}
  */
 function wasClientFor({
   baseServerUrl,
   zcapClient
 }: {
   baseServerUrl: string
-  zcapClient: ConstructorParameters<typeof WasClient>[0]['zcapClient']
-}): WasClient {
-  return wasClientAt({
+  zcapClient: ConstructorParameters<typeof PwsClient>[0]['zcapClient']
+}): PwsClient {
+  return pwsClientAt({
     baseServerUrl,
     zcapClient,
     encryption: createEdvEncryption({ resolveKeys: async () => null })
@@ -193,25 +193,25 @@ async function syncEngineOnce({
  *
  * @param options {object}
  * @param options.rxCollection {RxCollection<SyncedDoc>}
- * @param options.wasPort {WasSyncPort}
+ * @param options.pwsPort {PwsSyncPort}
  * @param options.replicationIdentifier {string}
  * @param [options.writerId] {string}
  * @returns {Promise<void>}
  */
 async function replicateFwOnce({
   rxCollection,
-  wasPort,
+  pwsPort,
   replicationIdentifier,
   writerId
 }: {
   rxCollection: RxCollection<SyncedDoc>
-  wasPort: WasSyncPort
+  pwsPort: PwsSyncPort
   replicationIdentifier: string
   writerId?: string
 }): Promise<void> {
-  const state = createWasReplication({
+  const state = createPwsReplication({
     rxCollection,
-    wasPort: wasPort as unknown as FwWasSyncPort,
+    pwsPort: pwsPort as unknown as FwReplicationPort,
     replicationIdentifier,
     live: false,
     ...(writerId !== undefined && { writerId })
@@ -562,7 +562,7 @@ function makeDcwContactResolve({
   cipher
 }: {
   store: InMemoryStore
-  port: WasSyncPort
+  port: PwsSyncPort
   cipher: DocCipher
 }): ResolveConflict {
   return async ({ id, data }) => {
@@ -631,7 +631,7 @@ describe('cross-replica round-trip conformance', () => {
   let spaceId: string
 
   // One controller identity, derived independently by each replica from the
-  // same seed -- exactly the property `@interop/was-client/identity` exists
+  // same seed -- exactly the property `@interop/pws-client/identity` exists
   // to guarantee.
   const seed = new Uint8Array(32).fill(7)
 
@@ -645,12 +645,12 @@ describe('cross-replica round-trip conformance', () => {
   // DCW replica parts, per collection.
   const dcwCiphers = {} as Record<CollectionId, DocCipher>
   const dcwStores = {} as Record<CollectionId, InMemoryStore>
-  const dcwPorts = {} as Record<CollectionId, WasSyncPort>
+  const dcwPorts = {} as Record<CollectionId, PwsSyncPort>
   const dcwEngines = {} as Record<CollectionId, SyncEngine>
 
   // Freewallet replica parts.
   const fwCiphers = {} as Record<CollectionId, DocCipher>
-  const fwPorts = {} as Record<CollectionId, WasSyncPort>
+  const fwPorts = {} as Record<CollectionId, PwsSyncPort>
   let fwCollections: Record<CollectionId, RxCollection<SyncedDoc>>
   let fwStore: BrowserStore
 
@@ -664,7 +664,7 @@ describe('cross-replica round-trip conformance', () => {
   async function fwSync(collectionId: CollectionId): Promise<void> {
     await replicateFwOnce({
       rxCollection: fwCollections[collectionId],
-      wasPort: fwPorts[collectionId],
+      pwsPort: fwPorts[collectionId],
       replicationIdentifier: `conformance:${spaceId}:${collectionId}`
     })
   }
@@ -860,7 +860,7 @@ describe('cross-replica round-trip conformance', () => {
     ;({ fastify, serverUrl } = await startTeachingServer())
 
     // Two wallets, one identity: each replica derives its own agents from the
-    // shared seed and gets its own WasClient.
+    // shared seed and gets its own PwsClient.
     const dcwAgents = await agentsFromSeed({ seed })
     const fwAgents = await agentsFromSeed({ seed })
     expect(fwAgents.controllerDid).toBe(dcwAgents.controllerDid)
@@ -883,7 +883,7 @@ describe('cross-replica round-trip conformance', () => {
     const descriptors: Record<string, CollectionEncryption> = {}
     for (const collectionId of COLLECTIONS) {
       await ensureSpaceAndCollection({
-        was: fwWas,
+        pws: fwWas,
         spaceUrl: fwWas.space(spaceId).url,
         controllerDid: fwAgents.controllerDid,
         collectionId,
@@ -920,13 +920,13 @@ describe('cross-replica round-trip conformance', () => {
           collectionId === CONTACTS_COLLECTION ? 'random' : 'content',
         encryption: descriptors[collectionId]
       })
-      dcwPorts[collectionId] = createWasSyncPort({
-        was: dcwWas,
+      dcwPorts[collectionId] = createPwsSyncPort({
+        pws: dcwWas,
         spaceUrl: dcwWas.space(spaceId).url,
         collectionId
       })
-      fwPorts[collectionId] = createWasSyncPort({
-        was: fwWas,
+      fwPorts[collectionId] = createPwsSyncPort({
+        pws: fwWas,
         spaceUrl: fwWas.space(spaceId).url,
         collectionId
       })
@@ -1162,10 +1162,10 @@ describe('cross-replica round-trip conformance', () => {
 
   it('round-trips a DCW in-place edit of a freewallet-authored contact (the once-pinned defect)', async () => {
     // Formerly pinned as an open defect: freewallet minted uuidv7 resource ids
-    // that failed was-client's `assertDocId` multibase check, so DCW's
+    // that failed pws-client's `assertDocId` multibase check, so DCW's
     // `encryptUpdate` refused every web-authored contact. Fixed from both ends
     // -- freewallet's contacts resource replicas are now keyed by the
-    // cipher-minted EDV id (spec `idDerivation: 'random'`), and was-client's
+    // cipher-minted EDV id (spec `idDerivation: 'random'`), and pws-client's
     // update path accepts a pre-existing resource id verbatim. The contact was
     // written by the real `BrowserStore.addContact`, whose id choice the
     // freewallet-authored round trip above asserts; this exercises the edit
@@ -1311,8 +1311,8 @@ describe('cross-replica writer attribution', () => {
   let spaceId: string
   let dcwCipher: DocCipher
   let fwCipher: DocCipher
-  let fwPort: WasSyncPort
-  let thirdPort: WasSyncPort
+  let fwPort: PwsSyncPort
+  let thirdPort: PwsSyncPort
   let dcwStore: InMemoryStore
   let dcwEngine: SyncEngine
   let fwStore: BrowserStore
@@ -1327,7 +1327,7 @@ describe('cross-replica writer attribution', () => {
   async function fwSync(): Promise<void> {
     await replicateFwOnce({
       rxCollection: fwCollection,
-      wasPort: fwPort,
+      pwsPort: fwPort,
       replicationIdentifier: `conformance:${spaceId}:${collectionId}`,
       writerId: FW_WRITER_ID
     })
@@ -1466,7 +1466,7 @@ describe('cross-replica writer attribution', () => {
     })
 
     await ensureSpaceAndCollection({
-      was: fwWas,
+      pws: fwWas,
       spaceUrl: fwWas.space(spaceId).url,
       controllerDid: fwAgents.controllerDid,
       collectionId,
@@ -1492,20 +1492,20 @@ describe('cross-replica writer attribution', () => {
       idDerivation: 'content',
       encryption: descriptor
     })
-    const dcwPort = createWasSyncPort({
-      was: dcwWas,
+    const dcwPort = createPwsSyncPort({
+      pws: dcwWas,
       spaceUrl: dcwWas.space(spaceId).url,
       collectionId
     })
-    fwPort = createWasSyncPort({
-      was: fwWas,
+    fwPort = createPwsSyncPort({
+      pws: fwWas,
       spaceUrl: fwWas.space(spaceId).url,
       collectionId
     })
     // The third writer is told apart by its label alone, so it can share
     // dcw's client.
-    thirdPort = createWasSyncPort({
-      was: dcwWas,
+    thirdPort = createPwsSyncPort({
+      pws: dcwWas,
       spaceUrl: dcwWas.space(spaceId).url,
       collectionId
     })

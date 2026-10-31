@@ -26,9 +26,9 @@ import type {
   IDelegatedZcap,
   IKeyAgreementKey
 } from '@interop/data-integrity-core'
-import { WasError, type CollectionEncryption } from '@interop/was-client'
-import { deriveSpaceId } from '@interop/was-client/sync'
-import { createEdvDocCipher } from '@interop/was-client/edv'
+import { PwsError, type CollectionEncryption } from '@interop/pws-client'
+import { deriveSpaceId } from '@interop/pws-client/sync'
+import { createEdvDocCipher } from '@interop/pws-client/edv'
 import { loadClientKeyRecord, loadKeyringCache } from '@/lib/sessionKey'
 import {
   KEYRING_CACHE_TTL_MS,
@@ -104,7 +104,7 @@ vi.mock('@interop/wallet-core/keyring', async importOriginal => ({
         ifMatch !== undefined &&
         (!wasState.spaces.has(spaceId) || ifMatch !== etagFor(spaceId))
       ) {
-        const { PreconditionFailedError } = await import('@interop/was-client')
+        const { PreconditionFailedError } = await import('@interop/pws-client')
         throw new PreconditionFailedError('Precondition Failed')
       }
       wasState.versions.set(spaceId, (wasState.versions.get(spaceId) ?? 0) + 1)
@@ -1217,7 +1217,7 @@ describe('fetchKeyring', () => {
       idb,
       kdf: KDF
     })
-    wasState.getError = new WasError('NetworkError when attempting to fetch', {
+    wasState.getError = new PwsError('NetworkError when attempting to fetch', {
       cause: new TypeError('NetworkError when attempting to fetch')
     })
 
@@ -1244,7 +1244,7 @@ describe('fetchKeyring', () => {
       kdf: KDF
     })
     vi.setSystemTime(Date.now() + KEYRING_CACHE_TTL_MS + 60_000)
-    const networkError = new WasError('NetworkError when attempting to fetch', {
+    const networkError = new PwsError('NetworkError when attempting to fetch', {
       cause: new TypeError('NetworkError when attempting to fetch')
     })
     wasState.getError = networkError
@@ -1270,7 +1270,7 @@ describe('fetchKeyring', () => {
     })
     // A bare record at the cache key, as written before write-time stamps.
     await putRawSessionEntry({ idb, key: `keyring/${spaceId}`, value: record })
-    const networkError = new WasError('NetworkError when attempting to fetch', {
+    const networkError = new PwsError('NetworkError when attempting to fetch', {
       cause: new TypeError('NetworkError when attempting to fetch')
     })
     wasState.getError = networkError
@@ -1324,7 +1324,7 @@ describe('fetchKeyring', () => {
   })
 
   it('rethrows a network error rather than reporting no account', async () => {
-    const networkError = new WasError('NetworkError when attempting to fetch', {
+    const networkError = new PwsError('NetworkError when attempting to fetch', {
       cause: new TypeError('NetworkError when attempting to fetch')
     })
     wasState.getError = networkError
@@ -1878,7 +1878,7 @@ describe('changePassphrase', () => {
       idb: createFakeIdb(),
       kdf: KDF
     })
-    const networkError = new WasError('NetworkError when attempting to fetch', {
+    const networkError = new PwsError('NetworkError when attempting to fetch', {
       cause: new TypeError('NetworkError when attempting to fetch')
     })
     wasState.getError = networkError
@@ -2053,7 +2053,7 @@ describe('verifyPassphrase', () => {
       idb: createFakeIdb(),
       kdf: KDF
     })
-    const networkError = new WasError('NetworkError when attempting to fetch', {
+    const networkError = new PwsError('NetworkError when attempting to fetch', {
       cause: new TypeError('NetworkError when attempting to fetch')
     })
     wasState.getError = networkError
@@ -2339,7 +2339,7 @@ describe('management zcap delegation', () => {
    */
   function unlockSpaceUrl(spaceId: string): string {
     // The canonical container form: a trailing slash, which is the target
-    // was-client's `spaceUrlById` builder emits and the server matches.
+    // pws-client's `spaceUrlById` builder emits and the server matches.
     return new URL(`space/${spaceId}/`, wasState.url).toString()
   }
 
@@ -2368,7 +2368,7 @@ describe('management zcap delegation', () => {
     })
 
     it('keeps a sub-path deployment prefix in the invocation target', async () => {
-      // The DELETE this capability parents is addressed with was-client's
+      // The DELETE this capability parents is addressed with pws-client's
       // path helpers against the server URL, so a hand-built root-anchored
       // target would drop the base path and the server would refuse every
       // child of it.
@@ -2813,7 +2813,7 @@ describe('fetchTransientKeyring (FW-215)', () => {
   })
 
   it('rethrows a network error unchanged (no offline cache fallback)', async () => {
-    const networkError = new WasError('NetworkError when attempting to fetch', {
+    const networkError = new PwsError('NetworkError when attempting to fetch', {
       cause: new TypeError('NetworkError when attempting to fetch')
     })
     wasState.getError = networkError

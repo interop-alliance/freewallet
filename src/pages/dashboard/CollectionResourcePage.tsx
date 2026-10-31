@@ -42,7 +42,7 @@ import {
 } from '@/components/storage/useResourceSource'
 import { credentialTitle } from '@/lib/viewMappers/credentialTitle'
 import { getDisplayFields } from '@/lib/viewMappers/credentialDisplayFields'
-import { cidFrom } from '@interop/was-client/sync'
+import { cidFrom } from '@interop/pws-client/sync'
 import { downloadBlob } from '@/lib/downloadBlob'
 import { createLogger } from '@/lib/log'
 

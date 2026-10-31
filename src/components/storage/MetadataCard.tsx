@@ -7,7 +7,7 @@
  * that read in through `fetchMeta` rather than paying for it twice.
  *
  * A server without metadata support (`NotImplementedError`) and a `null`
- * read are the same empty state here, not an error. was-client resolves
+ * read are the same empty state here, not an error. pws-client resolves
  * null on a 404, which the server also answers for a target this session
  * may not read (an expired generation delegation, a read outside the
  * grant), so the null branch is logged.

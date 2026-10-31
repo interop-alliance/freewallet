@@ -6,7 +6,7 @@
  * only, like the session -- cleared on logout.
  */
 import { create } from 'zustand'
-import type { SyncStatus } from '@interop/was-client/sync'
+import type { SyncStatus } from '@interop/pws-client/sync'
 
 export type { SyncStatus }
 

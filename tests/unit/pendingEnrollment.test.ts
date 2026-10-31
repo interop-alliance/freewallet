@@ -15,8 +15,8 @@
  */
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { memoryResourceLogPinStore } from '@interop/vh-resource-log'
-import { WasError } from '@interop/was-client'
-import { agentsFromSeed } from '@interop/was-client/identity'
+import { PwsError } from '@interop/pws-client'
+import { agentsFromSeed } from '@interop/pws-client/identity'
 import { clientSigningKeyMultibase } from '@interop/wallet-core/webvh'
 
 vi.mock('@interop/wallet-core/webvh', async importOriginal => ({
@@ -449,7 +449,7 @@ describe('resumePendingEnrollment -- branch decision', () => {
 
 describe('resumePendingEnrollment -- fail-closed bounds', () => {
   it('rethrows a transport failure unchanged and deletes nothing', async () => {
-    const outage = new WasError('network down')
+    const outage = new PwsError('network down')
     vi.mocked(verifyAccountLog).mockRejectedValue(outage)
     const { found } = makeFound()
 

@@ -30,7 +30,7 @@
  * network errors rethrow unchanged so a flap stays distinguishable from a
  * generation lapse.
  */
-import { agentsFromSeed } from '@interop/was-client/identity'
+import { agentsFromSeed } from '@interop/pws-client/identity'
 import type { UnlockKdf } from '@interop/wallet-core/keyring'
 import {
   clientSigningKeyMultibase,
@@ -65,7 +65,7 @@ import { WAS_BASE_SERVER_URL } from '@/app.config'
 import { hasClientKeyRecord } from '@/lib/sessionKey'
 import { isStorageUnreachable } from '@/lib/storageErrors'
 import { createLogger } from '@/lib/log'
-import { wasClientAt, wasServiceDescription } from '@/lib/wasService'
+import { pwsClientAt, wasServiceDescription } from '@/lib/wasService'
 import { spaceLocation } from '@/lib/spaceLocation'
 import {
   ladderMendAuthority,
@@ -407,8 +407,8 @@ export async function ensureClientAnnexGenerationReady({
       ladderSeed: standing.ladderSeed,
       standingClient: { did: found.standingClient.clientDid, zcapClient },
       serviceDescription,
-      bootstrapWasFor: ({ keyAgent }) =>
-        wasClientAt({
+      bootstrapPwsFor: ({ keyAgent }) =>
+        pwsClientAt({
           baseServerUrl,
           zcapClient: didKeyZcapClient({ keyAgent }),
           serviceDescription

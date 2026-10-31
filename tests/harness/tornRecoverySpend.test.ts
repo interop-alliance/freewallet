@@ -176,7 +176,7 @@ describe('the transient recovery spend torn at its roster append', () => {
       await spendWithTornAppend({ harness, tear: 'refuse' })
 
     // The spend fails at the append and says so.
-    expect(errorNameOf(error)).toBe('WasServerError')
+    expect(errorNameOf(error)).toBe('PwsServerError')
 
     // The continuation's two entries: reveal-and-commit, add-and-retire.
     const accountLogWrites = writes.filter(
@@ -242,7 +242,7 @@ describe('the transient recovery spend torn at its roster append', () => {
     const { dataDir } = harness
 
     // The client saw a transport failure.
-    expect(errorNameOf(error)).toBe('WasError')
+    expect(errorNameOf(error)).toBe('PwsError')
     const rosterWrites = writes.filter(write => write.path === paths.roster)
     // The first append was applied; each re-attempt found the head moved.
     expect(rosterWrites.map(write => [write.status, write.fault])).toEqual([

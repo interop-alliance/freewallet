@@ -20,8 +20,8 @@ import type {
   IVerifiableCredential
 } from '@interop/data-integrity-core'
 import { addSink, captureSink } from '@interop/logger'
-import { IntegrityError } from '@interop/was-client'
-import type { Json } from '@interop/was-sync'
+import { IntegrityError } from '@interop/pws-client'
+import type { Json } from '@interop/pws-sync'
 import { getRxStorageMemory } from 'rxdb/plugins/storage-memory'
 import type { ControllerProfile, User } from '@/types/auth'
 import { browserLocalSessionPersistence } from '@/session/persistence'
@@ -30,9 +30,9 @@ import { generateVaultKeys } from '@/stores/testing/vaultKeys'
 
 const TAMPERED_COLLECTION = 'private-credentials'
 
-vi.mock('@interop/was-client/edv', async importOriginal => {
+vi.mock('@interop/pws-client/edv', async importOriginal => {
   const actual =
-    await importOriginal<typeof import('@interop/was-client/edv')>()
+    await importOriginal<typeof import('@interop/pws-client/edv')>()
   return {
     ...actual,
     createEdvDocCipher: async (

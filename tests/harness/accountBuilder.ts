@@ -343,7 +343,7 @@ export async function deletePointedGeneration({
       session,
       pointer: { ...pointer, did: pointer.did }
     })
-    await reach!.was
+    await reach!.pws
       .space(reach!.spaceId)
       .collection(reach!.generationId)
       .delete()

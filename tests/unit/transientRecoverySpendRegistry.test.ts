@@ -13,7 +13,7 @@
  * stored records are real.
  */
 import { beforeEach, describe, expect, it, vi } from 'vitest'
-import { resourceUrl, spaceUrlById } from '@interop/was-client/paths'
+import { resourceUrl, spaceUrlById } from '@interop/pws-client/paths'
 
 import type { IKeyAgreementKey, IZcap } from '@interop/data-integrity-core'
 
@@ -102,17 +102,17 @@ vi.mock('@interop/wallet-core/clientAnnex', async importOriginal => ({
   )
 }))
 
-vi.mock('@interop/was-client', async importOriginal => ({
-  ...(await importOriginal<typeof import('@interop/was-client')>()),
-  WasClient: class {
+vi.mock('@interop/pws-client', async importOriginal => ({
+  ...(await importOriginal<typeof import('@interop/pws-client')>()),
+  PwsClient: class {
     space() {
       return { async configure() {} }
     }
   }
 }))
 
-vi.mock('@interop/was-client/edv', async importOriginal => ({
-  ...(await importOriginal<typeof import('@interop/was-client/edv')>()),
+vi.mock('@interop/pws-client/edv', async importOriginal => ({
+  ...(await importOriginal<typeof import('@interop/pws-client/edv')>()),
   unwrapEpochSecret: vi.fn(async () => new Uint8Array(32).fill(3))
 }))
 
@@ -206,7 +206,7 @@ import {
   RECOVERY_KDF,
   wrapUnlockRecord
 } from '@interop/wallet-core/recovery'
-import { agentsFromSeed } from '@interop/was-client/identity'
+import { agentsFromSeed } from '@interop/pws-client/identity'
 import { recoverAccountWithCode } from '@/session/recovery'
 
 // The codes and the passphrase derive through the real Argon2id KDF.

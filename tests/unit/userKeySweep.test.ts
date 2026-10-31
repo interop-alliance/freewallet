@@ -16,7 +16,7 @@
  */
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
-import { agentsFromSeed } from '@interop/was-client/identity'
+import { agentsFromSeed } from '@interop/pws-client/identity'
 
 const state = vi.hoisted(() => ({
   wasUrl: 'https://was.example.test/' as string | undefined

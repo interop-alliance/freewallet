@@ -42,7 +42,7 @@
  */
 import type { IZcap } from '@interop/data-integrity-core'
 import type { ZcapClient } from '@interop/ezcap'
-import { PreconditionFailedError } from '@interop/was-client'
+import { PreconditionFailedError } from '@interop/pws-client'
 import { isPreconditionFailed } from '@/lib/storageErrors'
 import { zcapExpires } from '@/lib/zcap'
 import { base64urlnopad } from '@scure/base'
@@ -94,7 +94,7 @@ import {
   unwrapRecordEnvelope,
   wrapRecordEnvelope
 } from '@/session/recordEnvelope'
-import { spaceUrlById } from '@interop/was-client/paths'
+import { spaceUrlById } from '@interop/pws-client/paths'
 import { deleteUnlockLocalState } from '@/lib/sessionKey'
 import { createLogger } from '@/lib/log'
 import { wasServiceDescription } from '@/lib/wasService'
@@ -1255,7 +1255,7 @@ export function managementZcapClient({
  *   account did:webvh). Same residue, same mender.
  * - `stale-target` -- the recorded management zcap names a Space URL other
  *   than the one this deployment addresses (an entry minted before the target
- *   was built with was-client's path helpers carries a root-anchored URL on a
+ *   was built with pws-client's path helpers carries a root-anchored URL on a
  *   sub-path deployment). Same residue, same mender.
  * - `unsupported-capability` -- the recorded management zcap's `allowedAction`
  *   does not carry the verb the caller asked for, so a child of it would
@@ -2175,7 +2175,7 @@ function capabilityWidensStored({
  * A fresh capability naming a DIFFERENT `invocationTarget` is adopted
  * whatever its actions. The target is the deployment's own Space URL, so a
  * stored one that differs is unusable here (a root-anchored target minted
- * before the mint moved onto was-client's path helpers, on a sub-path
+ * before the mint moved onto pws-client's path helpers, on a sub-path
  * deployment); keeping it on an action comparison alone would strand the
  * entry until its year ran out.
  *

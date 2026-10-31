@@ -14,7 +14,7 @@ import type {
   IKeyAgreementKey,
   IKeyResolver
 } from '@interop/data-integrity-core'
-import { createEdvDocCipher, type DocCipher } from '@interop/was-client/edv'
+import { createEdvDocCipher, type DocCipher } from '@interop/pws-client/edv'
 import { getRxStorageMemory } from 'rxdb/plugins/storage-memory'
 import { mintRecordEncryption } from '@/session/recordEnvelope'
 import { browserLocalSessionPersistence } from '@/session/persistence'

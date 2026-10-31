@@ -2,7 +2,8 @@
 /**
  * The doc counterpart test for the ceremony vocabulary: parses
  * ARCHITECTURE.md's "## Ceremony inventory" table and asserts it names
- * exactly the ids wallet-core's `CEREMONY_IDS` exports, that every id is
+ * exactly the ids wallet-core's `CEREMONY_IDS` exports, less the ones this
+ * wallet does not run yet, that every id is
  * kebab-case and unique, and that every module path a row names actually
  * exists. A new ceremony added to the table with no id mapping here, or an
  * id exported with no table row, fails the test -- the seam that keeps the
@@ -41,6 +42,18 @@ const TITLE_TO_ID: Record<string, string> = {
   'Request consent (App Connect, interaction URL, share)': 'request-consent',
   'Grant revocation (app, agent, unshare)': 'grant-revocation'
 }
+
+/**
+ * The ceremony ids wallet-core exports that this wallet does not run yet,
+ * so the table has no row for them. ARCHITECTURE.md says so under the
+ * table. An id leaves this list in the change that adds its row.
+ */
+const NOT_BUILT_HERE: ReadonlySet<string> = new Set([
+  'replica-registration',
+  'replica-stop',
+  'replica-restart',
+  'replica-deletion'
+])
 
 interface CeremonyRow {
   ceremony: string
@@ -132,7 +145,12 @@ describe('ceremony inventory counterpart', () => {
       return id
     })
 
-    expect(new Set(mappedIds)).toEqual(new Set(CEREMONY_IDS))
+    for (const id of mappedIds) {
+      expect(NOT_BUILT_HERE.has(id), id).toBe(false)
+    }
+    expect(new Set([...mappedIds, ...NOT_BUILT_HERE])).toEqual(
+      new Set(CEREMONY_IDS)
+    )
   })
 
   it('exports only kebab-case, unique ceremony ids', () => {

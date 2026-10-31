@@ -36,7 +36,7 @@ import {
   delegatedClientsPointer
 } from '@interop/wallet-core/clientAnnex'
 import { encryptedWalletCollectionIds } from '@interop/wallet-core/space/collections'
-import type { CollectionEncryption } from '@interop/was-client'
+import type { CollectionEncryption } from '@interop/pws-client'
 import { storedSpacesDir } from './storeOracle'
 
 /**

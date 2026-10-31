@@ -5,7 +5,7 @@
  * left running by a previous session is torn down before the new one starts.
  * `restart()` is the one entry point that starts replication.
  *
- * The replication core in `@interop/was-sync/rxdb` is stubbed, so what these
+ * The replication core in `@interop/pws-sync/rxdb` is stubbed, so what these
  * cases exercise is the binding's own bookkeeping: which sessions reach the
  * core, how many cores it constructs, which it stops, and how it serializes
  * overlapping transitions. `stop()` is terminal for a core instance, so a
@@ -36,7 +36,7 @@ const cores = vi.hoisted(() => ({
   }>
 }))
 
-vi.mock('@interop/was-sync/rxdb', () => ({
+vi.mock('@interop/pws-sync/rxdb', () => ({
   createSyncController: vi.fn(({ port }: { port: { spaceUrl: string } }) => {
     const core = {
       spaceUrl: port.spaceUrl,
@@ -55,7 +55,7 @@ vi.mock('@/stores/syncStatusStore', () => ({
   }
 }))
 
-import { createSyncController } from '@interop/was-sync/rxdb'
+import { createSyncController } from '@interop/pws-sync/rxdb'
 import { syncController } from '@/stores/syncController'
 import type { Session } from '@/types/auth'
 
@@ -73,7 +73,7 @@ function fakeSession({ spaceUrl }: { spaceUrl: string }): Session {
     isGuest: false,
     persistence: { getWriterId: () => 'writer-profile-1' },
     storage: {
-      wasClient: { fake: true },
+      pwsClient: { fake: true },
       spaceUrl,
       hasLocalReplica: true,
       localCollection: vi.fn(() => ({ fakeCollection: true }))

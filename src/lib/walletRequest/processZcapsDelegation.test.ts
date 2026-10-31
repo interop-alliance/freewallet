@@ -440,7 +440,7 @@ describe('processZcaps collection attribution', () => {
 
   it('passes the attribution on re-admit too, the standing collection keeping its own', async () => {
     // The "a standing collection keeps its attribution" rule is enforced
-    // where the write happens (was-client stamps it on the guarded create
+    // where the write happens (pws-client stamps it on the guarded create
     // only), so the call site does not consult a collections snapshot.
     const { session } = fakeSession({ collections: [{ id: 'docs' }] })
     await processZcaps({
@@ -725,7 +725,7 @@ describe('processZcaps two rows naming one new private collection', () => {
 
 describe('processZcaps string target on a reserved Space segment', () => {
   // `policy` and `quotas` pass the collection naming rule but address server
-  // facets, so was-client's grammar classes them `sub-resource`. The
+  // facets, so pws-client's grammar classes them `sub-resource`. The
   // snapshot lists both as if they were collections, so existence is not
   // what refuses them.
   const collections = [{ id: 'policy' }, { id: 'quotas' }]

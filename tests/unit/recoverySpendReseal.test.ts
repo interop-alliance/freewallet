@@ -13,7 +13,7 @@
  * into the mocked unlock Space exactly as issuance writes it).
  */
 import { beforeEach, describe, expect, it, vi } from 'vitest'
-import { resourceUrl, spaceUrlById } from '@interop/was-client/paths'
+import { resourceUrl, spaceUrlById } from '@interop/pws-client/paths'
 
 import type { IKeyAgreementKey, IZcap } from '@interop/data-integrity-core'
 
@@ -193,7 +193,7 @@ import {
   RECOVERY_KDF,
   wrapUnlockRecord
 } from '@interop/wallet-core/recovery'
-import { agentsFromSeed } from '@interop/was-client/identity'
+import { agentsFromSeed } from '@interop/pws-client/identity'
 import { recoverAccountWithCode } from '@/session/recovery'
 import { createFakeSessionIdb } from './fakeSessionIdb'
 

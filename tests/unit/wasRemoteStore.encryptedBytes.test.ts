@@ -2,11 +2,11 @@
 /**
  * Unit tests for `WASRemoteStore.putEncryptedResourceBytes`, the write the
  * content migration lands a bytes Resource of an encrypted app collection
- * through. The store's client is a real `WasClient` over an in-memory WAS
+ * through. The store's client is a real `PwsClient` over an in-memory WAS
  * server (`memoryWasServer`), with a small blob limit, so a payload takes
- * was-client's chunked write, and the create-if-absent `412`, the read-back
+ * pws-client's chunked write, and the create-if-absent `412`, the read-back
  * that reassembles chunks, the pending stub a torn write leaves, and a `507`
- * all run through was-client's own code.
+ * all run through pws-client's own code.
  */
 import { describe, expect, it } from 'vitest'
 import { memoryResourceLogPinStore } from '@interop/vh-resource-log'
@@ -17,9 +17,9 @@ import {
   mintEpoch,
   ownerRecipient,
   wrapEpochSecret
-} from '@interop/was-client/edv'
-import type { CollectionEncryption } from '@interop/was-client'
-import type { Json } from '@interop/was-sync'
+} from '@interop/pws-client/edv'
+import type { CollectionEncryption } from '@interop/pws-client'
+import type { Json } from '@interop/pws-sync'
 import { errorNameOf } from '@interop/wallet-core/menders'
 import { TEST_SERVICE_DESCRIPTION } from '../shared/wasServiceFixture'
 import { MEMORY_SERVER_URL, memoryWasServer } from './memoryWasServer'
@@ -56,7 +56,7 @@ async function setup() {
     spaceId: 's-space',
     controller: 'did:key:test'
   })
-  store.was = server.client({ maxBlobBytes: 16, chunkSize: 24 })
+  store.pws = server.client({ maxBlobBytes: 16, chunkSize: 24 })
   const cipher = await createEdvDocCipher({
     ...keys,
     collectionId: COLLECTION_ID,

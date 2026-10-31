@@ -119,16 +119,16 @@ import {
 import {
   isEd25519DidKey,
   x25519RecipientFromDidKey
-} from '@interop/was-client/edv'
+} from '@interop/pws-client/edv'
 import {
   collectionUrl,
   isReservedCollectionId,
   parseSpaceTarget,
   resourceUrl,
   rootCapabilityId
-} from '@interop/was-client/paths'
+} from '@interop/pws-client/paths'
 import type { IDID } from '@interop/data-integrity-core'
-import type { CollectionGenerator, IDelegatedZcap } from '@interop/was-client'
+import type { CollectionGenerator, IDelegatedZcap } from '@interop/pws-client'
 import type { ICapabilityQueryDetail, IZcap } from './types'
 import { granteeRecipientId } from '@/lib/zcap'
 import { forcedShareZcapTtlMs } from '@/lib/e2eSeams'
@@ -272,7 +272,7 @@ function isNeverGrantableCollection(collectionId: string | undefined): boolean {
 /**
  * Collection id naming rule (D2): lowercase alphanumerics and hyphens, not
  * starting with a hyphen, up to 64 characters. This is the one part of
- * {@link isCollectionName} was-client does not decide. The reserved segments
+ * {@link isCollectionName} pws-client does not decide. The reserved segments
  * are its registry's, and a plain-URL target's shape is its
  * `parseSpaceTarget` grammar's.
  */
@@ -756,13 +756,13 @@ function standardCollection(
 
 /**
  * Whether a descriptor's `name` can be a collection id at all: the naming rule
- * plus the spec's Reserved Path Segment Registry, asked of was-client's own
+ * plus the spec's Reserved Path Segment Registry, asked of pws-client's own
  * predicate so this module and the path builders agree by construction.
  *
  * A reserved segment (`meta`, `policy`, `query`, `export`, `import`,
  * `backends`, `collections`, `linkset`, `quotas`) satisfies the naming rule
  * while addressing a server facet rather than a Collection. Two things ride on
- * refusing it here. was-client's `collectionUrl` throws a `ValidationError`
+ * refusing it here. pws-client's `collectionUrl` throws a `ValidationError`
  * on one, so admitting it would throw out of resolution instead of refusing
  * the grant, and `${spaceUrl}meta` is the Space Metadata object, which a
  * full-vocabulary collection grant would hand a requester write access to -- the
@@ -779,7 +779,7 @@ function isCollectionName(name: string | undefined): name is string {
 
 /**
  * Classifies a plain-URL invocation target against the user's Space with
- * was-client's own grammar (`parseSpaceTarget`): a Collection in the Space,
+ * pws-client's own grammar (`parseSpaceTarget`): a Collection in the Space,
  * or a Resource in one, with the ids the builders re-emit from. `undefined` is
  * anything else -- the Space itself (no grant reaches the whole Space), a
  * foreign origin or another Space, a reserved sub-endpoint such as `meta` or `policy` at any depth, a path
@@ -827,7 +827,7 @@ function classifySpaceTarget({
 /**
  * Resolves an abstract `invocationTarget` descriptor against the user's Space:
  *
- * - a plain URL string inside the Space -- classified with was-client's
+ * - a plain URL string inside the Space -- classified with pws-client's
  *   grammar (`classifySpaceTarget`) and re-emitted through its path builders,
  *   so a URL under a standard collection (or at a Resource inside one) is
  *   flagged `collectionId` / `encrypted` and gets the same cap as its
@@ -1486,7 +1486,7 @@ export async function processZcaps({
 
   // `hasZcapStorage` above guarantees a remote backend, so the Space URL
   // stands. It is the store's own, the one its root capability id names, and
-  // every collection target below is built from it through was-client's path
+  // every collection target below is built from it through pws-client's path
   // builders.
   const spaceUrl = session.storage.spaceUrl!
   const now = Date.now()
@@ -1637,7 +1637,7 @@ export async function processZcaps({
    * can name the requester a collection belongs to, and a reconnecting app
    * is told apart from another app on its origin. A
    * collection that already stands keeps whatever attribution it has, since
-   * was-client's ensure stamps it on the guarded create only: the re-admit pass that adds a second
+   * pws-client's ensure stamps it on the guarded create only: the re-admit pass that adds a second
    * requester to an existing private collection cannot rename its creator.
    *
    * On the interaction-URL path the requester is an agent. A collection this

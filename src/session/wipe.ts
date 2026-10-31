@@ -26,7 +26,7 @@
  * unlock-local state, keyed by an unlock Space id, so it goes with each
  * credential's unlock-local state on every grade, the forget grade included.
  */
-import { deriveSpaceId } from '@interop/was-client/sync'
+import { deriveSpaceId } from '@interop/pws-client/sync'
 import { ceremonyEvents, type CeremonyEmitter } from '@interop/wallet-core'
 import {
   deleteAccountDidForSpace,

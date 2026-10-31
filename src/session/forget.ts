@@ -66,7 +66,7 @@
  * this browser already fetched stays readable to whoever holds it.
  */
 import { deriveNextKeyHash } from '@interop/did-method-webvh'
-import type { WasClient, ServiceDescription } from '@interop/was-client'
+import type { PwsClient, ServiceDescription } from '@interop/pws-client'
 import {
   clientAnnexLogStore,
   forgetEnrolledClient,
@@ -78,7 +78,7 @@ import type {
   EnrolledClientForgetResult,
   LastEnrolledClientForgetResult
 } from '@interop/wallet-core/clientAnnex'
-import { agentsFromSeed } from '@interop/was-client/identity'
+import { agentsFromSeed } from '@interop/pws-client/identity'
 import type { AccountPointer } from '@interop/wallet-core/keyring'
 import {
   clientSigningKeyMultibase,
@@ -89,7 +89,7 @@ import {
 import type { RevokedClientKeys } from '@interop/wallet-core/webvh'
 import type { ResourceLogPinStore } from '@interop/vh-resource-log'
 import type { Session, User } from '@/types/auth'
-import { deriveSpaceId } from '@interop/was-client/sync'
+import { deriveSpaceId } from '@interop/pws-client/sync'
 import type { VerifiedAccountLog } from '@interop/wallet-core/clients'
 import { retireConnectionParty } from '@/lib/connectedApps'
 import { SESSION_DB_NAME } from '@/lib/sessionKey'
@@ -127,7 +127,7 @@ import { disposeSession } from '@/session/sessionLifecycle'
 import { cascadeCollections } from '@/session/userKeyCascade'
 import { createLogger } from '@/lib/log'
 import { spaceLocation } from '@/lib/spaceLocation'
-import { wasClientAt, wasServiceDescription } from '@/lib/wasService'
+import { pwsClientAt, wasServiceDescription } from '@/lib/wasService'
 
 const log = createLogger('fw:session:forget')
 import { invalidateVerifiedLog } from '@/session/verifiedLog'
@@ -611,7 +611,7 @@ function annexCeremonyReach({
   const { baseServerUrl, spaceId: accountSpaceId } = spaceLocation({
     spaceUrl: pointer.spaceUrl
   })
-  const was = wasClientAt({
+  const pws = pwsClientAt({
     baseServerUrl,
     zcapClient: session.profile.zcapClient,
     serviceDescription
@@ -625,13 +625,13 @@ function annexCeremonyReach({
       generationId: string
     }) =>
       clientAnnexLogStore({
-        was,
+        pws,
         spaceId,
         generationId,
         pinStore: session.persistence.logPins
       }),
-    revoke: async (delegation: Parameters<WasClient['revoke']>[0]) =>
-      was.revoke(delegation),
+    revoke: async (delegation: Parameters<PwsClient['revoke']>[0]) =>
+      pws.revoke(delegation),
     baseServerUrl,
     accountSpaceId
   }

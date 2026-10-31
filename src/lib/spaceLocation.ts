@@ -4,9 +4,9 @@
  * `{base}space/{spaceId}/`, so both are the URL's own segments, and an
  * account pointer (`{ did?, spaceUrl }`) stores neither a host nor a base.
  * Every wallet-core call that takes `baseServerUrl` and `spaceId` reads them
- * through this one helper, over was-client's path rules.
+ * through this one helper, over pws-client's path rules.
  */
-import { baseServerUrlOf, spaceIdOfUrl } from '@interop/was-client/paths'
+import { baseServerUrlOf, spaceIdOfUrl } from '@interop/pws-client/paths'
 
 /**
  * The base server URL and Space id of a Space URL.
@@ -14,7 +14,7 @@ import { baseServerUrlOf, spaceIdOfUrl } from '@interop/was-client/paths'
  * @param options {object}
  * @param options.spaceUrl {string}   a Space URL (`{base}space/{spaceId}/`)
  * @returns {{ baseServerUrl: string, spaceId: string }}
- * @throws {ValidationError}   was-client's, when `spaceUrl` is not a Space
+ * @throws {ValidationError}   pws-client's, when `spaceUrl` is not a Space
  *   URL under a base server URL
  */
 export function spaceLocation({ spaceUrl }: { spaceUrl: string }): {

@@ -66,8 +66,8 @@ import {
   MULTIKEY_COMMITMENT_VM_TYPE,
   standingZcapStale
 } from '@interop/wallet-core/webvh'
-import type { CollectionEncryption } from '@interop/was-client'
-import { epochKeyIdFor } from '@interop/was-client/edv/cipher'
+import type { CollectionEncryption } from '@interop/pws-client'
+import { epochKeyIdFor } from '@interop/pws-client/edv/cipher'
 import { INVARIANT_CENSUS, type InvariantCensusRow } from './invariantCensus'
 import {
   listStoredCollectionIds,

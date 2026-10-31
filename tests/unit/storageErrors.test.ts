@@ -1,24 +1,24 @@
 // @vitest-environment node
 import { describe, it, expect } from 'vitest'
 import {
-  WasError,
+  PwsError,
   NotFoundError,
   ValidationError,
   AuthRequiredError,
-  WasServerError
-} from '@interop/was-client'
+  PwsServerError
+} from '@interop/pws-client'
 import { isStorageUnreachable } from '../../src/lib/storageErrors'
 
 describe('isStorageUnreachable', () => {
-  it('returns true for a network failure (WasError with no status)', () => {
-    const err = new WasError('NetworkError when attempting to fetch resource', {
+  it('returns true for a network failure (PwsError with no status)', () => {
+    const err = new PwsError('NetworkError when attempting to fetch resource', {
       cause: new TypeError('NetworkError when attempting to fetch resource')
     })
     expect(isStorageUnreachable(err)).toBe(true)
   })
 
   it('returns true for a 5xx server fault', () => {
-    const err = new WasServerError('Bad Gateway', { status: 502 })
+    const err = new PwsServerError('Bad Gateway', { status: 502 })
     expect(isStorageUnreachable(err)).toBe(true)
   })
 
@@ -37,13 +37,13 @@ describe('isStorageUnreachable', () => {
     expect(isStorageUnreachable(err)).toBe(false)
   })
 
-  it('returns false for a non-WasError', () => {
+  it('returns false for a non-PwsError', () => {
     expect(isStorageUnreachable(new Error('boom'))).toBe(false)
     expect(isStorageUnreachable(undefined)).toBe(false)
   })
 
-  it('returns true for a WasError (no status) wrapped via cause', () => {
-    const inner = new WasError(
+  it('returns true for a PwsError (no status) wrapped via cause', () => {
+    const inner = new PwsError(
       'NetworkError when attempting to fetch resource',
       {
         cause: new TypeError('NetworkError when attempting to fetch resource')
@@ -53,8 +53,8 @@ describe('isStorageUnreachable', () => {
     expect(isStorageUnreachable(wrapped)).toBe(true)
   })
 
-  it('returns true for a WasServerError wrapped via cause', () => {
-    const inner = new WasServerError('Bad Gateway', { status: 502 })
+  it('returns true for a PwsServerError wrapped via cause', () => {
+    const inner = new PwsServerError('Bad Gateway', { status: 502 })
     const wrapped = new Error('Failed to configure collection', {
       cause: inner
     })
@@ -68,8 +68,8 @@ describe('isStorageUnreachable', () => {
     expect(isStorageUnreachable(wrapped)).toBe(false)
   })
 
-  it('returns true for a WasError double-wrapped via nested cause', () => {
-    const inner = new WasServerError('Service Unavailable', { status: 503 })
+  it('returns true for a PwsError double-wrapped via nested cause', () => {
+    const inner = new PwsServerError('Service Unavailable', { status: 503 })
     const mid = new Error('collection.configure failed', { cause: inner })
     const outer = new Error('setup failed', { cause: mid })
     expect(isStorageUnreachable(outer)).toBe(true)

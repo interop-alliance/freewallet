@@ -9,11 +9,11 @@
  *
  * The rule itself lives in `@interop/wallet-core/sync`, so both replicas
  * decide a race identically; the RxDB shape around it comes from
- * `@interop/was-sync`, so everything here is the decision closure. The
+ * `@interop/pws-sync`, so everything here is the decision closure. The
  * collection's document cipher is read at resolve time through `getCipher`,
  * never captured, so a later `setCiphers` swap (the epoch cascade's) is
  * honored. A resolver throw (an integrity refusal, or a `getCipher` that itself
- * fails) is reported by `makeConflictHandler` too, through was-sync's logging
+ * fails) is reported by `makeConflictHandler` too, through pws-sync's logging
  * seam (the same `sync` namespace), before it propagates.
  *
  * Each side's envelope is addressed with the contested resource id, so a body
@@ -24,12 +24,12 @@
  * `sync` namespace, naming the resource replica and the side the binding check
  * refused, and is then rethrown unchanged.
  */
-import { makeConflictHandler, type ConflictHandler } from '@interop/was-sync'
+import { makeConflictHandler, type ConflictHandler } from '@interop/pws-sync'
 import { resolveContactHeadConflict } from '@interop/wallet-core/sync'
-import type { DocCipher } from '@interop/was-client/edv'
+import type { DocCipher } from '@interop/pws-client/edv'
 import { createLogger } from '@/lib/log'
 
-// The driver's own namespace: the refusal reads beside was-sync's report of
+// The driver's own namespace: the refusal reads beside pws-sync's report of
 // the failed cycle rather than under an app-side name of its own.
 const log = createLogger('sync')
 

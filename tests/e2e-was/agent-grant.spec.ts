@@ -1,17 +1,17 @@
 import type { Page } from '@playwright/test'
 import { CapabilityAgent } from '@interop/capability-agent'
 import {
-  WasClient,
+  PwsClient,
   type Collection,
   type CollectionEncryption,
   type JsonObject
-} from '@interop/was-client'
+} from '@interop/pws-client'
 import {
   createEdvEncryption,
   isEncryptedEnvelope,
   x25519RecipientFromDidKey
-} from '@interop/was-client/edv'
-import { agentsFromKeyAgent } from '@interop/was-client/identity'
+} from '@interop/pws-client/edv'
+import { agentsFromKeyAgent } from '@interop/pws-client/identity'
 import {
   composeCapabilityRequest,
   createEphemeralExchange,
@@ -32,7 +32,7 @@ import { test, expect } from '../shared/consoleCapture'
 
 /**
  * The agent-grant e2e (WAS mode): a CLI agent asking for storage access
- * through the interaction-URL entry point, with was-client standing in for
+ * through the interaction-URL entry point, with pws-client standing in for
  * the CLI. The agent mints its own did:key, stores a zcap-only VPR (one
  * `#public-collection` descriptor named `web`) on an ephemeral exchange, and
  * hands the wallet the deep link; the `/external/request` page renders the
@@ -107,7 +107,7 @@ async function storeAgentRequest({
       capabilityQueries: [
         {
           referenceId: collectionName,
-          // A read is asked for beside the write because was-client's upsert
+          // A read is asked for beside the write because pws-client's upsert
           // pre-reads the resource to compare-and-swap on its ETag.
           allowedAction: ['GET', 'PUT'],
           controller,
@@ -159,7 +159,7 @@ async function publishAndFetch({
   zcap: IZcap
   resourceId: string
 }): Promise<Response> {
-  const was = WasClient.fromSigner({
+  const was = PwsClient.fromSigner({
     baseServerUrl: WAS_URL,
     signer: agent.getSigner()
   })
@@ -414,7 +414,7 @@ test.describe('agent grant over an interaction URL', () => {
     expect(grantedKids.length).toBeGreaterThanOrEqual(2)
 
     // The agent writes through its grant with its own key-agreement key.
-    const encrypted = WasClient.fromSigner({
+    const encrypted = PwsClient.fromSigner({
       baseServerUrl: WAS_URL,
       signer: agent.getSigner(),
       encryption: createEdvEncryption({

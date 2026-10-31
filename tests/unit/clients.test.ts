@@ -11,7 +11,7 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import type { Session } from '@/types/auth'
 import type { AccountClientView } from '@interop/wallet-core/clients'
-import { epochKeyIdFor, mintEpoch } from '@interop/was-client/edv'
+import { epochKeyIdFor, mintEpoch } from '@interop/pws-client/edv'
 
 const REVOKED_KEYS = {
   signingKeyMultibase: 'z6MkRevokedSigning',

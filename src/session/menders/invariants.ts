@@ -795,6 +795,68 @@ const DECLARATIONS: ReadonlyArray<
     ceremonies: [],
     // Which party read a seed is not visible in any stored state.
     evidence: ['host-listing']
+  },
+  // 41
+  // No converger: the replica pass, which restates a missing pointer and
+  // drops one no live item names, is not built. A generation re-mint must
+  // carry or restate the pointers, so the re-minting ceremonies can tear it.
+  {
+    id: 'pointed-annex-names-every-replica-server',
+    statement:
+      'The pointed annex document carries a replica-server pointer for every live `replicas` item of an unretired `replica-server` entry (no `stoppedAt`, entry not declined), and no pointer there names a server with no such item.',
+    standsOn: ['ladder-anchored', 'enrolled'],
+    authority: 'none',
+    triggers: [],
+    ceremonies: [
+      'replica-registration',
+      'replica-stop',
+      'replica-restart',
+      'replica-deletion',
+      'client-revocation',
+      'unlock-credential-rotation'
+    ],
+    // The annex head is read under the visit's pin; the `replicas` items
+    // are host-served directory state.
+    evidence: ['verified-log', 'host-listing']
+  },
+  // 42
+  // No converger: the replica pass's silent renewal is not built. A
+  // grant whose signer a ceremony withdrew waits for the owner's tick, as
+  // an agent grant does.
+  {
+    id: 'replica-pull-grants-are-current',
+    statement:
+      "Every live `replicas` item records a pull grant per replicated Space whose proof verifies as this account's, whose signer the verified account document still lists, and whose `expires` is not yet inside `ZCAP_RENEWAL_WINDOW_MS`.",
+    standsOn: ['ladder-anchored', 'enrolled'],
+    authority: 'none',
+    triggers: [],
+    ceremonies: [
+      'replica-registration',
+      'replica-restart',
+      'unlock-credential-rotation',
+      'client-revocation',
+      'forget-client',
+      'last-client-transition',
+      'recovery-code-spend'
+    ],
+    // The proof check and the signer read rest on the verified account
+    // document; the recorded grants are host-served directory state.
+    evidence: ['verified-log', 'host-listing']
+  },
+  // 43
+  // No converger: the replica pass, which finishes a registration's
+  // promotion stage once the first pull lands, is not built.
+  {
+    id: 'replica-space-controller-is-the-account-did',
+    statement:
+      'Every replica Space whose first pull has landed is controlled by the account did:webvh rather than by the bootstrap did:key that created and registered it.',
+    standsOn: ['ladder-anchored', 'enrolled'],
+    authority: 'none',
+    triggers: [],
+    ceremonies: ['replica-registration'],
+    // The controller comes back on the replica server's own answer for the
+    // Space, as row 12's does on the source server.
+    evidence: ['host-listing']
   }
 ]
 

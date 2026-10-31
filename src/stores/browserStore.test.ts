@@ -12,11 +12,11 @@ import { createRxDatabase, type RxCollection } from 'rxdb/plugins/core'
 import { replicateRxCollection } from 'rxdb/plugins/replication'
 import { getRxStorageMemory } from 'rxdb/plugins/storage-memory'
 import type { User } from '@/types/auth'
-import { cidFrom } from '@interop/was-client/sync'
-import type { Json } from '@interop/was-sync'
+import { cidFrom } from '@interop/pws-client/sync'
+import type { Json } from '@interop/pws-sync'
 import { BrowserStore } from './browserStore'
-import { UnknownEpochError, type DocCipher } from '@interop/was-client/edv'
-import { IntegrityError, KeyUnwrapError } from '@interop/was-client'
+import { UnknownEpochError, type DocCipher } from '@interop/pws-client/edv'
+import { IntegrityError, KeyUnwrapError } from '@interop/pws-client'
 import type { ContactRevisionPayload } from '@interop/social-core'
 import { browserLocalSessionPersistence } from '@/session/persistence'
 import { PublicCopyRetractionError, StorageManager } from './storageManager'
@@ -1076,7 +1076,7 @@ function makeEpochCipher(epoch: string): DocCipher {
 }
 
 /**
- * The same refusal as it arrives from a SECOND copy of `@interop/was-client`:
+ * The same refusal as it arrives from a SECOND copy of `@interop/pws-client`:
  * the `name` contract intact, an unrelated constructor. A cipher is an
  * injected seam, so this is the shape a `link:` dev setup or a dedupe miss
  * produces, and the shape no `instanceof` can match.
@@ -1209,7 +1209,7 @@ function makeMisboundCipher({
 
 describe('BrowserStore (misbound envelopes)', () => {
   it('counts a row under a key epoch whose entry fails its key-wrap check as integrity, uncached and unpurged', async () => {
-    // was-client raises `IntegrityError` for a kid-matched recipient entry
+    // pws-client raises `IntegrityError` for a kid-matched recipient entry
     // that fails its AES-KW check, on the first decrypt under that epoch. It
     // is the same tamper signal as a misbound body: no refresh can change it,
     // and purging it would destroy data a corrupt entry hides.
@@ -1386,7 +1386,7 @@ describe('BrowserStore (misbound envelopes)', () => {
 
   it('classifies the refusal raised from a second copy of the package', async () => {
     // Matched by `err.name`, for the same reason the epoch refusals are: a
-    // wallet whose `@interop/was-client` resolves twice throws a class this
+    // wallet whose `@interop/pws-client` resolves twice throws a class this
     // file never imported, and a miss here drops the resource replica into the
     // purgeable bucket.
     const { localStore } = await initLocalStore({
@@ -1480,7 +1480,7 @@ describe('BrowserStore (key epochs)', () => {
 
   it('classifies both cipher refusals raised from a second copy of the package', async () => {
     // The whole point of matching these by `err.name`: the cipher is an
-    // injected seam, so in a wallet whose `@interop/was-client` resolves twice
+    // injected seam, so in a wallet whose `@interop/pws-client` resolves twice
     // the class it throws is not the class this file imported. Missing the
     // `KeyUnwrapError` branch drops another reader's real data into the
     // undecryptable bucket, which `purgeUndecryptableCredentials` then

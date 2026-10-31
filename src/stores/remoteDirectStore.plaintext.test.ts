@@ -9,9 +9,9 @@
  * @vitest-environment node
  */
 import { describe, expect, it } from 'vitest'
-import type { DocCipher } from '@interop/was-client/edv'
-import { cidFrom } from '@interop/was-client/sync'
-import type { Json } from '@interop/was-sync'
+import type { DocCipher } from '@interop/pws-client/edv'
+import { cidFrom } from '@interop/pws-client/sync'
+import type { Json } from '@interop/pws-sync'
 import { RemoteDirectStore } from './remoteDirectStore'
 import type { WASRemoteStore } from './wasRemoteStore'
 

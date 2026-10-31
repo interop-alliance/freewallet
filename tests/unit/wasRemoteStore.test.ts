@@ -9,8 +9,8 @@ import type {
   CollectionEncryption,
   ResourceChangeDocument,
   SpaceMetadata,
-  WasClient
-} from '@interop/was-client'
+  PwsClient
+} from '@interop/pws-client'
 
 vi.mock('../../src/app.config', async importOriginal => ({
   ...(await importOriginal<typeof import('../../src/app.config')>()),
@@ -19,11 +19,11 @@ vi.mock('../../src/app.config', async importOriginal => ({
 }))
 
 import { ensureIndexedFirstEpoch } from '@interop/wallet-core/keys'
-import { createEdvDocCipher, ownerRecipient } from '@interop/was-client/edv'
+import { createEdvDocCipher, ownerRecipient } from '@interop/pws-client/edv'
 import { memoryDescriptorStores } from './fakeDescriptorStores'
 import { generateVaultKeys } from '../../src/stores/testing/vaultKeys'
 import { mintSpaceId, WASRemoteStore } from '../../src/stores/wasRemoteStore'
-import { deriveSpaceId } from '@interop/was-client/sync'
+import { deriveSpaceId } from '@interop/pws-client/sync'
 import type { ControllerProfile, User } from '../../src/types/auth'
 import type { SessionPersistence } from '../../src/session/persistence'
 
@@ -45,7 +45,7 @@ function storeWithStubbedClient(was: unknown): WASRemoteStore {
     spaceId: 'space-id',
     controller: 'did:key:test'
   })
-  store.was = was as WasClient
+  store.pws = was as PwsClient
   return store
 }
 
@@ -288,7 +288,7 @@ describe('WASRemoteStore.fetchCollectionResource', () => {
   })
 
   it('forces the plaintext override so a marked collection returns its raw envelope', async () => {
-    // The store's WasClient is built with a fail-closed encryption provider, so
+    // The store's PwsClient is built with a fail-closed encryption provider, so
     // the storage browser must read encryption-marked resources as plaintext:
     // the raw EDV envelope, not a decoded body it cannot key for.
     const envelope = { id: 'z6Env1', jwe: { ciphertext: 'x' } }
@@ -397,7 +397,7 @@ describe('WASRemoteStore.collectionMetadata', () => {
   })
 
   it('returns undefined for an absent custom value', async () => {
-    // A cleared `custom` (`null` or `{}` as stored) is dropped by was-client's
+    // A cleared `custom` (`null` or `{}` as stored) is dropped by pws-client's
     // read itself, so the one shape the store sees for absence is no member.
     const { store: noCustom } = storeWithMetadata({
       metadata: { name: 'no custom' }
@@ -873,7 +873,7 @@ describe('WASRemoteStore.ensureGovernedCollection', () => {
       controller: 'did:key:test',
       capability
     })
-    store.was = { spaceAt: space } as unknown as WasClient
+    store.pws = { spaceAt: space } as unknown as PwsClient
 
     await expect(
       store.ensureGovernedCollection({ id: 'example-app-data' })
@@ -925,7 +925,7 @@ describe('WASRemoteStore.ensureGovernedCollection', () => {
 describe('WASRemoteStore.promoteSpaceController', () => {
   it('forwards a supplied `current` to the Space configure, validator included', async () => {
     // The caller's baseline carries the `ETag` of the read it came from:
-    // was-client pins the promotion write to it, and refuses a baseline
+    // pws-client pins the promotion write to it, and refuses a baseline
     // without one rather than writing unconditionally.
     const current: SpaceMetadata & { etag?: string } = {
       id: 'space-id',
@@ -969,7 +969,7 @@ describe('WASRemoteStore.ensureUserCollections', () => {
 
   // Provisioning now runs through the shared `provisionWalletSpace`
   // (`@interop/wallet-core/space`), so these tests drive the real roster and
-  // provisioner against a recording stub of the was-client handle surface it
+  // provisioner against a recording stub of the pws-client handle surface it
   // touches, rather than stubbing the library's `ensureSpaceAndCollection`.
   function recordingWas({
     fail = () => false
@@ -1099,7 +1099,7 @@ describe('WASRemoteStore.keyedCollectionHandle', () => {
       controller: 'did:webvh:zQmScid:example.test:space:space-id:id',
       ...(capability ? { capability } : {})
     })
-    store.was = { spaceAt: space } as unknown as WasClient
+    store.pws = { spaceAt: space } as unknown as PwsClient
     return { store, space, collection }
   }
 
@@ -1227,7 +1227,7 @@ describe('WASRemoteStore.declareCollectionIndexes', () => {
     const store = new WASRemoteStore({
       serviceDescription: TEST_SERVICE_DESCRIPTION,
       pinStore: memoryResourceLogPinStore(),
-      // This store builds a real WasClient, which refuses a base server URL
+      // This store builds a real PwsClient, which refuses a base server URL
       // the service description does not describe, so the base matches
       // TEST_SERVICE_DESCRIPTION's.
       baseServerUrl: 'http://localhost/',

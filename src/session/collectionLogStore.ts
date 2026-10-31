@@ -22,8 +22,8 @@
  * the enrolled client's own on a remembered session, the credential's
  * ladder VM on a transient one.
  */
-import { resourceLogStore } from '@interop/was-client/log'
-import type { EncryptionDescriptorSource } from '@interop/was-client/edv'
+import { resourceLogStore } from '@interop/pws-client/log'
+import type { EncryptionDescriptorSource } from '@interop/pws-client/edv'
 import {
   collectionDescriptorStores,
   userKeyRosterLogSigner,

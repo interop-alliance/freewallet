@@ -22,7 +22,7 @@ import type {
   IKeyResolver,
   IVerifiableCredential
 } from '@interop/data-integrity-core'
-import type { CollectionEncryption } from '@interop/was-client'
+import type { CollectionEncryption } from '@interop/pws-client'
 import { getRxStorageMemory } from 'rxdb/plugins/storage-memory'
 import type { ControllerProfile, User } from '@/types/auth'
 import { browserLocalSessionPersistence } from '@/session/persistence'

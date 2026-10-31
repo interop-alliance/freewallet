@@ -3,7 +3,7 @@
  * constants.
  */
 import type { EntityIdentityRegistry } from '@interop/verifier-core'
-import { canonicalBaseServerUrl } from '@interop/was-client/paths'
+import { canonicalBaseServerUrl } from '@interop/pws-client/paths'
 import {
   CONTACTS_COLLECTION,
   CONTACTS_HISTORY_COLLECTION
@@ -24,12 +24,12 @@ const env = import.meta.env
 
 // The remote WAS server's base server URL: the URL under which the server
 // serves `service`, `spaces/` and `space/{id}/` (`https://host/`, or
-// `https://host/was/` on a sub-path mount). Held in was-client's canonical
+// `https://host/was/` on a sub-path mount). Held in pws-client's canonical
 // form, with one trailing slash, so every URL derived from it (the KMS
 // facet, the CORS proxy facet) appends a bare segment. When set, a remote
 // WAS Space is available as a sync target: the sync controller replicates
 // the local RxDB collections to it in the background. (Guest sessions never
-// sync.) A value was-client refuses (a scheme-less `localhost:3002`, a URL
+// sync.) A value pws-client refuses (a scheme-less `localhost:3002`, a URL
 // with a query or fragment) is refused by name here, rather than leaving the
 // app a white screen at module evaluation.
 export const WAS_BASE_SERVER_URL: string | undefined = env.VITE_WAS_SERVER_URL
@@ -37,13 +37,13 @@ export const WAS_BASE_SERVER_URL: string | undefined = env.VITE_WAS_SERVER_URL
   : undefined
 
 /**
- * The configured base server URL in was-client's canonical form, the one
- * rule every `WasClient` applies, so the value survives the constructor byte
+ * The configured base server URL in pws-client's canonical form, the one
+ * rule every `PwsClient` applies, so the value survives the constructor byte
  * for byte.
  *
  * @param configured {string}   the configured `VITE_WAS_SERVER_URL`
  * @returns {string}   the canonical base server URL, with one trailing slash
- * @throws {Error}   when was-client's `canonicalBaseServerUrl` refuses the
+ * @throws {Error}   when pws-client's `canonicalBaseServerUrl` refuses the
  *   configured value
  */
 function canonicalWasBaseServerUrl(configured: string): string {

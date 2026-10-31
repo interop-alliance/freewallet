@@ -88,5 +88,11 @@ export const MENDER_WARNINGS: Readonly<Record<InvariantId, string>> = {
   'agent-grants-are-current':
     "Could not renew the connected agents' grants; the next login retries",
   'no-withdrawn-party-holds-a-live-pairwise-channel':
-    'Could not rotate a pairwise seed a withdrawn party may hold; no converger is built'
+    'Could not rotate a pairwise seed a withdrawn party may hold; no converger is built',
+  'pointed-annex-names-every-replica-server':
+    'Could not restate the replica-server pointers on the annex; no converger is built',
+  'replica-pull-grants-are-current':
+    'Could not renew the replica pull grants; no converger is built',
+  'replica-space-controller-is-the-account-did':
+    'Could not promote the replica Space controller to the account did:webvh; no converger is built'
 }

@@ -28,7 +28,7 @@ publishes a ladder VM, and the delegation clause that bounds what that VM may
 delegate fails open on a server that does not enforce it. The check runs
 before the key derivation, and on a passkey signup before the WebAuthn
 ceremony, so a refused signup writes nothing and leaves no passkey on the
-authenticator. The refusal is was-client's `IncompatibleServerError`, shown
+authenticator. The refusal is pws-client's `IncompatibleServerError`, shown
 with the `auth.errors.storageIncompatible` copy. The check runs once per
 account. The heal re-run of a torn signup does not repeat it, and neither
 does any later ceremony that publishes a ladder VM: adding a passkey or a

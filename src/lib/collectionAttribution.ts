@@ -25,7 +25,7 @@
  */
 import type { CollectionCreator, CreatedByParty } from '@/lib/connectedApps'
 import type { StorageCollection } from '@/lib/storage'
-import type { CollectionGenerator } from '@interop/was-client'
+import type { CollectionGenerator } from '@interop/pws-client'
 
 /**
  * The head and tail a shortened DID keeps around `...`: the method prefix

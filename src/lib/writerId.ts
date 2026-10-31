@@ -1,5 +1,5 @@
 /**
- * The browser-local binding over `@interop/was-sync`'s writer-id mint: an
+ * The browser-local binding over `@interop/pws-sync`'s writer-id mint: an
  * unkeyed, clearable, unrecoverable attribution label saying which writing
  * agent produced a revision. Its only jobs are history attribution and
  * breaking last-write-wins ties. It lives in `localStorage`, dies with a
@@ -14,7 +14,7 @@ import {
   clearPersistedWriterId,
   getWriterId,
   type WriterIdStorage
-} from '@interop/was-sync'
+} from '@interop/pws-sync'
 
 /**
  * The one place the key prefix is written. The persisted key is

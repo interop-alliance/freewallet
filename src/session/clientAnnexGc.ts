@@ -94,7 +94,7 @@ export async function sweepClientAnnexGenerations({
     // auxiliary Space to list orphans in.
     return { skipped: 'no-annex-inventory' }
   }
-  const { doc, log, was } = reach
+  const { doc, log, pws } = reach
   const { baseServerUrl, spaceId } = spaceLocation({
     spaceUrl: pointer.spaceUrl
   })
@@ -106,7 +106,7 @@ export async function sweepClientAnnexGenerations({
   let report: ClientAnnexGcReport
   try {
     report = await runClientAnnexGc({
-      was,
+      pws,
       baseServerUrl,
       accountSpaceId: spaceId,
       account: { did: pointer.did, doc, log },

@@ -49,7 +49,7 @@ src/lib/            Pure business logic (no React)
   passkey.ts        The WebAuthn registration and assertion ceremonies and
                     their PRF output
   registerWallet.ts CHAPI handler registration with the mediator
-  wasService.ts     The one WAS service discovery every WasClient reuses
+  wasService.ts     The one WAS service discovery every PwsClient reuses
   decryptFailure.ts The classifier sorting a failed envelope decrypt into
                     its handling bucket
   collectionAttribution.ts  A collection's and a Resource's creator lines
@@ -393,7 +393,7 @@ docs/architecture/session-persistence.md, and "Remote-direct popup storage" in
 docs/architecture/chapi.md). One local database per user holds every standard
 collection (`private-credentials`, `public-credentials`, `wallet-activity`,
 `contacts`, `contacts-history`, `app-keys`) on the generic synced-doc
-schema (`syncedDocSchema` from `@interop/was-sync`). Its shape is
+schema (`syncedDocSchema` from `@interop/pws-sync`). Its shape is
 `{ id, updatedAt, data }` plus optional members the server assigns or
 reports: the rest of the write stamp (`updatedAtCounter`, `originId`), the
 nested `meta` stamp and the `custom` body, `createdBy`, `epoch`, the
@@ -413,7 +413,7 @@ payload.
 The encrypted collections, all of the above except `public-credentials`, store
 **EDV envelopes**: encrypted at rest locally and opaque to the server. A
 per-collection document cipher (`createEdvDocCipher` from
-`@interop/was-client/edv`, built from the session's vault KAK) encrypts at write
+`@interop/pws-client/edv`, built from the session's vault KAK) encrypts at write
 time and decrypts at read time. The resource id is a hash of the JWE ciphertext,
 so it is identical on every replica. The exception is `contacts`, whose head
 Resources keep a stable random id and are rewritten in place. Every decrypt
@@ -433,7 +433,12 @@ than on the resource id. `public-credentials` is plaintext and keyed directly by
 `cid`. Each encrypted collection's key epochs come from the verified head of its
 own governing log rather than from a metadata member the host serves (see
 "Per-collection descriptor logs" in
-docs/architecture/keys-and-descriptor-logs.md).
+docs/architecture/keys-and-descriptor-logs.md). A log's head names its state
+type, and pws-client 0.105.0 (taken through wallet-core 0.113.0) reads only
+`PwsEpochConfiguration`. A roster or collection descriptor log written under
+the old `WasEpochConfiguration` value stops reading, with no fallback. An
+account provisioned before this release is re-provisioned rather than
+migrated.
 
 The `connections` directory holds one encrypted connection entry per party the
 wallet has dealt with (an app, an agent, or a wallet client), at a resource id
@@ -467,7 +472,7 @@ When `VITE_WAS_SERVER_URL` (the server's base server URL, under which it
 serves `service`, `spaces/` and `space/{id}/`) is set, and the session holds a local replica and is not a guest, a
 remote WAS Space is attached as a **sync target**. `SessionSyncController` in
 `src/stores/syncController.ts` replicates every synced local collection to its
-remote WAS Collection counterpart in the background, over `@interop/was-sync`'s
+remote WAS Collection counterpart in the background, over `@interop/pws-sync`'s
 collection-agnostic driver, which ships stored bodies verbatim and touches no
 keys. That module is the session binding around the package's controller core,
 and owns that gate. It also owns the port the core reads the Space and the local
@@ -493,7 +498,7 @@ choice skips retraction entirely.
 
 The world-readable share link a public copy gets
 (`WASRemoteStore.publicCredentialUrl`) is built by wallet-core/space's
-`publicCredentialUrl`, over was-client's path helpers, which join onto the
+`publicCredentialUrl`, over pws-client's path helpers, which join onto the
 storage server's base path, so on a sub-path deployment (a server URL like
 `https://host/was`) the link addresses exactly the resource replication wrote,
 with per-segment encoding.
@@ -640,6 +645,11 @@ every mend entry, also emits on the ceremony event channel (wallet-core's
 | Request consent (App Connect, interaction URL, share) | CHAPI get popup and `/external/request`, approval of a request; an agent restore (a dialog's tick, Restore on the Applications detail page); a grant needs a remote Space | `src/lib/walletRequest/respond.ts` + `src/session/agentReconnect.ts`        | app-side                    | a failure before the first escrow rolls the record back; past it, the recorded grants stay listed, and the user's own revoke from that row converges them                                                                                                                                                                         | `app-connect.md`         |
 | Grant revocation (app, agent, unshare)                | Applications page (disconnect, revoke), Storage page shares dialog (unshare); an unshare needs a remote Space                                                             | `src/lib/connectedApps.ts` + `src/session/shares.ts`                        | app-side                    | the user's own re-run from the row a torn run leaves listed; an agent revoke's first write empties the channel, so no renewal undoes a torn one                                                                                                                                                                                   | `app-connect.md`         |
 
+Wallet-core's `CEREMONY_IDS` also names four replica ceremonies
+(`replica-registration`, `replica-stop`, `replica-restart`,
+`replica-deletion`). This wallet does not run them yet, so the table has
+no row for them.
+
 A WAS signup's remembered and passkey flavors continue into the
 self-enrollment row, and the credential-anchored genesis heal branch also
 mends a remembered signup torn before its self-enrollment.
@@ -735,6 +745,18 @@ built:
   annex commitment to attribute one by, so the hash rides every later swap.
   The retired credential's unlock record and ladder VM are gone, so the
   rung reaches no Space. The residue is wallet-core's WC-295.
+- A pointed annex generation that misses the replica-server pointer of a
+  live replica, or carries a pointer no live replica names (invariant
+  `pointed-annex-names-every-replica-server`). The replica pass that
+  restates and drops pointers is not built yet.
+- A live replica whose recorded pull grant is due for renewal, past its
+  expiry, or signed by a withdrawn signer (invariant
+  `replica-pull-grants-are-current`). The replica pass that renews it is
+  not built yet.
+- A replica Space whose first pull landed while the bootstrap did:key that
+  created it still controls it (invariant
+  `replica-space-controller-is-the-account-did`). The replica pass that
+  finishes the promotion is not built yet.
 
 Second, a residue whose only mender is a remembered login:
 
@@ -849,7 +871,7 @@ cascades, and the permanent wire-level constants.
   wallet-core's `isWasLinkPayload` and `isConnectCode` as injected
   recognizers. The package has its own logger seam, wired beside
   wallet-core's in `lib/log.ts`.
-- **`@interop/was-sync`** (+ `/rxdb`, `/testing`) -- the WAS replication
+- **`@interop/pws-sync`** (+ `/rxdb`, `/testing`) -- the WAS replication
   driver for RxDB, shared with `@interop/was-react`: the synced-document
   schema, the opaque-body helpers, the conflict-handler seam, and the
   writer-id mint on the root entry; the changes-feed pull handler, the
@@ -869,7 +891,7 @@ cascades, and the permanent wire-level constants.
   by `err.name` rather than by class, since a duplicate package copy would
   break `instanceof`. The did:webvh controller adapter stays on
   `@interop/wallet-core/resourceLog`.
-- **`@interop/was-client`** (+ `/edv`, `/sync`, `/paths`, `/log`, `/identity`)
+- **`@interop/pws-client`** (+ `/edv`, `/sync`, `/paths`, `/log`, `/identity`)
   -- the WAS HTTP client, the sync wire contract the RxDB driver speaks, its
   error classes and the `err.name` predicates that classify them
   (`isUnknownEpochError`), the EDV envelope cipher and key-epoch construction
@@ -926,7 +948,7 @@ Containment hierarchy (remote mode): **Space > Collection > Resource**.
   32-byte client seed (`agentsFromSeed`) rather than from the passphrase.
 - **CID (Content-addressed Identifier)** -- a base64url-encoded SHA-256 hash
   of the canonicalized credential JSON (`cidFrom()` from
-  `@interop/was-client/sync`), the primary key for stored credentials.
+  `@interop/pws-client/sync`), the primary key for stored credentials.
 - **ZCap (Authorization Capability)** -- the authorization model for HTTP
   requests to the WAS server. Clients sign with their Ed25519 key, and the
   server verifies against the Space controller's DID.
@@ -983,7 +1005,7 @@ Containment hierarchy (remote mode): **Space > Collection > Resource**.
 - **`writerId`** -- an unkeyed, clearable, unrecoverable attribution label
   saying which writing agent produced a revision, used to attribute history
   and break last-write-wins ties. It is minted per browser profile by
-  `@interop/was-sync`, bound in `src/lib/writerId.ts` under the
+  `@interop/pws-sync`, bound in `src/lib/writerId.ts` under the
   `localStorage` key `freewallet:writerId`. It derives from no secret and is
   not an identity. Which sessions declare it on the wire is in "Session
   persistence". One met in a second session under the same account may
@@ -1071,7 +1093,7 @@ base64url(SHA-256(unlock did:key))` (a discovery convention).
 - **Container URL** -- the URL of a Space or a Collection, written with a
   trailing slash (`/space/{spaceId}/`, `/space/{spaceId}/{collectionId}/`).
   The slash-less form only redirects. A Resource URL carries no trailing
-  slash. Both are built through was-client's path builders rather than by
+  slash. Both are built through pws-client's path builders rather than by
   string concatenation. Avoid: collection URL prefix, space base URL.
 - **Controller** -- the DID that owns a Space: the account's `did:webvh`
   once promoted, and a `did:key` before promotion and on an unlock Space.
@@ -1319,7 +1341,7 @@ base64url(SHA-256(unlock did:key))` (a discovery convention).
   quotas.
 - **SyncController** -- the lifecycle around background replication: one
   `replicateRxCollection` state machine per synced collection, started on
-  login and cancelled on logout. The core is `@interop/was-sync`'s and its
+  login and cancelled on logout. The core is `@interop/pws-sync`'s and its
   `stop()` is terminal, so the binding in `src/stores/syncController.ts`
   constructs a fresh core per session.
 - **Known issuer registries** -- the issuer registries credential

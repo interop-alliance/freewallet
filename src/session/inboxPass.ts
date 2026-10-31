@@ -78,7 +78,7 @@
  */
 import type { IZcap } from '@interop/data-integrity-core'
 import type { ZcapClient } from '@interop/ezcap'
-import { httpStatus } from '@interop/was-client'
+import { httpStatus } from '@interop/pws-client'
 import {
   classifyGrantRevocationRefusal,
   embeddedGenerationDelegation,

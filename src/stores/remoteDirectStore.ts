@@ -20,7 +20,7 @@
  *   rather than one per resource.
  *
  * Both backends encrypt/decrypt through the SAME per-collection {@link DocCipher}
- * instances the session built (`@interop/was-client/edv`): the content-derived
+ * instances the session built (`@interop/pws-client/edv`): the content-derived
  * envelope-hash id and the key-epoch stamp come from `cipher.encrypt`, so a
  * remote-direct write reproduces verbatim what background replication would have
  * pushed (the raw EDV envelope under its content-derived id, created with
@@ -44,10 +44,10 @@ import {
   type ContactHeadPayload,
   type ContactRevisionPayload
 } from '@interop/social-core'
-import { cidFrom, errorStatus } from '@interop/was-client/sync'
+import { cidFrom, errorStatus } from '@interop/pws-client/sync'
 import { compareContactRevisionsNewestFirst } from '@/lib/contactRevisions'
-import type { Json } from '@interop/was-sync'
-import { isEncryptedEnvelope, type DocCipher } from '@interop/was-client/edv'
+import type { Json } from '@interop/pws-sync'
+import { isEncryptedEnvelope, type DocCipher } from '@interop/pws-client/edv'
 import {
   classifyDecryptFailure,
   type DecryptFailure

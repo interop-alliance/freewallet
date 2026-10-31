@@ -1,8 +1,8 @@
 /**
  * An in-memory WAS server behind a stub `ZcapClient`, for tests that drive a
- * real `WasClient` handle end to end: its EDV codec, a chunked write, the
+ * real `PwsClient` handle end to end: its EDV codec, a chunked write, the
  * create-if-absent `412`, and a read that reassembles chunks. Modeled on
- * was-client's own chunked-put test server.
+ * pws-client's own chunked-put test server.
  *
  * `PUT` stores the body under a fresh `ETag`, refusing an `If-None-Match: *`
  * create over a stored path, or an `If-Match` on a stale `ETag`, with 412.
@@ -15,11 +15,11 @@
  * invoked under.
  */
 import {
-  WasClient,
+  PwsClient,
   type ChangesPage,
   type ResourceChangeDocument
-} from '@interop/was-client'
-import { createEdvEncryption } from '@interop/was-client/edv'
+} from '@interop/pws-client'
+import { createEdvEncryption } from '@interop/pws-client/edv'
 import { TEST_SERVICE_DESCRIPTION } from '../shared/wasServiceFixture'
 
 export const MEMORY_SERVER_URL = 'http://localhost/'
@@ -44,7 +44,7 @@ export interface MemoryRequestArgs {
  */
 export function memoryWasServer(): {
   store: Map<string, Uint8Array>
-  client: (options: { maxBlobBytes: number; chunkSize: number }) => WasClient
+  client: (options: { maxBlobBytes: number; chunkSize: number }) => PwsClient
   failWhen: {
     test?: (args: MemoryRequestArgs, path: string) => boolean
     status?: number
@@ -166,14 +166,14 @@ export function memoryWasServer(): {
   }: {
     maxBlobBytes: number
     chunkSize: number
-  }): WasClient =>
-    new WasClient({
+  }): PwsClient =>
+    new PwsClient({
       baseServerUrl: MEMORY_SERVER_URL,
       serviceDescription: TEST_SERVICE_DESCRIPTION,
       zcapClient: {
         invocationSigner: { id: 'did:example:alice#key-1' },
         request
-      } as unknown as ConstructorParameters<typeof WasClient>[0]['zcapClient'],
+      } as unknown as ConstructorParameters<typeof PwsClient>[0]['zcapClient'],
       // The fail-closed provider a WASRemoteStore's client carries, with a
       // small blob limit so a test payload takes the chunked path.
       encryption: createEdvEncryption({

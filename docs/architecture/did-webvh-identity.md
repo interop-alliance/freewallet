@@ -71,7 +71,7 @@ The practical cost is verification time rather than bytes. Every pinned
 read verifies the log from genesis, about 1.2 ms per entry in Node and more
 in a browser, and each entry written costs two full client verifications
 (the read and the `updateDID` resolve) plus one on the server. At the
-upload limit every log-extending ceremony fails at once with was-client's
+upload limit every log-extending ceremony fails at once with pws-client's
 `PayloadTooLargeError`, which no log-write path catches, and no compaction
 is possible because the SCID chain anchors at genesis. Login-time menders
 would warn and skip under the runner's discipline, and the account would

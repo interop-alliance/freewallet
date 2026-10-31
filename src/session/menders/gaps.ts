@@ -253,5 +253,33 @@ export const MENDER_GAPS: ReadonlyArray<InvariantGap> = [
     standsOn: ['ladder-anchored', 'enrolled'],
     item: 'FW-682',
     kind: 'none'
+  },
+  // 27. The replica pass restates and drops the replica-server pointers;
+  // it is not built.
+  {
+    invariant: 'pointed-annex-names-every-replica-server',
+    tornState:
+      'A pointed annex generation that misses the replica-server pointer of a live replica (a generation mint that did not restate it, or a torn registration, Stop, or re-start), or carries a pointer no live replica names. The replica pass that restates and drops pointers is not built.',
+    standsOn: ['ladder-anchored', 'enrolled'],
+    item: 'FW-688',
+    kind: 'none'
+  },
+  // 28. The replica pass renews the pull grants; it is not built.
+  {
+    invariant: 'replica-pull-grants-are-current',
+    tornState:
+      'A live replica whose recorded pull grant is due for renewal, past its expiry, or signed by a withdrawn signer. The replica pass that renews it is not built.',
+    standsOn: ['ladder-anchored', 'enrolled'],
+    item: 'FW-688',
+    kind: 'none'
+  },
+  // 29. The replica pass finishes a torn promotion; it is not built.
+  {
+    invariant: 'replica-space-controller-is-the-account-did',
+    tornState:
+      'A replica Space whose first pull landed while the bootstrap did:key that created it still controls it. The replica pass that finishes the promotion is not built.',
+    standsOn: ['ladder-anchored', 'enrolled'],
+    item: 'FW-688',
+    kind: 'none'
   }
 ]

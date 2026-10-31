@@ -17,7 +17,7 @@ import {
   EphemeralExchangeGoneError,
   signCapabilityRequest
 } from '@interop/wallet-request'
-import { x25519RecipientFromDidKey } from '@interop/was-client/edv'
+import { x25519RecipientFromDidKey } from '@interop/pws-client/edv'
 import {
   barredGrants,
   EXTERNAL_REQUEST_ORIGIN,

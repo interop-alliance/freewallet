@@ -4,7 +4,7 @@
  * interface) per session, resolved to a concrete adapter at every call.
  *
  * - On a session with a remote Space the adapter is wallet-core's
- *   `wasConnectionsStore`, built by the storage manager over the account
+ *   `pwsConnectionsStore`, built by the storage manager over the account
  *   Space's `connections` Collection handle and the directory's EDV cipher.
  *   The handle and the cipher are rebuilt from the descriptor the call
  *   resolves, so a user key cascade's descriptor refresh reaches the next
@@ -16,18 +16,18 @@
  *
  * Every write the directory logic makes is conditional, a read-modify-write
  * under `ifMatch` or a create under `ifNoneMatch`, and a lost race surfaces
- * as was-client's `PreconditionFailedError`, which wallet-core matches by
+ * as pws-client's `PreconditionFailedError`, which wallet-core matches by
  * name.
  */
 import type { RxCollection, RxDocument } from 'rxdb/plugins/core'
-import { PreconditionFailedError } from '@interop/was-client'
-import type { EdvDocCipher } from '@interop/was-client/edv'
+import { PreconditionFailedError } from '@interop/pws-client'
+import type { EdvDocCipher } from '@interop/pws-client/edv'
 import type {
   ConnectionIdKey,
   ConnectionsStore,
   StoredConnection
 } from '@interop/wallet-core/connections'
-import type { Json, SyncedDoc } from '@interop/was-sync'
+import type { Json, SyncedDoc } from '@interop/pws-sync'
 import { createLogger } from '@/lib/log'
 
 const log = createLogger('fw:connections')

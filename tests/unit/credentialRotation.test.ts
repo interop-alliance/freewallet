@@ -100,12 +100,12 @@ vi.mock('@interop/wallet-core/clientAnnex', async importOriginal => ({
   })
 }))
 
-vi.mock('@interop/was-client', async importOriginal => ({
-  ...(await importOriginal<typeof import('@interop/was-client')>()),
+vi.mock('@interop/pws-client', async importOriginal => ({
+  ...(await importOriginal<typeof import('@interop/pws-client')>()),
   // The signing authority is restated on the instance, so an annex reach's
   // client can be told apart from this session's own by the store it is
   // handed to.
-  WasClient: class {
+  PwsClient: class {
     isWasClient = true
     baseServerUrl: string
     zcapClient: unknown
@@ -1096,7 +1096,7 @@ describe('the annex strike-or-swap stage', () => {
           spaceId: CLIENT_ANNEX_SPACE_ID,
           generationId: GENERATION_ID,
           capability: SURVIVING_SIBLING,
-          was: expect.objectContaining({
+          pws: expect.objectContaining({
             baseServerUrl: 'http://localhost/',
             zcapClient: SURVIVING_ZCAP_CLIENT
           })
@@ -1172,7 +1172,7 @@ describe('the annex strike-or-swap stage', () => {
       expect(vi.mocked(clientAnnexLogStore)).toHaveBeenCalledWith(
         expect.objectContaining({
           capability: ACTING_SIBLING,
-          was: expect.objectContaining({ zcapClient: ACTING_ZCAP_CLIENT })
+          pws: expect.objectContaining({ zcapClient: ACTING_ZCAP_CLIENT })
         })
       )
     })

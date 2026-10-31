@@ -77,7 +77,7 @@ export async function resolveWalletInput(
   try {
     return await handleWalletInput<WalletInputOutcome>({
       text,
-      recognizers: { isWasLink: isPwsLinkPayload, isConnectCode },
+      recognizers: { isPwsLink: isPwsLinkPayload, isConnectCode },
       handlers: {
         credentials: async ({ text: raw }) => ({
           kind: 'credentials',

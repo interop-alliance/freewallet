@@ -56,9 +56,9 @@ vi.mock('@interop/wallet-core/clientAnnex', async importOriginal => ({
   })
 }))
 
-vi.mock('@interop/was-client', async importOriginal => ({
-  ...(await importOriginal<typeof import('@interop/was-client')>()),
-  WasClient: class {
+vi.mock('@interop/pws-client', async importOriginal => ({
+  ...(await importOriginal<typeof import('@interop/pws-client')>()),
+  PwsClient: class {
     isWasClient = true
   }
 }))

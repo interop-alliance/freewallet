@@ -55,7 +55,7 @@ import {
   type Resource,
   type ServiceDescription,
   type SpaceMetadata
-} from '@interop/was-client'
+} from '@interop/pws-client'
 import {
   acquireDescriptor,
   acquireDescriptors,
@@ -68,8 +68,8 @@ import {
   type EncryptionDescriptorSource,
   type EncryptionDescriptorStore,
   type RecipientPublicKey
-} from '@interop/was-client/edv'
-import { rootCapabilityId } from '@interop/was-client/paths'
+} from '@interop/pws-client/edv'
+import { rootCapabilityId } from '@interop/pws-client/paths'
 import {
   accountCollectionStores,
   ensureIndexedFirstEpoch,
@@ -82,7 +82,7 @@ import {
   sessionCollectionStores
 } from '@/session/collectionLogStore'
 import type { ControllerProfile, SessionCore, User } from '@/types/auth'
-import { cidFrom, contentCid, isIntegrityError } from '@interop/was-client/sync'
+import { cidFrom, contentCid, isIntegrityError } from '@interop/pws-client/sync'
 import { equalBytes } from '@noble/ciphers/utils.js'
 import { classifyDecryptFailure } from '@/lib/decryptFailure'
 import { refreshingCollectionCipher } from '@/stores/refreshingCollectionCipher'
@@ -103,7 +103,7 @@ import {
   readConnections,
   removeGrants,
   retireConnection,
-  wasConnectionsStore,
+  pwsConnectionsStore,
   type ConnectionEntry,
   type ConnectionGrant,
   type ConnectionIdKey,
@@ -167,9 +167,9 @@ import {
   ownerRecipient,
   type DocCipher,
   type EdvDocCipher
-} from '@interop/was-client/edv'
+} from '@interop/pws-client/edv'
 import type { StorageCollection, StorageResource } from '@/lib/storage'
-import type { Json, SyncedDoc } from '@interop/was-sync'
+import type { Json, SyncedDoc } from '@interop/pws-sync'
 import type { SpaceQuotaReport } from '@/types/storageQuota'
 import type { FetchedCollectionResource } from '@/lib/storageResource'
 import type { StoredAppKey, StoredCredential } from '@/types/credential'
@@ -1388,13 +1388,13 @@ export class StorageManager {
    * the sync controller to drive background replication against remote Collection
    * replicas (it signs with the same session key).
    */
-  get wasClient(): WASRemoteStore['was'] | undefined {
-    return this.#remoteStore?.was
+  get pwsClient(): WASRemoteStore['pws'] | undefined {
+    return this.#remoteStore?.pws
   }
 
   /**
    * The remote Space URL, or undefined when there is no remote backend. Zcap
-   * grant resolution forms every target from it through was-client's path
+   * grant resolution forms every target from it through pws-client's path
    * builders.
    */
   get spaceUrl(): string | undefined {
@@ -2291,7 +2291,7 @@ export class StorageManager {
     const remote = this.#remoteStore
     if (remote) {
       const { keyAgreementKey, keyResolver } = this.#vaultKeys
-      return wasConnectionsStore({
+      return pwsConnectionsStore({
         collection: remote.keyedCollectionHandle({
           collectionId: CONNECTIONS_COLLECTION,
           encryption: descriptor,
@@ -2739,7 +2739,7 @@ export class StorageManager {
    * it binds to its own seed: app keys are wallet-minted, never imported, and
    * the mint path has its own store method ({@link addMintedAppKey}). The
    * background sync pull
-   * (the driver in `@interop/was-sync`) stores pulled Resources as resource
+   * (the driver in `@interop/pws-sync`) stores pulled Resources as resource
    * replicas in the local replica without
    * passing through here, deliberately: it replicates the account's own
    * remote collections, which only the account's enrolled wallet clients can
@@ -4084,7 +4084,7 @@ export class StorageManager {
 
     if (remote.controller === did) {
       // Already bound to the promoted controller (the pointer path): one
-      // describe confirms the server agrees; a null answer (was-client maps
+      // describe confirms the server agrees; a null answer (pws-client maps
       // 404 -- the shape unauthorized reads take -- to null) means the
       // promotion PUT never landed, and the promotion is retried signed by
       // the stored did:key controller. A THROWN describe (a 5xx, a network
@@ -4116,7 +4116,7 @@ export class StorageManager {
         // unauthorized answer is masked as the same 404 an absent
         // description returns, so the truthful read is the one `configure`
         // makes under the did:key client. And a read carrying no `ETag` is
-        // no compare-and-swap baseline at all -- was-client refuses such a
+        // no compare-and-swap baseline at all -- pws-client refuses such a
         // write rather than sending it unconditionally -- so it is dropped
         // for the same reason, leaving `configure` its own read.
         const current =
@@ -4283,7 +4283,7 @@ export class StorageManager {
             })) ?? undefined)
         try {
           const result = await ensureAccountGenesis({
-            was: remoteStore.was,
+            pws: remoteStore.pws,
             baseServerUrl: remoteStore.baseServerUrl,
             spaceId: remoteStore.spaceId,
             keyAgent,
@@ -5012,7 +5012,7 @@ export class StorageManager {
    * `revokeRecordedGrant`, whose policy each POST follows: the one local skip
    * is a capability expired beyond the revocation clock-skew margin;
    * everything else is POSTed, whatever the verified document says about its
-   * signer; was-client's `AlreadyRevokedError` is a confirmed revocation; a
+   * signer; pws-client's `AlreadyRevokedError` is a confirmed revocation; a
    * plain `ValidationError` is read against the document and counts as
    * skipped when the client can say why the chain no longer verifies
    * (expired, an orphaned account-signed grant, a parent delegation whose
@@ -5099,7 +5099,7 @@ export class StorageManager {
    * The key-rotation half of revoking a party's access (an app, an agent, or
    * a wallet client whose entry carries grants): for each encrypted
    * collection the party may still be a recipient of, removes its recipient
-   * entry from the current epoch in ONE was-client `removeRecipient` call
+   * entry from the current epoch in ONE pws-client `removeRecipient` call
    * (which rotates the epoch FIRST, then runs the pull axis -- indivisible),
    * so a revoked party cannot decrypt future writes. The collection gains one
    * epoch and its pull-axis zcaps are revoked once. The owner (the vault KAK)
@@ -5124,7 +5124,7 @@ export class StorageManager {
    * revoke.
    *
    * The pull axis POSTs each capability under the grant stage's own policy
-   * ({@link #postRevocations}), in place of was-client's default revoke, which
+   * ({@link #postRevocations}), in place of pws-client's default revoke, which
    * reads every `ValidationError` as already revoked. `revokedIds` names only
    * the capabilities that policy confirmed revoked, so the grant stage does
    * not POST them again. A capability it skipped (a dead chain) or could not
@@ -5723,9 +5723,9 @@ export class StorageManager {
 
   /**
    * Rotates one collection's current key epoch off a recipient through
-   * was-client's `removeRecipient`, with the pull axis POSTing each recorded
+   * pws-client's `removeRecipient`, with the pull axis POSTing each recorded
    * capability under {@link #postRevocations}'s policy in place of
-   * was-client's default revoke, which reads every `ValidationError` as
+   * pws-client's default revoke, which reads every `ValidationError` as
    * already revoked. The shared step of an unshare and of a party's
    * recipient revocation, so both pull under one policy.
    *
@@ -5837,7 +5837,7 @@ export class StorageManager {
 
   /**
    * The `resolveRecipientKey` a rotation of one collection hands
-   * was-client's `removeRecipient`. It vouches only for the recipients this
+   * pws-client's `removeRecipient`. It vouches only for the recipients this
    * wallet admitted to the collection, and resolves `null` for any other kid
    * the roster lists, so a junk entry receives no wrap of the fresh epoch
    * key. The admitted set is the owner (this session's vault KAK) and the
@@ -6379,7 +6379,7 @@ export class StorageManager {
 
   /**
    * Stops sharing one of the wallet's encrypted collections with a reader,
-   * doing BOTH halves of an un-share indivisibly via was-client's
+   * doing BOTH halves of an un-share indivisibly via pws-client's
    * `removeRecipient`: it rotates the epoch to the remaining current-epoch
    * roster (the read axis; prospective) THEN revokes the recorded zcap(s) (the
    * pull axis; immediate). freewallet never exposes a rotate-only or
@@ -6948,7 +6948,7 @@ export class StorageManager {
    * Every one reports an {@link ImportOutcome} rather than throwing, so the
    * migration carries on past a Resource it could not write. The one exception
    * is the migration-stopping error (`MIGRATION_STOPPING_ERROR_NAME`,
-   * was-client's 507), which is a wall rather than a per-Resource failure and
+   * pws-client's 507), which is a wall rather than a per-Resource failure and
    * is rethrown so the migration stops.
    *
    * The merge rule is "skip existing, by content identity", so a re-run of the
@@ -7397,7 +7397,7 @@ export class StorageManager {
 
   /**
    * The plaintext half of {@link ensureImportedAppCollection}'s ensure:
-   * was-client's guarded create, always private. The world-read grant is the
+   * pws-client's guarded create, always private. The world-read grant is the
    * caller's to set, and only on a collection this run made.
    *
    * @param options {object}
@@ -7435,7 +7435,7 @@ export class StorageManager {
   /**
    * The encrypted half of {@link ensureImportedAppCollection}'s ensure: the
    * bare guarded create of a log-governed collection. A rival that won the
-   * create with a client-written `encryption` descriptor makes was-client
+   * create with a client-written `encryption` descriptor makes pws-client
    * refuse with its `ValidationError`, which is reported as the mismatch it
    * is.
    *

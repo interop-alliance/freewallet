@@ -67,7 +67,7 @@ import {
 } from '@interop/wallet-core/connections'
 import { delegationProofKeyId } from '@interop/wallet-core/webvh'
 import type { IZcap } from '@interop/data-integrity-core'
-import type { CollectionGenerator } from '@interop/was-client'
+import type { CollectionGenerator } from '@interop/pws-client'
 import { appGeneratorIds } from '@/lib/collectionAttribution'
 import { EXTERNAL_REQUEST_ORIGIN } from '@/lib/walletRequest/externalRequest'
 

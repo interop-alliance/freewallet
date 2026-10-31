@@ -56,7 +56,7 @@ vi.mock('@/stores/wasRemoteStore', () => ({
         wasState.beforePut = undefined
         await hook()
       }
-      const { PreconditionFailedError } = await import('@interop/was-client')
+      const { PreconditionFailedError } = await import('@interop/pws-client')
       const exists = wasState.records.has(spaceUrl)
       const version = wasState.versions.get(spaceUrl) ?? 0
       if (ifNoneMatch && exists) {

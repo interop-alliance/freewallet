@@ -10,7 +10,7 @@
  */
 import { describe, expect, it, vi } from 'vitest'
 import type { UserKey } from '@interop/wallet-core/keys'
-import type { CollectionEncryption } from '@interop/was-client'
+import type { CollectionEncryption } from '@interop/pws-client'
 import type { Session } from '@/types/auth'
 
 vi.mock('@/app.config', async importOriginal => ({

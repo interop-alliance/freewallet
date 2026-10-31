@@ -7,7 +7,7 @@
  * namespaced logger through this module's re-exported {@link createLogger},
  * so importing it anywhere -- the app shell and the CHAPI popup pages
  * alike, which sit outside the shell -- runs the bootstrap wiring exactly
- * once: the `setLogger` of wallet-core, wallet-request, and was-sync, and in
+ * once: the `setLogger` of wallet-core, wallet-request, and pws-sync, and in
  * dev builds the NDJSON dev sink plus the ring buffer behind the
  * `window.__fwLog` devtools handle, and the e2e page-tag marker on a page a
  * test tagged.
@@ -28,7 +28,7 @@ import {
 import type { Logger } from '@interop/logger'
 import { setLogger, stageNotifier } from '@interop/wallet-core'
 import { setLogger as setRequestLogger } from '@interop/wallet-request'
-import { setLogger as setSyncLogger } from '@interop/was-sync'
+import { setLogger as setSyncLogger } from '@interop/pws-sync'
 import type { CeremonyId, StageNotifier } from '@interop/wallet-core'
 import { E2E_LOG_TAG_GLOBAL, E2E_LOG_TAG_MSG } from '@/lib/e2eLogTag'
 

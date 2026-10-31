@@ -9,7 +9,7 @@
 import { base64urlnopad } from '@scure/base'
 import type { IKeyAgreementKey, IZcap } from '@interop/data-integrity-core'
 import type { ZcapClient } from '@interop/ezcap'
-import { httpStatus } from '@interop/was-client'
+import { httpStatus } from '@interop/pws-client'
 import type { DIDLog } from '@interop/did-method-webvh'
 import {
   clientKeyAgreementController,
@@ -41,7 +41,7 @@ import type {
   CeremonyEmitter,
   CeremonyOutcome
 } from '@interop/wallet-core'
-import { parseSpaceTarget, spaceUrlById } from '@interop/was-client/paths'
+import { parseSpaceTarget, spaceUrlById } from '@interop/pws-client/paths'
 import { DATE_FMT, PASSKEY_KDF, WAS_BASE_SERVER_URL } from '@/app.config'
 import { assertPasskeyPrf, registerPasskey } from '@/lib/passkey'
 import { establishStandingUnlock } from '@/session/standingUnlock'
@@ -130,7 +130,7 @@ import {
 import { findLoginCredential, loginHandleOf } from '@/lib/loginCredential'
 import type { Session } from '@/types/auth'
 import { createLogger } from '@/lib/log'
-import { wasClientAt, wasServiceDescription } from '@/lib/wasService'
+import { pwsClientAt, wasServiceDescription } from '@/lib/wasService'
 
 const log = createLogger('fw:session:settings')
 
@@ -1799,7 +1799,7 @@ async function probeSpace({
   spaceId: string
   capability?: IZcap
 }): Promise<'present' | 'absent'> {
-  // Status-exact deliberately, rather than was-client's `Space.describe()`:
+  // Status-exact deliberately, rather than pws-client's `Space.describe()`:
   // that read resolves `null` for a 404 AND for a 2xx whose body did not
   // parse (`dataOrNull`), so a live Space could be recorded absent, and an
   // absence recorded here is what lets a later 404 grade as a deletion. Only
@@ -2579,7 +2579,7 @@ async function runAccountDeletion({
           capability
         }))
       } else {
-        ;({ outcome } = await wasClientAt({
+        ;({ outcome } = await pwsClientAt({
           baseServerUrl: WAS_BASE_SERVER_URL as string,
           zcapClient: profile.zcapClient,
           serviceDescription: await wasServiceDescription()
@@ -2856,7 +2856,7 @@ async function runAccountDeletion({
       // is retried -- a 404 is an answer, and the 404 rule grades it.
       for (let attempt = 0; attempt < 2 && outcome === undefined; attempt++) {
         try {
-          ;({ outcome } = await wasClientAt({
+          ;({ outcome } = await pwsClientAt({
             baseServerUrl: WAS_BASE_SERVER_URL as string,
             zcapClient,
             serviceDescription: await wasServiceDescription()

@@ -154,7 +154,7 @@ is replaced or the page unmounts, so the handle does not outlive the session.
 That backend serves credential, history, and public-link reads and writes
 straight over the remote WAS collections, with the same per-collection
 ciphers the local store uses, so the envelope, id, and key-epoch logic lives
-once. A listing is was-client's `Collection.documents()`, the snapshot walk
+once. A listing is pws-client's `Collection.documents()`, the snapshot walk
 over the `changes` feed, one request per page; the feed's tombstones drop
 out and a resource rewritten mid-walk keeps its latest state. A write
 reproduces verbatim what background replication would have pushed: the raw

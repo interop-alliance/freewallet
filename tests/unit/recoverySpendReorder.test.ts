@@ -30,7 +30,7 @@
  * identities, and the stored records are real.
  */
 import { beforeEach, describe, expect, it, vi } from 'vitest'
-import { resourceUrl, spaceUrlById } from '@interop/was-client/paths'
+import { resourceUrl, spaceUrlById } from '@interop/pws-client/paths'
 
 import { memoryResourceLogPinStore } from '@interop/vh-resource-log'
 import { addSink, captureSink } from '@interop/logger'
@@ -384,7 +384,7 @@ async function docPublishingCommitment({
  * @returns {Promise<string>}
  */
 async function keyAgreementMultibase(seedByte: number): Promise<string> {
-  const { agentsFromSeed } = await import('@interop/was-client/identity')
+  const { agentsFromSeed } = await import('@interop/pws-client/identity')
   const { keyAgreementKey } = await agentsFromSeed({
     seed: new Uint8Array(32).fill(seedByte)
   })

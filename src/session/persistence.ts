@@ -21,8 +21,8 @@
  * transparent in-memory storage fork.
  */
 import type { IZcap } from '@interop/data-integrity-core'
-import type { CollectionEncryption } from '@interop/was-client'
-import type { EncryptionDescriptorCache } from '@interop/was-client/edv'
+import type { CollectionEncryption } from '@interop/pws-client'
+import type { EncryptionDescriptorCache } from '@interop/pws-client/edv'
 import type {
   WriterFirstSeenRecord,
   WriterFirstSeenStore

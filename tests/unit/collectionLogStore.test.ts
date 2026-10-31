@@ -35,7 +35,7 @@ vi.mock('@interop/wallet-core/resourceLog', async importOriginal => ({
   webvhResourceLogController: vi.fn(options => ({ controllerFor: options }))
 }))
 
-import type { Collection } from '@interop/was-client'
+import type { Collection } from '@interop/pws-client'
 import {
   collectionDescriptorStores,
   userKeyRosterLogSigner

@@ -72,8 +72,8 @@
  * Space.
  */
 import type { ZcapClient } from '@interop/ezcap'
-import { PreconditionFailedError } from '@interop/was-client'
-import { canonicalSpaceUrl, spaceUrlById } from '@interop/was-client/paths'
+import { PreconditionFailedError } from '@interop/pws-client'
+import { canonicalSpaceUrl, spaceUrlById } from '@interop/pws-client/paths'
 import type { IKeyAgreementKey, IZcap } from '@interop/data-integrity-core'
 import {
   KEYRING_CACHE_TTL_MS,
@@ -381,7 +381,7 @@ export async function delegateUnlockManagement({
   controller: string
   allowedActions?: string[]
 }): Promise<IZcap> {
-  // Built with was-client's path helpers rather than by hand: a sub-path
+  // Built with pws-client's path helpers rather than by hand: a sub-path
   // deployment (a server URL like `https://host/was/`) keeps its base path,
   // so the target matches byte for byte what the DELETE and the GET address.
   const invocationTarget = spaceUrlById({

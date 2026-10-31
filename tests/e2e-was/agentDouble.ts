@@ -25,11 +25,11 @@ import { DataIntegrityProof } from '@interop/data-integrity-proof'
 import { eddsaRdfc2022 } from '@interop/ed25519-signature/eddsa-rdfc-2022'
 import {
   httpStatus,
-  WasClient,
+  PwsClient,
   type Collection,
   type IZcap as WasZcap,
   type JsonObject
-} from '@interop/was-client'
+} from '@interop/pws-client'
 import {
   composeCapabilityRequest,
   createEphemeralExchange,
@@ -39,7 +39,7 @@ import {
   type IVPRDetails,
   type IZcap
 } from '@interop/wallet-request'
-import { spaceIdOfUrl } from '@interop/was-client/paths'
+import { spaceIdOfUrl } from '@interop/pws-client/paths'
 import { INBOX_DESCRIPTOR_TYPE } from '@/lib/walletRequest/connectionRequest'
 
 export const WAS_URL = 'http://localhost:3002'
@@ -149,7 +149,7 @@ export class AgentDouble {
       seed: crypto.getRandomValues(new Uint8Array(32)),
       handle: 'agent-double-connection'
     })
-    const was = WasClient.fromSigner({
+    const was = PwsClient.fromSigner({
       baseServerUrl: WAS_URL,
       signer: controllerKey.getSigner()
     })
@@ -174,13 +174,13 @@ export class AgentDouble {
   }
 
   /**
-   * A was-client signing as the connection key, the controller of every
+   * A pws-client signing as the connection key, the controller of every
    * grant the owner delegates to the double.
    *
-   * @returns {WasClient}
+   * @returns {PwsClient}
    */
-  agentClient(): WasClient {
-    return WasClient.fromSigner({
+  agentClient(): PwsClient {
+    return PwsClient.fromSigner({
       baseServerUrl: WAS_URL,
       signer: this.connectionKey.getSigner()
     })

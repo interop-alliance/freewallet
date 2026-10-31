@@ -13,8 +13,8 @@ import type {
   ContactHeadPayload,
   ContactRevisionPayload
 } from '@interop/social-core'
-import type { DocCipher } from '@interop/was-client/edv'
-import type { Json } from '@interop/was-sync'
+import type { DocCipher } from '@interop/pws-client/edv'
+import type { Json } from '@interop/pws-sync'
 import { RemoteDirectStore } from './remoteDirectStore'
 import type { WalletActivity } from './storageManager'
 import type { WASRemoteStore } from './wasRemoteStore'

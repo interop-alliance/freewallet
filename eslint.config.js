@@ -64,7 +64,7 @@ export default defineConfig([
     }
   },
   {
-    // `@interop/was-sync/testing` is test fixtures: its fake WAS server accepts
+    // `@interop/pws-sync/testing` is test fixtures: its fake WAS server accepts
     // every write and serves a plausible changes feed, so a production import
     // would show a healthy sync status over a replica writing nothing to WAS.
     // `@interop/wallet-core/testing` is the recorded-grant and signer-check
@@ -78,7 +78,7 @@ export default defineConfig([
         {
           patterns: [
             {
-              group: ['@interop/was-sync/testing', '@interop/wallet-core/testing'],
+              group: ['@interop/pws-sync/testing', '@interop/wallet-core/testing'],
               message:
                 'Test fixtures only. Import it from a test file, never from ' +
                 'application code.'

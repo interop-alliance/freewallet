@@ -15,8 +15,8 @@ import { X25519KeyAgreementKey2020 } from '@interop/x25519-key-agreement-key'
 import {
   createEdvDocCipher,
   type EncryptionDescriptorSource
-} from '@interop/was-client/edv'
-import { isUnknownEpochError } from '@interop/was-client/sync'
+} from '@interop/pws-client/edv'
+import { isUnknownEpochError } from '@interop/pws-client/sync'
 import { mintRecordEncryption } from '@interop/wallet-core/keyring'
 import { refreshingCollectionCipher } from './refreshingCollectionCipher'
 

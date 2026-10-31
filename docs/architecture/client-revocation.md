@@ -306,7 +306,7 @@ the app key kept and the entry unretired; the rotation is idempotent and
 the landed revocations answer `AlreadyRevokedError`, so the retry converges
 once the refused POST succeeds, and the Revoke it records counts them. The
 rotation's pull axis runs this same per-grant policy, in place of
-was-client's default revoke, which reads every `ValidationError` as already
+pws-client's default revoke, which reads every `ValidationError` as already
 revoked. The grant stage skips only the grants the pull confirmed revoked. The check is best-effort, so
 with no verified document this session the page lists without the marker
 rather than failing, and the revocation skips on expiry alone. Agent rows

@@ -15,7 +15,7 @@
  */
 import { useMemo } from 'react'
 import type { ReadConnection } from '@interop/wallet-core/connections'
-import type { CollectionGenerator } from '@interop/was-client'
+import type { CollectionGenerator } from '@interop/pws-client'
 import {
   appGeneratorIds,
   recordedCreatorOf,

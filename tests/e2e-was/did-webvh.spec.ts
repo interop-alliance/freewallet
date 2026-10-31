@@ -47,7 +47,7 @@ type E2EStorage = {
     tarFile: File
   }): Promise<{ collectionsCreated: number; resourcesCreated: number }>
   spaceId?: string
-  wasClient?: {
+  pwsClient?: {
     space(spaceId: string): {
       collection(collectionId: string): { delete(): Promise<void> }
     }
@@ -328,7 +328,7 @@ test('a Space export carries did.jsonl byte-exact and world-readable, and its im
     const storage = (window as unknown as { __E2E_STORAGE__: E2EStorage })
       .__E2E_STORAGE__
     await storage
-      .wasClient!.space(storage.spaceId!)
+      .pwsClient!.space(storage.spaceId!)
       .collection('key-map')
       .delete()
   })

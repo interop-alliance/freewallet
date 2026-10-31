@@ -10,7 +10,7 @@
  * in-memory descriptor stores (each collection's governing log, with real
  * create-if-absent semantics), the stored `/meta` values, and the raw
  * resource bodies per collection. Its index declaration seals the schema
- * with was-client's own EDV codec, so the collection's cipher really installs
+ * with pws-client's own EDV codec, so the collection's cipher really installs
  * it, and the ciphers are real EDV codecs over freshly generated X25519 keys.
  *
  * @vitest-environment node
@@ -27,15 +27,15 @@ import {
   type IDelegatedZcap,
   type IndexSchema,
   type ResourceMetadataCustom
-} from '@interop/was-client'
+} from '@interop/pws-client'
 import {
   createEdvDocCipher,
   createEdvEncryption,
   edvIdFromBytes,
   ownerRecipient,
   removeRecipient
-} from '@interop/was-client/edv'
-import type { Json } from '@interop/was-sync'
+} from '@interop/pws-client/edv'
+import type { Json } from '@interop/pws-sync'
 import {
   descriptorLogsFrom,
   memoryDescriptorStores,
@@ -129,7 +129,7 @@ async function sealSchema({
 function makeFakeRemote(stores: MemoryDescriptorStores) {
   // A bytes Resource of an encrypted collection is written by a real
   // WASRemoteStore over an in-memory WAS server, so its envelope, its chunks,
-  // the 412 read-back, and a pending stub are was-client's own. The small
+  // the 412 read-back, and a pending stub are pws-client's own. The small
   // blob limit sends anything over 16 bytes down the chunked path.
   const server = memoryWasServer()
   const bytesStore = new WASRemoteStore({
@@ -140,7 +140,7 @@ function makeFakeRemote(stores: MemoryDescriptorStores) {
     spaceId: 's-space',
     controller: 'did:key:test'
   })
-  bytesStore.was = server.client({ maxBlobBytes: 16, chunkSize: 24 })
+  bytesStore.pws = server.client({ maxBlobBytes: 16, chunkSize: 24 })
   const plaintext = new Set<string>()
   // Collections created bare by a governed ensure, before their log genesis.
   const bare = new Set<string>()
@@ -276,7 +276,7 @@ function makeFakeRemote(stores: MemoryDescriptorStores) {
     }) {
       ensured.push(options)
       await runRival()
-      // was-client's ensure: a standing collection is left as it is, but
+      // pws-client's ensure: a standing collection is left as it is, but
       // gets the world-read grant when `isPublic` is asked for.
       const created = !stands(options.id)
       if (created) {

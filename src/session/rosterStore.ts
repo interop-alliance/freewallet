@@ -31,7 +31,7 @@
  * inside the verified-log memo. A bare-parts caller inside a ceremony that
  * already stands on a head hands it over instead, and makes no read at all.
  */
-import type { ServiceDescription } from '@interop/was-client'
+import type { ServiceDescription } from '@interop/pws-client'
 import type { DIDLog } from '@interop/did-method-webvh'
 import type { IZcap } from '@interop/data-integrity-core'
 import type { ZcapClient } from '@interop/ezcap'

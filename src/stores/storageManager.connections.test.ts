@@ -22,7 +22,7 @@
  * - A guest or no-WAS session keeps its directory locally, its ids derived
  *   under the locally minted blinded-index key.
  *
- * The remote side is a real `WASRemoteStore` over a real `WasClient`, served
+ * The remote side is a real `WASRemoteStore` over a real `PwsClient`, served
  * by the in-memory WAS server, with real EDV ciphers over generated keys.
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
@@ -33,7 +33,7 @@ import type {
   CollectionEncryption,
   CollectionGenerator,
   IZcap
-} from '@interop/was-client'
+} from '@interop/pws-client'
 import {
   addRecipient,
   createEdvDocCipher,
@@ -42,14 +42,14 @@ import {
   removeRecipient,
   replaceRecipient,
   resolveHmacKey
-} from '@interop/was-client/edv'
+} from '@interop/pws-client/edv'
 import { ensureIndexedFirstEpoch } from '@interop/wallet-core/keys'
 import {
   connectionResourceId,
   readConnections,
   recordGrants
 } from '@interop/wallet-core/connections'
-import type { Json } from '@interop/was-sync'
+import type { Json } from '@interop/pws-sync'
 import { classifyDecryptFailure } from '@/lib/decryptFailure'
 import {
   browserLocalSessionPersistence,
@@ -147,7 +147,7 @@ function remoteSession({
     controller: 'did:key:z6MkTestController',
     ...(capability ? { capability } : {})
   })
-  remoteStore.was = server.client({ maxBlobBytes: 1 << 20, chunkSize: 1 << 18 })
+  remoteStore.pws = server.client({ maxBlobBytes: 1 << 20, chunkSize: 1 << 18 })
   vi.spyOn(remoteStore, 'collectionMetadata').mockImplementation(
     async ({ collectionId }) => ({
       encryption: stores.descriptorOf(collectionId),

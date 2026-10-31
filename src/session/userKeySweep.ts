@@ -11,7 +11,7 @@
  * server-held state alone, so a cascade another client crashed partway is
  * completed here and a healthy account writes nothing.
  */
-import type { CollectionEncryption } from '@interop/was-client'
+import type { CollectionEncryption } from '@interop/pws-client'
 import type { IKeyAgreementKey } from '@interop/data-integrity-core'
 import { convergeUserKeyRosterToAccount } from '@interop/wallet-core/clients'
 import type {

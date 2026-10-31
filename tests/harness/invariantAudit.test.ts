@@ -6,11 +6,7 @@
  * - The healthy shapes: a fresh credential-anchored signup, a transient
  *   visit on it, and each account-builder shape (passphrase, passkey,
  *   recovery code, enrolled client), each audited from the stored state
- *   alone and again with a live actor as the key holder. Two shapes are not
- *   clean as built: a passkey add and a recovery-code issuance, run as
- *   ladder-kind ceremonies, leave the did:web projection behind the log
- *   until the next transient visit refreshes it, so their first audit
- *   allows exactly that id and the audit after the visit is clean.
+ *   alone and again with a live actor as the key holder.
  * - The shared builder's server-state shapes, which have no registry and no
  *   unlock record a login finds, audited from the stored state alone. They
  *   stand violated by construction on what that builder skips (see the
@@ -168,49 +164,39 @@ describe('the invariant auditor', () => {
     const enrolledAccount = await buildEnrolledClientAccount({ harness })
     // A passkey add and a recovery-code issuance run from the signup's
     // transient session, as ladder-kind ceremonies. Each appends an
-    // inventory-changing entry and leaves the did:web projection behind it;
-    // the projection's mender is the next transient visit's refresh, which
-    // the audit after that visit sees done.
-    const projectionBehind: InvariantId[] = [
-      'did-web-projection-matches-the-log'
-    ]
+    // inventory-changing entry and writes the did:web projection through the
+    // ceremony's projection store, so the projection stands in step.
     const shapes: Array<{
       shape: string
       spaceId: string
       credential: { passphrase: string } | { passkey: TestPasskey }
       profile?: EnrolledClientAccount['enrolledProfile']
-      built: InvariantId[]
     }> = [
       {
         shape: 'passphrase',
         spaceId: passphraseAccount.spaceId,
-        credential: { passphrase: passphraseAccount.passphrase },
-        built: []
+        credential: { passphrase: passphraseAccount.passphrase }
       },
       {
         shape: 'passkey',
         spaceId: passkeyAccount.spaceId,
-        credential: { passkey: passkeyAccount.passkey },
-        built: projectionBehind
+        credential: { passkey: passkeyAccount.passkey }
       },
       {
         shape: 'recovery code',
         spaceId: recoveryAccount.spaceId,
-        credential: { passphrase: recoveryAccount.passphrase },
-        built: projectionBehind
+        credential: { passphrase: recoveryAccount.passphrase }
       },
       {
         shape: 'enrolled client',
         spaceId: enrolledAccount.spaceId,
         credential: { passphrase: enrolledAccount.passphrase },
-        profile: enrolledAccount.enrolledProfile,
-        built: []
+        profile: enrolledAccount.enrolledProfile
       }
     ]
-    for (const { shape, spaceId, credential, profile, built } of shapes) {
+    for (const { shape, spaceId, credential, profile } of shapes) {
       expectInvariantsHold({
-        audit: await auditInvariants({ dataDir: harness.dataDir, spaceId }),
-        allow: built
+        audit: await auditInvariants({ dataDir: harness.dataDir, spaceId })
       })
       const actor = await harness.logIn({ ...credential, profile, name: shape })
       expect((await actor.settled()).failures, shape).toEqual([])

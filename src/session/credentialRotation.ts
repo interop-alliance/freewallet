@@ -704,7 +704,7 @@ async function retireClientAnnexInventoryStage({
       )
       return { action: 'skipped', reason: 'no-ladder-seed' }
     }
-    const { was } = reach
+    const { pws } = reach
 
     if (retiredLadderSeed !== undefined && survivingLadderSeed !== undefined) {
       try {
@@ -747,7 +747,7 @@ async function retireClientAnnexInventoryStage({
     const replicaServerDids = await restatedReplicaServers({ session })
     const { revoke, replicaPointersDropped, replicaPointersMissing } =
       await swapClientAnnexGeneration({
-        was,
+        pws,
         baseServerUrl,
         accountSpaceId,
         account: {

@@ -16,7 +16,7 @@ import { vi } from 'vitest'
 import type { IZcap } from '@interop/data-integrity-core'
 import { DataIntegrityProof } from '@interop/data-integrity-proof'
 import { createSignCryptosuite } from '@interop/ed25519-signature/eddsa-jcs-2022'
-import { agentsFromSeed } from '@interop/was-client/identity'
+import { agentsFromSeed } from '@interop/pws-client/identity'
 import type { AccountSignerCheck } from '@interop/wallet-core/clientAnnex'
 import {
   clearReceivedGrants,

@@ -142,7 +142,7 @@ describe('the gap allowlist', () => {
       derived
         .filter(gap => gap.kind === 'none')
         .map(gap => rowOf(gap.invariant))
-    ).toEqual([26, 28, 29, 31, 32, 34, 36, 40])
+    ).toEqual([26, 28, 29, 31, 32, 34, 36, 40, 41, 42, 43])
     // Row 2 moved out of `none` when the transient chain's collection
     // fan-out began reporting its collection half.
     // Rows 11 and 27 moved out of `none` when stage B gave each an
@@ -156,6 +156,8 @@ describe('the gap allowlist', () => {
     // `unreachable` when the ceremony-tail trigger became site-backed: the
     // remembered sweep is the one site reporting either. Row 40 entered `none`
     // with its declaration: nothing rotates the pairwise seed until FW-647.
+    // Rows 41 to 43 entered `none` with their declarations: the replica
+    // pass that converges them is not built.
     // Row 30 left `none` when the dead-pointer prompt's accept began
     // reporting it from the login-routing site; its declared rows stay,
     // each scoped to a torn state the prompt does not reach. Row 27 left

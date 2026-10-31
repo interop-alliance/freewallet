@@ -32,7 +32,7 @@
 import type { IZcap } from '@interop/data-integrity-core'
 import type { ZcapClient } from '@interop/ezcap'
 import { userKeyVaultKeys, type UserKey } from '@interop/wallet-core/keys'
-import type { CollectionEncryption } from '@interop/was-client'
+import type { CollectionEncryption } from '@interop/pws-client'
 import { WAS_BASE_SERVER_URL } from '@/app.config'
 import type { Session } from '@/types/auth'
 import { rewrapUnlockMethodsRecord } from '@/session/unlockMethods'

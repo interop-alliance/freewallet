@@ -26,7 +26,7 @@
  */
 import { afterEach, describe, expect, it } from 'vitest'
 import type { IVerifiableCredential } from '@interop/data-integrity-core'
-import type { Json } from '@interop/was-sync'
+import type { Json } from '@interop/pws-sync'
 import { CapabilityAgent } from '@interop/capability-agent'
 import {
   AppKeyMintInvariantError,
@@ -304,7 +304,7 @@ describe('StorageManager app-key collection surface', () => {
     })
     // The listing reports the skipped replica by count alone. A body that
     // will not parse as a JWE is structural garbage (`undecryptable`), not an
-    // integrity failure: was-client relabels nothing but an AEAD miss.
+    // integrity failure: pws-client relabels nothing but an AEAD miss.
     const { appKeys, skipped } = await storage.listAppKeys()
     expect(appKeys).toEqual([])
     expect(skipped.undecryptable).toBe(1)

@@ -20,7 +20,7 @@
 import type { IKeyAgreementKey } from '@interop/data-integrity-core'
 import type { ZcapClient } from '@interop/ezcap'
 import type { DIDLog } from '@interop/did-method-webvh'
-import { agentsFromSeed } from '@interop/was-client/identity'
+import { agentsFromSeed } from '@interop/pws-client/identity'
 import type { ControllerProfile, Session, User } from '@/types/auth'
 import { KMS_SERVER_URL, PASSKEY_KDF, WAS_BASE_SERVER_URL } from '@/app.config'
 import { ensureKeystore } from '@/lib/kms'
@@ -98,7 +98,7 @@ import {
 import { blockRegistryRead } from '@/session/registryPasses'
 import { primeVerifiedAccountLog } from '@/session/verifiedLog'
 import type { AccountPointer } from '@interop/wallet-core/keyring'
-import type { ServiceDescription } from '@interop/was-client'
+import type { ServiceDescription } from '@interop/pws-client'
 import type {
   KeyringFetchResult,
   PersistableClientKeys,

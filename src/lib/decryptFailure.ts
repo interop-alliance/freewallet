@@ -23,7 +23,7 @@ import {
   isIntegrityError,
   isKeyUnwrapError,
   isUnknownEpochError
-} from '@interop/was-client/sync'
+} from '@interop/pws-client/sync'
 
 /**
  * The bucket an unreadable Resource of an encrypted collection lands in.
@@ -38,7 +38,7 @@ export type DecryptFailure =
 /**
  * Sorts one decrypt failure into its bucket. The verdict is decided by the
  * error's NAME rather than by `instanceof`, since a wallet whose
- * `@interop/was-client` resolves to a second copy throws a class the store
+ * `@interop/pws-client` resolves to a second copy throws a class the store
  * never imported (every predicate is name-based for that reason).
  *
  * The integrity check is asked first, so a body that failed to authenticate or

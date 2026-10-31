@@ -15,13 +15,13 @@ import {
   type RxDatabase
 } from 'rxdb/plugins/core'
 import { getRxStorageMemory } from 'rxdb/plugins/storage-memory'
-import { syncedDocSchema, type SyncedDoc } from '@interop/was-sync'
+import { syncedDocSchema, type SyncedDoc } from '@interop/pws-sync'
 import {
   createEdvDocCipher,
   isEncryptedEnvelope,
   ownerRecipient,
   type EdvDocCipher
-} from '@interop/was-client/edv'
+} from '@interop/pws-client/edv'
 import {
   connectionResourceId,
   readConnections,

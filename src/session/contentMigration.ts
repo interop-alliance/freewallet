@@ -60,7 +60,7 @@ import { awaitCollectionsInSync } from '@/stores/syncStatusStore'
 import type { WalletActivity } from '@/stores/storageManager'
 import type { Session } from '@/types/auth'
 import type { HeldAppResources, HeldContent } from '@/types/migration'
-import type { Json } from '@interop/was-sync'
+import type { Json } from '@interop/pws-sync'
 
 const log = createLogger('fw:session:migration')
 

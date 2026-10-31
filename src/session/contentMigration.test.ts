@@ -3,7 +3,7 @@
  * real bundles, and the run record it writes afterwards. Every bundle here is
  * genuinely encrypted -- a user key roster wrapped to a recovery code's
  * identity, one epoch per collection wrapped to that user key, and real
- * envelopes over was-client's own cipher -- packed by `@interop/space-archive`
+ * envelopes over pws-client's own cipher -- packed by `@interop/space-archive`
  * and `@interop/wallet-backup`'s own writers. The account side is a
  * `StorageManager` over a memory-RxDB `BrowserStore` with real ciphers, so a
  * Resource really round-trips through encrypt and decrypt and no dedupe can be
@@ -19,8 +19,8 @@ import {
   CONTACTS_COLLECTION,
   CONTACTS_HISTORY_COLLECTION
 } from '@interop/social-core'
-import { QuotaExceededError } from '@interop/was-client'
-import type { CollectionEncryption } from '@interop/was-client'
+import { QuotaExceededError } from '@interop/pws-client'
+import type { CollectionEncryption } from '@interop/pws-client'
 import {
   createEdvEncryptOnlyDocCipher,
   mintEpoch,
@@ -28,9 +28,9 @@ import {
   toEpochConfigurationState,
   wrapEpochSecret,
   EDV_SCHEME_VERSION
-} from '@interop/was-client/edv/core'
-import type { RecipientPublicKey } from '@interop/was-client/edv/core'
-import { cidFrom } from '@interop/was-client/sync'
+} from '@interop/pws-client/edv/core'
+import type { RecipientPublicKey } from '@interop/pws-client/edv/core'
+import { cidFrom } from '@interop/pws-client/sync'
 import {
   collectBytes,
   fileNameFor,

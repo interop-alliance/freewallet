@@ -12,7 +12,7 @@
  * check exercises the true did:key.
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { agentsFromSeed } from '@interop/was-client/identity'
+import { agentsFromSeed } from '@interop/pws-client/identity'
 
 // The deployment axis: a WAS server or the local-only build. It decides
 // whether a popup's descriptor cache is a cache at all, so the popup tests
@@ -120,7 +120,7 @@ import {
 import { DeadAccountPointerError } from '@/session/deadAccountPointer'
 import { ensureKeystore } from '@/lib/kms'
 import { mintUserKey } from '@interop/wallet-core/keys'
-import { epochKeyIdFor } from '@interop/was-client/edv'
+import { epochKeyIdFor } from '@interop/pws-client/edv'
 import {
   assertClientStillEnrolled,
   wipeStaleClientResidue

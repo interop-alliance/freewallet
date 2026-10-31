@@ -97,11 +97,11 @@ the Applications page; the other two kinds stay unpurged.
 
 Which bucket a Resource lands in is decided by the error's NAME rather than by
 `instanceof`, through `isIntegrityError`, `isUnknownEpochError`, and
-`isKeyUnwrapError` (`@interop/was-client/sync`, the latter two also on
+`isKeyUnwrapError` (`@interop/pws-client/sync`, the latter two also on
 `/edv`). The integrity check is asked first, and it also catches a key epoch
-entry that names this wallet but fails its key-wrap check, which was-client
+entry that names this wallet but fails its key-wrap check, which pws-client
 raises as `IntegrityError` on the first decrypt under that epoch. The cipher is an
-injected seam, so a second resolved copy of `@interop/was-client` throws a
+injected seam, so a second resolved copy of `@interop/pws-client` throws a
 class the store did not import, and a missed `KeyUnwrapError` would put real
 data in the purgeable bucket. The push handler classifies its `412` the same
 way (`isSyncConflictError`).
@@ -501,7 +501,7 @@ directory rides the session's backend through one store seam
 "Replica-less, capability-bound storage" in session-persistence.md). Every
 write is a read-modify-write
 under `ifMatch` or a create under `ifNoneMatch`, and a lost race surfaces
-as was-client's `PreconditionFailedError`. A write re-reads only its own
+as pws-client's `PreconditionFailedError`. A write re-reads only its own
 entry. A page reads the directory once, and every lookup by DID matches in
 memory, so the host sees no GET at the id a DID derives to.
 
@@ -854,7 +854,7 @@ collection's key-epoch roster. The shares listing reads every encrypted
 standard collection rather than only the shareable ones, so such a reader
 still shows on the collection's "Shared" chip and is removed there. The grantee's
 X25519 key is derived from the `did:key` the request already names as
-`controller` (`x25519RecipientFromDidKey` from `@interop/was-client/edv`),
+`controller` (`x25519RecipientFromDidKey` from `@interop/pws-client/edv`),
 so a request can never pair controller DID A with recipient key B. A
 controller with no Ed25519 twin (a did:web, an X25519 did:key) makes the
 grant unsatisfiable.

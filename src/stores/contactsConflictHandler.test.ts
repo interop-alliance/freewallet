@@ -1,6 +1,6 @@
 /**
  * Unit tests for the `contacts` conflict binding: the decision closure this
- * app hands `@interop/was-sync`'s conflict-handler factory. Two properties are
+ * app hands `@interop/pws-sync`'s conflict-handler factory. Two properties are
  * this app's rather than the package's -- that the collection's cipher is read
  * at resolve time, so the epoch cascade's `setCiphers` swap is honored, and
  * that an unreadable side falls back to the remote master, which is
@@ -10,12 +10,12 @@
 import { describe, expect, it } from 'vitest'
 import { addSink, captureSink } from '@interop/logger'
 import { errorNameOf } from '@interop/wallet-core/menders'
-import { IntegrityError } from '@interop/was-client/sync'
-// The driver logs through was-sync's own seam, which the app's logging module
+import { IntegrityError } from '@interop/pws-client/sync'
+// The driver logs through pws-sync's own seam, which the app's logging module
 // wires to the `sync` namespace on import.
 import '@/lib/log'
-import type { DocCipher } from '@interop/was-client/edv'
-import type { SyncedDoc, WithDeleted } from '@interop/was-sync'
+import type { DocCipher } from '@interop/pws-client/edv'
+import type { SyncedDoc, WithDeleted } from '@interop/pws-sync'
 import { createContactsConflictHandler } from './contactsConflictHandler'
 
 const CONTACT_ID = 'urn:uuid:c0ffee'

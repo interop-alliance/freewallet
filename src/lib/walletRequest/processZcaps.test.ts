@@ -8,7 +8,7 @@ import {
   UNLOCK_METHODS_COLLECTION,
   WALLET_SPACE_PROVISION_ROSTER
 } from '@interop/wallet-core/space'
-import { x25519RecipientFromDidKey } from '@interop/was-client/edv'
+import { x25519RecipientFromDidKey } from '@interop/pws-client/edv'
 import {
   existingCollectionsFrom,
   isSatisfiable,

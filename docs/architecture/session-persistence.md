@@ -462,14 +462,14 @@ that member only when `StorageManager.canProvisionAppCollections` holds (remote
 storage and descriptor logs), so a guest or a no-WAS session leaves app
 collections in the report's not-migrated counts. `ensureImportedAppCollection`
 reads the collection's standing state and checks a standing collection before it
-writes anything. It then runs was-client's guarded ensure, whose `created`
+writes anything. It then runs pws-client's guarded ensure, whose `created`
 report decides whether this run made the collection. The earlier read only feeds
 the checks. A create lost to a rival reads the rival's collection back and
 checks it the same way. An encrypted collection is ensured bare under its
 archived `generator`. It then gets a fresh governing log, whose first epoch is
 owner-only, and a fresh blinded-index key. That is the second half of
 `provisionEncryptedCollection` with no grantee. On a collection the run creates,
-it declares the archived index schema through was-client's add-only
+it declares the archived index schema through pws-client's add-only
 `declareIndexes`. It then builds the collection's cipher from the descriptor and
 the collection metadata as it then stands. A standing collection that predates
 the blinded index has no key to declare under, and its Resources land without
@@ -529,7 +529,7 @@ under a fresh content-derived id. One that decrypted to bytes, a chunked
 Resource or a small binary or text one, arrives as raw bytes under its sealed
 content type. Its identity is its archived resource id.
 `WASRemoteStore.putEncryptedResourceBytes` writes it at that id through
-was-client's `Resource.put` with `ifNoneMatch`, on a handle carrying the
+pws-client's `Resource.put` with `ifNoneMatch`, on a handle carrying the
 verified descriptor and the vault keys as a per-handle encryption override,
 since the store's client holds no keystore. A payload over the codec's blob
 limit is written as a chunked document. A `412` reads the held copy back,

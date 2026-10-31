@@ -48,7 +48,7 @@ import {
   type IZcap,
   type ResourceMetadataCustom,
   type Space
-} from '@interop/was-client'
+} from '@interop/pws-client'
 import { Ed25519VerificationKey } from '@interop/ed25519-verification-key'
 import {
   addRecipient,
@@ -60,7 +60,7 @@ import {
   unwrapEpochSecret,
   x25519RecipientFromDidKey,
   type RecipientPublicKey
-} from '@interop/was-client/edv'
+} from '@interop/pws-client/edv'
 import {
   connectionGrants,
   connectionResourceId,
@@ -93,14 +93,14 @@ import {
 } from '@/session/persistence'
 import { getRxStorageMemory } from 'rxdb/plugins/storage-memory'
 import type { ControllerProfile, User } from '@/types/auth'
-import { cidFrom } from '@interop/was-client/sync'
-import type { Json } from '@interop/was-sync'
+import { cidFrom } from '@interop/pws-client/sync'
+import type { Json } from '@interop/pws-sync'
 import { BrowserStore } from './browserStore'
 import {
   createEdvDocCipher,
   ownerRecipient,
   type DocCipher
-} from '@interop/was-client/edv'
+} from '@interop/pws-client/edv'
 import {
   revokeAgentAccess,
   revokeAppAuthority,
@@ -469,7 +469,7 @@ async function mintCollectionMeta({
     throw new Error(`No codec for collection "${collectionId}".`)
   }
   const { custom } = await codec.encodeMeta({
-    // The same cast was-client's own declareIndex applies: the index schema
+    // The same cast pws-client's own declareIndex applies: the index schema
     // rides inside `custom` beyond the declared `name` / `tags` members.
     custom: { indexSchema: schema } as ResourceMetadataCustom,
     // The collection's own stored metadata, so the envelope is AEAD-bound to
@@ -3531,7 +3531,7 @@ describe('StorageManager.revokeCollectionRecipients (an agent)', () => {
   })
 
   it('counts the rotation, and names nothing, when the server refuses the pull', async () => {
-    // was-client's default pull reads every ValidationError as already
+    // pws-client's default pull reads every ValidationError as already
     // revoked. A refusal the signer check cannot explain may be a live grant,
     // so it is left to the grant stage. The rotation itself landed, so the
     // collection counts as rotated.

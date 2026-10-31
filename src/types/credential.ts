@@ -67,7 +67,7 @@ export interface VerificationStep {
 /**
  * A VC as returned by the storage layer. The `cid` is the credential's
  * content cid (a hash of the canonicalized VC, see `cidFrom` in
- * `@interop/was-client/sync`),
+ * `@interop/pws-client/sync`),
  * which keys the content-addressed local `private-credentials` collection.
  */
 export interface StoredCredential {
