@@ -1,6 +1,6 @@
 # 0016: The DIDAuth holder dispatches on `acceptedMethods`; App Connect is pinned to the client did:key
 
-- Status: accepted
+- Status: accepted (rule 2 superseded by 0052)
 - Date: 2026-09-03
 - Driving work: the FW-344 design gate (retiring the wallet's standalone
   did:web mint, so the holder form stops being a function of what was
@@ -161,3 +161,8 @@ Reopen this decision when one or more of the following holds:
   A refinement: it runs outside the dispatch and answers no DID-Auth
   query. The App Connect pin in rule 2 is unchanged here; moving it to
   the pairwise key is a separate reopening.
+
+- 2026-10-31: Rule 2 is superseded by `decisions/0052`. The App Connect
+  holder is the pairwise did:key toward the app, derived from the app
+  entry's seed, on every session kind; `acceptedMethods` is still unread.
+  Rules 1 and 3 are unchanged.
