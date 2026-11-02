@@ -35,8 +35,6 @@
   },
   "settings": {
     "title": "Settings",
-    "vcSection": "Verifiable Credentials",
-    "moreInfo": "More Info",
     "deleteAccount": "Delete Account",
     "deleteAccountHint": "Your login, keys, and all data will be deleted.",
     "deleteConfirm": "Are you sure you want to delete your account? This action cannot be undone.",
@@ -511,6 +509,8 @@
     "earlierGrants_other": "{{count}} earlier grants"
   },
   "dashboard": {
+    "vcInfoTitle": "Verifiable Credentials",
+    "moreInfo": "More Info",
     "title": "Freewallet Dashboard",
     "addCredential": "Add Credential",
     "credentialsHeading": "Credentials",

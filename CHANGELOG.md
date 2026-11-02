@@ -64,6 +64,11 @@
 
 ### Changed
 
+- The Settings page's "Verifiable Credentials" section is gone. Its More
+  Info button, which opens the VC explainer, now sits beside Sync in the
+  Dashboard's credentials heading row (`dashboard.moreInfo`,
+  `dashboard.vcInfoTitle`; the `settings.vcSection` and
+  `settings.moreInfo` strings are removed).
 - Docs, comments, UI strings, and error messages say Portable Web Spaces
   (PWS) in place of Wallet Attached Storage (WAS). Identifiers such as
   `VITE_WAS_SERVER_URL` are unchanged.

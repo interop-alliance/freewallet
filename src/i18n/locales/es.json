@@ -35,8 +35,6 @@
   },
   "settings": {
     "title": "Ajustes",
-    "vcSection": "Credenciales verificables",
-    "moreInfo": "Más información",
     "deleteAccount": "Eliminar cuenta",
     "deleteAccountHint": "Se eliminarán su acceso, claves y todos los datos.",
     "deleteConfirm": "¿Seguro que desea eliminar su cuenta? Esta acción no se puede deshacer.",
@@ -511,6 +509,8 @@
     "earlierGrants_other": "{{count}} concesiones anteriores"
   },
   "dashboard": {
+    "vcInfoTitle": "Credenciales verificables",
+    "moreInfo": "Más información",
     "title": "Panel de Freewallet",
     "addCredential": "Añadir credencial",
     "credentialsHeading": "Credenciales",

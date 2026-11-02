@@ -18,7 +18,6 @@ import Typography from '@mui/material/Typography'
 import { MdContentCopy, MdEdit } from 'react-icons/md'
 import { useTranslation } from 'react-i18next'
 import { DashboardLayout } from '@/components/DashboardLayout'
-import { useInfoBox } from '@/hooks/useInfoBox'
 import { useCopyToClipboard } from '@/hooks/useCopyToClipboard'
 import { usePrfRetryPrompt } from '@/hooks/usePrfRetryPrompt'
 import { getFileUrl } from '@interop/did-method-webvh'
@@ -186,7 +185,6 @@ export function SettingsPage() {
   const { t, i18n } = useTranslation()
   const session = useAuthStore(state => state.session)
   const logout = useAuthStore(state => state.logout)
-  const { displayInfoBox } = useInfoBox()
   const [deleteError, setDeleteError] = useState(false)
   const [deleteUnverified, setDeleteUnverified] = useState(false)
   const [deleteDialogOpen, setDeleteDialogOpen] = useState(false)
@@ -951,28 +949,6 @@ export function SettingsPage() {
   return (
     <DashboardLayout title={t('settings.title')}>
       <Stack sx={{ mt: 4, gap: 4, maxWidth: 640 }}>
-        <Stack direction="row" sx={{ alignItems: 'center', gap: 3 }}>
-          <Typography variant="h6">{t('settings.vcSection')}</Typography>
-          <Button
-            variant="outlined"
-            size="small"
-            sx={{
-              borderRadius: 2,
-              whiteSpace: 'nowrap'
-            }}
-            onClick={() =>
-              displayInfoBox({
-                docUrl: 'vcs',
-                title: t('settings.vcSection')
-              })
-            }
-          >
-            {t('settings.moreInfo')}
-          </Button>
-        </Stack>
-
-        <Divider />
-
         <Stack direction="row" sx={dashboardStyles.settingsRow}>
           <Button
             variant="contained"

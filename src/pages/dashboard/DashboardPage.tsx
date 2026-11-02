@@ -22,6 +22,7 @@ import { PRIVATE_CREDENTIALS_COLLECTION } from '@interop/wallet-core/space'
 import { flattenSearchValues } from '@/lib/searchValues'
 import { useAsyncLoad } from '@/hooks/useAsyncLoad'
 import { useSearch } from '@/hooks/useSearch'
+import { useInfoBox } from '@/hooks/useInfoBox'
 import { dashboardStyles } from '@/styles/appStyles'
 import { DashboardLayout } from '@/components/DashboardLayout'
 import { CredentialCard } from '@/components/CredentialCard'
@@ -60,6 +61,7 @@ const CREDENTIAL_SEARCH_KEYS: FuseOptionKey<StoredCredential>[] = [
 
 export function DashboardPage() {
   const { t } = useTranslation()
+  const { displayInfoBox } = useInfoBox()
   const navigate = useNavigate()
   const session = useAuthStore(state => state.session)
   const [credentials, setCredentials] = useState<StoredCredential[]>([])
@@ -459,6 +461,19 @@ export function DashboardPage() {
           <Typography variant="h5" sx={dashboardStyles.credentialsHeading}>
             {t('dashboard.credentialsHeading')}
           </Typography>
+          <Button
+            variant="outlined"
+            size="small"
+            onClick={() =>
+              displayInfoBox({
+                docUrl: 'vcs',
+                title: t('dashboard.vcInfoTitle')
+              })
+            }
+            sx={dashboardStyles.syncButton}
+          >
+            {t('dashboard.moreInfo')}
+          </Button>
           <Button
             variant="outlined"
             size="small"
