@@ -79,11 +79,13 @@ export function LobbyPage() {
     }
     navigated.current = true
     if (result.kind === 'failed') {
-      const { errorKey } = result
+      const { errorKey, errorCode } = result
       clearSetup()
       void navigate(signupRetryPath(method), {
         replace: true,
-        ...(errorKey ? { state: { setupErrorKey: errorKey } } : {})
+        ...(errorKey
+          ? { state: { setupErrorKey: errorKey, setupErrorCode: errorCode } }
+          : {})
       })
       return
     }

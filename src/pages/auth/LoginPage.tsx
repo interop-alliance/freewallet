@@ -86,6 +86,8 @@ export function LoginPage() {
   const [isSubmitting, setIsSubmitting] = useState(false)
   const [isPasskeySubmitting, setIsPasskeySubmitting] = useState(false)
   const [errorKey, setErrorKey] = useState<string | null>(null)
+  // The diagnostic code a passkey PRF refusal's message interpolates.
+  const [errorCode, setErrorCode] = useState<string | undefined>(undefined)
   // The enrollment (connect-this-browser) flow off the not-enrolled state:
   // the passphrase that located the account, then the locally minted key set
   // and its connect code. In-memory only -- nothing is written until
@@ -419,6 +421,8 @@ export function LoginPage() {
         // The user dismissed or aborted the ceremony -- nothing to report.
       } else if (err instanceof PasskeyPrfUnsupportedError) {
         // This passkey or browser cannot evaluate the PRF extension.
+        log.warn('Passkey login cannot evaluate PRF', { reason: err.reason })
+        setErrorCode(err.reason)
         setErrorKey('auth.errors.passkeyPrfUnsupported')
       } else {
         // The connect-this-browser flow starts from a passphrase, so a torn
@@ -566,7 +570,7 @@ export function LoginPage() {
                     severity={ERROR_ALERT_SEVERITY[errorKey] ?? 'error'}
                     sx={authStyles.userMessage}
                   >
-                    {t(errorKey)}
+                    {t(errorKey, { code: errorCode ?? '' })}
                     {ERROR_ALERT_SEVERITY[errorKey] === undefined && (
                       <>
                         {' '}

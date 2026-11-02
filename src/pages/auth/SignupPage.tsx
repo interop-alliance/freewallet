@@ -81,8 +81,30 @@ function stepI18nKeys(method: 'passphrase' | 'passkey') {
 
 /**
  * Maps a failed setup run onto the error key the wizard shows when the lobby
- * hands the user back. `null` is the silent failure: the user dismissed the
- * WebAuthn ceremony (or declined the PRF retry).
+ * hands the user back, plus the diagnostic code the message interpolates
+ * where one exists. A `null` key is the silent failure: the user dismissed
+ * the WebAuthn ceremony (or declined the PRF retry).
+ *
+ * @param err {unknown}
+ * @returns {{ errorKey: string | null, errorCode?: string }}
+ */
+function signupError(err: unknown): {
+  errorKey: string | null
+  errorCode?: string
+} {
+  if (err instanceof PasskeyPrfUnsupportedError) {
+    log.warn('Signup passkey cannot evaluate PRF', { reason: err.reason })
+    return {
+      errorKey: 'auth.errors.passkeyPrfUnsupported',
+      errorCode: err.reason
+    }
+  }
+  return { errorKey: signupErrorKey(err) }
+}
+
+/**
+ * The error key half of {@link signupError}, for every error but the
+ * passkey PRF refusal.
  *
  * @param err {unknown}
  * @returns {string | null}
@@ -90,9 +112,6 @@ function stepI18nKeys(method: 'passphrase' | 'passkey') {
 function signupErrorKey(err: unknown): string | null {
   if (err instanceof PasskeyCancelledError) {
     return null
-  }
-  if (err instanceof PasskeyPrfUnsupportedError) {
-    return 'auth.errors.passkeyPrfUnsupported'
   }
   if (isStorageUnreachable(err)) {
     // The PWS storage server is unreachable -- offer a guest-mode fallback.
@@ -169,7 +188,7 @@ async function runSetup({
     await session.storageReady
     finishSetup({ session, userExists: false })
   } catch (err) {
-    failSetup({ errorKey: signupErrorKey(err) })
+    failSetup(signupError(err))
   }
 }
 
@@ -204,6 +223,7 @@ export function SignupPage() {
   const [errorKey, setErrorKey] = useState<string | null>(
     state?.setupErrorKey ?? null
   )
+  const errorCode: string | undefined = state?.setupErrorCode
 
   // The step and the chosen login method both ride the URL search params, so
   // a mid-wizard reload keeps them (`src/lib/signupSteps.ts` owns the shape).
@@ -319,7 +339,7 @@ export function SignupPage() {
           </Alert>
         ) : errorKey ? (
           <Alert severity="error" sx={authStyles.userMessage}>
-            {t(errorKey)}
+            {t(errorKey, { code: errorCode ?? '' })}
           </Alert>
         ) : (
           bannerText && (

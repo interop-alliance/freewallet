@@ -52,7 +52,7 @@ export interface SetupStep {
 export type SetupResult =
   | { kind: 'pending' }
   | { kind: 'done'; session?: Session; userExists: boolean }
-  | { kind: 'failed'; errorKey: string | null }
+  | { kind: 'failed'; errorKey: string | null; errorCode?: string }
 
 /**
  * The establishment stages that get no line of their own. `account-log-read`
@@ -235,7 +235,7 @@ interface SetupState {
   beginSetup: (options: { method: SetupMethod }) => boolean
   markStage: (stage: string) => void
   finishSetup: (outcome: { session?: Session; userExists: boolean }) => void
-  failSetup: (options: { errorKey: string | null }) => void
+  failSetup: (options: { errorKey: string | null; errorCode?: string }) => void
   attendSetup: () => void
   abandonSetup: () => void
   clearSetup: () => void
@@ -305,12 +305,18 @@ export const useSetupStore = create<SetupState>()((set, get) => ({
       result: { kind: 'done', ...outcome }
     }))
   },
-  failSetup: ({ errorKey }) => {
+  failSetup: ({ errorKey, errorCode }) => {
     if (get().abandoned) {
       get().clearSetup()
       return
     }
-    set({ result: { kind: 'failed', errorKey } })
+    set({
+      result: {
+        kind: 'failed',
+        errorKey,
+        ...(errorCode ? { errorCode } : {})
+      }
+    })
   },
   attendSetup: () => {
     if (get().abandoned) {
@@ -387,8 +393,13 @@ export function finishSetup(outcome: {
  * @param options {object}
  * @param options.errorKey {string | null}   the i18n key the signup wizard
  *   shows on its return, or `null` for a silent failure
+ * @param [options.errorCode] {string}   a short diagnostic code the message
+ *   interpolates (a passkey PRF refusal's reason)
  */
-export function failSetup(options: { errorKey: string | null }): void {
+export function failSetup(options: {
+  errorKey: string | null
+  errorCode?: string
+}): void {
   useSetupStore.getState().failSetup(options)
 }
 

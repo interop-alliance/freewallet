@@ -9,6 +9,9 @@
  * key derivation to its callers.
  */
 import { PASSKEY_PRF_INPUT, PASSKEY_RP_ID } from '@/app.config'
+import { createLogger } from '@/lib/log'
+
+const log = createLogger('fw:passkey')
 
 /**
  * Result of a passkey registration ceremony. `prfOutput` is exactly 32 bytes;
@@ -40,13 +43,25 @@ export class PasskeyCancelledError extends Error {
  * extension, so no unlock secret can be derived from this passkey.
  */
 export class PasskeyPrfUnsupportedError extends Error {
-  constructor(
-    message = 'This passkey or browser cannot evaluate the PRF extension.'
-  ) {
-    super(message)
+  /**
+   * Which ceremony step found no PRF output. `create-enabled-false`: the
+   * authenticator declared PRF unsupported at creation. `retry-no-result`:
+   * creation gave no output and the follow-up assertion gave none either.
+   * `assertion-no-result`: a login or unlock assertion gave none.
+   */
+  readonly reason: PasskeyPrfUnsupportedReason
+
+  constructor({ reason }: { reason: PasskeyPrfUnsupportedReason }) {
+    super(
+      `This passkey or browser cannot evaluate the PRF extension (${reason}).`
+    )
     this.name = 'PasskeyPrfUnsupportedError'
+    this.reason = reason
   }
 }
+
+export type PasskeyPrfUnsupportedReason =
+  'create-enabled-false' | 'retry-no-result' | 'assertion-no-result'
 
 /**
  * Raised when registration hits an `excludeCredentials` entry
@@ -119,13 +134,39 @@ function mapCeremonyError({
 }): never {
   if (err instanceof DOMException) {
     if (err.name === 'NotAllowedError' || err.name === 'AbortError') {
+      log.info('WebAuthn ceremony dismissed', { name: err.name })
       throw new PasskeyCancelledError(err.message)
     }
     if (duplicateEligible && err.name === 'InvalidStateError') {
+      log.info('WebAuthn ceremony refused a duplicate', { name: err.name })
       throw new PasskeyDuplicateError(err.message)
     }
   }
+  log.warn('WebAuthn ceremony failed', { err })
   throw err
+}
+
+/**
+ * The loggable shape of a ceremony's client-extension results: whether the
+ * PRF member is present, its `enabled` flag, and the byte length of
+ * `results.first`. The output bytes themselves are never logged.
+ *
+ * @param credential {PublicKeyCredential}
+ * @returns {{ prfPresent: boolean, prfEnabled: boolean | undefined,
+ *   prfResultBytes: number | undefined }}
+ */
+function describePrfResults(credential: PublicKeyCredential): {
+  prfPresent: boolean
+  prfEnabled: boolean | undefined
+  prfResultBytes: number | undefined
+} {
+  const prf = credential.getClientExtensionResults().prf
+  const first = prf?.results?.first
+  return {
+    prfPresent: prf !== undefined,
+    prfEnabled: prf?.enabled,
+    prfResultBytes: first ? first.byteLength : undefined
+  }
 }
 
 /**
@@ -304,6 +345,14 @@ export async function registerPasskey({
       ? parseBackupFlags(response.getAuthenticatorData())
       : { backupEligibility: false, backupState: false }
   const credentialId = copyBytes(credential.rawId)
+  log.info('Passkey created', {
+    ...describePrfResults(credential),
+    transports,
+    backupEligibility,
+    backupState,
+    credentialIdBytes: credentialId.byteLength,
+    authenticatorAttachment: credential.authenticatorAttachment ?? undefined
+  })
 
   let prfOutput = prfResult(credential)
   if (!prfOutput) {
@@ -354,7 +403,10 @@ async function resolvePrfViaAssertion({
   // An explicit `enabled === false` means the authenticator will never yield a
   // PRF output; retrying cannot help.
   if (prf?.enabled === false) {
-    throw new PasskeyPrfUnsupportedError()
+    log.warn('Authenticator declared PRF unsupported at creation', {
+      reason: 'create-enabled-false'
+    })
+    throw new PasskeyPrfUnsupportedError({ reason: 'create-enabled-false' })
   }
 
   const consented = await promptForPrfRetry()
@@ -375,9 +427,13 @@ async function resolvePrfViaAssertion({
     mapCeremonyError({ err, duplicateEligible: false })
   }
 
+  log.info('PRF retry assertion returned', describePrfResults(assertion))
   const retried = prfResult(assertion)
   if (!retried) {
-    throw new PasskeyPrfUnsupportedError()
+    log.warn('PRF retry assertion returned no PRF output', {
+      reason: 'retry-no-result'
+    })
+    throw new PasskeyPrfUnsupportedError({ reason: 'retry-no-result' })
   }
   return retried
 }
@@ -420,9 +476,17 @@ export async function assertPasskeyPrf({
     mapCeremonyError({ err, duplicateEligible: false })
   }
 
+  log.info('Passkey assertion returned', {
+    ...describePrfResults(assertion),
+    credentialIdBytes: assertion.rawId.byteLength,
+    authenticatorAttachment: assertion.authenticatorAttachment ?? undefined
+  })
   const prfOutput = prfResult(assertion)
   if (!prfOutput) {
-    throw new PasskeyPrfUnsupportedError()
+    log.warn('Passkey assertion returned no PRF output', {
+      reason: 'assertion-no-result'
+    })
+    throw new PasskeyPrfUnsupportedError({ reason: 'assertion-no-result' })
   }
 
   const response = assertion.response as AuthenticatorAssertionResponse

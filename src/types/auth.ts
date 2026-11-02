@@ -202,6 +202,11 @@ export type AuthLocationState = {
    * key gets its guest-mode link), not as the plain banner above.
    */
   setupErrorKey?: string
+  /**
+   * The diagnostic code that key's message interpolates, where one exists
+   * (a passkey PRF refusal's reason).
+   */
+  setupErrorCode?: string
 }
 
 /**

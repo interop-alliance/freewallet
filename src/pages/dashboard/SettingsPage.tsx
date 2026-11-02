@@ -359,6 +359,10 @@ export function SettingsPage() {
   const [passkeyError, setPasskeyError] = useState<
     'duplicate' | 'unsupported' | 'notEstablished' | 'failed' | null
   >(null)
+  // The diagnostic code the PRF-unsupported message interpolates.
+  const [passkeyErrorCode, setPasskeyErrorCode] = useState<string | undefined>(
+    undefined
+  )
   // The unlock-methods registry: how this account can be unlocked (the
   // passphrase entry plus one entry per passkey). Loaded once the passkeys
   // section is usable, and refreshed after every mutation.
@@ -525,6 +529,8 @@ export function SettingsPage() {
       } else if (err instanceof PasskeyDuplicateError) {
         setPasskeyError('duplicate')
       } else if (err instanceof PasskeyPrfUnsupportedError) {
+        log.warn('Added passkey cannot evaluate PRF', { reason: err.reason })
+        setPasskeyErrorCode(err.reason)
         setPasskeyError('unsupported')
       } else if (err instanceof PasskeyNotEstablishedError) {
         // The passkey was created on the authenticator but could not be
@@ -1379,7 +1385,9 @@ export function SettingsPage() {
                           {passkeyError === 'duplicate'
                             ? t('settings.passkeyDuplicate')
                             : passkeyError === 'unsupported'
-                              ? t('settings.passkeyPrfUnsupported')
+                              ? t('settings.passkeyPrfUnsupported', {
+                                  code: passkeyErrorCode ?? ''
+                                })
                               : passkeyError === 'notEstablished'
                                 ? t('settings.passkeyNotEstablished')
                                 : t('settings.passkeyAddFailed')}

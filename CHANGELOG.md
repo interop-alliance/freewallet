@@ -29,6 +29,15 @@
 
 ### Added
 
+- Passkey ceremony diagnostics. An `fw:passkey` logger records each
+  `create()` and `get()` outcome: whether the PRF extension result is
+  present, its `enabled` flag, the output's byte length (the output itself
+  is never logged), the transports, the backup flags, and the
+  authenticator attachment. `PasskeyPrfUnsupportedError` carries a `reason`
+  (`create-enabled-false`, `retry-no-result`, `assertion-no-result`), and
+  the signup, login, and Settings messages for it append that code, so a
+  report names the step that found no PRF output. Unit tests cover the
+  result shapes over a fake `navigator.credentials`.
 - Unit tests against the installed `@interop/wallet-core` dist: every
   standard collection's `grantable` is a boolean, `private-credentials` is
   grantable, and a private-collection grant naming it resolves satisfiable.
