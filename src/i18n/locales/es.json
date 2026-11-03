@@ -665,12 +665,6 @@
     "sharedRemoving": "Quitando...",
     "sharedRemoved": "Acceso quitado.",
     "sharedRemoveFailed": "No se pudo quitar el acceso. Inténtelo de nuevo.",
-    "syncStatus": {
-      "idle": "Inactivo",
-      "syncing": "Sincronizando...",
-      "synced": "Sincronizado",
-      "error": "Error de sincronización (se reintentará)"
-    },
     "collectionNames": {
       "private-credentials": "Credenciales verificables",
       "public-credentials": "Credenciales verificables (compartidas públicamente)",

@@ -19,7 +19,6 @@ import {
 import type { CollectionCreator } from '@/lib/connectedApps'
 import type { StorageCollection } from '@/lib/storage'
 import type { CollectionShare } from '@/session/shares'
-import type { SyncStatus } from '@/stores/syncStatusStore'
 import { formatBytes } from '@/lib/formatBytes'
 import { storageStyles } from '@/styles/appStyles'
 import { getCollectionDisplayName, groupCollections } from './displayUtils'
@@ -27,27 +26,15 @@ import { CollectionAttribution } from './CollectionAttribution'
 import { EncryptedAccessIcon, PublicAccessIcon } from './AccessIcon'
 import { StorageEmptyState } from './EmptyState'
 
-const SYNC_CHIP_COLOR: Record<
-  SyncStatus,
-  'default' | 'info' | 'success' | 'error'
-> = {
-  idle: 'default',
-  syncing: 'info',
-  synced: 'success',
-  error: 'error'
-}
-
 export function CollectionsOverview({
   collections,
   usageByCollection,
-  syncStatuses,
   sharesByCollection,
   creatorsByCollection,
   onShowShares
 }: {
   collections: StorageCollection[]
   usageByCollection?: Map<string, number>
-  syncStatuses?: Record<string, SyncStatus>
   sharesByCollection?: Record<string, CollectionShare[]>
   /**
    * The application that created each app-provisioned collection, keyed by
@@ -76,7 +63,6 @@ export function CollectionsOverview({
         title={t('storage.groupWalletContents')}
         collections={contents}
         usageByCollection={usageByCollection}
-        syncStatuses={syncStatuses}
         sharesByCollection={sharesByCollection}
         creatorsByCollection={creatorsByCollection}
         onShowShares={onShowShares}
@@ -87,7 +73,6 @@ export function CollectionsOverview({
           description={t('storage.groupAppCollectionsDescription')}
           collections={app}
           usageByCollection={usageByCollection}
-          syncStatuses={syncStatuses}
           sharesByCollection={sharesByCollection}
           creatorsByCollection={creatorsByCollection}
           onShowShares={onShowShares}
@@ -97,7 +82,6 @@ export function CollectionsOverview({
         title={t('storage.groupSystemCollections')}
         collections={system}
         usageByCollection={usageByCollection}
-        syncStatuses={syncStatuses}
         sharesByCollection={sharesByCollection}
         creatorsByCollection={creatorsByCollection}
         onShowShares={onShowShares}
@@ -117,7 +101,6 @@ function CollectionGroup({
   description,
   collections,
   usageByCollection,
-  syncStatuses,
   sharesByCollection,
   creatorsByCollection,
   onShowShares,
@@ -127,7 +110,6 @@ function CollectionGroup({
   description?: string
   collections: StorageCollection[]
   usageByCollection?: Map<string, number>
-  syncStatuses?: Record<string, SyncStatus>
   sharesByCollection?: Record<string, CollectionShare[]>
   creatorsByCollection?: Map<string, CollectionCreator>
   onShowShares?: (collectionId: string) => void
@@ -159,7 +141,6 @@ function CollectionGroup({
             key={collection.id}
             collection={collection}
             usageBytes={usageByCollection?.get(collection.id)}
-            syncStatus={syncStatuses?.[collection.id]}
             shareCount={sharesByCollection?.[collection.id]?.length}
             creator={creatorsByCollection?.get(collection.id)}
             onShowShares={onShowShares}
@@ -174,7 +155,6 @@ function CollectionGroup({
 function CollectionFolderCard({
   collection,
   usageBytes,
-  syncStatus,
   shareCount,
   creator,
   onShowShares,
@@ -182,7 +162,6 @@ function CollectionFolderCard({
 }: {
   collection: StorageCollection
   usageBytes?: number
-  syncStatus?: SyncStatus
   shareCount?: number
   creator?: CollectionCreator
   onShowShares?: (collectionId: string) => void
@@ -277,14 +256,6 @@ function CollectionFolderCard({
               event.stopPropagation()
               onShowShares(collection.id)
             }}
-          />
-        )}
-        {syncStatus && (
-          <Chip
-            size="small"
-            color={SYNC_CHIP_COLOR[syncStatus]}
-            label={t(`storage.syncStatus.${syncStatus}`)}
-            sx={storageStyles.folderSyncChip}
           />
         )}
         {usageBytes != null && (

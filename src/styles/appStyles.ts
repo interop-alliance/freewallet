@@ -849,9 +849,6 @@ export const storageStyles = {
     textAlign: 'right',
     fontVariantNumeric: 'tabular-nums'
   },
-  folderSyncChip: {
-    flexShrink: 0
-  },
   folderShareChip: {
     flexShrink: 0
   },

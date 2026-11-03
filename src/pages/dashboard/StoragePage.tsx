@@ -13,12 +13,10 @@ import { getCollectionDisplayName } from '@/components/storage/displayUtils'
 import { useAsyncLoad } from '@/hooks/useAsyncLoad'
 import { useSpaceQuota } from '@/hooks/useSpaceQuota'
 import { useAuthStore } from '@/stores/authStore'
-import { useSyncStatusStore } from '@/stores/syncStatusStore'
 import { storageStyles } from '@/styles/appStyles'
 import type { StorageCollection } from '@/lib/storage'
 import { useStorageListings } from '@/hooks/useStorageListings'
 import { attributeCollectionsToApps } from '@/lib/collectionAttribution'
-import { SYNCED_COLLECTIONS } from '@/app.config'
 import { createLogger } from '@/lib/log'
 
 const log = createLogger('fw:ui:storage')
@@ -33,7 +31,6 @@ export const StoragePage = () => {
     string | null
   >(null)
   const hasRemoteStorage = Boolean(session?.storage?.hasRemoteStorage)
-  const syncStatuses = useSyncStatusStore(state => state.statuses)
 
   const { status: quotaStatus, reload: reloadQuota } = useSpaceQuota({
     session
@@ -158,12 +155,6 @@ export const StoragePage = () => {
                     ? quotaStatus.quota.usageByCollection
                     : undefined
                 }
-                syncStatuses={Object.fromEntries(
-                  SYNCED_COLLECTIONS.map(({ id }) => [
-                    id,
-                    syncStatuses[id] ?? 'idle'
-                  ])
-                )}
                 sharesByCollection={sharesByCollection}
                 creatorsByCollection={creatorsByCollection}
                 onShowShares={setSharesDialogCollectionId}

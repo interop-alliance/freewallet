@@ -64,6 +64,11 @@
 
 ### Changed
 
+- The Storage page no longer shows a per-collection sync status chip. Only
+  transient sessions, which run no replication, are reachable today, so
+  every chip read "Idle". The `storage.syncStatus` strings are removed from
+  both locales; the sync status store stays, read by the pull-settled hook
+  and content migration.
 - The Settings page renders the Space section (the connected Space's URL
   and the Export, Import, and Migrate actions) above Delete Account. The
   block and the two dialogs behind it moved out of the Storage page into
