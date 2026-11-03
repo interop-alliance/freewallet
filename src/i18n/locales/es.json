@@ -541,7 +541,9 @@
       "hint": "Apunte la cámara a una URL de credencial, un código QR JSON o un QR VP1.",
       "cameraError": "No se pudo acceder a la cámara.",
       "cameraPermissionHint": "La cámara está bloqueada o no está disponible. Permita el acceso a la cámara en la configuración del navegador para este sitio; luego cierre y vuelva a abrir Escanear QR.",
-      "scanEngineError": "El escáner QR se detuvo por un error inesperado. Cierre este cuadro e inténtelo de nuevo."
+      "scanEngineError": "El escáner QR se detuvo por un error inesperado. Cierre este cuadro e inténtelo de nuevo.",
+      "diagnosticsTitle": "Diagnóstico del escáner",
+      "forceJsDecoder": "Usar el decodificador JavaScript (omitir el BarcodeDetector nativo del navegador)"
     }
   },
   "contacts": {

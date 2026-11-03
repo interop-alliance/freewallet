@@ -5,6 +5,7 @@ import '@fontsource-variable/inter'
 import '@/i18n'
 import '@/lib/log'
 import { InfoBoxProvider } from '@/context/InfoBoxProvider'
+import { AppErrorBoundary } from '@/components/AppErrorBoundary'
 import { FreewalletThemeProvider } from '@/components/FreewalletThemeProvider'
 import './index.css'
 import '@/themes'
@@ -12,13 +13,15 @@ import App from './App'
 
 createRoot(document.getElementById('root')!).render(
   <StrictMode>
-    <FreewalletThemeProvider>
-      <HashRouter>
-        <InfoBoxProvider>
-          <App />
-        </InfoBoxProvider>
-      </HashRouter>
-    </FreewalletThemeProvider>
+    <AppErrorBoundary>
+      <FreewalletThemeProvider>
+        <HashRouter>
+          <InfoBoxProvider>
+            <App />
+          </InfoBoxProvider>
+        </HashRouter>
+      </FreewalletThemeProvider>
+    </AppErrorBoundary>
   </StrictMode>
 )
 

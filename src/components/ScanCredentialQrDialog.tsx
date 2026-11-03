@@ -8,7 +8,9 @@ import {
   Typography,
   Alert,
   CircularProgress,
-  Box
+  Box,
+  FormControlLabel,
+  Switch
 } from '@mui/material'
 import QrScanner from 'qr-scanner'
 import { useTranslation } from 'react-i18next'
@@ -21,6 +23,38 @@ import {
   scanCredentialQrStyles,
   scanCredentialQrVideoStyle
 } from '@/styles/scanCredentialQrStyles'
+import { createLogger } from '@/lib/log'
+
+const log = createLogger('fw:ui:scan-qr')
+
+/**
+ * Formats one error for the on-page diagnostics list: name and message,
+ * plus the first stack frames, so a phone browser with no console still
+ * shows what the scanner hit.
+ */
+function describeError(err: unknown): string {
+  if (err instanceof Error) {
+    const frames = (err.stack ?? '')
+      .split('\n')
+      .slice(1, 4)
+      .map(line => line.trim())
+      .join('\n  ')
+    return `${err.name}: ${err.message}${frames ? `\n  ${frames}` : ''}`
+  }
+  return String(err)
+}
+
+/**
+ * The library picks its decode engine once, at construction: the browser's
+ * native `BarcodeDetector` when present (Chrome on Android), its jsQR Web
+ * Worker otherwise. The flag is a private static, so forcing the worker is
+ * reached through a cast. A diagnostic, not a product setting.
+ */
+function setForceJsDecoder(force: boolean): void {
+  ;(
+    QrScanner as unknown as { _disableBarcodeDetector: boolean }
+  )._disableBarcodeDetector = force
+}
 
 export function ScanCredentialQrDialog({
   open,
@@ -40,6 +74,20 @@ export function ScanCredentialQrDialog({
   const [decodeError, setDecodeError] = useState<string | null>(null)
   const [startingCamera, setStartingCamera] = useState(false)
   const [cameraBlocked, setCameraBlocked] = useState(false)
+  const [forceJsDecoder, setForceJsDecoder_] = useState(false)
+  const [diagnostics, setDiagnostics] = useState<string[]>([])
+
+  const addDiagnostic = useCallback((line: string) => {
+    setDiagnostics(prev => [...prev, line])
+  }, [])
+
+  const reportError = useCallback(
+    (label: string, err: unknown) => {
+      log.error(label, { err })
+      addDiagnostic(`${label}\n${describeError(err)}`)
+    },
+    [addDiagnostic]
+  )
 
   const destroyScanner = useCallback(() => {
     scannerRef.current?.destroy()
@@ -50,11 +98,12 @@ export function ScanCredentialQrDialog({
     (error: Error | string) => {
       const msg = typeof error === 'string' ? error : error.message
       if (msg !== QrScanner.NO_QR_CODE_FOUND) {
+        reportError('Decode engine error', error)
         setDecodeError(t('dashboard.scanQr.scanEngineError'))
         destroyScanner()
       }
     },
-    [destroyScanner, t]
+    [destroyScanner, reportError, t]
   )
 
   const onScanSuccess = useCallback(
@@ -68,19 +117,23 @@ export function ScanCredentialQrDialog({
         sc.stop()
         onResolved(await resolveWalletInput(data))
       } catch (err) {
+        reportError('Scanned payload refused', err)
         setDecodeError(
           resolveCredentialsInputErrorMessage(err, t, { trimmed: data })
         )
-        sc.start().catch(() => {})
+        sc.start().catch(restartErr => {
+          reportError('Camera restart failed', restartErr)
+        })
       }
     },
-    [onResolved, t]
+    [onResolved, reportError, t]
   )
 
   const handleClose = useCallback(() => {
     setDecodeError(null)
     setStartingCamera(false)
     setCameraBlocked(false)
+    setDiagnostics([])
     onClose()
   }, [onClose])
 
@@ -102,8 +155,28 @@ export function ScanCredentialQrDialog({
       setStartingCamera(true)
       setDecodeError(null)
       setCameraBlocked(false)
+      setDiagnostics([])
+
+      const nativeDetector = 'BarcodeDetector' in window
+      const engine =
+        nativeDetector && !forceJsDecoder
+          ? 'native BarcodeDetector'
+          : 'jsQR worker'
+      const environment = {
+        engine,
+        nativeDetector,
+        forceJsDecoder,
+        mediaDevices: typeof navigator.mediaDevices !== 'undefined',
+        userAgent: navigator.userAgent
+      }
+      log.info('Starting the QR scanner', environment)
+      addDiagnostic(
+        `engine: ${engine} (BarcodeDetector in window: ${nativeDetector}, ` +
+          `mediaDevices: ${environment.mediaDevices})\n${navigator.userAgent}`
+      )
 
       try {
+        setForceJsDecoder(forceJsDecoder)
         const scanner = new QrScanner(video, onScanSuccess, {
           onDecodeError: onScanFail,
           preferredCamera: 'environment',
@@ -114,20 +187,44 @@ export function ScanCredentialQrDialog({
         scannerRef.current = scanner
         scanner
           .start()
-          .catch(() => {
+          .then(async () => {
+            addDiagnostic(
+              `camera started: ${video.videoWidth}x${video.videoHeight}`
+            )
+            try {
+              const cameras = await QrScanner.listCameras(true)
+              const labels = cameras.map(cam => cam.label || cam.id)
+              log.info('Cameras', { cameras: labels })
+              addDiagnostic(`cameras: ${labels.join(', ') || '(none)'}`)
+            } catch (err) {
+              reportError('Camera listing failed', err)
+            }
+          })
+          .catch(err => {
+            reportError('Camera start failed', err)
             setCameraBlocked(true)
             setDecodeError(t('dashboard.scanQr.cameraError'))
           })
           .finally(() => {
             setStartingCamera(false)
           })
-      } catch {
+      } catch (err) {
+        reportError('Scanner construction failed', err)
         setStartingCamera(false)
         setCameraBlocked(true)
         setDecodeError(t('dashboard.scanQr.cameraError'))
       }
     },
-    [destroyScanner, open, onScanFail, onScanSuccess, t]
+    [
+      destroyScanner,
+      open,
+      forceJsDecoder,
+      onScanFail,
+      onScanSuccess,
+      addDiagnostic,
+      reportError,
+      t
+    ]
   )
 
   return (
@@ -144,12 +241,22 @@ export function ScanCredentialQrDialog({
         ) : null}
         {open ? (
           <Box sx={scanCredentialQrStyles.previewContainer}>
-            <video
-              ref={attachVideoRef}
-              muted
-              playsInline
-              style={scanCredentialQrVideoStyle}
-            />
+            {/*
+              The scanner inserts its highlight overlay as a sibling of the
+              video, so the video gets a wrapper of its own and shares no
+              parent with React-managed children (the spinner below).
+            */}
+            <div style={scanCredentialQrStyles.videoWrapper}>
+              <video
+                // The ref callback's identity changes with the decoder
+                // toggle, which React honours by detaching and re-attaching,
+                // so the toggle rebuilds the scanner on the chosen engine.
+                ref={attachVideoRef}
+                muted
+                playsInline
+                style={scanCredentialQrVideoStyle}
+              />
+            </div>
             {startingCamera ? (
               <CircularProgress
                 size={36}
@@ -165,6 +272,31 @@ export function ScanCredentialQrDialog({
           <Typography variant="body2" color="error" sx={{ mt: 2 }}>
             {decodeError}
           </Typography>
+        ) : null}
+        <FormControlLabel
+          sx={{ mt: 1 }}
+          control={
+            <Switch
+              size="small"
+              checked={forceJsDecoder}
+              onChange={event => setForceJsDecoder_(event.target.checked)}
+            />
+          }
+          label={
+            <Typography variant="body2">
+              {t('dashboard.scanQr.forceJsDecoder')}
+            </Typography>
+          }
+        />
+        {diagnostics.length > 0 ? (
+          <Box sx={{ mt: 1 }}>
+            <Typography variant="caption" color="text.secondary">
+              {t('dashboard.scanQr.diagnosticsTitle')}
+            </Typography>
+            <Box component="pre" sx={scanCredentialQrStyles.diagnostics}>
+              {diagnostics.join('\n\n')}
+            </Box>
+          </Box>
         ) : null}
       </DialogContent>
       <DialogActions sx={{ px: 3, pb: 2 }}>

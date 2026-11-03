@@ -541,7 +541,9 @@
       "hint": "Point your camera at a credential URL, JSON QR code, or VP1-encoded credential QR.",
       "cameraError": "Could not access the camera.",
       "cameraPermissionHint": "Camera is blocked or not available. Allow camera access in your browser settings for this site, then close and open Scan QR again.",
-      "scanEngineError": "The QR scanner stopped after an unexpected error. Close this dialog and try again."
+      "scanEngineError": "The QR scanner stopped after an unexpected error. Close this dialog and try again.",
+      "diagnosticsTitle": "Scanner diagnostics",
+      "forceJsDecoder": "Use the JavaScript decoder (bypass the browser's native BarcodeDetector)"
     }
   },
   "contacts": {

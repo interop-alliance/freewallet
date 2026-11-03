@@ -10,6 +10,26 @@ export const scanCredentialQrStyles = {
     display: 'flex',
     alignItems: 'center',
     justifyContent: 'center'
+  },
+  // The scanner's highlight overlay is positioned off the video's offsets,
+  // so its wrapper is the offset parent.
+  videoWrapper: {
+    position: 'relative',
+    width: '100%',
+    display: 'flex'
+  } satisfies CSSProperties,
+  diagnostics: {
+    m: 0,
+    p: 1,
+    fontSize: 11,
+    fontFamily: 'monospace',
+    whiteSpace: 'pre-wrap',
+    wordBreak: 'break-word',
+    bgcolor: 'action.hover',
+    borderRadius: 1,
+    maxHeight: 240,
+    overflow: 'auto',
+    userSelect: 'text'
   }
 } as const
 
