@@ -74,7 +74,7 @@ export function ScanCredentialQrDialog({
   const [decodeError, setDecodeError] = useState<string | null>(null)
   const [startingCamera, setStartingCamera] = useState(false)
   const [cameraBlocked, setCameraBlocked] = useState(false)
-  const [forceJsDecoder, setForceJsDecoder_] = useState(false)
+  const [forceJsDecoder, setForceJsDecoder_] = useState(true)
   const [diagnostics, setDiagnostics] = useState<string[]>([])
 
   const addDiagnostic = useCallback((line: string) => {
