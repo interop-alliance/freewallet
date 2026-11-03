@@ -639,6 +639,12 @@
     "importSuccess": "Import complete. Collections added: {{collectionsCreated}} (skipped {{collectionsSkipped}}). Resources added: {{resourcesCreated}} (skipped {{resourcesSkipped}}).{{credentialsNote}}",
     "importCredentialsNote": " Credentials imported: {{count}}.",
     "importCredentialsOnly": "Import complete. Credentials imported: {{count}}.",
+    "importPage": {
+      "title": "Import from Backup",
+      "intro": "Loads a backup archive this wallet exported. Its space data is added to the connected storage space, skipping what the space already holds, and any credentials in it are offered for you to accept. Nothing in this account is removed. The import is unavailable while the space is full.",
+      "chooseArchive": "Choose archive",
+      "unrecognized": "This file is not a wallet backup archive."
+    },
     "collectionsLoadError": "Could not load storage collections.",
     "resourcesLoadError": "Could not load collection files.",
     "collectionNotFound": "Collection not found.",

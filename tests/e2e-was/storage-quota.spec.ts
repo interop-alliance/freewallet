@@ -74,10 +74,15 @@ test.describe('Storage quota', () => {
     await goToStorage(page)
     await expectQuotaCard(page)
 
+    // The Import action links to the Import page, whose file picker is the
+    // control the quota gates.
+    await page.getByRole('link', { name: 'Import (Load) from Backup' }).click()
+    await expect(page).toHaveURL(/\/storage\/import$/)
+    await expectQuotaCard(page)
     // The loading-capable MUI Button renders nested elements that both expose
     // the button role and the same accessible name, so scope to the first.
     await expect(
-      page.getByRole('button', { name: 'Import (Load) from Backup' }).first()
+      page.getByRole('button', { name: 'Choose archive' }).first()
     ).toBeEnabled()
   })
 

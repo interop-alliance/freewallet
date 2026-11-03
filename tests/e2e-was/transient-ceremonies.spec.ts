@@ -585,13 +585,10 @@ test('a Space exports and imports from a transient session', async ({
       name: 'Export (Backup) Space Contents'
     })
     await expect(exportButton).toBeEnabled({ timeout: 30_000 })
-    // The import control is a MUI Button rendered as a <label> wrapping a
-    // hidden file input; both carry the accessible name, so address the label.
-    await expect(
-      page.locator('label[role="button"]', {
-        hasText: 'Import (Load) from Backup'
-      })
-    ).toBeEnabled()
+    const importLink = page.getByRole('link', {
+      name: 'Import (Load) from Backup'
+    })
+    await expect(importLink).toBeEnabled()
 
     // The export's sink is `showSaveFilePicker`, which headless Chromium does
     // not implement, so the bytes are read through the same live-session seam
@@ -634,8 +631,13 @@ test('a Space exports and imports from a transient session', async ({
     await backupDialog.getByRole('button', { name: 'Close' }).click()
     await expect(backupDialog).toBeHidden()
 
-    // The import goes through the page's own button (a hidden file input
-    // inside it), which is the surface the refusal used to reach.
+    // The import goes through the Import page's picker (a hidden file input
+    // inside its button), which is the surface the refusal used to reach.
+    // The picker is disabled until the quota has loaded.
+    await importLink.click()
+    await expect(
+      page.locator('label[role="button"]', { hasText: 'Choose archive' })
+    ).toBeEnabled({ timeout: 30_000 })
     await page.locator('input[type="file"]').setInputFiles({
       name: 'space.tar',
       mimeType: 'application/x-tar',

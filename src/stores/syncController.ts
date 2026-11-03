@@ -113,9 +113,12 @@ class SessionSyncController {
 
   /**
    * Triggers an immediate replication cycle on every running collection
-   * replication, rather than waiting for the next scheduled tick.
-   * Fire-and-forget: progress surfaces through the syncStatusStore as usual. A
-   * no-op when replication is not running (guest, no remote, stopped).
+   * replication, rather than waiting for the next scheduled tick. The call
+   * for it is a write that landed on the Space remote-direct (an archive
+   * import, a content migration), which a remembered session's replica
+   * learns of only through a pull. Fire-and-forget: progress surfaces
+   * through the syncStatusStore as usual. A no-op when replication is not
+   * running (guest, no remote, stopped).
    *
    * @returns {void}
    */

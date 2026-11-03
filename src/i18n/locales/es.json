@@ -639,6 +639,12 @@
     "importSuccess": "Importación completada. Colecciones añadidas: {{collectionsCreated}} (omitidas {{collectionsSkipped}}). Recursos añadidos: {{resourcesCreated}} (omitidos {{resourcesSkipped}}).{{credentialsNote}}",
     "importCredentialsNote": " Credenciales importadas: {{count}}.",
     "importCredentialsOnly": "Importación completada. Credenciales importadas: {{count}}.",
+    "importPage": {
+      "title": "Importar desde copia de seguridad",
+      "intro": "Carga un archivo de copia de seguridad exportado por esta billetera. Sus datos de espacio se agregan al espacio de almacenamiento conectado, omitiendo lo que el espacio ya contiene, y las credenciales que incluya se le ofrecen para aceptarlas. No se elimina nada de esta cuenta. La importación no está disponible mientras el espacio esté lleno.",
+      "chooseArchive": "Elegir archivo",
+      "unrecognized": "Este archivo no es una copia de seguridad de la billetera."
+    },
     "collectionsLoadError": "No se pudieron cargar las colecciones.",
     "resourcesLoadError": "No se pudieron cargar los archivos de la colección.",
     "collectionNotFound": "Colección no encontrada.",

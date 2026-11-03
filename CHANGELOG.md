@@ -64,6 +64,24 @@
 
 ### Changed
 
+- The Settings page renders the Space section (the connected Space's URL
+  and the Export, Import, and Migrate actions) above Delete Account. The
+  block and the two dialogs behind it moved out of the Storage page into
+  `src/components/storage/SpaceSection.tsx`, which both pages render. On
+  Settings the Export action, whose backup credential writes the
+  unlock-methods registry, waits on the registry repair like the rest of
+  the page.
+- The Import action opens the new Import page (`/storage/import`,
+  `src/pages/dashboard/ImportArchivePage.tsx`) in place of a bare file
+  picker. The page says what an import does, shows the Space's quota, and
+  disables the picker while the Space refuses writes, so an over-quota
+  import is refused before the archive is uploaded. A file that is not a
+  wallet archive, and Space data on a session with no remote storage, each
+  report their own reason on the page in place of the generic import error.
+  A finished import returns to the Storage page. The import's refusal and
+  outcome decisions are pure functions in `src/lib/import.ts`
+  (`importRefusal`, `importOutcome`), with unit tests, and the quota load
+  both pages share is `src/hooks/useSpaceQuota.ts`.
 - The Settings page's "Verifiable Credentials" section is gone. Its More
   Info button, which opens the VC explainer, now sits beside Sync in the
   Dashboard's credentials heading row (`dashboard.moreInfo`,

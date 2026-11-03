@@ -303,8 +303,8 @@ the owner's tick restores. The change's dialog lists those agents, ticked by
 default (see "The agent connection" in app-connect.md).
 
 **The backup export's stage order** (`src/session/backupExport.ts`). The
-Storage page's export action
-(`src/components/storage/BackupExportDialog.tsx`) runs it. It exports every
+Space section's export action, on the Storage and Settings pages
+(`src/components/storage/BackupExportDialog.tsx`), runs it. It exports every
 Space the account names through the server's per-Space export route, and
 packs the archives into one outer tar with `@interop/wallet-backup`'s
 `exportBundle`. The export also packs a backup credential into the bundle.

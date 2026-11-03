@@ -1,83 +1,43 @@
-import { useCallback, useMemo, useState } from 'react'
+import { useMemo, useState } from 'react'
 import Alert from '@mui/material/Alert'
 import Box from '@mui/material/Box'
-import Button from '@mui/material/Button'
-import Paper from '@mui/material/Paper'
 import Skeleton from '@mui/material/Skeleton'
 import Stack from '@mui/material/Stack'
-import Typography from '@mui/material/Typography'
 import { useTranslation } from 'react-i18next'
-import { useNavigate } from 'react-router'
 import { DashboardLayout } from '@/components/DashboardLayout'
-import { BackupExportDialog } from '@/components/storage/BackupExportDialog'
 import { CollectionSharesDialog } from '@/components/storage/CollectionSharesDialog'
-import { ContentMigrationDialog } from '@/components/storage/ContentMigrationDialog'
+import { SpaceSection } from '@/components/storage/SpaceSection'
 import { CollectionsOverview } from '@/components/storage/StorageBrowser'
 import { StorageQuotaCard } from '@/components/storage/StorageQuotaCard'
 import { getCollectionDisplayName } from '@/components/storage/displayUtils'
 import { useAsyncLoad } from '@/hooks/useAsyncLoad'
+import { useSpaceQuota } from '@/hooks/useSpaceQuota'
 import { useAuthStore } from '@/stores/authStore'
-import { syncController } from '@/stores/syncController'
 import { useSyncStatusStore } from '@/stores/syncStatusStore'
-import { showToast } from '@/stores/toastStore'
-import { storageStyles, visuallyHiddenInput } from '@/styles/appStyles'
+import { storageStyles } from '@/styles/appStyles'
 import type { StorageCollection } from '@/lib/storage'
-import { quotaViewFromReport, writesRestricted } from '@/lib/storageQuota'
-import type { StorageQuotaStatus } from '@/types/storageQuota'
-import type { ImportSpaceSummary } from '@/stores/storageManager'
-import { parseImportTarFile } from '@/lib/import'
 import { useStorageListings } from '@/hooks/useStorageListings'
 import { attributeCollectionsToApps } from '@/lib/collectionAttribution'
 import { SYNCED_COLLECTIONS } from '@/app.config'
 import { createLogger } from '@/lib/log'
-import { canExportBackup } from '@/session/backupExport'
 
 const log = createLogger('fw:ui:storage')
 
 export const StoragePage = () => {
   const { t } = useTranslation()
-  const navigate = useNavigate()
   const session = useAuthStore(state => state.session)
   const [loadedCollections, setLoadedCollections] = useState<
     Array<StorageCollection>
   >([])
-  const [backupOpen, setBackupOpen] = useState(false)
-  const [isImporting, setIsImporting] = useState(false)
   const [sharesDialogCollectionId, setSharesDialogCollectionId] = useState<
     string | null
   >(null)
-  const [migrationOpen, setMigrationOpen] = useState(false)
-  const [quotaStatus, setQuotaStatus] = useState<StorageQuotaStatus>({
-    kind: 'loading'
-  })
   const hasRemoteStorage = Boolean(session?.storage?.hasRemoteStorage)
-  const backupOffered = Boolean(session && canExportBackup({ session }))
   const syncStatuses = useSyncStatusStore(state => state.statuses)
 
-  const loadQuota = useCallback(async () => {
-    if (!hasRemoteStorage || !session?.storage) {
-      return
-    }
-
-    try {
-      const report = await session.storage.getSpaceQuotas()
-      if (!report?.backends.length) {
-        setQuotaStatus({ kind: 'unavailable' })
-        return
-      }
-
-      const quota = quotaViewFromReport(report)
-      setQuotaStatus(quota ? { kind: 'ready', quota } : { kind: 'unavailable' })
-    } catch (error) {
-      log.error('Failed to load storage quota', { err: error })
-      setQuotaStatus({ kind: 'error' })
-    }
-  }, [hasRemoteStorage, session])
-
-  const handleRetryQuota = useCallback(() => {
-    setQuotaStatus({ kind: 'loading' })
-    void loadQuota()
-  }, [loadQuota])
+  const { status: quotaStatus, reload: reloadQuota } = useSpaceQuota({
+    session
+  })
 
   // The listing lands in two stages: the bare collections first, then the same
   // list with each collection's resource count.
@@ -91,10 +51,6 @@ export const StoragePage = () => {
       if (!hasRemoteStorage || !storage) {
         return
       }
-
-      // The quota load runs beside the listing and reports through its own
-      // status state.
-      void loadQuota()
 
       const remoteCollections = await storage.listCollections()
       if (isCancelled()) {
@@ -124,7 +80,7 @@ export const StoragePage = () => {
       }
       setLoadedCollections(withCounts)
     },
-    [hasRemoteStorage, session, loadQuota],
+    [hasRemoteStorage, session],
     {
       enabled: hasRemoteStorage && Boolean(session?.storage),
       onError: err => {
@@ -159,71 +115,6 @@ export const StoragePage = () => {
     [creators, collections]
   )
 
-  const handleImportFile = async (
-    event: React.ChangeEvent<HTMLInputElement>
-  ) => {
-    const file = event.target.files?.[0]
-    event.target.value = ''
-    if (!file || !session?.storage) {
-      return
-    }
-
-    setIsImporting(true)
-    try {
-      const { hasSpace, hasCredentials, credentials } =
-        await parseImportTarFile(file)
-
-      if (!hasSpace && !hasCredentials) {
-        throw new Error('Unrecognized archive.')
-      }
-
-      let spaceSummary: ImportSpaceSummary | undefined
-      if (hasSpace) {
-        if (!session.storage.hasRemoteStorage) {
-          throw new Error(t('storage.importSpaceRequiresRemote'))
-        }
-        spaceSummary = await session.storage.importSpace({ tarFile: file })
-        void reloadCollections()
-      }
-
-      if (credentials.length > 0) {
-        navigate('/accept-credentials', {
-          state: { credentials, importSummary: spaceSummary }
-        })
-        return
-      }
-
-      const credentialsNote = hasCredentials
-        ? t('storage.importCredentialsNote', { count: credentials.length })
-        : ''
-
-      if (spaceSummary) {
-        showToast({
-          message: t('storage.importSuccess', {
-            ...spaceSummary,
-            credentialsNote
-          }),
-          severity: 'success'
-        })
-        return
-      }
-
-      if (hasCredentials) {
-        showToast({
-          message: t('storage.importCredentialsOnly', {
-            count: credentials.length
-          }),
-          severity: 'success'
-        })
-      }
-    } catch (error) {
-      log.error('Failed to import space', { err: error })
-      showToast({ message: t('storage.importError'), severity: 'error' })
-    } finally {
-      setIsImporting(false)
-    }
-  }
-
   const sharesDialogCollection = collections.find(
     collection => collection.id === sharesDialogCollectionId
   )
@@ -231,127 +122,55 @@ export const StoragePage = () => {
     ? getCollectionDisplayName({ collection: sharesDialogCollection, t })
     : (sharesDialogCollectionId ?? '')
 
-  const importBlocked =
-    quotaStatus.kind === 'ready' && writesRestricted(quotaStatus.quota)
-
   return (
     <DashboardLayout title={t('storage.title')}>
-      <Paper variant="outlined" sx={storageStyles.storageToolbar}>
-        <Stack
-          direction={{ xs: 'column', md: 'row' }}
-          spacing={2}
-          sx={storageStyles.connectedRow}
-        >
-          <Stack spacing={0.5} sx={{ minWidth: 0, flexGrow: 1 }}>
-            <Typography variant="h6" sx={storageStyles.connectedLabel}>
-              {t('storage.spaceConnected')}
-            </Typography>
-            <Typography variant="body2" sx={storageStyles.connectedLink}>
-              {session?.storage.spaceUrl || t('storage.noRemoteSpace')}
-            </Typography>
-          </Stack>
-          <Stack direction="row" spacing={1.5}>
-            <Button
-              variant="contained"
-              onClick={() => setBackupOpen(true)}
-              disabled={!backupOffered}
-              sx={[
-                storageStyles.buttonTextLeft,
-                storageStyles.buttonSize.topAction
-              ]}
-            >
-              {t('storage.exportSpace')}
-            </Button>
-            <Button
-              variant="outlined"
-              component="label"
-              loading={isImporting}
-              disabled={importBlocked}
-              sx={[
-                storageStyles.buttonTextLeft,
-                storageStyles.buttonSize.topAction
-              ]}
-            >
-              {t('storage.importSpace')}
-              <input
-                type="file"
-                accept={'.tar,application/x-tar'}
-                style={visuallyHiddenInput}
-                onChange={handleImportFile}
-              />
-            </Button>
-            <Button
-              variant="outlined"
-              onClick={() => setMigrationOpen(true)}
-              disabled={!session}
-              sx={[
-                storageStyles.buttonTextLeft,
-                storageStyles.buttonSize.topAction
-              ]}
-            >
-              {t('storage.migration.action')}
-            </Button>
-          </Stack>
-        </Stack>
-      </Paper>
-
-      {hasRemoteStorage && (
-        <StorageQuotaCard status={quotaStatus} onRetry={handleRetryQuota} />
-      )}
-
-      <Box sx={storageStyles.collectionsWrap}>
-        {hasRemoteStorage && isLoadingCollections && (
-          <Stack spacing={1.5} aria-busy="true">
-            {[0, 1, 2].map(row => (
-              <Skeleton key={row} variant="rounded" height={72} />
-            ))}
-          </Stack>
-        )}
-        {collectionsErrorKey && (
-          <Alert severity="error">{t(collectionsErrorKey)}</Alert>
-        )}
-        {hasRemoteStorage && !isLoadingCollections && !collectionsErrorKey && (
-          <CollectionsOverview
-            collections={collections}
-            usageByCollection={
-              quotaStatus.kind === 'ready'
-                ? quotaStatus.quota.usageByCollection
-                : undefined
-            }
-            syncStatuses={Object.fromEntries(
-              SYNCED_COLLECTIONS.map(({ id }) => [
-                id,
-                syncStatuses[id] ?? 'idle'
-              ])
-            )}
-            sharesByCollection={sharesByCollection}
-            creatorsByCollection={creatorsByCollection}
-            onShowShares={setSharesDialogCollectionId}
-          />
-        )}
-      </Box>
-
-      {session && backupOpen && (
-        <BackupExportDialog
+      <Stack sx={{ mt: 3, gap: 3 }}>
+        <SpaceSection
           session={session}
-          onClose={() => setBackupOpen(false)}
-        />
-      )}
-
-      {session && migrationOpen && (
-        <ContentMigrationDialog
-          session={session}
-          onClose={() => setMigrationOpen(false)}
           onImported={() => {
-            // The Resources land through the session's own import methods, so a
-            // remembered session's replica already carries them; this re-lists
-            // what the page itself shows and nudges replication to push them
-            // out.
-            syncController.reSync()
             void reloadCollections()
+            reloadQuota()
           }}
         />
-      )}
+
+        {hasRemoteStorage && (
+          <StorageQuotaCard status={quotaStatus} onRetry={reloadQuota} />
+        )}
+
+        <Box sx={storageStyles.collectionsWrap}>
+          {hasRemoteStorage && isLoadingCollections && (
+            <Stack spacing={1.5} aria-busy="true">
+              {[0, 1, 2].map(row => (
+                <Skeleton key={row} variant="rounded" height={72} />
+              ))}
+            </Stack>
+          )}
+          {collectionsErrorKey && (
+            <Alert severity="error">{t(collectionsErrorKey)}</Alert>
+          )}
+          {hasRemoteStorage &&
+            !isLoadingCollections &&
+            !collectionsErrorKey && (
+              <CollectionsOverview
+                collections={collections}
+                usageByCollection={
+                  quotaStatus.kind === 'ready'
+                    ? quotaStatus.quota.usageByCollection
+                    : undefined
+                }
+                syncStatuses={Object.fromEntries(
+                  SYNCED_COLLECTIONS.map(({ id }) => [
+                    id,
+                    syncStatuses[id] ?? 'idle'
+                  ])
+                )}
+                sharesByCollection={sharesByCollection}
+                creatorsByCollection={creatorsByCollection}
+                onShowShares={setSharesDialogCollectionId}
+              />
+            )}
+        </Box>
+      </Stack>
 
       {session && sharesDialogCollectionId && (
         <CollectionSharesDialog

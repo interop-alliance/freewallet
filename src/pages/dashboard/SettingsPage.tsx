@@ -71,6 +71,7 @@ import { formatDate } from '@/lib/viewMappers/formatDate'
 import { RecoveryCodesSection } from '@/components/RecoveryCodesSection'
 import { BackupCredentialsSection } from '@/components/BackupCredentialsSection'
 import { EnrolledClientsSection } from '@/components/EnrolledClientsSection'
+import { SpaceSection } from '@/components/storage/SpaceSection'
 import { useAsyncLoad } from '@/hooks/useAsyncLoad'
 import {
   encounterLostRosterWrap,
@@ -949,6 +950,8 @@ export function SettingsPage() {
   return (
     <DashboardLayout title={t('settings.title')}>
       <Stack sx={{ mt: 4, gap: 4, maxWidth: 640 }}>
+        <SpaceSection session={session} registryRepairing={registryRepairing} />
+
         <Stack direction="row" sx={dashboardStyles.settingsRow}>
           <Button
             variant="contained"

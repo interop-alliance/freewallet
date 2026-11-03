@@ -82,6 +82,10 @@ const StoragePage = lazyNamed(
   () => import('@/pages/dashboard/StoragePage'),
   'StoragePage'
 )
+const ImportArchivePage = lazyNamed(
+  () => import('@/pages/dashboard/ImportArchivePage'),
+  'ImportArchivePage'
+)
 const CollectionContentsPage = lazyNamed(
   () => import('@/pages/dashboard/CollectionContentsPage'),
   'CollectionContentsPage'
@@ -158,6 +162,7 @@ function App() {
           <Route path="/contacts" element={<ContactsPage />} />
           <Route path="/contacts/new" element={<ContactFormPage />} />
           <Route path="/storage" element={<StoragePage />} />
+          <Route path="/storage/import" element={<ImportArchivePage />} />
           <Route
             path="/storage/collections/:collectionId"
             element={<CollectionContentsPage />}

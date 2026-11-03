@@ -615,10 +615,10 @@ export const visuallyHiddenInput: React.CSSProperties = {
 
 export const storageStyles = {
   /**
-   * Top toolbar showing the connected remote space and export action.
+   * The Space section's card: the connected Space URL and its export,
+   * import, and migration actions. The host page owns the spacing around it.
    */
-  storageToolbar: {
-    mt: 3,
+  spaceSection: {
     p: 2.5,
     borderRadius: 3
   },
@@ -635,7 +635,6 @@ export const storageStyles = {
   },
 
   quotaCard: {
-    mt: 3,
     p: 2.5,
     borderRadius: 3
   },
@@ -718,7 +717,6 @@ export const storageStyles = {
    * Collections overview -- vertical list of folder rows (Finder-like).
    */
   collectionsWrap: {
-    mt: 3,
     maxWidth: 1200
   },
   collectionsList: {
