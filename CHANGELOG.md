@@ -277,6 +277,11 @@
 
 ### Fixed
 
+- The collection contents page no longer states a wallet collection's
+  creator twice. When the server-observed `createdBy` line reads as this
+  wallet, the "Created by this wallet" caption above it is left out.
+- The Metadata card's expand chevron on the collection and Resource pages
+  is sized at 24px, instead of inheriting the native button font size.
 - The storage browser reads a server listing's path-absolute item URLs on a
   sub-path mount: a reference the Space URL does not resolve is read as a
   path under the canonical base server URL, so a base URL given without its

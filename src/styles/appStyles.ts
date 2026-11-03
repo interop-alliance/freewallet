@@ -628,6 +628,16 @@ export const storageStyles = {
   connectedLabel: {
     fontWeight: 600
   },
+  // The URL column keeps a readable width when the action buttons crowd the
+  // row, so `break-all` wraps the URL in lines rather than in letters.
+  connectedUrl: {
+    minWidth: { xs: 0, md: 220 },
+    flexGrow: 1
+  },
+  connectedActions: {
+    flexWrap: 'wrap',
+    flexShrink: 0
+  },
   connectedLink: {
     fontSize: 16,
     wordBreak: 'break-all',

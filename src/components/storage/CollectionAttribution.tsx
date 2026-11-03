@@ -9,6 +9,8 @@
  * stamp is the wallet's own record of whom it created the collection for,
  * so the verb is "for" on every surface, apart from the server-observed
  * "Created by" line that stands beside it on the collection contents page.
+ * Where that line also names the wallet, the wallet-collection caption is
+ * left out, since the two would state one fact twice.
  */
 import type { ReactNode } from 'react'
 import Box from '@mui/material/Box'
@@ -25,10 +27,16 @@ import { isWalletCollection } from './displayUtils'
 export function CollectionAttribution({
   collection,
   creator,
+  observedByWallet = false,
   linkToApp = true
 }: {
   collection: StorageCollection
   creator?: CollectionCreator
+  /**
+   * True where the server-observed creator line beside this caption already
+   * reads as this wallet. A wallet collection then renders no caption.
+   */
+  observedByWallet?: boolean
   /**
    * False where the caption sits inside a row that is itself a link (the
    * folder card): the app name is then plain text, since interactive content
@@ -38,9 +46,12 @@ export function CollectionAttribution({
 }) {
   const { t } = useTranslation()
 
-  const caption = isWalletCollection(collection.id)
-    ? t('storage.createdByWallet')
-    : creatorCaption({ collection, creator, linkToApp })
+  if (isWalletCollection(collection.id)) {
+    return observedByWallet ? null : (
+      <AttributionCaption>{t('storage.createdByWallet')}</AttributionCaption>
+    )
+  }
+  const caption = creatorCaption({ collection, creator, linkToApp })
   if (!caption) {
     return null
   }

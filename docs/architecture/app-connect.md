@@ -300,7 +300,9 @@ signal is verified identity. Under delegated provisioning the two differ by
 design, since the wallet creates an app's collection and `createdBy` names
 the wallet's invoking DID. The collection contents page shows the two as
 separate labeled lines, the stamp as "created for" and `createdBy` as what
-the server observed. The Resource page shows a Resource's `createdBy` the
+the server observed. A wallet collection has no stamp, and its caption
+reads "created by this wallet", so when `createdBy` also reads as the
+wallet that caption is left out and the observed line stands alone. The Resource page shows a Resource's `createdBy` the
 same way, since a Resource has no `generator` of its own. It reads the
 Resource's metadata beside the body and hands that read to its Metadata
 card, so expanding the card costs no second GET. Elsewhere the Metadata card

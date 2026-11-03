@@ -113,7 +113,7 @@ export function MetadataCard({
       onChange={handleChange}
       sx={{ mb: 2 }}
     >
-      <AccordionSummary expandIcon={<MdExpandMore />}>
+      <AccordionSummary expandIcon={<MdExpandMore size={24} />}>
         <Typography variant="subtitle1">{t('storage.meta.title')}</Typography>
       </AccordionSummary>
       <AccordionDetails>

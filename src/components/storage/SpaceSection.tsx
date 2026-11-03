@@ -57,7 +57,7 @@ export function SpaceSection({
           spacing={2}
           sx={storageStyles.connectedRow}
         >
-          <Stack spacing={0.5} sx={{ minWidth: 0, flexGrow: 1 }}>
+          <Stack spacing={0.5} sx={storageStyles.connectedUrl}>
             <Typography variant="h6" sx={storageStyles.connectedLabel}>
               {t('storage.spaceConnected')}
             </Typography>
@@ -65,7 +65,12 @@ export function SpaceSection({
               {session?.storage.spaceUrl || t('storage.noRemoteSpace')}
             </Typography>
           </Stack>
-          <Stack direction="row" spacing={1.5}>
+          <Stack
+            direction="row"
+            spacing={1.5}
+            useFlexGap
+            sx={storageStyles.connectedActions}
+          >
             <Button
               variant="contained"
               onClick={() => setBackupOpen(true)}

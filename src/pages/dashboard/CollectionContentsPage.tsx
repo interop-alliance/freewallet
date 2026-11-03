@@ -396,6 +396,7 @@ export function CollectionContentsPage() {
               <CollectionAttribution
                 collection={collection}
                 creator={creator}
+                observedByWallet={createdBy?.kind === 'wallet'}
               />
             )}
             {createdBy && (
